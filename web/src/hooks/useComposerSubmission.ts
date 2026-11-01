@@ -40,6 +40,7 @@ export function useComposerSubmission({ value, draftKey, sessionId,
     if (submissionLock.current) return
     submissionLock.current = true
     const newSessionRevision = useAppStore.getState().newSessionRevision
+    const checkoutRevision = useAppStore.getState().newSessionCheckoutRevision
     const editOrigin = useDraftStore.getState().bySession[draftKey]?.editOrigin
     setSubmitting(true)
     let accepted
@@ -58,7 +59,8 @@ export function useComposerSubmission({ value, draftKey, sessionId,
     }
     if (accepted === false) return
     // 旧创建回包不能清除用户再次进入新会话后的草稿。
-    if (!sessionId && useAppStore.getState().newSessionRevision !== newSessionRevision) return
+    if (!sessionId && (useAppStore.getState().newSessionRevision !== newSessionRevision
+      || useAppStore.getState().newSessionCheckoutRevision !== checkoutRevision)) return
     const drafts = useDraftStore.getState()
     if (drafts.bySession[draftKey]?.text === value && drafts.bySession[draftKey]?.editOrigin === editOrigin) {
       setValue('')

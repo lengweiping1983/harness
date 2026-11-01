@@ -54,8 +54,12 @@ function draft(value: unknown): boolean {
     && text(value.text) && Array.isArray(value.attachments) && value.attachments.every(item => attachment(item, true)) && selection(value)
     && optional(value, 'inlineEdits', edits => dictionary(edits, text))
     && optional(value, 'editOrigin', origin => isRecord(origin) && fields(origin, ['sessionId', 'sourceSeq']) && text(origin.sessionId) && integer(origin.sourceSeq))
-    && optional(value, 'creationRequest', request => isRecord(request) && fields(request, ['id'], ['cwd', 'agent'])
-      && typeof request.id === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(request.id) && optional(request, 'cwd', text) && optional(request, 'agent', text))
+    && optional(value, 'creationRequest', request => isRecord(request) && fields(request, ['id'], ['cwd', 'agent', 'project'])
+      && typeof request.id === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(request.id) && optional(request, 'cwd', text) && optional(request, 'agent', text)
+      && optional(request, 'project', project => isRecord(project) && fields(project, ['workspace_id', 'mode'], ['ref', 'expected_head', 'expected_branch'])
+        && text(project.workspace_id) && Boolean(project.workspace_id) && ['local', 'worktree'].includes(project.mode as string)
+        && optional(project, 'ref', text) && optional(project, 'expected_head', item => item === null || text(item))
+        && optional(project, 'expected_branch', item => item === null || text(item))))
     && optional(value, 'goalCreation', goal => isRecord(goal) && fields(goal, ['objective', 'rounds', 'budget']) && Object.values(goal).every(text))
 }
 function submission(value: unknown): boolean {

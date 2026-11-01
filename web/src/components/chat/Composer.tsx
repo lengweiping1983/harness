@@ -1,5 +1,6 @@
 import {noticeText} from '@/lib/noticeText'
 import {ComposerDock, ComposerCard, ComposerEditor, ComposerToolbar, ComposerSendButton} from './ComposerSurface'
+import {NewConversationProject} from './NewConversationProject'
 import { ComposerAttachments } from './ComposerAttachments'
 import { useComposerSubmission } from '@/hooks/useComposerSubmission'
 import { useComposerKeyboard } from '@/hooks/useComposerKeyboard'
@@ -465,6 +466,8 @@ export function Composer({
             </div>
           </ComposerToolbar>
         </ComposerCard>
+
+        {!sessionId && <NewConversationProject />}
 
         {running ? <span id="queued-followup-hint" className="sr-only">{t("ui.components.chat.Composer.49bc7900e665")}</span> : null}
 

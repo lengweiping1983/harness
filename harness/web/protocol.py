@@ -19,6 +19,17 @@ from ..academy.protocol import SCHEMAS as ACADEMY_SCHEMAS, ENDPOINTS as ACADEMY_
 PERSONALITY_CODE = {'anyOf': [{'type': 'string', 'enum': list(STYLE_CODES)}, {'type': 'null'}]}
 
 SCHEMAS: dict[str, dict[str, Any]] = {
+    'ConversationProject': {'type': 'object', 'additionalProperties': False, 'required': ['workspace_id', 'mode'], 'properties': {
+        'workspace_id': {'type': 'string', 'minLength': 1}, 'mode': {'type': 'string', 'enum': ['local', 'worktree']},
+        'ref': {'type': 'string', 'minLength': 1}, 'expected_head': {'type': ['string', 'null']},
+        'expected_branch': {'type': ['string', 'null']}}},
+    'NewConversationRequest': {'type': 'object', 'properties': {
+        'cwd': {'type': ['string', 'null']}, 'title': {'type': ['string', 'null']}, 'model': {'type': ['string', 'null']},
+        'agent_selection': {'type': 'string', 'minLength': 1}, 'project': {'$ref': '#/components/schemas/ConversationProject'}}},
+    'WorkspaceOptions': {'type': 'object', 'required': ['cwd', 'is_git', 'root', 'branch', 'head', 'refs', 'local_branches', 'dirty'], 'properties': {
+        'cwd': {'type': 'string'}, 'is_git': {'type': ['boolean', 'null']}, 'root': {'type': ['string', 'null']},
+        'branch': {'type': ['string', 'null']}, 'head': {'type': ['string', 'null']}, 'dirty': {'type': ['boolean', 'null']},
+        'refs': {'type': 'array', 'items': {'type': 'string'}}, 'local_branches': {'type': 'array', 'items': {'type': 'string'}}}},
     'ResourceCopy': {'type': 'object', 'required': ['key'], 'properties': {
         'key': {'type': 'string'}, 'params': {'type': 'object', 'additionalProperties': {'anyOf': [{'type': 'string'}, {'type': 'number'}]}}}},
     'RunFailureDetails': {'type': 'object', 'properties': {'copy': {'$ref': '#/components/schemas/ResourceCopy'}}},
@@ -950,6 +961,12 @@ def openapi(templates: list[str]) -> dict[str, Any]:
         parameters = [{"name": name, "in": "path", "required": True, "schema": {"type": "string"}} for name in re.findall(r"{([^}]+)}", path)]
         parameters.append({"name": "X-Request-ID", "in": "header", "schema": {"type": "string"}})
         collaboration_response = None
+        if path == '/api/v1/workspace-options' and method == 'GET':
+            parameters.append({'name': 'path', 'in': 'query', 'required': True, 'schema': {'type': 'string', 'minLength': 1}})
+            operation['responses']['200']['content'] = {'application/json': {'schema': {'$ref': '#/components/schemas/WorkspaceOptions'}}}
+        if path == '/api/v1/sessions' and method == 'POST':
+            operation['requestBody'] = {'required': False, 'content': {'application/json': {'schema': {'$ref': '#/components/schemas/NewConversationRequest'}}}}
+            operation['responses']['503'] = {'description': tr('ui.newConversation.preparationUnconfirmed'), 'content': {'application/json': {'schema': {'$ref': '#/components/schemas/ApiError'}}}}
         if path.startswith('/api/v1/sessions/') and '/questions/' in path and path.endswith('/answer'):
             collaboration_response = 'DecisionReceipt'
         elif path.startswith('/api/v1/sessions/') and '/decisions/' in path:

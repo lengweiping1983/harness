@@ -10,7 +10,7 @@ const unknown:ApiFailure={ok:false,status:0,code:'network',message:'Original net
 const row=(id:string,complete=true):SessionSummary=>({id:'created',cwd:'/fixture',metadata:{creation_request_id:id,creation_completed:complete}})
 const detail=(header:SessionSummary):SessionDetail=>({header,events:[],messages:[],usage:{},stats:{},todos:[],timeline:[]})
 beforeEach(()=>{const localValues=new Map<string,string>();vi.stubGlobal('localStorage',{getItem:(key:string)=>localValues.get(key)??null,setItem:(key:string,value:string)=>localValues.set(key,value),removeItem:(key:string)=>localValues.delete(key)})
-useDraftStore.setState({bySession:{},submissions:{}});useAppStore.setState({activeSessionId:null,activeWorkspaceId:'project',newSessionRevision:1,sessionCreating:false,sessions:[],workspaces:[{id:'project',path:'/fixture',name:'Project',color:'blue'}],toasts:[]})})
+useDraftStore.setState({bySession:{},submissions:{}});useAppStore.setState({activeSessionId:null,activeWorkspaceId:'project',newSessionCheckout:null,newSessionCheckoutStatus:'ready',newSessionRevision:1,sessionCreating:false,sessions:[],workspaces:[{id:'project',path:'/fixture',name:'Project',color:'blue'}],toasts:[]})})
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();setLocale('en')})
 it.each(['lost','mismatched'] as const)('%s response recovers only the exact completed identity without another write',async(kind)=>{
  let id=''

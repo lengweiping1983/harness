@@ -139,7 +139,7 @@ export const api = {
   sessionActivity: (signal?: AbortSignal, cursor?: {serverId: string; after: number}) =>
     request<import('./protocol.generated').SessionActivity>('/api/v1/sessions/activity' +
       (cursor ? '?' + new URLSearchParams({server_id: cursor.serverId, after: String(cursor.after)}) : ''), {signal}),
-  createSession: (body: { cwd?: string; title?: string; agent_selection?: string } = {}, requestId?: string) =>
+  createSession: (body: { cwd?: string; title?: string; agent_selection?: string; project?: import('./protocol.generated').ConversationProject } = {}, requestId?: string) =>
     post<{ session: SessionSummary; agent_mount?: import('@/lib/agentMount').AgentMountState }>('/api/v1/sessions', body,
       requestId ? {headers: {'X-Request-ID': requestId}} : undefined),
   getSession: (id: string, view?: 'conversation' | 'conversation-window', signal?: AbortSignal, agentId?: string) => request<SessionDetail>('/api/v1/sessions/' + encodeURIComponent(id) + '?' + new URLSearchParams({ ...(view ? { view } : {}), ...(agentId ? { agent_id: agentId } : {}) }), { signal }),

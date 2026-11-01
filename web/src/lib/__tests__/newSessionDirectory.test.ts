@@ -3,11 +3,11 @@ import {newSessionDirectory} from '../workspaces'
 
 const projects = [{id:'project',path:'/project/B',name:'User project 原文',color:'blue'}]
 it('uses the selected project rather than the host startup directory',()=>{
- expect(newSessionDirectory(projects,'project','/host/A')).toBe('/project/B')
+ expect(newSessionDirectory(projects,'project')).toBe('/project/B')
 })
-it.each([null,'missing'])('falls back only when selected project %s is unavailable',id=>{
- expect(newSessionDirectory(projects,id,'/host/A')).toBe('/host/A')
+it.each([null,'missing'])('requires an explicit project when selected project %s is unavailable',id=>{
+ expect(newSessionDirectory(projects,id)).toBeUndefined()
 })
 it('does not invent a directory when neither source exists',()=>{
- expect(newSessionDirectory([],null,undefined)).toBeUndefined()
+ expect(newSessionDirectory([],null)).toBeUndefined()
 })

@@ -1,5 +1,6 @@
 import {createInflightOperations} from '@/lib/inflightOperations'
 import {createdFor, creationUnconfirmed, creationRetained, recoverSessionCreation} from '@/lib/sessionCreation'
+import type {ConversationCheckout} from '@/lib/conversationProject'
 import {captureSessionLocalDrafts, sameSessionLocalDrafts} from '@/lib/sessionLocalDrafts'
 import {download} from '@/lib/utils'
 import {INSPECTOR_PANELS} from '@/lib/inspectorPanels'
@@ -28,7 +29,7 @@ import { useChatStore } from './chat'
 import { useDraftStore, type PendingSubmission } from './drafts'
 import { useGitDraftStore } from './gitDrafts'
 import { getFileRoot, setFileRoot } from '@/lib/fileRoot'
-import { matchWorkspaceFor, newSessionDirectory, sessionDirectory } from '@/lib/workspaces'
+import { matchWorkspaceFor, newSessionDirectory, sessionDirectory, sessionProjectDirectory } from '@/lib/workspaces'
 import type { LayoutMode } from '@/lib/layout'
 import { toastDuration } from '@/lib/toastTimer'
 import { reasoningSelection } from '@/lib/reasoningSelection'
@@ -127,6 +128,10 @@ interface AppState {
   activeSessionId: string | null
   /** 区分同一项目内多次进入的新会话，隔离尚未返回的创建请求。 */
   newSessionRevision: number
+  newSessionCheckout: ConversationCheckout | null
+  newSessionCheckoutRevision: number
+  newSessionCheckoutStatus: 'idle' | 'loading' | 'ready' | 'error'
+  setNewSessionCheckout: (value: ConversationCheckout | null, status?: 'loading' | 'ready' | 'error') => void
 
   /**
    * 项目（Workspace）：会话之上的目录分组层。
@@ -171,6 +176,7 @@ interface AppState {
   settingsWorkspaceRoot: string | null
   /** 项目选择器：目录浏览器。 */
   workspacePickerOpen: boolean
+  workspacePickerMode: 'add' | 'select'
   /** 模型菜单（model seat 与 /model 共用同一个入口状态）。 */
   modelMenuOpen: boolean
   reasoningSaves: Record<string, { pending: boolean; error: ResourceText | null; unconfirmed: boolean }>
@@ -252,7 +258,7 @@ interface AppState {
   setQuickOpen: (open: boolean) => void
   setShortcutsOpen: (open: boolean) => void
   setSettingsOpen: (open: boolean, target?: SettingsTarget, root?: string) => void
-  setWorkspacePickerOpen: (open: boolean) => void
+  setWorkspacePickerOpen: (open: boolean, mode?: 'add' | 'select') => void
   setModelMenuOpen: (open: boolean) => void
   setUiFontSize: (size: number) => void
   openLightbox: (src: string, alt?: string) => void
@@ -412,6 +418,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionsLoading: false,
   activeSessionId: null,
   newSessionRevision: 0,
+  newSessionCheckout: null,
+  newSessionCheckoutRevision: 0,
+  newSessionCheckoutStatus: 'idle',
+  setNewSessionCheckout: (newSessionCheckout, newSessionCheckoutStatus = 'ready') => set(state => ({newSessionCheckout, newSessionCheckoutStatus, newSessionCheckoutRevision: state.newSessionCheckoutRevision + 1})),
+  workspacePickerMode: 'add',
 
   workspaces: [],
   workspacesLoading: false,
@@ -546,7 +557,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const current = get()
       setFileRoot(current.activeSessionId
         ? sessionDirectory(current.sessions.find(session => session.id === current.activeSessionId))
-        : current.workspaces.find(workspace => workspace.id === current.activeWorkspaceId)?.path ?? current.workspace?.root)
+        : current.workspaces.find(workspace => workspace.id === current.activeWorkspaceId)?.path)
     } else {
       set({ sessionsLoading: false })
       get().toast({ title: {key: 'ui.store.app.6106f0a12583'}, description: result.copy ?? result.message, tone: 'danger' })
@@ -579,20 +590,37 @@ export const useAppStore = create<AppState>((set, get) => ({
    * 进入新对话草稿，首次发送才创建持久会话。
    *
    * 目录解析链：
-   * 显式指定的项目 → 当前选中的项目 → 当前会话所属项目 → 全局默认根。
+   * 显式指定的项目 → 当前选中的项目 → 当前会话所属项目 → 选择项目。
    * 前端**不猜**：猜错一次，用户会以为模型在错误的目录里干了活。
    */
   startNewSession: (workspaceId) => {
     const state = get()
     const targetId = workspaceId === undefined ? state.activeWorkspaceId ?? workspaceOfSession(state.sessions, state.activeSessionId) : workspaceId
-    const target = state.workspaces.find(w => w.id === targetId)
-    set({ activeSessionId: null, pendingQuote: null, newSessionRevision: state.newSessionRevision + 1, activeWorkspaceId: targetId, inspectorExpanded: false, drawerIntent: 'none' })
-    setFileRoot(target?.path ?? state.workspace?.root)
+    const target = state.workspaces.find(w => w.id === targetId && w.exists !== false)
+    set({ activeSessionId: null, pendingQuote: null, newSessionRevision: state.newSessionRevision + 1, activeWorkspaceId: target?.id ?? null,
+      newSessionCheckout: null, newSessionCheckoutStatus: target ? 'loading' : 'idle', workspacePickerOpen: !target, workspacePickerMode: 'select', inspectorExpanded: false, drawerIntent: 'none' })
+    setFileRoot(target?.path)
   },
 
   materializeSession: async (submission) => {
     const state = get()
     if (state.sessionCreating || state.activeSessionId) return false
+    const existingRequest = useDraftStore.getState().bySession.__unsaved__?.creationRequest
+    const workspace = state.workspaces.find(row => row.id === state.activeWorkspaceId)
+    if (!existingRequest && (!workspace || workspace.exists === false)) {
+      get().setWorkspacePickerOpen(true, 'select')
+      get().toast({title: {key: 'ui.newConversation.chooseProject'}, tone: 'warn'})
+      return false
+    }
+    if (!existingRequest && state.newSessionCheckoutStatus !== 'ready') {
+      get().toast({title: {key: 'ui.newConversation.checkBeforeSend'}, tone: 'warn'})
+      return false
+    }
+    const checkout = state.newSessionCheckout?.cwd === workspace?.path ? state.newSessionCheckout : null
+    const project = workspace && checkout ? {workspace_id: workspace.id, mode: checkout.mode,
+      ...(checkout.ref ? {ref: checkout.ref} : {}), expected_head: checkout.expected_head, expected_branch: checkout.expected_branch} : undefined
+    if (!existingRequest && checkout?.mode === 'local' && checkout.ref && checkout.ref !== 'HEAD' && checkout.ref !== checkout.expected_branch
+      && !window.confirm(t('ui.newConversation.confirmBranch', {current: checkout.expected_branch ?? 'HEAD', target: checkout.ref, path: checkout.cwd}))) return false
     const agentSelection = useDraftStore.getState().bySession.__unsaved__?.agentSelection
     const executionMode = useDraftStore.getState().bySession.__unsaved__?.executionMode
     set({ sessionCreating: true })
@@ -601,15 +629,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       const reasoningWrite = reasoningQueues.get(null)
       if (reasoningWrite) {
         await reasoningWrite.tail
-        if (get().activeSessionId || get().newSessionRevision !== state.newSessionRevision || get().activeWorkspaceId !== state.activeWorkspaceId) return false
+        if (get().activeSessionId || get().newSessionRevision !== state.newSessionRevision || get().activeWorkspaceId !== state.activeWorkspaceId
+          || get().newSessionCheckoutRevision !== state.newSessionCheckoutRevision) return false
       }
       if (defaultReasoningBlocked(null)) {
         get().toast({title: {key: 'ui.models.reasoningBeforeSend'}, tone: 'danger'})
         return false
       }
-      const cwd = newSessionDirectory(state.workspaces, state.activeWorkspaceId, state.workspace?.root)
+      const cwd = newSessionDirectory(state.workspaces, state.activeWorkspaceId)
       const existing = useDraftStore.getState().bySession.__unsaved__?.creationRequest
-      const attempt = existing ?? {id: crypto.randomUUID(), cwd, agent: agentSelection?.name}
+      const attempt = existing ?? {id: crypto.randomUUID(), cwd, agent: agentSelection?.name, ...(project ? {project} : {})}
       const clearAttempt = () => {
         if (useDraftStore.getState().bySession.__unsaved__?.creationRequest?.id === attempt.id) useDraftStore.getState().setCreationRequest()
       }
@@ -624,16 +653,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       let result: Awaited<ReturnType<typeof api.createSession>>
       try {
         result = existing ? await recoverSessionCreation(attempt.id)
-          : await api.createSession({ ...(cwd ? { cwd } : {}), ...(agentSelection ? {agent_selection: agentSelection.name} : {}) }, attempt.id)
+          : await api.createSession({ ...(cwd ? { cwd } : {}), ...(project ? {project} : {}), ...(agentSelection ? {agent_selection: agentSelection.name} : {}) }, attempt.id)
       } catch { result = creationUnconfirmed() }
       if (result.ok && !createdFor(result.data?.session, attempt.id)) result = creationUnconfirmed()
-      if (!result.ok && !existing && isUnconfirmedWrite(result)) result = await recoverSessionCreation(attempt.id)
+      if (!result.ok && !existing && isUnconfirmedWrite(result)) {
+        const failure = result
+        const recovered = await recoverSessionCreation(attempt.id)
+        result = !recovered.ok && failure.code === 'session/workspace-uncertain' ? failure : recovered
+      }
       if (!result.ok) {
         if (!isUnconfirmedWrite(result)) clearAttempt()
         get().toast({ title: {key: 'ui.store.app.e3a3c5f92ee1'}, description: result.copy ?? result.message, tone: 'danger' })
         return false
       }
-      if (attempt.cwd !== cwd || attempt.agent !== agentSelection?.name) {
+      if (attempt.cwd !== cwd || attempt.agent !== agentSelection?.name || JSON.stringify(attempt.project) !== JSON.stringify(project)) {
         clearAttempt()
         const recovered = result.data.session
         sessionListRequest++
@@ -649,7 +682,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const session = result.data.session
       if (result.data.agent_mount) useChatStore.getState().setAgentMount(session.id, result.data.agent_mount)
       const latestDraft = useDraftStore.getState().bySession.__unsaved__
-      const sameDraft = get().newSessionRevision === state.newSessionRevision &&
+      const sameDraft = get().newSessionRevision === state.newSessionRevision && get().newSessionCheckoutRevision === state.newSessionCheckoutRevision &&
         (Boolean(submission) || latestDraft?.executionMode === executionMode && latestDraft?.agentSelection === agentSelection)
       if (sameDraft && useDraftStore.getState().bySession.__unsaved__?.agentSelection === agentSelection) useDraftStore.getState().setAgentSelection('__unsaved__')
       if (executionMode) {
@@ -683,7 +716,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  selectWorkspace: (id) => set({ activeWorkspaceId: id }),
+  selectWorkspace: (id) => {
+    const state = get()
+    if (id === state.activeWorkspaceId) return
+    set({activeWorkspaceId: id, newSessionCheckout: null, newSessionCheckoutStatus: id ? 'loading' : 'idle', newSessionRevision: state.newSessionRevision + 1})
+    if (!state.activeSessionId) setFileRoot(state.workspaces.find(row => row.id === id)?.path)
+  },
 
   addWorkspace: async (path, name) => {
     const result = await api.registerWorkspace(name ? { path, name } : { path })
@@ -1118,7 +1156,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setQuickOpen: (quickOpen) => set({ quickOpen: quickOpen && Boolean(get().activeSessionId) }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   setSettingsOpen: (settingsOpen, target, root) => set({ settingsOpen, settingsTarget: target ?? null, settingsWorkspaceRoot: root ?? null }),
-  setWorkspacePickerOpen: (workspacePickerOpen) => set({ workspacePickerOpen }),
+  setWorkspacePickerOpen: (workspacePickerOpen, workspacePickerMode = 'add') => set({ workspacePickerOpen, workspacePickerMode }),
   setModelMenuOpen: (modelMenuOpen) => set({ modelMenuOpen }),
   setUiFontSize: (uiFontSize) => {
     set({ uiFontSize: applyFontSize(uiFontSize) })
@@ -1178,7 +1216,7 @@ function workspaceOfSession(
 ): string | null {
   const session = sessionId ? sessions.find((s) => s.id === sessionId) : null
   if (!session) return null
-  return matchWorkspaceFor(sessionDirectory(session), workspaces)?.id ?? null
+  return matchWorkspaceFor(sessionProjectDirectory(session), workspaces)?.id ?? null
 }
 
 /** 当前会话的摘要（可能尚未进入列表）。 */

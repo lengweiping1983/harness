@@ -13,7 +13,8 @@ beforeEach(() => {
 
   useChatStore.setState({sessions: {}})
   useDraftStore.setState({bySession: {}, submissions: {}})
-  useAppStore.setState({activeSessionId: null, sessionCreating: false, sessions: [], newSessionRevision: 1, workspaces: []})
+  useAppStore.setState({activeSessionId: null, activeWorkspaceId: 'project', newSessionCheckout: null, newSessionCheckoutStatus: 'ready', sessionCreating: false, sessions: [], newSessionRevision: 1,
+    workspaces: [{id: 'project', path: '/fixture', name: 'Project', color: 'brand'}]})
   vi.restoreAllMocks()
 })
 

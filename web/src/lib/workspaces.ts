@@ -17,9 +17,15 @@ export function sessionDirectory(session: SessionHeader | null | undefined): str
   return session?.resolved_cwd?.trim() || session?.cwd || null
 }
 
-/** 新对话的目录与创建请求保持一致：选中项目优先，其次宿主启动目录。 */
-export function newSessionDirectory(workspaces: WorkspaceInfo[], activeWorkspaceId: string | null, fallback: string | undefined): string | undefined {
-  return workspaces.find(workspace => workspace.id === activeWorkspaceId)?.path ?? fallback
+/** 工作树对话归入来源项目，执行和媒体仍使用真实检出目录。 */
+export function sessionProjectDirectory(session: SessionHeader | null | undefined): string | null {
+  const source = session?.metadata?.project_cwd
+  return typeof source === 'string' && source ? source : sessionDirectory(session)
+}
+
+/** 未选择或项目已失效时必须显式选择，不能隐式使用宿主启动目录。 */
+export function newSessionDirectory(workspaces: WorkspaceInfo[], activeWorkspaceId: string | null): string | undefined {
+  return workspaces.find(workspace => workspace.id === activeWorkspaceId && workspace.exists !== false)?.path
 }
 
 /** 归一化路径：解析 `.` / `..`、统一分隔符、大小写折叠。 */
@@ -117,7 +123,7 @@ export function groupSessionsByWorkspace(
 ): WorkspaceGroup[] {
   const buckets = new Map<string, SessionSummary[]>()
   for (const session of sessions) {
-    const matched = matchWorkspaceFor(sessionDirectory(session), workspaces)
+    const matched = matchWorkspaceFor(sessionProjectDirectory(session), workspaces)
     const bucketKey = matched ? normalizePath(matched.path) || matched.id : ''
     const list = buckets.get(bucketKey)
     if (list) list.push(session)

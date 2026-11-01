@@ -10,7 +10,7 @@ const pending=<T,>()=>{let resolve!:(value:T)=>void;const promise=new Promise<T>
 const failure:ApiFailure={ok:false,status:503,code:'offline',message:'External 原文'}
 const workspace={id:'workspace',path:'/fixture',color:'blue',name:'Project 原文'}
 beforeEach(()=>{const localValues=new Map<string,string>();vi.stubGlobal('localStorage',{getItem:(key:string)=>localValues.get(key)??null,setItem:(key:string,value:string)=>localValues.set(key,value),removeItem:(key:string)=>localValues.delete(key)})
-vi.mocked(loadCatalogs).mockResolvedValue({status:null,tools:[],skills:[],workspace:null,errors:[]});vi.stubGlobal('document',{documentElement:{style:{}}});useDraftStore.setState({bySession:{},submissions:{}});useAppStore.setState({booting:false,booted:false,activeSessionId:null,activeWorkspaceId:'workspace',newSessionRevision:1,sessionCreating:false,sessions:[],workspaces:[workspace],sessionsLoading:false,toasts:[]})})
+vi.mocked(loadCatalogs).mockResolvedValue({status:null,tools:[],skills:[],workspace:null,errors:[]});vi.stubGlobal('document',{documentElement:{style:{}}});useDraftStore.setState({bySession:{},submissions:{}});useAppStore.setState({booting:false,booted:false,activeSessionId:null,activeWorkspaceId:'workspace',newSessionCheckout:null,newSessionCheckoutStatus:'ready',newSessionRevision:1,sessionCreating:false,sessions:[],workspaces:[workspace],sessionsLoading:false,toasts:[]})})
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals()})
 it('a list issued before creation cannot erase the created conversation',async()=>{
  const list=pending<Awaited<ReturnType<typeof api.listSessions>>>()
@@ -55,7 +55,7 @@ it.each(['session','workspace'] as const)('a delayed startup catalog cannot rest
 })
 
 it.each([
- [null, null, '/default'],
+ [null, null, null],
  [undefined, 'workspace', '/fixture'],
  ['other', 'other', '/other'],
 ] as const)('new conversation project %s preserves explicit scope',async(selection,expectedId,expectedCwd)=>{
@@ -65,6 +65,13 @@ it.each([
  useAppStore.getState().startNewSession(selection)
  expect(useAppStore.getState().activeWorkspaceId).toBe(expectedId)
  expect(getFileRoot()).toBe(expectedCwd)
+ if (expectedId === null) {
+  expect(useAppStore.getState().workspacePickerOpen).toBe(true)
+  expect(await useAppStore.getState().materializeSession()).toBe(false)
+  expect(write).not.toHaveBeenCalled()
+  return
+ }
+ useAppStore.getState().setNewSessionCheckout(null, 'ready')
  expect(await useAppStore.getState().materializeSession()).toBe(true)
  expect(write).toHaveBeenCalledExactlyOnceWith({cwd:expectedCwd},expect.any(String))
 })

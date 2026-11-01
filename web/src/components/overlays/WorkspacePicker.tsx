@@ -20,6 +20,8 @@ import { normalizePath } from '@/lib/workspaces'
 import { useAppStore } from '@/store/app'
 import { Button, Kbd, Overlay, RefreshButton } from '@/components/ui/primitives'
 import type { DirectoryListing } from '@/types'
+import {ConversationCheckout} from '@/components/chat/ConversationCheckout'
+import type {ConversationCheckout as Checkout} from '@/lib/conversationProject'
 
 /**
  * 项目目录选择器。
@@ -39,6 +41,7 @@ export function WorkspacePicker() {
   useLocale()
 
   const open = useAppStore((s) => s.workspacePickerOpen)
+  const mode = useAppStore(s => s.workspacePickerMode)
   const setOpen = useAppStore((s) => s.setWorkspacePickerOpen)
   const addWorkspace = useAppStore((s) => s.addWorkspace)
   const startNewSession = useAppStore((s) => s.startNewSession)
@@ -54,6 +57,11 @@ export function WorkspacePicker() {
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
   const [selected, setSelected] = useState<string>('')
+  const [checkout, setCheckout] = useState<Checkout | null>(null)
+  const [checkoutStatus, setCheckoutStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const updateCheckout = useCallback((value: Checkout | null, status: 'loading' | 'ready' | 'error') => {
+    setCheckout(value); setCheckoutStatus(status)
+  }, [])
   const reqSeq = useRef(0)
   const directoryRequest = useRef<AbortController | null>(null)
   const requestedPath = useRef<string | undefined>(undefined)
@@ -62,6 +70,7 @@ export function WorkspacePicker() {
   const registrationPending = useRef(false)
 
   const load = useCallback(async (path?: string) => {
+    if (registrationPending.current || folderPending.current) return
     requestedPath.current = path
     const seq = ++reqSeq.current
     directoryRequest.current?.abort()
@@ -70,6 +79,7 @@ export function WorkspacePicker() {
     setStatus('loading')
     setError('')
     setSelected('')
+    setCheckout(null); setCheckoutStatus('loading')
     setMaking(false)
     const result = await api.listDirectories(path, controller.signal)
     // 快速连点时后到的旧响应必须丢掉，否则目录会"跳回"上一层。
@@ -92,14 +102,15 @@ export function WorkspacePicker() {
     setQuery('')
     setMaking(false)
     setNewName('')
-    void load()
+    const state = useAppStore.getState()
+    void load(mode === 'select' ? state.workspaces.find(row => row.id === state.activeWorkspaceId)?.path : undefined)
     return () => {
       panelEpoch.current++
       reqSeq.current++
       directoryRequest.current?.abort()
       directoryRequest.current = null
     }
-  }, [open, load])
+  }, [open, mode, load])
 
   const enter = useCallback(
     (path: string) => {
@@ -153,16 +164,20 @@ export function WorkspacePicker() {
       }
       registrationPending.current = true
       setBusy(true)
-      const record = await addWorkspace(path).finally(() => {
+      const existing = workspaces.find(row => normalizePath(row.path) === normalizePath(path))
+      const record = await (existing ? Promise.resolve(existing) : addWorkspace(path)).finally(() => {
         registrationPending.current = false
         setBusy(false)
       })
       if (!record || !current()) return
       useAppStore.getState().selectWorkspace(record.id)
       setOpen(false)
-      if (withSession) startNewSession(record.id)
+      if (withSession || mode === 'select') {
+        startNewSession(record.id)
+        if (checkout?.cwd === path) useAppStore.getState().setNewSessionCheckout({...checkout, cwd: record.path})
+      }
     },
-    [addWorkspace, startNewSession, setOpen],
+    [addWorkspace, startNewSession, setOpen, workspaces, checkout, mode],
   )
 
   const createFolder = useCallback(async () => {
@@ -191,7 +206,7 @@ export function WorkspacePicker() {
     <Overlay onClose={() => setOpen(false)} className="max-w-2xl" labelledBy="picker-title">
       <header className="flex items-center gap-2 border-b border-line px-4 py-3">
         <Folder className="h-4 w-4 text-brand" />
-        <h2 id="picker-title" className="ui-section-title">{t("ui.components.overlays.WorkspacePicker.8964f53ac30f")}</h2>
+        <h2 id="picker-title" className="ui-section-title">{t(mode === 'select' ? 'ui.newConversation.chooseProject' : 'ui.components.overlays.WorkspacePicker.8964f53ac30f')}</h2>
         <span className="truncate text-2xs text-faint">{t("ui.components.overlays.WorkspacePicker.0294c1647bf9")}</span>
         <button
           type="button"
@@ -202,6 +217,16 @@ export function WorkspacePicker() {
           <X className="h-4 w-4" />
         </button>
       </header>
+
+      {workspaces.length > 0 && <section className="space-y-2 border-b border-line px-4 py-3" aria-label={t('ui.newConversation.registeredProjects')}>
+        <h3 className="ui-group-title text-muted">{t('ui.newConversation.registeredProjects')}</h3>
+        <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto">
+          {workspaces.map(workspace => <Button key={workspace.id} size="sm" disabled={busy || workspace.exists === false} active={normalizePath(selected) === normalizePath(workspace.path)}
+            title={workspace.path} icon={<Folder className="h-3.5 w-3.5" />} onClick={() => enter(workspace.path)}>
+            <span className="max-w-path truncate">{workspace.name}</span>
+          </Button>)}
+        </div>
+      </section>}
 
       {/* 路径条：面包屑 + 上一级 + 手动输入，三条路都能到任意目录 */}
       <div className="refresh-action-container flex items-center gap-1.5 border-b border-line px-3 py-2">
@@ -305,12 +330,12 @@ export function WorkspacePicker() {
                     <span className="shrink-0 text-2xs text-faint">{t("ui.components.overlays.WorkspacePicker.889839915c3f")}</span>
                   ) : null}
                 </button>
-                <button
+                {mode !== 'select' && <button
                   type="button"
                   onClick={() => void commit(entry.path, false)}
                   disabled={added || busy || status !== 'idle'}
                   className="shrink-0 rounded-md px-2 py-1 text-2xs text-muted opacity-0 transition-opacity hover:bg-brand/[0.12] hover:text-brand disabled:opacity-40 group-hover:opacity-100"
-                >{t("ui.components.overlays.WorkspacePicker.7a8a11ead507")}</button>
+                >{t("ui.components.overlays.WorkspacePicker.7a8a11ead507")}</button>}
               </div>
             )
           })
@@ -337,7 +362,10 @@ export function WorkspacePicker() {
         ) : null}
       </div>
 
-      <footer className="flex items-center gap-2 border-t border-line px-4 py-3">
+      {selected && status === 'idle' && <div className="border-t border-line px-4 py-3">
+        <ConversationCheckout cwd={selected} value={checkout} disabled={busy} onChange={updateCheckout} />
+      </div>}
+      <footer className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs text-ink" title={selected}>
             {computer ? t('ui.workspacePicker.computer') : selected || '—'}
@@ -345,19 +373,19 @@ export function WorkspacePicker() {
           <p className="mt-0.5 text-2xs text-faint">{t("ui.components.overlays.WorkspacePicker.5e10e14c95a8")}</p>
         </div>
         <Button size="sm" variant="ghost" icon={<FolderPlus className="h-3.5 w-3.5" />} disabled={!selected || busy || status !== 'idle'} onClick={() => setMaking(true)}>{t("ui.components.overlays.WorkspacePicker.84244abc71de")}</Button>
-        <Button
+        {mode !== 'select' && <Button
           size="sm"
           variant="secondary"
           disabled={busy || !selected || status !== 'idle'}
           onClick={() => void commit(selected, false)}
           icon={<Check className="h-3.5 w-3.5" />}
-        >{t("ui.components.overlays.WorkspacePicker.6f201b36f533")}</Button>
+        >{t("ui.components.overlays.WorkspacePicker.6f201b36f533")}</Button>}
         <Button
           size="sm"
           variant="primary"
-          disabled={busy || !selected || status !== 'idle'}
+          disabled={busy || !selected || status !== 'idle' || checkoutStatus !== 'ready' || checkout?.cwd !== selected}
           onClick={() => void commit(selected, true)}
-        >{t("ui.components.overlays.WorkspacePicker.9246c4832cf4")}</Button>
+        >{t(mode === 'select' ? 'ui.newConversation.useProject' : 'ui.components.overlays.WorkspacePicker.9246c4832cf4')}</Button>
       </footer>
 
       <p className="border-t border-line px-4 py-2 text-2xs text-faint">

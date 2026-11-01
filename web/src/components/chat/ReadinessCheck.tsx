@@ -9,11 +9,10 @@ import {Button} from '@/components/ui/primitives'
 export function ReadinessCheck() {
   useLocale()
   const session = useActiveSession()
-  const workspace = useAppStore(s => s.workspace)
   const workspaces = useAppStore(s => s.workspaces)
   const activeWorkspaceId = useAppStore(s => s.activeWorkspaceId)
   const status = useAppStore(s => s.status)
-  const directory = sessionDirectory(session) || newSessionDirectory(workspaces, activeWorkspaceId, workspace?.root) || ''
+  const directory = sessionDirectory(session) || newSessionDirectory(workspaces, activeWorkspaceId) || ''
   const [dismissed, setDismissed] = useState<string | null>(null)
   if (dismissed === directory) return null
   return <section className="mx-4 mt-3 rounded-xl border border-line bg-raised/50 p-3 text-xs text-muted" aria-label={t('ui.readiness.title')}>
@@ -21,6 +20,6 @@ export function ReadinessCheck() {
     <p className="mt-1 break-all">{directory ? t('ui.readiness.project', {directory}) : t('ui.readiness.noProject')}</p>
     <p className="mt-1">{t(status?.config?.has_api_key === true ? 'ui.readiness.model' : status?.config?.has_api_key === false ? 'ui.readiness.noModel' : 'ui.readiness.modelUnknown')}</p>
     <p className="mt-1">{t('ui.readiness.hint')}</p>
-    <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={() => useAppStore.getState().setWorkspacePickerOpen(true)}>{t('ui.readiness.chooseProject')}</Button><Button size="sm" onClick={() => useAppStore.getState().setSettingsOpen(true, 'models')}>{t('ui.readiness.openModels')}</Button></div>
+    <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={() => useAppStore.getState().setWorkspacePickerOpen(true, 'select')}>{t('ui.readiness.chooseProject')}</Button><Button size="sm" onClick={() => useAppStore.getState().setSettingsOpen(true, 'models')}>{t('ui.readiness.openModels')}</Button></div>
   </section>
 }

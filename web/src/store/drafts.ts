@@ -25,7 +25,7 @@ export interface PendingSubmission {
 export interface PersistentAgentSelection {name: string; display_name?: string; agent_type: 'agent' | 'team'}
 export interface GoalCreationDraft { objective: string; rounds: string; budget: string }
 
-export interface SessionCreationRequest {id: string; cwd?: string; agent?: string}
+export interface SessionCreationRequest {id: string; cwd?: string; agent?: string; project?: import('@/lib/protocol.generated').ConversationProject}
 
 interface SessionDraft {
   creationRequest?: SessionCreationRequest

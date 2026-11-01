@@ -3,6 +3,11 @@ from harness.i18n import tr
 
 
 _ERROR_CODES = (
+    'session/workspace-invalid',
+    'session/workspace-changed',
+    'session/workspace-dirty',
+    'session/workspace-uncertain',
+    'session/workspace-directory',
     'access/ambiguous-credential',
     'access/browser-disabled',
     'access/changed',

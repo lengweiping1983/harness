@@ -73,6 +73,18 @@ class WorktreeService:
         _atomic_write(self.index, json.dumps(rows, ensure_ascii=False))
 
     @serialized
+    def conversation_options(self, cwd: str) -> dict:
+        """新对话与添加项目页面共用只读目录探测。"""
+        from .conversation_workspace import options
+        return options(self, cwd)
+
+    @serialized
+    def prepare_conversation(self, cwd: str, selection: dict) -> tuple[str, dict]:
+        """预检与实际检出共用同一次仓库写入锁。"""
+        from .conversation_workspace import prepare
+        return prepare(self, cwd, selection)
+
+    @serialized
     def repository(self, cwd: str) -> dict[str, Any]:
         """读取当前仓库真实状态，使用 NUL 分隔以保留特殊文件名。"""
         target = Path(cwd).resolve()

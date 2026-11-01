@@ -15,8 +15,8 @@ beforeEach(() => {
   vi.stubGlobal('localStorage', {getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key)})
   setLocale('en')
   useDraftStore.setState({bySession: {}, submissions: {}})
-  useAppStore.setState({activeSessionId: null, activeWorkspaceId: null, newSessionRevision: 1, sessionCreating: false,
-    sessions: [{id: 'other', reasoning_effort: 'low', metadata: {reasoning_effort: 'low'}}], workspaces: [], workspace: null,
+  useAppStore.setState({activeSessionId: null, activeWorkspaceId: 'project', newSessionCheckout: null, newSessionCheckoutStatus: 'ready', newSessionRevision: 1, sessionCreating: false,
+    sessions: [{id: 'other', reasoning_effort: 'low', metadata: {reasoning_effort: 'low'}}], workspaces: [{id:'project',path:'/fixture',name:'Project',color:'brand'}], workspace: null,
     defaultReasoningEffort: 'low', defaultReasoningSave: null, reasoningSaves: {}, toasts: []})
 })
 afterEach(() => {vi.restoreAllMocks(); vi.unstubAllGlobals(); setLocale('en')})
@@ -136,7 +136,7 @@ it('freezes Agent and execution mode before awaiting a default save and preserve
   useDraftStore.getState().setExecutionMode('__unsaved__', 'goal')
   response.resolve(saved('high')); await save
   expect(await creation).toBe(true)
-  expect(create).toHaveBeenCalledExactlyOnceWith({agent_selection: 'original'}, expect.any(String))
+  expect(create).toHaveBeenCalledExactlyOnceWith({cwd: '/fixture', agent_selection: 'original'}, expect.any(String))
   expect(useDraftStore.getState().bySession.__unsaved__).toMatchObject({agentSelection: {name: 'later'}, executionMode: 'goal'})
 })
 

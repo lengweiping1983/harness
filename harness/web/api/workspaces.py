@@ -18,6 +18,27 @@ from ..router import Router
 def build_router(ctx: Any) -> Router:
     router = Router()
 
+    @router.get('/api/v1/workspace-options')
+    def workspace_options(request: Any) -> Any:
+        from pathlib import Path
+        from harness.core.errors import HarnessError
+        path = request.get('path', '')
+        if len(request.query.get('path', [])) != 1 or not isinstance(path, str) or not path or '\0' in path or not Path(path).is_absolute():
+            raise BadRequest(tr('ui.newConversation.chooseProject'), code='workspace/invalid')
+        try:
+            service = ctx.harness.worktrees
+            if service is None:
+                directory = Path(path).resolve(strict=True)
+                if not directory.is_dir():
+                    raise ValueError(path)
+                return json_response({'cwd': str(directory), 'is_git': None, 'root': None, 'branch': None,
+                                      'head': None, 'refs': [], 'local_branches': [], 'dirty': None})
+            return json_response(service.conversation_options(path))
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise BadRequest(tr('python.shell_tools.9065985f4c79', p0=path), code='workspace/invalid') from exc
+        except HarnessError as exc:
+            raise BadRequest(exc.message, code=exc.code, details=exc.details) from exc
+
     @router.get("/api/v1/workspaces")
     def list_workspaces(request: Any) -> Any:
         registry = ctx.workspaces()

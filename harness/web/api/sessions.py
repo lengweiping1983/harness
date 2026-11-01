@@ -75,11 +75,50 @@ def build_router(ctx: Any) -> Router:
         selection = payload.get('agent_selection')
         if selection is not None and (not isinstance(selection, str) or not selection.strip()):
             raise BadRequest(tr('python.plugins.81af4a868780'), code='agent/invalid-selection')
+        project = payload.get('project')
+        project_metadata = {}
+        if 'project' in payload:
+            allowed = {'workspace_id', 'mode', 'ref', 'expected_head', 'expected_branch'}
+            if (not isinstance(project, dict) or set(project) - allowed
+                    or not isinstance(project.get('workspace_id'), str) or not project['workspace_id']
+                    or project.get('mode') not in ('local', 'worktree')
+                    or 'ref' in project and (not isinstance(project['ref'], str) or not project['ref'] or project['ref'].startswith('-') or '\0' in project['ref'])
+                    or any(key in project and project[key] is not None and not isinstance(project[key], str)
+                           for key in ('expected_head', 'expected_branch'))):
+                raise BadRequest(tr('ui.newConversation.invalidSelection'), code='session/workspace-invalid',
+                                 details={'copy': {'key': 'ui.newConversation.invalidSelection'}})
+            workspace = ctx.workspaces().get(project['workspace_id'])
+            if workspace is None or cwd is not None and Path(cwd) != Path(workspace['path']).resolve():
+                raise BadRequest(tr('ui.newConversation.chooseProject'), code='session/workspace-invalid',
+                                 details={'copy': {'key': 'ui.newConversation.chooseProject'}})
+            service = ctx.harness.worktrees
+            try:
+                if service is None:
+                    if project['mode'] != 'local' or 'ref' in project:
+                        raise BadRequest(tr('python.v1.4d7f49bfcc8f'), code='git/disabled')
+                    directory = Path(workspace['path']).resolve(strict=True)
+                    if not directory.is_dir():
+                        raise ValueError(workspace['path'])
+                    cwd = str(directory)
+                else:
+                    cwd, project_metadata = service.prepare_conversation(workspace['path'], project)
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise BadRequest(tr('python.shell_tools.9065985f4c79', p0=workspace['path']), code='session/invalid-cwd') from exc
+            except HarnessError as exc:
+                error = ServiceUnavailable if exc.code == 'session/workspace-uncertain' else BadRequest
+                raise error(exc.message, code=exc.code, details=exc.details) from exc
+            project_metadata['workspace_id'] = workspace['id']
         request_id = request.header('X-Request-ID')
-        metadata = {} if payload.get('title') else {'auto_title': 'awaiting'}
+        metadata = {**project_metadata, **({} if payload.get('title') else {'auto_title': 'awaiting'})}
         if request_id:
             metadata.update(creation_request_id=request_id, creation_completed=False)
-        session = ctx.harness.create_session(cwd=cwd, title=payload.get("title"), metadata=metadata)
+        try:
+            session = ctx.harness.create_session(cwd=cwd, title=payload.get("title"), metadata=metadata)
+        except Exception as exc:
+            if project is not None:
+                raise ServiceUnavailable(tr('ui.newConversation.preparationUnconfirmed'),
+                                         code='session/workspace-uncertain', details={**project_metadata, 'copy': {'key': 'ui.newConversation.preparationUnconfirmed'}}) from exc
+            raise
         # 新建时就把模型定死，省掉"建完会话再切一次模型"这一步。
         model = str(payload.get("model") or "").strip()
         if model:
@@ -89,8 +128,11 @@ def build_router(ctx: Any) -> Router:
         if selection is not None:
             try:
                 mount = ctx.call(ctx.harness.set_agent_selection(session, selection))
-            except Exception:
+            except Exception as exc:
                 ctx.harness.delete_session(session.id)
+                if project is not None:
+                    raise ServiceUnavailable(tr('ui.newConversation.preparationUnconfirmed'),
+                                             code='session/workspace-uncertain', details={**project_metadata, 'copy': {'key': 'ui.newConversation.preparationUnconfirmed'}}) from exc
                 raise
         if request_id:
             # 只有模型及Agent初始化完成，读回才能确认创建已完成。
