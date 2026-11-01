@@ -25,6 +25,10 @@ from .config import DEFAULT_HOME
 MAX_FRAME = 1048576
 
 
+class _WorkerExited(Exception):
+    """先完成所属进程与日志收尾，再构造对外诊断。"""
+
+
 def frame(value):
     """通道仅接受有界JSON，不反序列化可执行对象。"""
     raw = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
@@ -105,7 +109,7 @@ class SemanticWorker:
                         break
                     except TimeoutError:
                         if self._process.returncode is not None:
-                            raise self._failure() from None
+                            raise _WorkerExited from None
                         if asyncio.get_running_loop().time() >= deadline:
                             raise TimeoutError(tr('python.memory.semantic.startup_timeout')) from None
             finally:
@@ -161,10 +165,7 @@ class SemanticWorker:
                            'language': current_language.get(), **options}
                 self._writer.write(frame(request))
                 await self._writer.drain()
-                try:
-                    response = await receive(self._reader)
-                except (asyncio.IncompleteReadError, ConnectionError):
-                    raise self._failure() from None
+                response = await receive(self._reader)
                 if not isinstance(response, dict) or response.get('id') != identity:
                     raise ValueError(tr('python.memory.semantic.identity'))
                 if 'error' in response:
@@ -176,6 +177,10 @@ class SemanticWorker:
                     completed_error = HarnessError(error['message'], code=error['code'])
                 elif not isinstance(response.get('result'), dict):
                     raise ValueError(tr('python.memory.semantic.result'))
+            except (_WorkerExited, asyncio.IncompleteReadError, ConnectionError):
+                # EOF 和进程退出可能先于管道读取完成，不能提前冻结空白诊断。
+                await join_cleanup(asyncio.create_task(self._dispose()))
+                raise self._failure() from None
             except BaseException:
                 await join_cleanup(asyncio.create_task(self._dispose()))
                 raise

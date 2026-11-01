@@ -2,13 +2,66 @@
 import contextlib
 import io
 import subprocess
+import sys
+import textwrap
 import unittest
 from unittest.mock import Mock, patch
 
-from scripts.run_python_tests import check_environment, environment_identity, main
+from scripts.run_python_tests import DiagnosticTestResult, check_environment, environment_identity, main, positive_seconds
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_real_long_wait_emits_traceback_and_finishes_without_skipping(self):
+        """独立解释器实测原生诊断计时器，不让测试自身污染外层计时器。"""
+        script = textwrap.dedent('''
+            import time, unittest
+            from functools import partial
+            from scripts.run_python_tests import DiagnosticTestResult
+            class Fixture(unittest.TestCase):
+                def test_wait(self):
+                    time.sleep(.2)
+            result = unittest.TextTestRunner(resultclass=partial(
+                DiagnosticTestResult, traceback_timeout=.05)).run(
+                unittest.defaultTestLoader.loadTestsFromTestCase(Fixture))
+            raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 1 else 1)
+        ''')
+        result = subprocess.run([sys.executable, '-X', 'utf8', '-c', script],
+                                capture_output=True, timeout=10)
+        diagnostic = result.stderr.decode('utf-8')
+        self.assertEqual(result.returncode, 0, diagnostic)
+        self.assertIn('Timeout (', diagnostic)
+        self.assertIn('in test_wait', diagnostic)
+        self.assertIn('Ran 1 test', diagnostic)
+        self.assertIn('OK', diagnostic)
+
+    def test_diagnostic_timer_tracks_each_case_and_preserves_failures(self):
+        """多个用例各自计时，失败及收尾不留下跨用例的诊断计时器。"""
+        class Fixture(unittest.TestCase):
+            def test_failure(self):
+                self.fail('original failure')
+            def test_success(self):
+                pass
+        stream = io.StringIO()
+        with patch('scripts.run_python_tests.faulthandler') as diagnostic:
+            result = unittest.TextTestRunner(stream=stream,
+                resultclass=lambda *args, **kwargs: DiagnosticTestResult(*args, traceback_timeout=.5, **kwargs)
+            ).run(unittest.defaultTestLoader.loadTestsFromTestCase(Fixture))
+        self.assertEqual(result.testsRun, 2)
+        self.assertFalse(result.wasSuccessful())
+        self.assertEqual(len(result.failures), 1)
+        self.assertIn('original failure', result.failures[0][1])
+        self.assertEqual(diagnostic.dump_traceback_later.call_count, 2)
+        self.assertEqual(diagnostic.cancel_dump_traceback_later.call_count, 2)
+        self.assertEqual(diagnostic.dump_traceback_later.call_args.args, (.5,))
+        self.assertTrue(diagnostic.dump_traceback_later.call_args.kwargs['repeat'])
+
+    def test_diagnostic_interval_rejects_nonpositive_and_nonfinite_values(self):
+        import argparse
+        for value in ('0', '-1', 'nan', 'inf', '-inf'):
+            with self.subTest(value=value), self.assertRaises(argparse.ArgumentTypeError):
+                positive_seconds(value)
+        self.assertEqual(positive_seconds('0.25'), .25)
+
     def test_empty_suite_fails(self):
         with (patch('sys.argv', ['run_python_tests.py']), patch('scripts.run_python_tests.check_environment'),
               patch('unittest.defaultTestLoader.discover', return_value=unittest.TestSuite())):
