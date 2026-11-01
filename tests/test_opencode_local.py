@@ -490,6 +490,38 @@ class OpenCodeLocalTests(unittest.IsolatedAsyncioTestCase):
             await self.run_child('import sys;sys.stdin.read();'
                                  f'sys.stderr.write({record});sys.exit(1)', consume)
 
+    async def test_unknown_nonzero_exit_remains_terminal_and_keeps_bounded_trace_fields(self):
+        """未知退出不能因可重试优化而重放，追踪只保存确认的数字证据。"""
+        from harness.llm.failure_diagnostics import failure_diagnostics
+        async def consume(transport):
+            with self.assertRaises(LlmError) as caught:
+                async for _ in transport.post_stream(BASE_URL+'/chat/completions',
+                        headers={'Authorization':'Bearer public'}, body=b'{}', timeout=2):pass
+            error = caught.exception
+            self.assertFalse(error.transient)
+            self.assertEqual(error.details['runtime_exit_code'], 7)
+            self.assertEqual(error.details['response_bytes'], 1)
+            self.assertEqual(error.details['copy']['key'], 'ui.llm.opencodeLocalRuntimeExit')
+            self.assertEqual(failure_diagnostics(error), {'phase':'read','runtime_exit_code':7,
+                'response_bytes':1,'transient':False})
+        await self.run_child('import sys;sys.stdin.read();print(\'{"status":200}\',flush=True);'
+                             'sys.stdout.write("x");sys.stdout.flush();sys.exit(7)',consume)
+
+    async def test_spawn_failure_reports_localized_start_guidance_without_retry(self):
+        """启动失败与网络中断区分，保留当前语言资源身份。"""
+        from harness.i18n import tr
+        transport = self.transport()
+        with patch('harness.llm.opencode_local.asyncio.create_subprocess_exec', side_effect=OSError('private path')):
+            for language in ('en','zh-CN','en'):
+                with current_language.set(language):
+                    with self.assertRaises(LlmError) as caught:
+                        async for _ in transport.post_stream(BASE_URL+'/chat/completions',
+                                headers={'Authorization':'Bearer public'},body=b'{}',timeout=2):pass
+                    self.assertEqual(caught.exception.message, tr('ui.llm.opencodeLocalStartFailed'))
+                    self.assertFalse(caught.exception.transient)
+                    self.assertEqual(caught.exception.details['copy'], {'key':'ui.llm.opencodeLocalStartFailed'})
+                    self.assertNotIn('private',str(caught.exception))
+
     async def test_malformed_helper_output_fails_without_retry(self):
         async def consume(transport):
             with self.assertRaises(LlmError) as caught:
