@@ -1,6 +1,10 @@
+<img src="assets/brand/harness.svg" width="88" height="88" alt="Harness" />
+
 # Harness
 
 Harness 是可嵌入的 Python 智能体运行框架，提供 CLI、React 工作台、Electron 桌面端和独立的无模型 MCP 执行器。对话运行支持流式模型调用、工具审批、计划、目标与任务队列；扩展能力包括智能体、团队、技能、连接器、插件、记忆、钩子、自动化、项目任务板和 Git 工作树。
+
+品牌标识与各端资源维护见 [品牌规范](docs/brand.md)。
 
 ## 从源码启动
 

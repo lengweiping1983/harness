@@ -41,6 +41,8 @@ async function startDesktop() {
   let downloads
   const browser = createBrowserRuntime({app, WebContentsView, ipcMain, session, shell, Menu, clipboard, getWindow:() => window, getDownloads:() => downloads, getBackend:() => backend, getOrigin:() => origin, getMenuText:() => menuText})
   await app.whenReady()
+  const brandIcon = fileURLToPath(new URL('./assets/harness.png', import.meta.url))
+  if (process.platform === 'darwin') app.dock?.setIcon(brandIcon)
   fastCapture = ['win32','darwin'].includes(process.platform) ? new FastScreenCapture() : null
   app.on('will-quit', () => fastCapture?.close())
   bridge = await startBridge(browser.bridgeAction)
@@ -50,7 +52,7 @@ async function startDesktop() {
     origin = new URL(applicationURL).origin
   } catch (error) {dialog.showErrorBox('Harness startup failed', String(error)); app.quit(); throw error}
   downloads = new BrowserDownloads(() => path.join(app.getPath('downloads'), 'Harness'), () => browser.publish())
-  window = new BrowserWindow({width: 1440, height: 960, minWidth: 800, minHeight: 600, title: 'Harness', webPreferences: {preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true}})
+  window = new BrowserWindow({width: 1440, height: 960, minWidth: 800, minHeight: 600, title: 'Harness', icon: brandIcon, webPreferences: {preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true}})
   instanceReady()
   let menuReady = false
   const updates = new DesktopUpdates({updater:updaterPackage.autoUpdater, packaged:app.isPackaged, notify:() => installMenu(menuReady)})
@@ -84,7 +86,7 @@ async function startDesktop() {
       window.webContents.send('desktop-command', action)
     }})))
   }
-  app.setAboutPanelOptions({applicationName:'Harness', applicationVersion:app.getVersion()})
+  app.setAboutPanelOptions({applicationName:'Harness', applicationVersion:app.getVersion(), applicationIcon:brandIcon})
   ipcMain.handle('desktop-menu', (event, labels) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) throw Error('Untrusted menu request')
     const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','close','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect']

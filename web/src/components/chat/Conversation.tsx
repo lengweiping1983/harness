@@ -1,3 +1,4 @@
+import { HarnessLogo } from '@/components/ui/HarnessLogo'
 import { noticeText } from '@/lib/noticeText'
 import { ToolActivityIcon } from '@/components/ui/ToolActivityIcon'
 import { messageNavigationEntries, type MessageNavigationEntry } from '@/lib/messageNavigation'
@@ -5,7 +6,7 @@ import { MessageNavigator } from './MessageNavigator'
 import { t, useLocale } from '@/i18n'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ArrowDown, Brain, ChevronRight, ListOrdered, MessageSquarePlus, RotateCw, Sparkles, WifiOff } from 'lucide-react'
+import { ArrowDown, Brain, ChevronRight, ListOrdered, MessageSquarePlus, RotateCw, WifiOff } from 'lucide-react'
 import type { Block, QuestionBlock } from '@/types'
 import { api, unwrap } from '@/lib/api'
 import { cn, createDateHeadingFormatter } from '@/lib/utils'
@@ -741,9 +742,7 @@ function EmptyState({ onSuggest }: { onSuggest?: (text: string) => void }) {
       style={{ maxWidth: 'var(--chat-content-width)' }}
     >
       <div className="welcome-mark relative">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/10 text-brand">
-          <Sparkles className="h-6 w-6" />
-        </div>
+        <HarnessLogo className="h-14 w-14" />
       </div>
       <div className="welcome-copy space-y-3.5">
         <h2 className="text-2xl leading-9 font-semibold tracking-tight text-ink">{t("ui.components.chat.Conversation.e33a219fc51f")}</h2>

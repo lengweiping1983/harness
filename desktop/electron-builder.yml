@@ -16,15 +16,18 @@ files:
   - '!setup.mjs'
   - '!launch.mjs'
   - capture-screen.ps1
+  - assets/harness.png
 extraResources:
   - from: ../.run/desktop-release/resources
     to: runtime
 mac:
+  icon: assets/harness.icns
   category: public.app-category.developer-tools
   target:
     - dmg
     - zip
 win:
+  icon: assets/harness.ico
   target:
     - nsis
 nsis:

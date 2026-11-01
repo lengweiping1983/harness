@@ -1,3 +1,6 @@
 # 生成器按字节核对许可证和随包运行时，检出时必须保留 LF。
 model-runtime/licenses/* text eol=lf
 harness/llm/runtime/* text eol=lf
+# 品牌原稿与分发矢量按字节核对，跨平台检出保持一致。
+assets/brand/*.svg text eol=lf
+web/public/brand/*.svg text eol=lf
