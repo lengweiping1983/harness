@@ -33,7 +33,7 @@
 - 使用 `Closes #123`、`Fixes #123` 或 `Resolves #123` 等关闭语法关联本仓库真实 Issue；关联 PR 编号会失败。
 - “变更与验收”“验证证据”“风险与回退”三个二级章节各含至少 10 个字符的非空说明。
 
-`dependabot[bot]` 使用自动生成的正文，免除上述格式检查；其他机器人没有该豁免，业务 CI 仍独立运行。正文模板位于 `.github/PULL_REQUEST_TEMPLATE.md`。格式检查核对正文结构和 Issue 身份，验收证据仍由审查者核实。
+`dependabot[bot]` 使用自动生成的正文，免除上述格式检查；其他机器人没有该豁免，业务 CI 仍独立运行。豁免分两层：作业级 `if` 对 Dependabot 触发的运行直接跳过，不启动 runner；脚本内的作者判断继续覆盖维护者在 Dependabot 分支上推送、`github.actor` 变为维护者的情形。必需检查允许 `skipped` 状态，因此跳过的 `PR policy` 不阻塞这些 PR 在业务 CI 通过后合并。正文模板位于 `.github/PULL_REQUEST_TEMPLATE.md`。格式检查核对正文结构和 Issue 身份，验收证据仍由审查者核实。
 
 该工作流没有 `merge_group` 触发配置；CI 的合并组回归与 PR 正文检查是两个独立检查入口。
 
@@ -43,7 +43,7 @@
 
 `.github/ISSUE_TEMPLATE/` 提供缺陷报告、功能提案和工程任务表单，禁用空白 Issue。各表单分别收集复现与实际行为、用户问题与验收标准、工程范围与验证方案；日志和示例不得包含凭据或用户数据。
 
-Dependabot 每周检查 GitHub Actions、`web` npm、`desktop` npm 和根目录 pip 依赖，每组最多保留 3 个更新 PR。桌面带哈希的 Python 锁文件仍按发行流程维护。
+Dependabot 每周检查 GitHub Actions、`web` npm、`desktop` npm 和根目录 pip 依赖，每组最多保留 3 个更新 PR。GitHub Actions 的全部更新合为一个分组；npm 与 pip 只把 minor 和 patch 合入分组，主版本仍单独成 PR，保留逐个审查升级风险的机会。分组只决定 PR 的聚合方式，不改变锁文件和版本范围本身，实际升级结果仍按业务 CI 验证。桌面带哈希的 Python 锁文件仍按发行流程维护。
 
 ## 安装包与构建产物
 

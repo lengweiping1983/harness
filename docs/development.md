@@ -121,6 +121,8 @@ lint 检查 Python 语法与未使用导入；语言、协议、UI 规范和发�
 
 后端语言资源以 `harness/i18n/locales/*.json` 为源；运行 `python scripts/generate_i18n.py` 生成浏览器子集。公共协议由路由、`harness/web/protocol.py` 和 `response_contracts.py` 定义，运行 `python scripts/generate_protocol.py` 生成契约。修改源后重新生成，再执行 `--check`，不手改生成文件。
 
+模型桥接运行时的源位于 `model-runtime/`：`bridge.mjs`、`deepseek.mjs`、`provider-metadata.json`、`licenses/` 下的许可文本、`tests/`、`package.json` 与 `package-lock.json` 全部参与版本控制，只忽略依赖目录。`node model-runtime/build.mjs` 把打包结果写入 `harness/llm/runtime/`，该目录随发行包分发，属于生成物。两者都不能整目录忽略：缺源则 `npm --prefix model-runtime ci` 与 `--check` 无法执行，CI 和各平台构建会在第一步失败；直接改 `harness/llm/runtime/` 则会在下一次同步检查中被判为不一致。
+
 先核对当前实现、调用方、注册入口、资源分发和动态加载，再删除源码。新增业务回归应保留；失败先查明原因，不能以删断言或吞异常替代修复。
 
 用户数据、对话、凭据、项目记忆、数据库和运行目录不属于源码清理范围。涉及写入的验证使用临时目录。写请求结果未知时先查询状态，不自动重放。桌面安装包准备、平台构建和签名要求见 `desktop/README.md`。

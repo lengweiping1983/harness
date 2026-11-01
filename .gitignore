@@ -45,8 +45,6 @@ api-keys.txt
 
 .playwright-cli
 
-model-runtime
-
 # UI 服务运行时日志
 .ui.log
 .ui.err

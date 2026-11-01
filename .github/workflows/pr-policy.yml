@@ -12,6 +12,9 @@ permissions:
 jobs:
   policy:
     name: PR policy
+    # Dependabot 使用自动生成的正文，直接跳过整个作业，避免为每个依赖 PR 启动一次 runner。
+    # required check 允许 skipped 状态，因此不阻塞这些 PR 在 CI 通过后合并。
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

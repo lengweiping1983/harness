@@ -39,6 +39,10 @@ test('Dependabot uses generated metadata without exempting other bots', async ()
   assert.deepEqual((await check(null, { login: 'dependabot[bot]' })).errors, []);
   assert.equal((await check(null, { login: 'other[bot]' })).errors.length, 1);
 });
+test('Dependabot PRs skip the whole job so no runner starts', () => {
+  const jobIf = source.split('\n').find(line => line.trim().startsWith('if:'));
+  assert.equal(jobIf?.trim(), "if: github.actor != 'dependabot[bot]'");
+});
 test('issue references are deduplicated and untrusted text stays data', async () => {
   const result = await check(valid + '\nFixes #123\n${process.exit(1)}');
   assert.equal(result.calls.length, 1);
