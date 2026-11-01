@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,11 +8,10 @@ version = "1.0.0"
 description = "Agent Harness：模块化、可嵌入业务系统"
 readme = "README.md"
 requires-python = ">=3.14"
-license = { text = "MIT" }
+license = "MIT"
 keywords = ["agent", "harness", "llm", "openrouter", "ai"]
 classifiers = [
     "Programming Language :: Python :: 3.14",
-    "License :: OSI Approved :: MIT License",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 # 基础 Python 安装的依赖列表；功能扩展依赖见下方可选配置，前端依赖见 web/package.json。
@@ -27,7 +26,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["httpx>=0.28.1,<1", "setuptools>=61", "wheel", "cryptography>=50.0.2,<51"]
+test = ["httpx>=0.28.1,<1", "setuptools>=77.0.3", "wheel", "cryptography>=50.0.2,<51"]
 browser = ["playwright>=1.63,<2"]
 # 本地语义候选只在宿主显式装配后使用，基础安装不包含向量运行时。
 memory = ["fastembed==0.9.0"]

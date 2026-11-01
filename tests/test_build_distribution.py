@@ -1,5 +1,6 @@
 """使用真实构建核对声明式入口和源码发行包中的资源分发。"""
 from pathlib import Path
+from email.parser import BytesParser
 import shutil
 import subprocess
 import sys
@@ -77,6 +78,8 @@ class BuildDistributionTests(unittest.TestCase):
         """通过当前解释器调用 PEP 517 后端，不安装依赖或触及工作区。"""
         result = subprocess.run(
             [sys.executable, '-c',
+             'import warnings; from setuptools.warnings import SetuptoolsDeprecationWarning; '
+             'warnings.simplefilter("error", SetuptoolsDeprecationWarning); '
              f'from setuptools import build_meta; build_meta.{operation}("dist")'],
             cwd=project, capture_output=True, text=True,
         )
@@ -85,6 +88,13 @@ class BuildDistributionTests(unittest.TestCase):
     def check_wheel(self, project, resources):
         """核对包资源、技能目录和构建辅助模块的发行边界。"""
         with ZipFile(next((project / 'dist').glob('*.whl'))) as archive:
+            metadata_path = next(name for name in archive.namelist()
+                                 if name.endswith('.dist-info/METADATA'))
+            metadata = BytesParser().parsebytes(archive.read(metadata_path))
+            self.assertEqual(metadata['License-Expression'], 'MIT')
+            self.assertIsNone(metadata['License'])
+            self.assertFalse(any(value.startswith('License ::')
+                                 for value in metadata.get_all('Classifier', [])))
             actual = {name: archive.read(name) for name in archive.namelist()
                       if '.dist-info/' not in name}
         self.assertEqual(actual, resources)

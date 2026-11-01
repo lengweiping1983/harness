@@ -12,7 +12,7 @@
 
 `make` 使用 `PYTHON`，并传递给子进程的 `HARNESS_PYTHON`。桌面源码后端和浏览器 Python 夹具复用 `desktop/python-runtime.mjs`：显式 `HARNESS_PYTHON`、仓库 `.venv`、系统 Python。显式相对路径以仓库根为基准；路径不可用时失败，不改用其他环境。安装包使用自带运行时。
 
-Python 构建以 `pyproject.toml` 为唯一配置入口：包发现、包内资源与 `build_py` 钩子注册均在 `[tool.setuptools]` 下声明。`build_support.py` 实现 `.harness/skills` 的同级资源复制与路径检查；`MANIFEST.in` 将构建模块和系统技能纳入 sdist。`python -m unittest tests.test_build_distribution` 使用临时项目验证 wheel、sdist 重建、资源字节、删除资源后的重建及无预装技能构建。
+Python 构建以 `pyproject.toml` 为唯一配置入口：包发现、包内资源与 `build_py` 钩子注册均在 `[tool.setuptools]` 下声明。许可证使用 PEP 639 SPDX 表达式 `MIT`，构建与测试依赖的 setuptools 下限保持一致，以支持该元数据格式。`build_support.py` 实现 `.harness/skills` 的同级资源复制与路径检查；`MANIFEST.in` 将构建模块和系统技能纳入 sdist。`python -m unittest tests.test_build_distribution` 使用临时项目验证 wheel、sdist 重建、资源字节、删除资源后的重建及无预装技能构建，并将 setuptools 弃用警告视为错误，核对 wheel 的 `License-Expression`。
 
 模型桥接的许可证源和随包运行时由 `.gitattributes` 固定为 LF，避免 Windows 的 `core.autocrlf` 改写字节后使生成同步检查失败。已有检出目录不会因新增属性自动重写文件；遇到该错误时先保留本地修改，再核对许可证源的行尾并重新运行生成器，不跳过同步检查或手工修改生成产物。
 
