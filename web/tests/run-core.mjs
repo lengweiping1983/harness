@@ -1,40 +1,40 @@
 import {readdirSync} from 'node:fs'
-import {spawnSync} from 'node:child_process'
 import path from 'node:path'
-import {chromium} from 'playwright-core'
 import {resolveBrowserExecutable} from './browser-executable.mjs'
-import {selectBrowserScenarios} from '../../scripts/browser_selection.mjs'
+import {browserOptions, buildFingerprint, inputFingerprint, runScenarios, startWorker, writeBrowserReport} from './browser-runner.mjs'
 
-const root = path.resolve(import.meta.dirname, '..')
 const scripts = readdirSync(import.meta.dirname).filter(name => name.endsWith('-smoke.mjs')).sort()
-const scenarios = selectBrowserScenarios(scripts, process.argv.slice(2)).map(name => [name, []])
-const env = {...process.env}
-if (scenarios.length) {
-  try {
-    env.HARNESS_TEST_BROWSER = resolveBrowserExecutable()
-    const browser = await chromium.launch({executablePath: env.HARNESS_TEST_BROWSER, headless: true})
-    try {
-      console.log(`Core browser executable: ${env.HARNESS_TEST_BROWSER} (${browser.version()})`)
-    } finally {
-      await browser.close()
-    }
-  } catch (error) {
-    console.error('Browser preflight failed:', error.message)
-    process.exit(1)
-  }
+const options = browserOptions(scripts, process.argv.slice(2))
+const started = new Date(), startedAt = performance.now()
+const report = {started: started.toISOString(), platform: process.platform, node: process.version,
+  jobs: options.jobs, timeoutMs: options.timeoutMs, passed: false, inputsUnchanged: false, buildUnchanged: false,
+  results: options.scenarios.map(name => ({name, status: 'not_run'}))}
+const logs = path.resolve(import.meta.dirname, '../../output/browser-logs', started.toISOString().replace(/[:.]/g, '-'))
+await writeBrowserReport(options.report, report)
+try {
+  report.input = inputFingerprint()
+  report.build = buildFingerprint()
+  report.executablePath = resolveBrowserExecutable()
+  console.log(`Core browser executable: ${report.executablePath}`)
+  const outcome = await runScenarios(options.scenarios, {jobs: options.jobs,
+    createWorker: index => startWorker(index, {executablePath: report.executablePath, timeoutMs: options.timeoutMs, logs}),
+    onResult: result => console.log(`Core browser ${result.status}: ${result.name} (${((result.durationMs ?? 0) / 1000).toFixed(2)}s)`),
+  })
+  Object.assign(report, outcome)
+  report.inputsUnchanged = report.input === inputFingerprint()
+  report.buildUnchanged = report.build === buildFingerprint()
+  report.passed = report.results.every(result => result.status === 'passed') && !report.infrastructure.length
+    && report.inputsUnchanged && report.buildUnchanged
+} catch (error) {report.error = {message: error.message, stack: error.stack}; console.error(error)}
+finally {
+  report.durationMs = performance.now() - startedAt
+  report.finished = new Date().toISOString()
+  report.logs = logs
+  await writeBrowserReport(options.report, report)
 }
-if (!scenarios.length) console.log('Browser framework ready: no scenarios registered')
-const failed = []
-for (const [name, args] of scenarios) {
-  console.log(`\nCore browser: ${name} ${args.join(' ')}`)
-  const result = spawnSync(process.execPath, [path.join(import.meta.dirname, name), ...args], {cwd: root, env, stdio: 'inherit'})
-  if (result.error || result.status !== 0) {
-    if (result.error) console.error(result.error)
-    failed.push([name, ...args].join(' '))
-  }
-}
-if (scenarios.length) console.log(`\nCore browser: ${scenarios.length - failed.length}/${scenarios.length} passed`)
-if (failed.length) {
-  console.error('Failed:', failed.join(', '))
-  process.exitCode = 1
-}
+const count = status => report.results.filter(result => result.status === status).length
+console.log(`\nCore browser: ${count('passed')}/${report.results.length} passed; ${count('failed')} failed; ${count('infrastructure_failed')} infrastructure failed; ${count('not_run')} not run (${(report.durationMs / 1000).toFixed(2)}s)`)
+console.log('Browser report:', options.report)
+if (!report.inputsUnchanged || !report.buildUnchanged) console.error('Browser input/build identity was changed or unverified')
+if (report.infrastructure?.length) console.error('Browser infrastructure failed:', JSON.stringify(report.infrastructure))
+if (!report.passed) process.exitCode = 1

@@ -592,7 +592,7 @@ export function Conversation({
           readOnly ? <div className="p-8 text-center text-sm text-muted">{t('ui.shared.emptyConversation')}</div> : queuedEmpty === 'none' ? <EmptyState onSuggest={onSuggest} /> : <QueuedEmptyState state={queuedEmpty} />
         ) : (
           <div
-            className="relative mx-auto mt-auto w-full shrink-0 px-6 py-6"
+            className="relative mx-auto w-full shrink-0 px-6 py-6"
             style={{
               maxWidth: 'var(--chat-content-width)',
               height: virtualizer.getTotalSize(),

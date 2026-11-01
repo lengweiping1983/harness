@@ -18,10 +18,11 @@ const blocks=[{id:'reply',kind:'assistant',at:1,text}]
 const todos=[{id:'one',content:'Original checklist task 原文',status:'in_progress'},{id:'two',content:'Original completed task 原文',status:'completed'}]
 const generation=readGeneration({request_id:'fixture',phase:'waiting',model:'original/actual-request-model',elapsed_ms:6000})
 window.copy=t
-window.configure=({language='en',dark=false,size=14,paneWidth=null,phase='waiting',tasks=true,active=true,short=false}={})=>{
+window.configure=({language='en',dark=false,size=14,paneWidth=null,phase='waiting',tasks=true,active=true,short=false,withHistory=false}={})=>{
  setLocale(language);document.documentElement.classList.toggle('dark',dark);document.documentElement.style.fontSize=size+'px'
  useAppStore.setState({activeSessionId:null})
- root.render(<div style={{height:'100dvh',display:'flex',width:paneWidth??'100%'}}><ConversationPane title="Original conversation" conversation={{blocks:short?[{...blocks[0],text:'Short reply 原文'}]:blocks,running:active,streaming:false,connection:'open'}}>
+ const history=withHistory?{through:2,start:0,end:2,total:2,has_more:false,next_cursor:null,user_messages:[],cursorThrough:2,generation:1,revision:0,loading:false,error:null,resetRequired:false,ids:['request','reply']}:null
+ root.render(<div style={{height:'100dvh',display:'flex',width:paneWidth??'100%'}}><ConversationPane title="Original conversation" conversation={{blocks:short?[{id:'request',kind:'user',at:1,text:'Original user message 原文'},{...blocks[0],text:'Short reply 原文'}]:blocks,running:active,streaming:false,connection:'open',history}}>
   <Composer running={active} queued={0} planMode={false} connection="open" generation={active?{...generation,phase}:null} todos={tasks?todos:[]} onSend={()=>{window.sent=true}} onCancel={()=>{window.stopped=true}} onTogglePlan={()=>{}}/>
  </ConversationPane></div>)
 }
@@ -79,14 +80,25 @@ await browserScenario(async ({server,browser}) => {
   await page.evaluate(()=>window.configure({active:false,tasks:false}))
   await generation.waitFor({state:'detached'});await tasks.waitFor({state:'detached'})
   assert.equal(await page.locator('.composer-status-rail').evaluate(node=>node.getBoundingClientRect().height),0,'Empty rail reserves no height')
-  for(const language of ['en','zh-CN']) for(const width of [390,1600]) {
+  for(const dark of [false,true]) for(const language of ['en','zh-CN','en']) for(const width of [390,1600]) for(const withHistory of [false,true]) {
     await page.setViewportSize({width,height:1000})
-    await page.evaluate(config=>window.configure(config),{language,short:true,active:false,tasks:false})
+    await page.evaluate(config=>window.configure(config),{language,dark,short:true,active:false,tasks:false,withHistory})
+    await page.getByText('Original user message 原文',{exact:true}).waitFor()
     await page.getByText('Short reply 原文',{exact:true}).waitFor()
     await page.waitForFunction(()=>{
-      const scroll=document.querySelector('.conversation-scroll'),last=scroll.querySelector('[data-row-id]:last-child')
-      return last&&Math.abs(scroll.getBoundingClientRect().bottom-last.getBoundingClientRect().bottom)<3
+      const scroll=document.querySelector('.conversation-scroll'),first=scroll.querySelector('[data-row-id]')
+      return first&&Math.abs(first.getBoundingClientRect().top-scroll.getBoundingClientRect().top)<3
     })
+    const shortGeometry=await page.evaluate(()=>{
+      const scroll=document.querySelector('.conversation-scroll'),user=scroll.querySelector('[data-row-id="request"]')
+      return {userOffset:user.getBoundingClientRect().top-scroll.getBoundingClientRect().top,
+        scrollTop:scroll.scrollTop,overflow:scroll.scrollHeight-scroll.clientHeight,
+        composerBottom:document.querySelector('.composer-card').getBoundingClientRect().bottom}
+    })
+    assert.ok(shortGeometry.userOffset>=0&&shortGeometry.userOffset<160,'Short user messages follow the history/date headings at the top')
+    assert.equal(shortGeometry.scrollTop,0,'Short conversations do not scroll away from the user message')
+    assert.ok(shortGeometry.overflow<=1,'Short conversations leave remaining space below the messages')
+    assert.ok(1000-shortGeometry.composerBottom<=10,'Top-aligned messages keep the composer near the bottom')
   }
   if(process.env.HARNESS_TEST_SCREENSHOTS) {
     await mkdir(process.env.HARNESS_TEST_SCREENSHOTS,{recursive:true})
@@ -94,14 +106,16 @@ await browserScenario(async ({server,browser}) => {
     await page.evaluate(()=>window.configure({language:'zh-CN',dark:true}))
     await page.locator('.conversation-scroll pre').waitFor()
     await page.waitForFunction(()=>{
-      const scroll=document.querySelector('.conversation-scroll'),last=scroll.querySelector('[data-row-id]:last-child')
-      return last&&Math.abs(scroll.getBoundingClientRect().bottom-last.getBoundingClientRect().bottom)<3
+      const scroll=document.querySelector('.conversation-scroll'),first=scroll.querySelector('[data-row-id]'),last=scroll.querySelector('[data-row-id]:last-child')
+      return scroll.scrollHeight<=scroll.clientHeight+1
+        ? first&&Math.abs(first.getBoundingClientRect().top-scroll.getBoundingClientRect().top)<3
+        : last&&Math.abs(scroll.getBoundingClientRect().bottom-last.getBoundingClientRect().bottom)<3
     })
     await page.screenshot({path:process.env.HARNESS_TEST_SCREENSHOTS+'/conversation-space.png'})
   }
   assert.deepEqual(errors,[])
   await page.close()
-  console.log('Conversation space: responsive lanes, unified paragraph/code widths, compact status rail, native keyboard disclosures, locale retention and long drafts passed')
+  console.log('Conversation space: top-aligned short messages with history/date headings, responsive lanes, unified paragraph/code widths, compact status rail, native keyboard disclosures, locale retention and long drafts passed')
 },{entry:'/__conversation-space-entry.tsx',vite:{plugins:[{
   name:'conversation-space-fixture',
   resolveId(id){if(id==='/__conversation-space-entry.tsx')return id},
