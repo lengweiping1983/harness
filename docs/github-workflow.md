@@ -2,13 +2,17 @@
 
 仓库的持续回归、PR 正文检查和桌面安装包构建由 `.github/workflows/` 管理。本地验证入口见 [开发与测试](development.md)，安装包准备与签名见 [桌面文档](../desktop/README.md)。
 
-当前公开仓库的贡献闭环使用免费规则集与标准 GitHub 托管 runner，不依赖付费套餐、较大 runner 或付费审查服务。公开仓库标准 runner 的运行时长免费，依据 [GitHub Actions 计费说明](https://docs.github.com/en/actions/concepts/billing-and-usage)；仓库可见性或 runner 类型变化后须重新核对，不自动切换付费方案。安装包签名和产物存储属于独立发行范围，不是贡献闭环的验收前提。
+当前仓库为私有，按维护者要求在 Settings → Actions → General 选择 Disable actions，暂停所有 GitHub Actions，不使用托管 CI，也不等待远端 CI 或 PR 正文检查。全部工作流、测试和规则模板保留，以下作业说明描述重新启用后的配置，不表示当前正在执行。不购买套餐或启用付费 runner。
+
+当前贡献流程为 Issue → 分支与 PR → 本地适用验证和审查 → 直接 squash 合并 main → 核对提交与 Issue → 清理已合并来源分支。仓库已开启 Automatically delete head branches；本地切回 main，拉取最新提交，确认 PR 已合并且内容保留后删除对应本地分支，并执行 `git fetch --prune origin`。squash 合并的来源提交可能不是 main 的祖先，不能仅凭祖先关系判断是否可删除；未合并的 PR 和独有工作必须保留。
+
+原默认分支规则仍保存，但 GitHub 明确提示当前私有仓库套餐不强制执行规则集，因此不依赖它阻挡合并。恢复 CI 时，先核对套餐与免费额度，取得用户明确授权，再启用 Actions、核对必需检查与实际规则执行能力，运行目标提交并确认结果；未恢复前不报告远端门禁通过。安装包签名和产物存储属于独立发行范围。
 
 ## 持续回归
 
 日常贡献从 [贡献指南](../CONTRIBUTING.md)进入，按 Issue、Draft PR、本地验证、Ready、审查、squash 合并及 main 核对完成闭环。本页维护实际工作流与远端配置的边界。
 
-`ci.yml` 在 `main` 推送、PR、`merge_group` 和手动触发时运行，没有文件路径过滤。其他分支推送不会单独启动该工作流。默认权限为 `contents: read`；每个回归作业限时 45 分钟，汇总作业限时 5 分钟。同一 PR 的新运行取消旧运行，其他触发不自动取消。
+Actions 重新启用后，`ci.yml` 在 `main` 推送、PR、`merge_group` 和手动触发时运行，没有文件路径过滤。其他分支推送不会单独启动该工作流。默认权限为 `contents: read`；每个回归作业限时 45 分钟，汇总作业限时 5 分钟。同一 PR 的新运行取消旧运行，其他触发不自动取消。
 
 | 作业／检查 | 执行内容 |
 |---|---|
