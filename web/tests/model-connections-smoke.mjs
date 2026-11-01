@@ -32,7 +32,7 @@ await browserScenario(async({server,browser})=>{
  await page.getByText('Initial 原文',{exact:true}).waitFor()
  for(const language of ['en','zh-CN','en'])for(const theme of ['light','dark'])for(const width of [390,1440]){
   await page.setViewportSize({width,height:900});await page.evaluate(({language,theme})=>{window.locale(language);document.documentElement.className=theme;document.documentElement.dataset.theme=theme},{language,theme})
-  const labels=await page.evaluate(()=>({title:window.copy('ui.providers.title'),summary:window.copy('ui.providers.summary',{connections:1,models:1})}))
+  const labels=await page.evaluate(()=>({title:window.copy('ui.providers.title'),summary:window.copy('ui.providers.summary',{state:window.copy('ui.providers.state.configured'),connections:1,models:1})}))
   await page.getByRole('heading',{name:labels.title,exact:true}).waitFor();await page.getByText(labels.summary,{exact:true}).waitFor()
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1),false)
  }

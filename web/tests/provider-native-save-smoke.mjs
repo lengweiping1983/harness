@@ -53,7 +53,7 @@ try{
    const copy=await page.evaluate(()=>({error:window.copy('ui.providers.keyRequired'),description:window.copy('ui.providers.description')}))
    await page.getByRole('alert').first().waitFor();assert.ok((await page.getByRole('alert').allTextContents()).every(value=>value===copy.error));await page.getByText(copy.description,{exact:true}).waitFor()
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false)
-   if(language==='zh-CN'&&width===1440){await page.getByLabel('供应商名称',{exact:true}).scrollIntoViewIfNeeded();await page.screenshot({path:`../output/provider-native/validation-${theme}.png`})}
+   if(language==='zh-CN'&&width===1440){await page.getByLabel('提供商名称',{exact:true}).scrollIntoViewIfNeeded();await page.screenshot({path:`../output/provider-native/validation-${theme}.png`})}
   }
   await page.getByLabel('API key 1',{exact:true}).fill('isolated-fixture-only-key')
   await page.getByLabel('API endpoint address',{exact:true}).fill(endpoint)

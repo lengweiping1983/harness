@@ -1,3 +1,4 @@
+import type {ModelInfo} from '@/types'
 import {newIdentity} from '@/lib/ids'
 export type ProviderModel = {id: string; model: string; name: string; enabled: boolean; context_window?: number; max_output_tokens?: number; input: string[]; reasoning_efforts?: Record<string, string | null> | false; compat?: Record<string, unknown>}
 export type ProviderKey = {id: string; value?: string; mask?: string; enabled: boolean; available?: boolean; in_use?: boolean}
@@ -115,4 +116,17 @@ export function reconcileProviderModels(current: ProviderModel[], previous: read
 export function providerCatalogChanges(previous: readonly CatalogModel[], fresh: readonly CatalogModel[]) {
   const before = new Set(previous.map(model => model.id)), after = new Set(fresh.map(model => model.id))
   return {added: [...after].filter(id => !before.has(id)).length, retired: [...before].filter(id => !after.has(id)).length}
+}
+
+/** 按配置身份匹配可用模型，保持接入与模型顺序，不依据展示名称猜测归属。 */
+export function providerModelGroups(provider: ModelProvider, models: ModelInfo[]) {
+  const catalog = new Map(models.map(model => [model.id, model]))
+  return provider.connections.map(connection => ({
+    id: connection.id,
+    name: connection.name,
+    models: connection.models.flatMap(model => {
+      const entry = catalog.get(`harness/${provider.id}/${connection.id}/${model.id}`)
+      return entry ? [entry] : []
+    }),
+  })).filter(group => group.models.length)
 }

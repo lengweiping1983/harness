@@ -25,7 +25,7 @@ await browserScenario(async({server,browser})=>{
  assert.ok(header<=4,'Remove action belongs in the connection header')
  await page.getByRole('button',{name:'Remove connection',exact:true}).last().click();assert.equal(await page.getByRole('button',{name:'Remove connection',exact:true}).count(),0)
  await page.getByRole('button',{name:'Cancel',exact:true}).click();await page.getByRole('button',{name:'Choose provider',exact:true}).click()
- const providerDialog=()=>page.getByRole('dialog',{name:/Choose a provider|选择一个供应商/})
+ const providerDialog=()=>page.getByRole('dialog',{name:/Choose provider|选择提供商/})
  const options=()=>providerDialog().locator('div.grid').getByRole('button')
  await providerDialog().waitFor()
  await mkdir('../output/provider-order',{recursive:true})

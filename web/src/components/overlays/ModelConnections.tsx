@@ -1,8 +1,9 @@
 import {newIdentity} from '@/lib/ids'
 import {useEffect, useRef, useState} from 'react'
+import {DefaultModelFeedback, ModelPreferences} from './ModelPreferences'
 import {Plus, Eye, EyeOff, Trash2, ChevronUp, ChevronDown} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
-import type {ResourceText} from '@/types'
+import type {ModelInfo, ResourceText} from '@/types'
 import {runtimeRequest} from '@/lib/http'
 import {failureText} from '@/lib/resourceError'
 import {noticeText} from '@/lib/noticeText'
@@ -16,13 +17,14 @@ import {Switch} from './ExtensionCatalogControls'
 import type {ProviderChoice} from './ProviderPickers'
 import {ModelPagination, ModelPicker, ProviderPicker} from './ProviderPickers'
 import type {CatalogModel, ModelProvider, ProviderConnection, ProviderSnapshot, ProviderTemplate} from '@/lib/providerConnections'
-import {providerCatalogChanges, reconcileProviderModels, providerConnectionIssue, sortProviderChoices, providerConfigurationState, validProviderEndpoint, validProviderModelId, maskProviderKey, moveProviderItem, newProviderConnection, newProviderKey, newProviderModel, providerPayload} from '@/lib/providerConnections'
+import {providerModelGroups, providerCatalogChanges, reconcileProviderModels, providerConnectionIssue, sortProviderChoices, providerConfigurationState, validProviderEndpoint, validProviderModelId, maskProviderKey, moveProviderItem, newProviderConnection, newProviderKey, newProviderModel, providerPayload} from '@/lib/providerConnections'
 
 const field = 'w-full min-w-0 rounded-lg border border-line bg-canvas px-3 py-2 text-xs'
 
 export function ModelConnections() {
   useLocale()
   const visible = usePageVisible()
+  const models = useAppStore(state => state.models)
   const [snapshot, setSnapshot] = useState<ProviderSnapshot | null>(null)
   const [templates, setTemplates] = useState<ProviderTemplate[]>([])
   const [draft, setDraft] = useState<ModelProvider | null>(null)
@@ -77,20 +79,41 @@ export function ModelConnections() {
   const configuredProviders = snapshot?.providers ?? []
   const template = templates.find(row => row.id === draft?.type)
   return <section className="space-y-4" aria-label={t('ui.providers.title')}>
-    <header className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="ui-section-title">{t('ui.providers.title')}</h3><p className="mt-1 text-xs text-muted">{t('ui.providers.description')}</p></div><Button size="sm" disabled={busy || !!draft || !snapshot} onClick={() => {setAdding(true); setSaved(false)}}><Plus className="h-4 w-4" />{t('ui.providers.add')}</Button></header>
+    <header className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="ui-section-title">{t('ui.providers.title')}</h3><p className="mt-1 text-xs text-muted">{t('ui.providers.description')}</p><p className="mt-1 text-xs text-muted">{t('ui.components.overlays.SettingsDialog.60044c2733c0')}</p></div><Button size="sm" disabled={busy || !!draft || !snapshot} onClick={() => {setAdding(true); setSaved(false)}}><Plus className="h-4 w-4" />{t('ui.providers.add')}</Button></header>
     {error ? <p role="alert" className="text-xs text-danger">{noticeText(error)}</p> : null}
     {!snapshot ? error ? <Button size="sm" onClick={() => {setError(''); setLoadAttempt(value => value + 1)}}>{t('ui.providers.retryLoading')}</Button> : <p role="status" className="text-xs text-muted">{t('ui.providers.loading')}</p> : null}
     {adding ? <ProviderPicker choices={choices} onClose={() => setAdding(false)} onPick={id => {setAdding(false); setSaved(false); if (id === 'codex-account-pool') {setSubscription(true); return} const selected = templates.find(row => row.id === id); if (!selected) return; setDraft({id: newIdentity(), type: selected.id, name: selected.name, connections: [newProviderConnection(selected)]})}} /> : null}
+    <DefaultModelFeedback />
     {subscription ? <CodexGatewayAccounts /> : null}
     {snapshot && !snapshot.providers.length && !subscription && !draft && !adding ? <div className="rounded-xl border border-dashed border-line p-6 text-center text-xs text-muted">{t('ui.providers.empty')}</div> : null}
-    {sortProviderChoices(configuredProviders).filter(provider => provider.id !== draft?.id).map(provider => <div key={provider.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line p-4"><div className="min-w-0"><h4 className="ui-card-title break-words">{provider.name}</h4><p className="mt-1 text-xs text-muted">{t(`ui.providers.state.${providerConfigurationState(provider)}`)}</p><p className="mt-1 text-xs text-muted">{t('ui.providers.summary', {connections: provider.connections.length, models: provider.connections.reduce((count, connection) => count + connection.models.length, 0)})}</p></div><div className="flex gap-2"><Button size="sm" disabled={busy || !!draft} onClick={() => {setDraft(structuredClone(provider)); setRemoving(null); setSaved(false)}}>{t('ui.providers.edit')}</Button><Button size="sm" disabled={busy || !!draft} aria-label={t('ui.providers.removeNamed', {name: provider.name})} onClick={() => setRemoving(provider.id)}><Trash2 className="h-4 w-4" /></Button></div>{removing === provider.id ? <div className="flex w-full flex-wrap items-center gap-2 border-t border-line pt-3"><p className="w-full text-xs text-muted">{t('ui.providers.removeConfirm', {name: provider.name})}</p><Button size="sm" variant="danger" disabled={busy} onClick={() => {setRemoving(null); void persist(configuredProviders.filter(row => row.id !== provider.id))}}>{t('ui.providers.confirmRemove')}</Button><Button size="sm" disabled={busy} onClick={() => setRemoving(null)}>{t('ui.providers.cancel')}</Button></div> : null}</div>)}
+    {sortProviderChoices(configuredProviders).filter(provider => provider.id !== draft?.id).map(provider => <section key={provider.id} aria-label={provider.name} className="overflow-hidden rounded-xl border border-line">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <div className="min-w-0 flex-1"><h4 className="ui-card-title break-words">{provider.name}</h4><p className="mt-1 text-xs text-muted">{t('ui.providers.summary', {state: t(`ui.providers.state.${providerConfigurationState(provider)}`), connections: provider.connections.length, models: provider.connections.reduce((count, connection) => count + connection.models.length, 0)})}</p></div>
+        <div className="flex gap-2"><Button size="sm" disabled={busy || !!draft} onClick={() => {setDraft(structuredClone(provider)); setRemoving(null); setSaved(false)}}>{t('ui.providers.edit')}</Button><Button size="sm" disabled={busy || !!draft} aria-label={t('ui.providers.removeNamed', {name: provider.name})} onClick={() => setRemoving(provider.id)}><Trash2 className="h-4 w-4" /></Button></div>
+      </div>
+      <ProviderModelPreferences provider={provider} models={models} />
+      {removing === provider.id ? <div className="mx-4 mb-4 flex flex-wrap items-center gap-2 border-t border-line pt-3"><p className="w-full text-xs text-muted">{t('ui.providers.removeConfirm', {name: provider.name})}</p><Button size="sm" variant="danger" disabled={busy} onClick={() => {setRemoving(null); void persist(configuredProviders.filter(row => row.id !== provider.id))}}>{t('ui.providers.confirmRemove')}</Button><Button size="sm" disabled={busy} onClick={() => setRemoving(null)}>{t('ui.providers.cancel')}</Button></div> : null}
+    </section>)}
     {draft && template ? <form ref={editor} onInvalid={event => {let parent = event.target instanceof HTMLElement ? event.target.parentElement : null; while (parent) {if (parent instanceof HTMLDetailsElement) parent.open = true; parent = parent.parentElement}}} autoComplete="off" onSubmit={event => event.preventDefault()} className="space-y-4 rounded-xl border border-brand/30 bg-surface p-4"><label className="block space-y-1 text-xs"><span>{t('ui.providers.supplierName')}</span><input className={field} value={draft.name} onChange={event => setDraft({...draft, name: event.target.value})} disabled={busy} /></label>
       {draft.connections.map((connection, index) => <ConnectionEditor key={connection.id} connection={connection} template={template} busy={busy} removable={draft.connections.length > 1} initiallyOpen={index === 0 || !snapshot?.providers.some(provider => provider.connections.some(row => row.id === connection.id))} stored={!!snapshot?.providers.some(provider => provider.connections.some(row => row.id === connection.id))} onProbeStateChange={pending => {activeProbes.current = Math.max(0, activeProbes.current + (pending ? 1 : -1)); setProbeCount(activeProbes.current)}} validationIssue={credentialIssue?.connection === connection.id ? credentialIssue.key : undefined} onValidation={key => setCredentialIssue({connection: connection.id, key})} onChange={next => {setDraft(current => current?.id === draft.id ? {...current, connections: current.connections.map(row => row.id === next.id ? next : row)} : current); if (credentialIssue?.connection === next.id && !providerConnectionIssue(next)) setCredentialIssue(null)}} onRemove={() => setDraft({...draft, connections: draft.connections.filter((_, position) => position !== index)})} providerId={draft.id} onRefresh={next => {if (next) setSnapshot(next)}} />)}
       <details><summary className="cursor-pointer text-xs text-muted">{t('ui.providers.additionalConnections')}</summary><div className="mt-3"><Button size="sm" disabled={busy} onClick={() => setDraft({...draft, connections: [...draft.connections, newProviderConnection(template)]})}>{t('ui.providers.addConnection')}</Button></div></details>
       <div className="sticky bottom-0 z-10 -mx-4 -mb-4 flex flex-wrap items-center gap-2 rounded-b-xl border-t border-line bg-surface px-4 py-3"><Button disabled={busy || probeCount > 0 || !draft.name.trim() || !draft.connections.length} onClick={() => void persist([...(snapshot?.providers.filter(provider => provider.id !== draft.id) ?? []), draft])}>{t('ui.providers.save')}</Button><Button disabled={busy} onClick={() => {setDraft(null); setError(''); setCredentialIssue(null)}}>{t('ui.providers.cancel')}</Button>{busy ? <SaveStatus phase="saving" /> : null}</div>
     </form> : null}
     {saved ? <SaveStatus phase="saved" /> : null}
+    <ModelPreferences models={models.filter(model => !model.id.startsWith('harness/'))} />
   </section>
+}
+
+/** 以稳定身份归属模型，同名提供商和接入不会合并。 */
+export function ProviderModelPreferences({provider, models}: {provider: ModelProvider; models: ModelInfo[]}) {
+  const groups = providerModelGroups(provider, models)
+  if (!groups.length) return null
+  return <div className="space-y-3 border-t border-line px-4 pb-4 pt-3">
+    {groups.map(group => <section key={group.id} aria-label={provider.connections.length > 1 ? group.name : undefined} className="space-y-2">
+      {provider.connections.length > 1 ? <h5 className="ui-group-title break-words">{group.name}</h5> : null}
+      <ModelPreferences models={group.models} grouped={false} heading={false} />
+    </section>)}
+  </div>
 }
 
 type ConnectionProps = {onProbeStateChange: (pending: boolean) => void; validationIssue?: string; onValidation: (key: string) => void; removable: boolean; initiallyOpen: boolean; connection: ProviderConnection; template: ProviderTemplate; busy: boolean; stored: boolean; providerId: string; onChange: (next: ProviderConnection) => void; onRemove: () => void; onRefresh: (snapshot: ProviderSnapshot | null) => void}
