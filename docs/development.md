@@ -30,7 +30,7 @@ python scripts/dev.py --port 8765 --web-port 5273
 
 macOS 已准备好仓库 `.venv` 时，可双击 `scripts/dev.command`，或执行 `./scripts/dev.command --port 8765 --web-port 5273`。入口自动切到仓库根，默认使用 `.venv/bin/python`；可用 `HARNESS_PYTHON` 指定已安装项目依赖的解释器。打开终端输出的 Vite 开发页面（默认 `http://127.0.0.1:5273`）使用前端热更新。 启动参数 `--language en` 或 `--language zh-CN` 同时指定启动提示与后端语言；省略时依次使用用户语言设置、`HARNESS_LANGUAGE` 和系统地区自动选择。
 
-Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/dev.cmd`；该入口固定使用 `.venv\Scripts\python.exe`，也可在独立终端执行 `scripts\dev.cmd --port 8765 --web-port 5273`。使用其他已安装依赖的解释器时，仍直接运行上面的 Python 命令。请从独立终端或资源管理器启动常驻开发服务，避免继承 AI 应用沙箱的文件删除拦截。`scripts/dev.py` 在创建子进程前检查当前 Windows 进程是否已加载已知的豆包 `aiep_sbox.dll`，检测到时拒绝启动并提示人工切换入口；不会自动脱离沙箱，也不保证识别所有沙箱产品。已经运行的服务不会因入口更新自动停止或迁移。
+Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/dev.cmd`；该入口固定使用 `.venv\Scripts\python.exe`，也可在独立终端执行 `scripts\dev.cmd --port 8765 --web-port 5273`。使用其他已安装依赖的解释器时，仍直接运行上面的 Python 命令。开发入口不按宿主应用名称或注入模块名阻止启动；操作系统权限和文件系统错误按实际失败报告。
 
 该入口同时管理 Vite 与后端，监控 `harness` 内的 Python、JSON 和 Markdown 文件，变化稳定后重启后端。后端和 Vite 均忽略测试目录（`tests`、`test`、`__tests__`）及测试文件（`test_*`、`*.test.*`、`*.spec.*`；后端另含 `*_test.py`）；修改测试不触发重启或页面热更新。运行源码与资源仍正常更新。重启会中断正在执行的任务。启动时若后端或前端端口被占用，入口自动向该端口的 TCP 监听进程发送终止信号，等待最多 5 秒；POSIX 平台超时后重新查询监听者，只对仍占用端口的原进程发送强制终止信号，再等待最多 5 秒，确认端口可监听后继续启动。Windows 的终止信号直接结束对应进程，同样复查端口。此行为同样适用于直接运行 `scripts/dev.py`，会中断占用端口的服务及其任务。macOS／Linux 通过 `lsof` 查询监听者，Windows 通过 PowerShell 的 `Get-NetTCPConnection` 查询；端口探测在 POSIX 使用地址复用以避开已关闭连接的 `TIME_WAIT`，Windows 不启用地址复用，保留默认的占用检测行为。无法识别、权限不足或端口未释放时明确报错，不启动新服务；不终止整个进程树，也不追杀后来接管端口的新进程。
 
@@ -59,6 +59,8 @@ Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/de
 
 新增 Python 用例放在 `tests/test_*.py`；前端用例放在 `web/src/**/*.test.ts` 或 `.test.tsx`；桌面用例放在 `desktop/tests/**/*.test.mjs`。Node 发现脚本递归收集 .test.mjs 后传入显式文件列表，空目录不会启动 Node 默认发现。Python 和浏览器发现为空时失败；Node 独立发现器对空目录明确提示，不把空套件作为业务验收。Vitest 当前没有启用 --passWithNoTests。
 
+Python 聚合入口在发现测试前输出实际解释器、版本、基础安装目录、平台、UTF-8 模式、已加载的 `sitecustomize` 来源及 `os.open` 的目录句柄能力。随后在独立临时目录核对 `mkdir(exist_ok=True)` 和递归创建语义；macOS 另用 `/bin/ps` 读取本进程内存，核对课程运行器需要的监督命令。预检失败保留原异常栈、返回非零并明确说明未执行测试，不生成业务通过结论。`tests/test_test_discovery.py` 覆盖代理错误、命令拒绝／超时／异常回执、空发现及业务失败传播。预检只说明这些基础能力可用，不代表所有沙箱限制均已排除；仍须完整执行业务回归。解释器目录名称和宿主沙箱开关都不能单独证明失败归因，需结合原始异常调用链及同输入复测；大量用例通过也不能替代对剩余失败的定位。
+
 独立验证和测试发现入口统一启用 UTF-8 默认模式，浏览器夹具与桌面后端复用所属解释器的 UTF-8 环境；不要求为此逐个改写既有测试。运行库和生成器自身的文件边界仍显式指定编码，SDK 导入不改变宿主的默认编码或标准流。验证补丁原始字节的临时 Git 仓库在本地配置中固定 `core.autocrlf=false`、`core.eol=lf`，文本夹具显式保留换行；不改写开发者的 Git 配置，也不放宽 LF、CRLF、Unicode 分隔符或末行状态的断言。
 
 开发启动回归同时隔离 Harness 与 Codex 网关配置，不能读取用户已启用的本机网关改变进程数量；收尾断言按实际启动对象及未启用网关的无操作核对。固定隧道回归用本次分配的可用端口验证显式端口传播，另保留已占用端口的明确拒绝，不依赖用户默认服务端口空闲，也不停止用户服务。
@@ -75,7 +77,7 @@ LSP 文档符号回归使用 UTF-8 字节写入和核对源码夹具，覆盖 LF
 
 目录总截止时间分开验证启动超时和已开始的持续响应：前者用受控未就绪辅助进程核对返回前已经退出，后者确认 HTTP 已进入后核对总预算、取消收尾、连接释放和单次请求，避免把解释器必须在数百毫秒内启动作为业务前提。临时 HTTP 夹具显式通知并等待响应线程收尾。文件锁回归覆盖空文件、不同进程竞争、既有字节保留和释放后重入；Key 池以发布屏障验证构造读取也等待同一事务。临时目录清理须晚于所属连接、进程和线程的显式关闭，不能依靠垃圾回收、固定睡眠或吞掉 `PermissionError`。
 
-Web 单测入口也执行 `model-runtime/tests` 的桥接转录回归；Python 传输回归直接运行随包交付的桥接文件。Web 单测入口在 Windows 启动 Vitest 前启用文件监听轮询，避免原生监听的 libuv 断言导致工作进程退出；Vitest 使用最多两个工作进程。需要完整组件的渲染测试在收集阶段静态加载组件，不把首次模块转换计入业务断言的超时，也不扩大测试超时。
+Web 单测入口也执行 `model-runtime/tests` 的桥接转录回归；Python 传输回归直接运行随包交付的桥接文件。Web 单测入口在 Windows 启动 Vitest 前启用文件监听轮询，避免原生监听的 libuv 断言导致工作进程退出；Vitest 使用最多两个工作进程。需要完整组件的渲染测试在收集阶段静态加载组件，不把首次模块转换计入业务断言的超时，也不扩大测试超时。`sessionNotifications.test.ts` 同样在收集阶段加载真实通知模块，每例仍重载模块以隔离未读意图和存储失败状态。`devWatch.test.ts` 在 `beforeAll` 中通过 Vite 正式入口加载配置，在临时目录中启动真实监听，使用中间件模式并关闭 HMR 与依赖发现，不启动无关的 HTTP 服务；等待监听就绪后验证源码变化与测试路径忽略，非 Windows 同时覆盖默认监听和轮询，Windows 保留轮询边界。这些夹具边界减少测试内的准备工作，不能单凭它们推断某次历史超时的具体原因。
 
 新增浏览器用例放在 `web/tests/*-smoke.mjs`，由 `run-core.mjs` 发现完整场景，失败返回非零。默认一个持久工作进程顺序执行；`--jobs=2` 可显式使用两个独立工作进程（允许 1–8），不拆分场景内部矩阵。每个工作进程各自拥有 Chromium 和 Vite；普通虚拟入口夹具复用服务，每个场景建立独立 Playwright 连接与存储上下文，结束后排空请求、撤销夹具路由并失效模块图。包含前置钩子、产品转换或自定义配置的夹具使用独立 Vite。缓存位于每轮所属的系统临时目录，不清理开发服务的 `web/node_modules/.vite`；结束时先确认服务关闭，再清理本轮临时缓存，清理失败保留诊断并判为基础设施失败。直接运行单个 smoke 也使用独立临时缓存。`browser-scenario.mjs` 保留入口预转换、双语准备和资源回收；`python-fixture.mjs` 提供统一解释器选择。浏览器选择顺序为显式 `HARNESS_TEST_BROWSER`、已安装的 Playwright Chromium、本机 Chrome／Edge／Chromium（macOS 标准应用目录、Windows 系统及用户安装目录、Linux PATH）。显式配置错误或选定浏览器启动失败不会静默切换；`launchBrowser` 的显式 `executablePath`／`channel` 仍优先。套件在启动业务场景前执行一次启动及关闭预检，打印可执行文件路径和版本，并向所有场景传递同一路径；找不到浏览器时给出安装指令并立即失败。CI 建议在 `web` 目录运行 `npx playwright-core install chromium` 固定依赖匹配版本，本机浏览器版本由本机安装决定。测试不自动下载或修改浏览器安装。`runtime-smoke.mjs` 启动临时目录中的真实后端，用确定性传输验证对话路径；不读取用户凭据、不访问在线模型，退出时回收本次启动的服务。
 
@@ -316,6 +318,8 @@ python -m venv .run/semantic-eval
 `chatgpt-catalog-ownership-smoke.mjs` 使用隔离账号回执和受控模型目录，覆盖旧目录不能覆盖退出后的新目录，以及模型选择期间重复选择与退出不会重复写入；选择分支等待实际事件处理Promise结束，再核对写入次数。不会调用真实账号。
 
 前端已存提示不保存创建时的产品翻译：目标续跑及中断提示保存资源键，审批记录保存决策、审核来源、原始原因和工具名，由 NoticeBlock 渲染时解析当前语言。原文提示继续保持原样。`noticeLanguage.test.ts` 与 `notice-language-smoke.mjs` 验证不重建 store blocks 的英文→中文→英文切换、嵌套审批翻译及原因原文，浏览器另覆盖明暗主题和窄宽屏。
+
+错误收敛回归覆盖 `AgentLoop` → `RunController` → 对话 store → `ErrorBlock`：带详情的 `HarnessError.__str__` 与 `to_dict()` 表达不同，不能用拼接文本判断同次失败。`test_turn_error_presentation.py` 核对模型请求、超时、资源错误、普通异常、步数及预算限制的实时帧、持久结束和运行回执；`test_turn_end_commit.py` 保留提交失败的单次尝试、原日志及结构化诊断断言。`errorConvergence.test.tsx` 覆盖模型请求／超时／响应／上下文、限制、持久化及普通错误的正反事件顺序、重复帧、历史恢复、持久位置、技术详情、访客隔离与英中英呈现，并确认不同轮次、代码、正文及详情的失败不被合并。组件静态渲染不代表浏览器主题、尺寸或交互验收。
 
 工具中断和未知错误的前端兜底保留资源键，工具收到真实终态后清除临时兜底身份；原始输出不按内容猜测语言。历史分页保存资源型错误或原始错误文本，传输层为自有超时、取消、网络及协议错误保留资源键和原始参数，展示时重新解析。`fallbackLanguage.test.ts`、HTTP回归和 `fallback-language-smoke.mjs` 覆盖迟到终态替换、原文保持、分页失败不重发及同一状态反复切换语言；浏览器使用真实 ToolBlock/ErrorBlock，覆盖双主题与窄宽屏。
 

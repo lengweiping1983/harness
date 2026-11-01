@@ -18,26 +18,6 @@ from harness.i18n import tr
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def injected_sandbox_module() -> str | None:
-    """只检查当前进程已加载的已知沙箱模块，不解除或绕过注入。"""
-    if sys.platform != "win32":
-        return None
-    import ctypes
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    get_module = kernel32.GetModuleHandleW
-    get_module.argtypes = [ctypes.c_wchar_p]
-    get_module.restype = ctypes.c_void_p
-    name = "aiep_sbox.dll"
-    return name if get_module(name) else None
-
-
-def check_start_environment() -> None:
-    """拒绝将已知沙箱注入传播给长驻开发服务。"""
-    module = injected_sandbox_module()
-    if module:
-        raise RuntimeError(tr("runtime.dev.sandboxDetected", module=module))
-
-
 def snapshot(root: Path) -> dict[str, tuple[int, int]]:
     """只记录后端运行源码和资源，测试文件及缓存不触发重启。"""
     result = {}
@@ -187,10 +167,6 @@ def _main(language: str) -> int:
     parser.add_argument("--share", metavar="HTTP_LAN_ORIGIN",
                         help=tr("runtime.dev.shareHelp"))
     args = parser.parse_args()
-    try:
-        check_start_environment()
-    except RuntimeError as error:
-        parser.error(str(error))
     node = shutil.which("node")
     vite = ROOT / "web/node_modules/vite/bin/vite.js"
     if not node or not vite.is_file():

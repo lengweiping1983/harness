@@ -51,7 +51,6 @@
   "runtime.dev.portOwnerUnknown": "无法安全识别端口 {port} 的监听进程。",
   "runtime.dev.stoppingPort": "端口 {port} 已被占用，正在停止进程 {pid} 并等待端口释放。",
   "runtime.dev.portRange": "端口必须在 1 到 65535 之间。",
-  "runtime.dev.sandboxDetected": "开发服务未启动：当前进程已加载沙箱模块 {module}，SQLite 日志删除可能被转入回收站。请在任务结束边界停止旧服务，再从资源管理器打开 scripts\\dev.cmd，或从独立终端运行 scripts/dev.py。本入口不会自行脱离沙箱。",
   "ui.turnElapsed.hours": "{hours} 小时 {minutes} 分钟 {seconds} 秒",
   "ui.turnElapsed.minutes": "{minutes} 分钟 {seconds} 秒",
   "ui.turnElapsed.seconds": "{seconds} 秒",

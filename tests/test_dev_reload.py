@@ -10,7 +10,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
-from scripts.dev import check_ports, check_start_environment, injected_sandbox_module, listener_pids, main, release_port, snapshot
+from scripts.dev import check_ports, listener_pids, main, release_port, snapshot
 
 
 class DevReloadTests(unittest.TestCase):
@@ -27,39 +27,6 @@ class DevReloadTests(unittest.TestCase):
         home = patch.dict('os.environ', {'HARNESS_HOME': directory.name, 'HARNESS_CODEX_GATEWAY_HOME': str(gateway)})
         home.start()
         self.addCleanup(home.stop)
-
-    def test_windows_loaded_module_is_checked_without_loading_sandbox(self):
-        module = Mock(return_value=123)
-        kernel = Mock(GetModuleHandleW=module)
-        with patch('scripts.dev.sys.platform', 'win32'), patch('ctypes.WinDLL', return_value=kernel, create=True):
-            self.assertEqual(injected_sandbox_module(), 'aiep_sbox.dll')
-            module.assert_called_once_with('aiep_sbox.dll')
-            module.return_value = None
-            self.assertIsNone(injected_sandbox_module())
-
-    def test_guard_translates_same_instance_and_normal_process_can_start(self):
-        from harness.core.language import current_language
-        from harness.i18n import tr
-        with patch('scripts.dev.injected_sandbox_module', return_value='aiep_sbox.dll'):
-            for language in ('en', 'zh-CN', 'en'):
-                with current_language.set(language):
-                    with self.assertRaises(RuntimeError) as caught:
-                        check_start_environment()
-                    self.assertEqual(str(caught.exception), tr('runtime.dev.sandboxDetected', module='aiep_sbox.dll'))
-        with patch('scripts.dev.injected_sandbox_module', return_value=None):
-            check_start_environment()
-
-    def test_injected_launcher_refuses_before_ports_or_children_are_touched(self):
-        with (patch('scripts.dev.sys.argv', ['dev.py']),
-              patch('scripts.dev.injected_sandbox_module', return_value='aiep_sbox.dll'),
-              patch('scripts.dev.check_ports') as ports,
-              patch('scripts.dev.subprocess.Popen') as spawn,
-              patch('sys.stderr')):
-            with self.assertRaises(SystemExit) as caught:
-                main()
-            self.assertEqual(caught.exception.code, 2)
-            ports.assert_not_called()
-            spawn.assert_not_called()
 
     def test_test_changes_do_not_change_runtime_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -107,7 +74,7 @@ class DevReloadTests(unittest.TestCase):
             replacement = Mock(returncode=9)
             replacement.poll.return_value = 9
             with (patch('scripts.dev.sys.argv', ['dev.py', '--language', language, '--share', 'http://192.168.1.14:8766']),
-                  patch('scripts.dev.check_start_environment'), patch('scripts.dev.check_ports'),
+                  patch('scripts.dev.check_ports'),
                   patch('scripts.dev.shutil.which', return_value='/fixture/node'),
                   patch('scripts.dev.Path.is_file', return_value=True),
                   patch('scripts.dev.signal.signal'), patch('scripts.dev.time.sleep'),
@@ -138,7 +105,6 @@ class DevReloadTests(unittest.TestCase):
         from harness.i18n import tr
         for language in ('en', 'zh-CN', 'en'):
             with (patch('scripts.dev.sys.argv', ['dev.py', '--language', language]),
-                  patch('scripts.dev.check_start_environment'),
                   patch('scripts.dev.shutil.which', return_value='/fixture/node'),
                   patch('scripts.dev.Path.is_file', return_value=True),
                   patch('scripts.dev.check_ports', side_effect=OSError('Original diagnostic')),

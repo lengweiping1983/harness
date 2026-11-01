@@ -30,7 +30,7 @@ import type {
 import { matchesLocalEcho } from '@/lib/attachments'
 import { uid } from '@/lib/utils'
 import { presentedArtifacts } from '@/lib/presentedArtifacts'
-import { outcomeBuckets, runErrorCopy, turnOutcome } from '@/lib/turnOutcome'
+import { outcomeBuckets, runErrorCopy, sameTurnFailure, turnOutcome } from '@/lib/turnOutcome'
 import { mergeTurnActivity, type TurnActivity } from '@/lib/turnActivity'
 import { runtimeRequest, ApiError } from '@/lib/http'
 import { readPlanModeState, effectivePlanMode, type ConfirmedPlanMode } from '@/lib/planModeState'
@@ -882,23 +882,18 @@ export function reduceEvent(state: ChatSessionState, event: StreamEvent): Patch 
       const message = String(raw.message ?? raw.error ?? '')
       const last = state.blocks[state.blocks.length - 1]
       const code = typeof raw.code === 'string' ? raw.code : undefined
-      if (last?.kind === 'error' && last.turn === state.turn && !state.running &&
-          code === last.code && (last.message === message && last.messageKey === messageKey || code !== undefined && last.message === '[' + code + '] ' + message)) {
-        if (messageCopy) patch.blocks = state.blocks.map(block => block === last ? {...block, messageCopy} : block)
+      const failure: import('@/types').ErrorBlock = {
+        id: uid('e'), kind: 'error', at: Date.now(), message, messageCopy, messageKey, code,
+        details: raw.details, turn: state.turn,
+      }
+      if (last?.kind === 'error' && !state.running && sameTurnFailure(last, failure)) {
+        patch.blocks = state.blocks.map(block => block === last ? {...block,
+          messageCopy: messageCopy ?? last.messageCopy, details: raw.details ?? last.details} : block)
         patch.error = messageCopy ?? last.messageCopy ?? (messageKey ? { key: messageKey } : message)
         return patch
       }
       finalizeDraft(state, patch)
-      patch.blocks = (patch.blocks ?? state.blocks).concat({
-        id: uid('e'),
-        kind: 'error',
-        at: Date.now(),
-        message,
-        messageCopy,
-        messageKey,
-        code: typeof raw.code === 'string' ? raw.code : undefined,
-        turn: state.turn,
-      })
+      patch.blocks = (patch.blocks ?? state.blocks).concat(failure)
       patch.error = messageCopy ?? (messageKey ? { key: messageKey } : message)
       patch.running = false
       return patch
@@ -921,10 +916,11 @@ export function reduceEvent(state: ChatSessionState, event: StreamEvent): Patch 
         outcome.historical = false
         const last = patch.blocks[patch.blocks.length - 1]
         if (outcome.kind === 'error') {
-          const sameFailure = last?.kind === 'error' && last.turn === outcome.turn && last.code === outcome.code
-            && last.message === outcome.message && last.messageKey === outcome.messageKey
+          const sameFailure = last?.kind === 'error' && sameTurnFailure(last, outcome)
           if (!sameFailure) patch.blocks = patch.blocks.concat(outcome)
-          else if (outcome.messageCopy) patch.blocks = patch.blocks.map(block => block === last ? {...block, messageCopy: outcome.messageCopy} : block)
+          else patch.blocks = patch.blocks.map(block => block === last ? {...block,
+            messageCopy: outcome.messageCopy ?? last.messageCopy, details: outcome.details ?? last.details,
+            sourceSeq: outcome.sourceSeq ?? last.sourceSeq, historical: false} : block)
           patch.error = outcome.messageCopy ?? (outcome.messageKey ? { key: outcome.messageKey } : outcome.message)
         } else if (!patch.blocks.some(block => block.kind === 'turn' && block.phase === 'end' && block.turn === outcome.turn)) {
           patch.blocks = patch.blocks.concat(outcome)

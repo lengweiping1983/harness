@@ -662,14 +662,20 @@ class AgentLoop:
                 logger.exception(tr('log.e5d728b71658'))
                 self.status.status = "error"
                 self.status.last_error = str(exc)
-                error_info = exc.to_dict() if isinstance(exc, HarnessError) else {"message": str(exc)}
+                error_info = exc.to_dict() if isinstance(exc, HarnessError) else {"code": "run/error", "message": str(exc)}
                 await self._end_turn_safely(
                     session, TurnEndReason(kind="error", error=error_info, message=str(exc))
                 )
                 # 失败也必须广播 turn/end，否则 UI 会一直停在"思考中"。
+                committed_end = session.latest('turn/end')
+                if committed_end is not None and committed_end.data.get('turn') != turn:
+                    committed_end = None
                 await self._emit(
                     "turn/end",
-                    {"session_id": session.id, "turn": turn, "reason": "error", "error": str(exc)},
+                    {"session_id": session.id, "turn": turn, "reason": "error", "error": str(exc),
+                     **error_info, "committed": committed_end is not None,
+                     "time": committed_end.time if committed_end else None,
+                     "source_seq": committed_end.seq if committed_end else None},
                 )
                 await session.drain()
                 return TurnResult(session.id, turn, "error", text=final_text, thinking=final_thinking,
@@ -704,6 +710,7 @@ class AgentLoop:
                                          "time": committed_end.time if committed_end else None,
                                          "source_seq": committed_end.seq if committed_end else None,
                                          "final_response_seq": final_response_seq if reason == 'completed' else None,
+                                         **(limit_error.to_dict() if limit_error else {}),
                                          "error": str(limit_error) if limit_error else None})
             await session.drain()
             # 回合正常收尾后清掉取消标志，下一次 prompt 可以正常开始。
@@ -2221,7 +2228,8 @@ class AgentLoop:
                 self.status.status = 'error'
                 self.status.last_error = str(exc)
                 await self._emit('turn/end', {'session_id': session.id, 'turn': turn,
-                    'reason': 'error', 'committed': False, 'error': str(exc)})
+                    'reason': 'error', 'committed': False, 'error': str(exc),
+                    **(exc.to_dict() if isinstance(exc, HarnessError) else {'code': 'run/error', 'message': str(exc)})})
                 raise
             await self._emit('steer/state', {'session_id': session.id,
                 'receipts': session.steering.recent(turn, active_turn=None)})
