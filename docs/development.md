@@ -623,7 +623,7 @@ workflow 的 Node 子进程由 Python 为本次启动设置 `HARNESS_WORKFLOW_LA
 
 Windows 地区桥是受控替身验证；这些用例不启动 Electron、不下载依赖，不能写成 Windows 实机或安装包验收。
 
-`desktop/tests/release-language.test.mjs` 调用实际发行准备和打包前校验入口，使用隔离暂存目录及命令替身，验证拒绝路径的英中英提示、原文件保留、平台/架构/版本校验、成功复制与元数据，以及外部命令失败不重试。它不安装 Python、Electron 或依赖，也不生成安装包。
+`desktop/tests/release-language.test.mjs` 调用实际发行准备和打包前校验入口，使用隔离暂存目录及命令替身，验证拒绝路径的英中英提示、原文件保留、平台/架构/版本校验、成功复制与元数据，以及外部命令失败不重试。Python 引导显式传入仓库固定的下载清单，并在 Electron 准备前完成版本身份核对；回归核对含中文和空格路径的清单 URL、平台清单选择、禁止全局命令／注册表写入，以及 Python、Electron 和依赖失败时不继续后续步骤。Python 引导失败使用当前语言给出镜像／本地压缩包指引，保留原异常身份。它不安装 Python、Electron 或依赖，也不生成安装包；实际下载与受限网络配置见 `desktop/README.md`。
 
 `desktop/tests/screenshot-cleanup.test.mjs` 在图像释放、窗口各恢复步骤及恢复观察注入失败，验证后续清理仍逐项尝试、单错保持原对象、多错保留全部原件；窗口为替身，不代表原生窗口恢复验收。前端finish反馈仍单独核对。
 

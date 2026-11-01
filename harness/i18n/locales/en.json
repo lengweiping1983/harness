@@ -7194,6 +7194,7 @@
   "desktop.release.electronMissing": "Electron distribution is missing: {path}. Run node desktop/node_modules/electron/install.js first (requires a local zip cache or network access).",
   "desktop.release.runtimeCount": "Expected exactly one managed Python runtime. Use a fresh build directory.",
   "desktop.release.runtimeMismatch": "Managed Python does not match this native build platform, architecture or version.",
+  "desktop.release.pythonInstallHelp": "CPython 3.14.10 bootstrap failed; Electron preparation has not started. The download catalog and SHA-256 hashes are pinned in desktop/python-downloads.json. Check the original uv error; for restricted networks, set UV_PYTHON_INSTALL_MIRROR to an authorized mirror or a file:// directory of the pinned archives. --no-registry only disables Windows registry registration. See desktop/README.md.",
   "desktop.release.staged": "Desktop runtime staged at {path}.",
   "desktop.release.skillsMissing": "Bundled skill catalog is missing. Run package:prepare.",
   "desktop.release.bundleMismatch": "Bundled runtime does not match {platform}/{arch}/{version}. Run package:prepare on the target operating system and architecture.",

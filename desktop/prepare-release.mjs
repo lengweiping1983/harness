@@ -1,6 +1,6 @@
 import {existsSync, statSync} from 'node:fs'
 import {cp, mkdir, readdir, readFile, writeFile} from 'node:fs/promises'
-import {fileURLToPath} from 'node:url'
+import {fileURLToPath, pathToFileURL} from 'node:url'
 import path from 'node:path'
 import {runCommand} from './setup.mjs'
 import {setupCopy} from './setup-copy.mjs'
@@ -22,13 +22,15 @@ export async function prepareRelease({root = fileURLToPath(new URL('../', import
     throw Error(copy('desktop.release.stagingNotFresh', {path:staging}))
   }
   await mkdir(staging, {recursive:true})
-  await run(process.execPath, [path.join(root, 'desktop/node_modules/electron/install.js')], {cwd:path.join(root, 'desktop')})
-  // electron 的 install.js 仅凭 path.txt 判断是否已安装；path.txt 与 dist 不一致时
-  // 它会静默跳过，让打包在十几分钟后才在 electron-builder 处报 electronDist 不存在。
-  // 这里前置断言，把这种不一致立刻暴露在准备阶段。
-  const electronDist = path.join(root, 'desktop', 'node_modules', 'electron', 'dist')
-  if (!existsSync(electronDist)) throw Error(copy('desktop.release.electronMissing', {path:electronDist}))
-  await run('uv', ['python', 'install', '3.14.10', '--install-dir', runtime, '--no-bin', '--no-registry'], {cwd:root})
+  // 固定下载清单及哈希，避免 uv 内置目录过旧时找不到所需补丁版本。
+  // 在 Electron 下载前完成 Python 引导；镜像仍由 uv 的标准环境变量选择。
+  const downloads = pathToFileURL(path.join(root, 'desktop', 'python-downloads.json')).href
+  try {
+    await run('uv', ['python', 'install', '3.14.10', '--install-dir', runtime, '--no-bin', '--no-registry', '--python-downloads-json-url', downloads], {cwd:root})
+  } catch (error) {
+    log(copy('desktop.release.pythonInstallHelp'))
+    throw error
+  }
   const distributions = (await readdir(runtime)).filter(name => name.startsWith('cpython-3.14.10-'))
   if (distributions.length !== 1) throw Error(copy('desktop.release.runtimeCount'))
   const pythonRoot = path.join(runtime, distributions[0])
@@ -36,6 +38,12 @@ export async function prepareRelease({root = fileURLToPath(new URL('../', import
   const identity = JSON.parse(await run(python, ['-c', 'import json, platform, sys; print(json.dumps({"platform":sys.platform, "machine":platform.machine(), "version":platform.python_version()}))'], {cwd:root, capture:true}))
   const pythonArch = {arm64:'arm64', aarch64:'arm64', AMD64:'x64', x86_64:'x64'}[identity.machine]
   if (identity.platform !== platform || pythonArch !== arch || identity.version !== '3.14.10') throw Error(copy('desktop.release.runtimeMismatch'))
+  await run(process.execPath, [path.join(root, 'desktop/node_modules/electron/install.js')], {cwd:path.join(root, 'desktop')})
+  // electron 的 install.js 仅凭 path.txt 判断是否已安装；path.txt 与 dist 不一致时
+  // 它会静默跳过，让打包在十几分钟后才在 electron-builder 处报 electronDist 不存在。
+  // 这里前置断言，把这种不一致立刻暴露在准备阶段。
+  const electronDist = path.join(root, 'desktop', 'node_modules', 'electron', 'dist')
+  if (!existsSync(electronDist)) throw Error(copy('desktop.release.electronMissing', {path:electronDist}))
   await run('uv', ['pip', 'install', '--python', python, '--target', path.join(staging, 'site'), '--require-hashes', '--requirements', path.join(root, 'desktop/requirements.lock')], {cwd:root})
   await run('uv', ['pip', 'install', '--python', python, '--target', path.join(staging, 'site'), '--no-deps', '.'], {cwd:root})
   // PYTHONPATH 指向的目录不会被 site 处理，依赖里的 .pth（pywin32 靠它注册 win32/lib 与 DLL 目录）
