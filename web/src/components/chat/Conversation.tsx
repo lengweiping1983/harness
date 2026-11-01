@@ -529,7 +529,7 @@ export function Conversation({
           2) 空会话不画。空态下 hero 本来就没有"被切断的最后一段"，
              这条色带纯属凭空出现的一刀。 */}
       {isEmpty ? null : (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-12 bg-gradient-to-t from-surface to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3 bg-gradient-to-t from-surface to-transparent" />
       )}
 
       {/* 顶部渐隐：底部渐隐的镜像。滚动中的内容在顶缘柔和淡入，
@@ -586,13 +586,13 @@ export function Conversation({
         // 禁用浏览器的自动锚定；虚拟列表会在历史加载时按自己的锚点恢复，
         // 自动锚定叠加懒加载会把底部内容逐次推移，形成闪跳。
         style={{ overflowAnchor: 'none' }}
-        className="conversation-scroll min-h-0 flex-1 overflow-y-auto"
+        className={cn('conversation-scroll min-h-0 flex-1 overflow-y-auto', !isEmpty && 'flex flex-col')}
       >
         {isEmpty ? (
           readOnly ? <div className="p-8 text-center text-sm text-muted">{t('ui.shared.emptyConversation')}</div> : queuedEmpty === 'none' ? <EmptyState onSuggest={onSuggest} /> : <QueuedEmptyState state={queuedEmpty} />
         ) : (
           <div
-            className="relative mx-auto w-full px-6 py-6"
+            className="relative mx-auto mt-auto w-full shrink-0 px-6 py-6"
             style={{
               maxWidth: 'var(--chat-content-width)',
               height: virtualizer.getTotalSize(),

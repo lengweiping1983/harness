@@ -41,9 +41,13 @@ await browserScenario(async({server,browser})=>{
  await page.goto(server.resolvedUrls.local[0]+'__request-model-presentation')
  const copy=(key,params)=>page.evaluate(({key,params})=>window.copy(key,params),{key,params})
  const summary=page.locator('summary')
- const requestModel=async(model,key='ui.generation.requestModel')=>summary.getByText(await copy(key,{model}),{exact:true}).waitFor()
+ const requestModel=async(model,key='ui.generation.requestModel')=>{
+  const label=await copy(key,{model})
+  await page.waitForFunction(label=>document.querySelector('summary')?.title===label,label)
+  assert.equal(await page.locator('dd').first().textContent(),model,'Expanded details retain the actual request model, independently of the selected model')
+ }
  await requestModel('request/A-original-very-long-model-name')
- assert.equal(await page.locator('details').getAttribute('open'),null,'Request model must be visible while details are folded')
+ assert.equal(await page.locator('details').getAttribute('open'),null,'Technical request details start folded; the summary retains the full model tooltip')
  await page.evaluate(()=>{window.pendingSave=window.choose()})
  await page.waitForFunction(()=>typeof window.refuse==='function')
  for(const locale of ['en','zh-CN','en'])for(const dark of [false,true])for(const width of [390,1440])for(const font of [10,22]){

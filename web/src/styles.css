@@ -700,7 +700,7 @@ body {
 }
 
 .composer-editor {
-    min-height: min(104px, 18dvh);
+    min-height: min(64px, 14dvh);
     max-height: min(320px, 28dvh);
     scroll-margin-block: 12px;
 }
@@ -711,17 +711,37 @@ body {
     left: 0;
     right: 0;
     bottom: 100%;
-    height: 32px;
+    height: 12px;
     background: linear-gradient(180deg, transparent, rgb(var(--c-surface)));
     pointer-events: none;
   }
 
 .conversation-pane {
-  --chat-content-width: min(800px, calc(100% - 40px));
-  --composer-card-max-width: min(800px, calc(100% - 40px));
+  --chat-content-width: min(100%, 90rem);
+  --composer-card-max-width: var(--chat-content-width);
   background: rgb(var(--c-surface));
   box-shadow: none;
   overflow: clip;
+}
+
+/* 状态与清单共用一条轻量轨道；展开详情时独占一行，保留原生键盘交互。 */
+.composer-status-rail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 8px;
+  container-type: inline-size;
+}
+.composer-status-rail:has(> details) { margin-bottom: 4px; }
+.composer-status-rail > details { flex: 1 1 0; }
+.composer-status-rail > details[open] { flex-basis: 100%; }
+.composer-status-rail:has(> .composer-generation) > .composer-tasks:not([open]) { flex: 0 1 auto; }
+.composer-status-rail:has(> .composer-generation) .composer-task-preview { display: none; }
+.composer-status-rail > details[open] {
+  background: rgb(var(--c-raised) / 0.5);
+}
+@container (max-width: 22rem) {
+  .composer-status-rail > .composer-generation { flex-basis: 100%; }
 }
 
 .app-shell > .panel {
@@ -856,12 +876,7 @@ body {
 }
 
 @media (max-width: 640px) {
-  .conversation-pane {
-    --composer-card-max-width: 100%;
-  }
-  .composer-dock {
-    padding: 12px 12px 8px;
-  }
+  .composer-dock { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
 }
 
 .app-shell[data-mode='overlay'][data-panels='1'] > .panel-scrim {

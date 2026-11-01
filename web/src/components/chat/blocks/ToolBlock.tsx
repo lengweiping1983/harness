@@ -77,9 +77,9 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
         className={cn('flex min-h-8 w-full items-center gap-2 rounded-md px-1 py-1 text-left text-compact leading-5 focus-visible:outline-brand', open && 'font-medium text-ink', failed && !skipped ? 'text-danger' : 'text-muted')}
       >
         <ToolActivityIcon kind={activity.kind} name={block.name} running={running} skipped={skipped} failed={failed} />
-        <span className="min-w-0 max-w-full shrink-0 truncate" title={activity.label}>{images.length && block.status !== 'running' ? t(block.status === 'error' ? 'ui.toolBlock.imagesPartial' : 'ui.toolBlock.imagesViewed', {count: images.length}) : activity.label}</span>
-        {activity.detail ? <span className="min-w-0 max-w-activity truncate text-faint" title={activity.detail}>{activity.detail}</span> : null}
-        <ChevronRight aria-hidden className={cn('h-3 w-3 shrink-0 text-faint', open && 'rotate-90')} />
+        <span className="min-w-0 max-w-full truncate" title={activity.label}>{images.length && block.status !== 'running' ? t(block.status === 'error' ? 'ui.toolBlock.imagesPartial' : 'ui.toolBlock.imagesViewed', {count: images.length}) : activity.label}</span>
+        {activity.detail ? <span className="min-w-0 flex-1 truncate text-faint" title={activity.detail}>{activity.detail}</span> : null}
+        <ChevronRight aria-hidden className={cn('ml-auto h-3 w-3 shrink-0 text-faint', open && 'rotate-90')} />
       </button>
 
       {todoIssue ? <div role="note" className="ml-5 mb-2 space-y-1 rounded-md border border-line bg-raised p-3 text-xs leading-reading">

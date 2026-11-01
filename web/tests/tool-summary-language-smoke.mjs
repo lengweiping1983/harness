@@ -11,7 +11,7 @@ setLocale('en');window.locale=setLocale;window.copy=t
 const base={kind:'tool',at:0,turn:1,status:'ok',input:{},output:'Original output 原文'}
 const pixel='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
 const reasons=['stdin_read','inferred_idle','timeout','session_exit','cancelled','unknown']
-const blocks=[{...base,id:'command',callId:'command',name:'bash',durationMs:1250,display:{exit_code:7}},...[1,2].flatMap(count=>['ok','error'].map((status,i)=>({...base,id:'images'+count+'-'+i,callId:'images'+count+'-'+i,name:'read_images',status,output:Array(count).fill(pixel).join('\\n')}))),...reasons.map((reason,i)=>({...base,id:'wait'+i,callId:'wait'+i,name:'terminal_send',display:{terminal_wait:{reason},exit_code:7}}))]
+const blocks=[{...base,id:'command',callId:'command',name:'bash',input:{command:'printf "Original command 原文"; '.repeat(80)},durationMs:1250,display:{exit_code:7}},...[1,2].flatMap(count=>['ok','error'].map((status,i)=>({...base,id:'images'+count+'-'+i,callId:'images'+count+'-'+i,name:'read_images',status,output:Array(count).fill(pixel).join('\\n')}))),...reasons.map((reason,i)=>({...base,id:'wait'+i,callId:'wait'+i,name:'terminal_send',display:{terminal_wait:{reason},exit_code:7}}))]
 blocks.push({...base,id:'command',callId:'other-command',name:'bash',durationMs:1250,display:{exit_code:7},fixtureScope:'other'})
 const restored=blocksFromDetail({header:{id:'fixture'},interrupted:true,events:[{type:'tool/call',seq:1,data:{call_id:'restore',name:'fixture',turn:1,status:'running'}}],messages:[],usage:{},stats:{},todos:[],timeline:[]}).find(block=>block.kind==='tool')
 const state={...emptySession(),turn:1,blocks:[{id:'settled',kind:'tool',at:0,turn:1,callId:'settled',name:'fixture',status:'running'}]}
@@ -41,6 +41,10 @@ await browserScenario(async({server,browser})=>{
    if(locale==='en')assert.ok(expected.includes('. Waiting'))
   }
   await page.locator('[data-summary="command"]').getByText('Original output 原文',{exact:true}).waitFor()
+  const summaryGeometry=await page.locator('[data-summary="command"] button[aria-controls]').first().evaluate(node=>({
+   right:node.getBoundingClientRect().right,arrow:node.querySelector(':scope > svg:last-child').getBoundingClientRect().right,
+  }))
+  assert.ok(summaryGeometry.right-summaryGeometry.arrow<=6,'Tool summary uses its full row width and keeps the disclosure arrow at the detail right edge')
   for(const [id,key] of [['fallback-restore','ui.store.chat.eda14e9f81aa'],['fallback-settled','ui.store.chat.a57ff6bf2376']]){
    await page.locator('[data-summary='+id+']').getByText(await page.evaluate(key=>window.copy(key),key),{exact:true}).waitFor()
   }

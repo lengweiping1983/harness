@@ -209,6 +209,8 @@ HARNESS_PYTHON=.venv/bin/python node web/tests/live-model-check.mjs
 
 受邀对话加入后与本机对话共用 `ConversationPane`，标题栏、消息区域和正文宽度只维护一份；`ComposerSurface` 统一输入区、卡片、编辑器、工具栏、发送按钮和输入区滚动快捷键。`Composer` 与 `SharedTaskInput` 分别适配本机能力和受邀权限，受邀页面不挂载左右栏或本机管理入口。受邀草稿仍按对话与用户身份隔离，结果未知只回查原请求回执，明确重试继续使用原幂等键。
 
+`conversation-space-smoke.mjs` 使用实际对话正文和输入区，核对窄屏至超宽屏的共享通道、段落与代码统一右边界、底部间距、紧凑状态栏、键盘展开、语言切换后的展开状态及长草稿滚动；中栏宽度与根字号独立变化。`request-model-presentation-smoke.mjs` 与 `model-default-selection-smoke.mjs` 继续核对提示及展开详情中的请求模型证据，不以所选模型或路由候选替代。它们属于显式浏览器专项，常规验证不执行。
+
 `shared-session-smoke.mjs` 对比两种对话的实际页面与编辑器样式，覆盖中英文、明暗主题、窄宽屏、输入法、发送、草稿恢复、只读权限及未知提交回查；使用临时后端和受控权限响应，不使用用户对话或在线模型，由默认浏览器入口发现。
 
 ## 记忆召回评估

@@ -30,10 +30,10 @@ export const GenerationDock = memo(function GenerationDock({ generation, connect
   const quiet = connected && !stopping && !waiting && clock.idle_ms >= 20_000
   const modelLabel = t(connected ? 'ui.generation.requestModel' : 'ui.generation.lastRequestModel',
     {model: generation.model || t('ui.components.chat.GenerationDock.e403ba5798ba')})
-  return <details className="group/generation mb-2 min-w-0 rounded-xl border border-line/70 bg-surface text-xs" aria-label={t("ui.components.chat.GenerationDock.859809cd4641")}>
-    <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand">
+  return <details className="composer-generation group/generation min-w-0 rounded-lg text-xs" aria-label={t("ui.components.chat.GenerationDock.859809cd4641")}>
+    <summary title={modelLabel} className="flex min-h-8 cursor-pointer list-none items-center gap-2 rounded-lg px-2 py-1 text-muted hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand">
       <CircleDot className={cn('h-3.5 w-3.5 shrink-0', !connected || quiet ? 'text-warn' : 'text-brand')} aria-hidden="true" />
-      <span className="min-w-0 flex-1" aria-live="polite"><span className="block truncate font-medium">{generationLabel(generation, connected, stopping)}</span><span className="block truncate text-2xs text-muted" title={modelLabel}>{modelLabel}</span></span>
+      <span className={cn('min-w-0 flex-1 truncate font-medium', (!connected || quiet || waiting) && 'text-warn')} aria-live="polite">{generationLabel(generation, connected, stopping)}</span>
       <span className="shrink-0 tabular-nums text-muted">{secondsLabel(clock.elapsed_ms)}</span>
       <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted group-open/generation:rotate-90" aria-hidden="true" />
     </summary>

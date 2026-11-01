@@ -6,7 +6,7 @@ import {t} from '@/i18n'
 
 /** 输入区的页面结构、编辑器和发送按钮仅维护一份。 */
 export const ComposerDock = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function ComposerDock({children, className, onKeyDown, ...props}, ref) {
-  return <div role="region" aria-label={t('ui.components.chat.Composer.c94b64ba3bd6')} tabIndex={0} {...props} ref={ref} className={cn('composer-dock relative px-6 pb-2 pt-3 backdrop-blur-md', className)} onKeyDown={event => {
+  return <div role="region" aria-label={t('ui.components.chat.Composer.c94b64ba3bd6')} tabIndex={0} {...props} ref={ref} className={cn('composer-dock relative pb-2 pt-1 backdrop-blur-md', className)} onKeyDown={event => {
     onKeyDown?.(event)
     // 仅处理输入区自身的滚动快捷键，编辑器和披露控件保留原来的键盘归属。
     if (event.defaultPrevented || event.target !== event.currentTarget || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
@@ -19,7 +19,7 @@ export const ComposerDock = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivEle
     event.preventDefault()
     region.scrollTop = target
   }}>
-    <div className="mx-auto w-full" style={{maxWidth: 'var(--composer-card-max-width)'}}>{children}</div>
+    <div className="mx-auto w-full px-3 sm:px-6" style={{maxWidth: 'var(--composer-card-max-width)'}}>{children}</div>
   </div>
 })
 
@@ -28,7 +28,7 @@ export const ComposerCard = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivEle
 })
 
 export const ComposerEditor = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function ComposerEditor({className, rows = 1, spellCheck = false, ...props}, ref) {
-  return <textarea aria-label={t('ui.components.chat.Composer.a410452649b3')} {...props} ref={ref} rows={rows} spellCheck={spellCheck} className={cn('composer-editor no-scrollbar block w-full resize-none bg-transparent px-6 pb-4 pt-6 text-base leading-reading text-ink placeholder:text-faint focus:outline-none', className)} />
+  return <textarea aria-label={t('ui.components.chat.Composer.a410452649b3')} {...props} ref={ref} rows={rows} spellCheck={spellCheck} className={cn('composer-editor no-scrollbar block w-full resize-none bg-transparent px-5 pb-2 pt-4 text-base leading-reading text-ink placeholder:text-faint focus:outline-none', className)} />
 })
 
 export function ComposerToolbar({className, ...props}: HTMLAttributes<HTMLDivElement>) {

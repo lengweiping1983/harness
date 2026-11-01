@@ -49,7 +49,11 @@ await browserScenario(async({server,browser})=>{
  const count=()=>page.evaluate(()=>window.writes.length)
  const reset=async(model=null,owner='one')=>{await page.evaluate(({model,owner})=>window.reset(model,owner),{model,owner});await page.getByRole('listbox').waitFor()}
  const settled=()=>page.waitForFunction(()=>Object.keys(window.state().modelSaves).length===0)
- const actualRequest=async()=>page.locator('summary').getByText(await copy('ui.generation.requestModel',{model:'Original request model'}),{exact:true}).waitFor()
+ const actualRequest=async()=>{
+  const label=await copy('ui.generation.requestModel',{model:'Original request model'})
+  await page.waitForFunction(label=>document.querySelector('summary')?.title===label,label)
+  assert.equal(await page.locator('dd').first().textContent(),'Original request model')
+ }
  const seat=async(name='Model A',saving=false)=>page.getByRole('button',{name:await copy(saving?'ui.models.selectionSaving':'ui.components.chat.ModelPicker.8b625429e269',{p0:name}),exact:true}).waitFor()
 
  // 默认模型直接选中；组合输入、Tab 和 Escape 均不提交。

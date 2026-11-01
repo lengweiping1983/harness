@@ -241,7 +241,6 @@ export function Composer({
         : null}
       <ComposerDock ref={dockRef}>
 
-        <GenerationDock key={'generation-' + draftKey} generation={waitingInput ? null : generation} connection={connection} stopping={stopping} />
         {planSave ? <div role={planSave.pending ? 'status' : 'alert'} aria-label={t("ui.components.chat.Composer.7d5b650bec5e")} className="mb-2 space-y-1 px-1 text-xs leading-relaxed [overflow-wrap:anywhere]">
           <p className="text-muted">{planSave.pending ? t(planSave.target ? 'ui.composerFeedback.enterPending' : 'ui.composerFeedback.exitPending') : planSave.unconfirmed ? t("ui.components.chat.Composer.7d6bc9201aee") : t("ui.components.chat.Composer.1cb62bea1ef3")}</p>
           {planSave.message ? <p tabIndex={0} className="max-h-20 overflow-auto text-muted">{noticeText(planSave.message)}</p> : null}
@@ -285,9 +284,13 @@ export function Composer({
               node.focus(); node.setSelectionRange(node.value.length, node.value.length)
             })
           }} /> : null}
-        <TaskDock key={'tasks-' + draftKey} todos={todos} />
         {sessionId && <SessionMemberDock key={'members-' + sessionId} sessionId={sessionId} />}
         {goalPanel}
+
+        <div className="composer-status-rail">
+          <GenerationDock key={'generation-' + draftKey} generation={waitingInput ? null : generation} connection={connection} stopping={stopping} />
+          <TaskDock key={'tasks-' + draftKey} todos={todos} />
+        </div>
 
         <ComposerCard ref={wrapRef} disconnected={disconnected}>
 

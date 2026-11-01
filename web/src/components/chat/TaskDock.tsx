@@ -13,11 +13,11 @@ export const TaskDock = memo(function TaskDock({ todos }: { todos: TodoItem[] })
   const current = todos.find((todo) => todo.status === 'in_progress')
   const label = current?.content || (done === todos.length ? t("ui.components.chat.TaskDock.950c6a5548ba") : t("ui.components.chat.TaskDock.43a6fee40da0"))
   return (
-    <details className="group/task mb-2 w-full min-w-0 overflow-hidden rounded-xl border border-line bg-surface/90" aria-label={t("ui.components.chat.TaskDock.a4ea7d95390b")}>
-      <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-muted [&::-webkit-details-marker]:hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand">
+    <details className="composer-tasks group/task min-w-0 rounded-lg" aria-label={t("ui.components.chat.TaskDock.a4ea7d95390b")}>
+      <summary title={label} className="flex min-h-8 cursor-pointer list-none items-center gap-2 rounded-lg px-2 py-1 text-xs text-muted hover:bg-raised [&::-webkit-details-marker]:hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand">
         <ListChecks className="h-3.5 w-3.5 shrink-0 text-brand" aria-hidden="true" />
         <span className="shrink-0 font-medium text-ink">{t("ui.components.chat.TaskDock.a4ea7d95390b")}</span>
-        <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
+        <span className="composer-task-preview min-w-0 flex-1 truncate" title={label}>{label}</span>
         <span className="shrink-0 tabular-nums" aria-label={t("ui.components.chat.TaskDock.9259ff7d6f7c", {p0: (done), p1: (todos.length)})}>{done}/{todos.length}</span>
         <ChevronRight className="h-3.5 w-3.5 shrink-0 transition-transform group-open/task:rotate-90" aria-hidden="true" />
       </summary>
