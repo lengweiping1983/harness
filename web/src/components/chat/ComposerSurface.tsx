@@ -6,7 +6,7 @@ import {t} from '@/i18n'
 
 /** 输入区的页面结构、编辑器和发送按钮仅维护一份。 */
 export const ComposerDock = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function ComposerDock({children, className, onKeyDown, ...props}, ref) {
-  return <div role="region" aria-label={t('ui.components.chat.Composer.c94b64ba3bd6')} tabIndex={0} {...props} ref={ref} className={cn('composer-dock relative px-6 pb-6 pt-5 backdrop-blur-md', className)} onKeyDown={event => {
+  return <div role="region" aria-label={t('ui.components.chat.Composer.c94b64ba3bd6')} tabIndex={0} {...props} ref={ref} className={cn('composer-dock relative px-6 pb-2 pt-3 backdrop-blur-md', className)} onKeyDown={event => {
     onKeyDown?.(event)
     // 仅处理输入区自身的滚动快捷键，编辑器和披露控件保留原来的键盘归属。
     if (event.defaultPrevented || event.target !== event.currentTarget || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229

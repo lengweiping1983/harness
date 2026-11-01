@@ -11,17 +11,30 @@ import {setLocale,t} from '/src/i18n/index.ts'
 import '/src/styles.css'
 window.copy=t
 const root=createRoot(document.getElementById('root'))
-window.configure=({language,size,running,empty})=>{
+window.configure=({language,size,running,empty,compact=false})=>{
  setLocale(language);document.documentElement.style.fontSize=size+'px'
  useAppStore.setState({activeSessionId:null})
- useDraftStore.getState().setText('__unsaved__',running?'':'Original 原文\\n'.repeat(100))
- if(!running)useDraftStore.setState(state=>({bySession:{...state.bySession,__unsaved__:{...state.bySession.__unsaved__,attachments:Array.from({length:20},(_,i)=>({localId:'file-'+i,name:'Original-'+i+'.txt',mediaType:'text/plain',size:12,isImage:false,attachmentId:'fixture-'+i}))}}}))
+ useDraftStore.getState().setText('__unsaved__',running||compact?'':'Original 原文\\n'.repeat(100))
+ if(!running&&!compact)useDraftStore.setState(state=>({bySession:{...state.bySession,__unsaved__:{...state.bySession.__unsaved__,attachments:Array.from({length:20},(_,i)=>({localId:'file-'+i,name:'Original-'+i+'.txt',mediaType:'text/plain',size:12,isImage:false,attachmentId:'fixture-'+i}))}}}))
  root.render(React.createElement('div',{className:'app-shell',style:{height:'100dvh',display:'flex'}},React.createElement(ConversationPane,{title:'Original',empty},
   React.createElement('div',{style:{flex:'1 1 0',minHeight:0,overflow:'auto'}},'Original transcript'),
-  React.createElement(Composer,{running,queued:0,planMode:false,connection:'open',onSend:()=>{window.sent=true},onCancel:()=>{window.stopped=true},onTogglePlan:()=>{},todos:Array.from({length:20},(_,i)=>({content:'Original task '+i,status:'pending'}))}))))
+  React.createElement(Composer,{running,queued:0,planMode:false,connection:'open',onSend:()=>{window.sent=true},onCancel:()=>{window.stopped=true},onTogglePlan:()=>{},todos:Array.from({length:compact?0:20},(_,i)=>({content:'Original task '+i,status:'pending'}))}))))
 }
 `
 await browserScenario(async({server,browser})=>{
+ for(const theme of ['light','dark'])for(const width of [390,1440]){
+  const page=await browser.newPage({viewport:{width,height:900}})
+  await page.route('**/api/v1/**',route=>route.fulfill({status:503,json:{message:'Fixture unavailable'}}))
+  await page.goto(server.resolvedUrls.local[0]+'__composer-height')
+  for(const language of ['en','zh-CN','en']){
+  await page.evaluate(config=>{document.documentElement.classList.toggle('dark',config.theme==='dark');window.configure(config)},{language,theme,size:14,running:false,empty:false,compact:true})
+  const card=page.locator('.composer-card');await card.waitFor()
+  const gap=await card.evaluate(node=>innerHeight-node.getBoundingClientRect().bottom)
+  assert.ok(gap>=0&&gap<=9,`Composer bottom gap ${gap}: ${language} ${theme} ${width}`)
+  assert.equal(await page.locator('.composer-help').count(),0)
+  }
+  await page.close()
+ }
  for(const empty of [false,true])for(const height of [160,240])for(const language of ['en','zh-CN'])for(const width of [390,1440])for(const size of [10,22])for(const running of [false,true]){
   const page=await browser.newPage({viewport:{width,height}}),errors=[];page.on('pageerror',e=>errors.push(e.message))
   await page.route('**/api/v1/**',route=>route.fulfill({status:503,json:{message:'Fixture unavailable'}}))

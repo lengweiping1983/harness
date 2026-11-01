@@ -783,7 +783,7 @@ body {
 /* Small windows should open at the editor, not a screenful of sample prompts. */
 @media (max-height: 640px) {
   .welcome-panel { gap: 12px; padding-top: 12px; }
-  .welcome-mark, .welcome-suggestions, .composer-help { display: none; }
+  .welcome-mark, .welcome-suggestions { display: none; }
   .welcome-copy h2 { font-size: 1.25rem; line-height: 1.75rem; }
   .welcome-copy p { margin-top: 6px; font-size: 0.75rem; line-height: 1.125rem; }
 }
@@ -860,7 +860,7 @@ body {
     --composer-card-max-width: 100%;
   }
   .composer-dock {
-    padding: 12px;
+    padding: 12px 12px 8px;
   }
 }
 

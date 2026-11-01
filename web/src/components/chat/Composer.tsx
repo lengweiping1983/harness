@@ -10,14 +10,12 @@ import { t, useLocale } from '@/i18n'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ClipboardPaste,
   ListChecks,
   Loader2,
   Pause,
   Square,
   Target,
   WifiOff,
-  X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { caretAfterQuote, insertQuote } from '@/lib/quote'
@@ -26,7 +24,7 @@ import { resolveComposerMode, type ComposerMode } from '@/lib/composerMode'
 import { useAppStore } from '@/store/app'
 import { useStopStore } from '@/store/stops'
 import { usePlanModeStore } from '@/store/planModes'
-import { Badge, Button, Kbd, Tooltip } from '@/components/ui/primitives'
+import { Badge, Button, Tooltip } from '@/components/ui/primitives'
 import { TriggerMenu } from './TriggerMenu'
 import { ComposerAddMenu } from './ComposerAddMenu'
 import { SessionMemberDock } from './MemberDock'
@@ -465,19 +463,8 @@ export function Composer({
           </ComposerToolbar>
         </ComposerCard>
 
-        <div className="composer-help mt-2 flex items-center justify-between px-1.5 text-2xs text-faint">
+        {running ? <span id="queued-followup-hint" className="sr-only">{t("ui.components.chat.Composer.49bc7900e665")}</span> : null}
 
-          {running ? <span id="queued-followup-hint" className="sr-only">{t("ui.components.chat.Composer.49bc7900e665")}</span> : null}
-          <span className="hidden items-center gap-1 sm:inline-flex">
-            <ClipboardPaste className="h-3.5 w-3.5" />{t("ui.components.chat.Composer.5554a3b6e552")}</span>
-          <button
-            type="button"
-            onClick={() => setShortcutsOpen(true)}
-            className="inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:text-muted"
-          >
-            <Kbd>?</Kbd>{t("ui.components.chat.Composer.ee2638183d3e")}<X className="hidden" />
-          </button>
-        </div>
       </ComposerDock>
     </>
   )
