@@ -257,6 +257,8 @@ class Harness:
 
         # -- 会话 ----------------------------------------------------------
         self.sessions = SessionStore(self.config.home, bus=self.bus)
+        from .session_titles import SessionTitles
+        self.session_titles = SessionTitles(self)
 
         # -- 工具 ----------------------------------------------------------
         self.tools = ToolRegistry(allow=self.config.tool_allow)
@@ -2238,6 +2240,7 @@ class Harness:
         await attempt(self.terminal_setup.close)
         await attempt(self.goal_runtime.close)
         await attempt(self.runtime.close)
+        await attempt(self.session_titles.close)
         if self._owned_memory_candidates is not None:
             await attempt(self._owned_memory_candidates.aclose)
         await attempt(self.project_execution.close)

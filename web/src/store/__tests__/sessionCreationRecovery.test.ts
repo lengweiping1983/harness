@@ -19,6 +19,7 @@ it.each(['lost','mismatched'] as const)('%s response recovers only the exact com
  const read=vi.spyOn(api,'getSession').mockImplementation(async()=>({ok:true,data:detail(row(id))}))
  const submission={id:'send-original',text:'Original 用户 {name}',attachments:[],action:'send' as const,status:'sending' as const}
  expect(await useAppStore.getState().materializeSession(submission)).toBe(true)
+ expect(write.mock.calls[0][0]).toEqual({cwd:'/fixture'})
  expect(write).toHaveBeenCalledTimes(1);expect(list).toHaveBeenCalledTimes(1);expect(read).toHaveBeenCalledExactlyOnceWith('created','conversation-window')
  expect(useAppStore.getState().activeSessionId).toBe('created')
  expect(useDraftStore.getState().submissions.created).toHaveLength(1)

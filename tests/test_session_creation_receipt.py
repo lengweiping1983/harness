@@ -43,6 +43,8 @@ class SessionCreationReceiptTests(unittest.TestCase):
                                       json.dumps(payload).encode('utf-8'))
                     record = json.loads(endpoint(request, **params).body)['session']
                     self.assertEqual(Path(record['cwd']), project.resolve() if payload.get('cwd') else root)
+                    self.assertIsNone(record.get('title'))
+                    self.assertEqual(record['metadata']['auto_title'], 'awaiting')
 
     def fixture(self, root):
         store = SessionStore(root)

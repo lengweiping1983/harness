@@ -17,6 +17,11 @@ def failure_diagnostics(error):
         value = details.get(key)
         if type(value) is int and -65536 <= value <= 65536:
             result[key] = value
+    for key in ('runtime_exit_code', 'response_bytes'):
+        value = details.get(key)
+        minimum = -65536 if key == 'runtime_exit_code' else 0
+        if type(value) is int and minimum <= value <= 2**53 - 1:
+            result[key] = value
     for key in ('seconds', 'retry_after'):
         value = details.get(key)
         if type(value) in (int, float) and 0 <= value <= 86400:

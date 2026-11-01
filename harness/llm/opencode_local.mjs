@@ -1,6 +1,8 @@
 // 由已安装的 OpenCode Bun 运行时执行；不执行模型返回的工具。
 
 let idleTimer;
+let idleExpired = false;
+let phase = 'connect';
 try {
   const input = JSON.parse(await new Response(Bun.stdin.stream()).text());
   const body = input.body;
@@ -19,12 +21,14 @@ try {
   const controller=new AbortController();
   const resetIdle=()=>{
     clearTimeout(idleTimer);
-    idleTimer=setTimeout(()=>controller.abort(),input.timeout_ms);
+    idleTimer=setTimeout(()=>{ idleExpired=true; controller.abort(); },input.timeout_ms);
   };
   resetIdle();
   const response = await fetch('https://opencode.ai/inference/openai/v1/chat/completions', {
-    method:'POST',headers,body:JSON.stringify(body),signal:controller.signal,redirect:'error',
+    method:'POST',headers,body:JSON.stringify(body),signal:controller.signal,redirect:'error',timeout:false,
   });
+  phase = 'read';
+  resetIdle();
   process.stdout.write(JSON.stringify({status:response.status,retry_after:response.headers.get('retry-after')})+'\n');
   if(response.body) {
     for await(const chunk of response.body) {
@@ -33,7 +37,15 @@ try {
     }
   }
 } catch(error) {
-  process.stderr.write(String(error?.name ?? 'Error'));
+  // 只发送固定诊断字段，避免运行时异常正文泄露请求或凭据。
+  const errors = {ConnectionClosed:'ConnectionResetError', ECONNRESET:'ConnectionResetError',
+    ConnectionRefused:'ConnectionRefusedError', ECONNREFUSED:'ConnectionRefusedError',
+    EPIPE:'BrokenPipeError', ETIMEDOUT:'TimeoutError', TimeoutError:'TimeoutError',
+    ENOTFOUND:'gaierror', EAI_AGAIN:'gaierror'};
+  const code = error?.code ?? error?.name;
+  const networkError = Object.hasOwn(errors, code) ? errors[code] : null;
+  process.stderr.write(JSON.stringify({failure:idleExpired ? 'idle_timeout' : networkError ? 'network' : 'runtime',
+    phase, network_error:networkError})+'\n');
   process.exitCode=1;
 } finally {
   clearTimeout(idleTimer);

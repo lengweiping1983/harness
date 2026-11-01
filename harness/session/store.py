@@ -200,8 +200,12 @@ class SessionStore:
         with self._header_lock(session_id):
             session = self.get(session_id)
             metadata = dict(session.header.metadata)
-            metadata.update(changes.pop("metadata", None) or {})
+            metadata_changes = changes.pop("metadata", None) or {}
+            metadata.update(metadata_changes)
             title = changes.pop("title", ...)
+            # 显式改名撤销未完成的自动命名，即使新旧名称相同也保留人工选择。
+            if title is not ... and 'auto_title' in metadata and 'auto_title' not in metadata_changes:
+                metadata['auto_title'] = 'manual'
             payload = session.header.to_dict()
             payload["metadata"] = metadata
             if title is not ...:

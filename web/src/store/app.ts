@@ -31,7 +31,6 @@ import { getFileRoot, setFileRoot } from '@/lib/fileRoot'
 import { matchWorkspaceFor, newSessionDirectory, sessionDirectory } from '@/lib/workspaces'
 import type { LayoutMode } from '@/lib/layout'
 import { toastDuration } from '@/lib/toastTimer'
-import { sessionTaskTitle } from '@/lib/sessionTitle'
 import { reasoningSelection } from '@/lib/reasoningSelection'
 import { closeFilePreview, filePreviewScope, rememberFilePreview, sameFileReference, type FilePreviewReference } from '@/lib/filePreviewHistory'
 
@@ -609,7 +608,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         return false
       }
       const cwd = newSessionDirectory(state.workspaces, state.activeWorkspaceId, state.workspace?.root)
-      const title = sessionTaskTitle(submission?.text).slice(0, 80) || submission?.attachments[0]?.name
       const existing = useDraftStore.getState().bySession.__unsaved__?.creationRequest
       const attempt = existing ?? {id: crypto.randomUUID(), cwd, agent: agentSelection?.name}
       const clearAttempt = () => {
@@ -626,7 +624,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       let result: Awaited<ReturnType<typeof api.createSession>>
       try {
         result = existing ? await recoverSessionCreation(attempt.id)
-          : await api.createSession({ ...(cwd ? { cwd } : {}), ...(title ? { title } : {}), ...(agentSelection ? {agent_selection: agentSelection.name} : {}) }, attempt.id)
+          : await api.createSession({ ...(cwd ? { cwd } : {}), ...(agentSelection ? {agent_selection: agentSelection.name} : {}) }, attempt.id)
       } catch { result = creationUnconfirmed() }
       if (result.ok && !createdFor(result.data?.session, attempt.id)) result = creationUnconfirmed()
       if (!result.ok && !existing && isUnconfirmedWrite(result)) result = await recoverSessionCreation(attempt.id)
