@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {mkdir} from 'node:fs/promises'
 import {browserScenario} from './browser-scenario.mjs'
-const id='harness/private-supplier/private-endpoint/private-model'
+const id='harness/supplier/endpoint/model'
 const models=[{id,label:'DeepSeek V4 Pro',provider:'DeepSeek',visible:true,active:true,context_window:1048576,supports_reasoning:false}]
 const entry=`import React from 'react';import {createRoot} from 'react-dom/client';import {SettingsDialog} from '/src/components/overlays/SettingsDialog.tsx';import {useAppStore} from '/src/store/app.ts';import {setLocale,t} from '/src/i18n/index.ts';import '/src/styles.css';setLocale('en');window.locale=setLocale;window.copy=t;window.navigate=target=>useAppStore.setState({settingsTarget:target});window.catalog=()=>useAppStore.setState({models:${JSON.stringify(models)}});window.clearCatalog=()=>useAppStore.setState({models:[]});useAppStore.setState({models:${JSON.stringify(models)},defaultModel:${JSON.stringify(id)},settingsOpen:true,settingsTarget:'models'});createRoot(document.getElementById('root')).render(React.createElement(SettingsDialog));`
 const config={context_auto_manage:true,context_working_budget:10000,summary_max_tokens:null,output_reserve:1000,context_window:1048576,tool_result_max_chars:null,tool_schema_mode:'auto',permission_policy:'request_approval',max_steps:10,token_budget:null,network_timeout:60}
