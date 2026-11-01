@@ -1,4 +1,6 @@
 import {afterEach, expect, it, vi} from 'vitest'
+// 首次转换在收集阶段完成；每例仍重载模块，隔离未读意图与存储失败状态。
+import '../sessionNotifications'
 
 afterEach(() => vi.unstubAllGlobals())
 async function fixture(raw?: string) {
