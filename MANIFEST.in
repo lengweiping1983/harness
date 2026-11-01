@@ -1,0 +1,3 @@
+include build_support.py
+graft .harness/skills
+recursive-exclude .harness/skills *.pyc *.pyo .DS_Store

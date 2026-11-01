@@ -1,0 +1,8 @@
+{
+  "C1": {"verdict": "contradicted", "source": "cmd.md"},
+  "C2": {"verdict": "contradicted", "source": "sqlite.md"},
+  "C3": {"verdict": "unknown", "source": "facts.md"},
+  "C4": {"verdict": "contradicted", "source": "facts.md"},
+  "C5": {"verdict": "unknown", "source": "facts.md"},
+  "C6": {"verdict": "supported", "source": "cmd.md"}
+}

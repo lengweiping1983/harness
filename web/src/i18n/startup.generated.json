@@ -1,0 +1,12 @@
+{
+  "zh-CN": {
+    "ui.App.f76a8d866552": "正在连接 Harness…",
+    "ui.startup.failed": "界面资源未能加载。请检查连接后重新加载页面。",
+    "ui.deferred.reload": "重新加载页面"
+  },
+  "en": {
+    "ui.App.f76a8d866552": "Connecting to Harness…",
+    "ui.startup.failed": "The interface resources could not load. Check your connection and reload the page.",
+    "ui.deferred.reload": "Reload page"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "title": "安全审查团队 Terra 在线验收：路径边界与证据等级",
+  "team": "team-security-custom",
+  "required_members": [
+    "analyst",
+    "challenger"
+  ],
+  "member_read_paths": [
+    "source.md"
+  ],
+  "prompt": "只允许读取当前目录source.md，这是构造案例。实际委派analyst分析调用链与攻击前提，然后委派challenger独立反证关键结论。两个成员仅允许调用read工具读取source.md，不得调用其他工具、历史、记忆、项目板；不联网、不执行命令、不写入、不提问。不派surface。最终输出一个JSON代码块：claims数组每项含id、verdict（supported/contradicted/unknown）、reason及sources数组（path为source.md，quote为逐字连续原文）；member_sources列出analyst和challenger的member与真实agent_id。分类针对事实真值：S1=给定前提下，name为../tenant-ab/private.txt可通过检查读取授权目录外文件；S2=这段代码使用Path.resolve后按路径段验证了目标位于授权目录内；S3=真实生产系统已发生数据泄露。不要把代码可达风险当成生产事件已发生。"
+}

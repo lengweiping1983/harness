@@ -1,0 +1,14 @@
+{
+  "R1": {
+    "verdict": "supported",
+    "source": "primary.md"
+  },
+  "R2": {
+    "verdict": "contradicted",
+    "source": "coverage.md"
+  },
+  "R3": {
+    "verdict": "unknown",
+    "source": "primary.md"
+  }
+}

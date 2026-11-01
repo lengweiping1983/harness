@@ -1,0 +1,27 @@
+.screenshot-editor { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: #242424; padding: 24px 12px; outline: none; color: #333; font-family: system-ui, sans-serif; }
+.screenshot-stage { position: relative; max-width: 100%; min-height: 0; flex-shrink: 1; cursor: crosshair; user-select: none; touch-action: none; overflow: hidden; }
+.screenshot-stage > img { display: block; max-height: calc(100dvh - 170px); max-width: 100%; object-fit: contain; }
+.screenshot-preview { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.screenshot-shade { position: absolute; inset: 0; background: #0005; pointer-events: none; }
+.screenshot-move { cursor: move; }
+.screenshot-selection { position: absolute; border: 2px solid #07c160; box-shadow: 0 0 0 100vmax #0008; pointer-events: none; }
+.screenshot-size { position: absolute; left: 4px; top: 4px; background: #222b; color: white; padding: 2px 5px; font-size: 11px; white-space: nowrap; }
+.screenshot-handle { position: absolute; width: 8px; height: 8px; background: #07c160; pointer-events: auto; }
+.screenshot-handle-nw { left: -5px; top: -5px; cursor: nwse-resize; }.screenshot-handle-n { left: calc(50% - 4px); top: -5px; cursor: ns-resize; }.screenshot-handle-ne { right: -5px; top: -5px; cursor: nesw-resize; }
+.screenshot-handle-e { right: -5px; top: calc(50% - 4px); cursor: ew-resize; }.screenshot-handle-se { right: -5px; bottom: -5px; cursor: nwse-resize; }.screenshot-handle-s { bottom: -5px; left: calc(50% - 4px); cursor: ns-resize; }.screenshot-handle-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }.screenshot-handle-w { left: -5px; top: calc(50% - 4px); cursor: ew-resize; }
+.screenshot-controls { display: flex; align-items: center; flex-direction: column; gap: 8px; flex-shrink: 0; max-width: 100%; }
+.screenshot-toolbar, .screenshot-options { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 3px; background: #fafafa; border: 1px solid #d5d5d5; border-radius: 8px; padding: 5px; box-shadow: 0 3px 12px #0003; }
+.screenshot-toolbar button, .screenshot-options button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 32px; border-radius: 4px; cursor: pointer; }
+.screenshot-toolbar button:hover, .screenshot-options button:hover { background: #e6e6e6; }.screenshot-toolbar button[aria-pressed=true], .screenshot-options button[aria-pressed=true] { color: #079b4d; background: #def5e7; }
+.screenshot-toolbar button:focus-visible, .screenshot-options button:focus-visible { outline: 2px solid #1685ff; outline-offset: 2px; }.screenshot-toolbar button:disabled, .screenshot-options button:disabled { opacity: .35; cursor: default; }
+.screenshot-divider { width: 1px; height: 20px; background: #dedede; margin: 0 3px; }.screenshot-toolbar .screenshot-cancel { color: #dd4444; }.screenshot-toolbar .screenshot-done { color: #079b4d; }
+.screenshot-options .screenshot-color { width: 19px; height: 19px; margin: 0 5px; border: 1px solid #999; border-radius: 50%; }.screenshot-options .screenshot-color[aria-pressed=true] { outline: 2px solid #666; outline-offset: 2px; }
+.screenshot-text { position: absolute; z-index: 2; background: transparent; border: 0; min-width: 0; box-sizing: border-box; width: 240px; padding: 0; line-height: 1.25; font-family: inherit; font-weight: 600; outline: none; resize: none; overflow: auto; white-space: pre; user-select: text; }
+.screenshot-hint, .screenshot-error { font-size: 12px; margin: 0; color: #eee; text-align: center; }.screenshot-error { color: #ff9494; }
+@media (max-height: 500px) { .screenshot-editor { padding: 8px; gap: 6px; }.screenshot-stage > img { max-height: calc(100dvh - 140px); } }
+
+.screenshot-editor textarea.screenshot-text, .screenshot-editor textarea.screenshot-text:focus { border: 1px solid #6aa8a6; outline: none; box-shadow: none; border-radius: 3px; padding: 0; background: transparent; }
+.screenshot-stage .screenshot-text-mark { position: absolute; z-index: 2; display: block; width: max-content; max-width: 100%; min-width: 20px; padding: 0; margin: 0; border: 1px solid transparent; border-radius: 0; background: transparent; color: transparent; font-family: system-ui, sans-serif; font-weight: 600; line-height: 1.25; white-space: pre; cursor: pointer; outline: none; box-shadow: none; }
+.screenshot-stage .screenshot-text-mark[aria-pressed=true] { border: 1px solid #777; }
+.screenshot-text-corner { position:absolute; width:7px; height:7px; border:1px solid #777; border-radius:50%; background:white; pointer-events:none; }
+.screenshot-text-corner-nw { left:-4px;top:-4px; }.screenshot-text-corner-ne { right:-4px;top:-4px; }.screenshot-text-corner-se { right:-4px;bottom:-4px; }.screenshot-text-corner-sw { left:-4px;bottom:-4px; }

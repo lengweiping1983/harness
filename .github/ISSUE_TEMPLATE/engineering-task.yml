@@ -1,0 +1,55 @@
+name: 工程任务
+description: 跟踪构建、测试、重构或文档维护。
+title: '[Task] '
+body:
+  - type: markdown
+    attributes:
+      value: 提交前请搜索已有问题，并阅读 [贡献指南](https://github.com/lengweiping1983/harness/blob/main/CONTRIBUTING.md)。请勿提交凭据、用户会话或数据库。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      options:
+        - 后端 / Python
+        - Web 工作台
+        - 桌面客户端
+        - 构建与 CI
+        - 文档与示例
+        - 其他 / 尚未确定
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 背景与依据
+      description: 说明现有约束、问题证据或关联 Issue。
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 工作范围
+      description: 列出交付物、受影响入口与不变的公共行为。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 列出完成条件和可复核证据。
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: 验证方案
+      description: 填写计划使用的仓库验证入口及所需环境。
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: 风险与回退
+      description: 说明依赖、数据边界及回退方式。
+    validations:
+      required: false

@@ -1,0 +1,26 @@
+{
+  "rows": [
+    {"id": "queue", "topic": "queue", "content": "队列重排通过后端完整快照比较并持久化。", "evidence": "harness/app/queue_edit.py"},
+    {"id": "revision", "topic": "memory", "content": "记忆更新和删除需要 expected_revision；旧版本不能覆盖新记录。", "evidence": "harness/app/memory.py"},
+    {"id": "privacy", "topic": "user", "content": "跨项目用户偏好禁止保存项目秘密及访问令牌。", "evidence": "用户明确约定"},
+    {"id": "budget", "topic": "context", "content": "The prompt budget includes the wrapper and escaped JSON content.", "evidence": "tests/test_memory_context.py"},
+    {"id": "format", "topic": "storage", "content": "损坏或不符合当前格式的数据库保留原文件并报错，不自动迁移。", "evidence": "harness/core/sqlite.py"},
+    {"id": "worktree", "topic": "project", "content": "同一 Git repository 的 linked worktree 共享项目长期记忆。", "evidence": "git-common-dir"},
+    {"id": "font", "topic": "interface", "content": "页面使用系统中文字体和统一等宽字体，不加载远程字体。", "evidence": "AGENTS.md"},
+    {"id": "replay", "topic": "recovery", "content": "写请求结果未知时先回查状态，不自动重放副作用。", "evidence": "docs/storage.md"}
+  ],
+  "cases": [
+    {"name": "中文短语", "query": "队列重排", "expected": ["queue"]},
+    {"name": "中文长短语重叠", "query": "如何防止旧版本覆盖新记录", "expected": ["revision"]},
+    {"name": "英文标识符", "query": "expected_revision", "expected": ["revision"]},
+    {"name": "源码路径", "query": "harness/core/sqlite.py", "expected": ["format"]},
+    {"name": "中英文混合", "query": "linked worktree 共享", "expected": ["worktree"]},
+    {"name": "英文关键词", "query": "prompt wrapper budget", "expected": ["budget"]},
+    {"name": "同义表达", "query": "操作超时后能不能再执行一遍", "expected": ["replay"]},
+    {"name": "跨语种表达", "query": "Do we migrate corrupt databases automatically?", "expected": ["format"]},
+    {"name": "用户隐私", "query": "跨项目偏好能保存令牌吗", "expected": ["privacy"]},
+    {"name": "排版规则", "query": "远程字体", "expected": ["font"]},
+    {"name": "无相关资料", "query": "火星大气压和木星磁场", "expected": []},
+    {"name": "英文无相关资料", "query": "weather forecast tomorrow", "expected": []}
+  ]
+}

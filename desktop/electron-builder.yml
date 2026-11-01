@@ -1,0 +1,40 @@
+appId: io.github.lengweiping1983.harness
+productName: Harness
+electronDist: node_modules/electron/dist
+asar: true
+asarUnpack:
+  - capture-screen.ps1
+beforePack: ./verify-runtime.mjs
+directories:
+  output: ../.run/installers
+files:
+  - '*.mjs'
+  - '*.cjs'
+  - '!prepare-release.mjs'
+  - '!verify-runtime.mjs'
+  - '!release-assets.mjs'
+  - '!setup.mjs'
+  - '!launch.mjs'
+  - capture-screen.ps1
+extraResources:
+  - from: ../.run/desktop-release/resources
+    to: runtime
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  deleteAppDataOnUninstall: false
+artifactName: Harness-${version}-${os}-${arch}.${ext}
+publish:
+  provider: github
+  owner: lengweiping1983
+  repo: harness
+  releaseType: draft

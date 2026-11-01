@@ -1,0 +1,239 @@
+"""工作区运行时依赖工具。
+
+让模型在需要 spawn / 跑 Node 侧技能时，先摸清当前机器上有哪些
+可用运行时（内置工作区依赖运行时、Node、pnpm、Python 包等），
+避免瞎猜路径。本实现只做**只读探测**：
+
+* Python 解释器与 site-packages 目录；
+* Node / pnpm / npx / npm 的可执行文件与版本；
+* 当前进程 ``sys.path`` 里的模块目录；
+* 已安装的 Python distribution（按需限量，避免把几千个包塞进上下文）。
+
+本 harness 是独立 Python 进程，因此**探测真实环境**而不是读取宿主注入的
+「bundled runtime 路径表」，对模型更有用且不依赖任何宿主假设。
+"""
+
+from __future__ import annotations
+
+from harness.i18n import tr
+
+from copy import deepcopy
+from bisect import insort
+
+import importlib.metadata as importlib_metadata
+import asyncio
+import os
+import shutil
+import sys
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
+from ...core.errors import ToolExecutionError
+from ...core.cleanup import join_cleanup
+from ...llm.types import TextBlock
+from ..registry import ToolDefinition, ToolRunContext, ToolResult
+from ..runtime_probe import probe_version
+
+#: 一次最多枚举多少个已安装 distribution（防止上下文爆炸）
+MAX_PACKAGES = 200
+#: 探测单个外部命令的超时（秒）
+PROBE_TIMEOUT = 5.0
+#: 会被探测的 Node 侧命令
+NODE_COMMANDS = ("node", "npm", "npx", "pnpm", "yarn", "bun", "deno")
+#: 探测结果的缓存时长（秒）。Node 版本探测要 spawn 若干子进程，
+#: 而运行时装载在一次会话里会被反复调用，因此按 TTL 缓存而不是每次重探。
+PROBE_CACHE_TTL = 300.0
+
+#: 缓存结构：``{"node": (expires_at, payload), "packages": ...}``
+_PROBE_CACHE: dict[str, tuple[float, Any]] = {}
+_PROBE_LOCK = threading.Lock()
+_PROBE_FLIGHTS: dict[str, threading.Lock] = {}
+
+
+def _cached(key: str, produce):
+    """按 TTL 复用探测结果；``monotonic`` 时钟避免系统时间回拨影响。"""
+    with _PROBE_LOCK:
+        flight = _PROBE_FLIGHTS.setdefault(key, threading.Lock())
+    # 同类探测只运行一次；等待发生在工作线程，不占用聊天事件循环。
+    with flight:
+        with _PROBE_LOCK:
+            hit = _PROBE_CACHE.get(key)
+            if hit is not None and hit[0] > time.monotonic():
+                return deepcopy(hit[1])
+        payload = deepcopy(produce())
+        with _PROBE_LOCK:
+            _PROBE_CACHE[key] = (time.monotonic() + PROBE_CACHE_TTL, payload)
+        return deepcopy(payload)
+
+
+def _version_of(executable: str) -> str:
+    """有界读取可执行文件版本；普通探测失败为空，清理失败仍向上传播。"""
+    try:
+        return asyncio.run(probe_version([executable, '--version'], PROBE_TIMEOUT))
+    except OSError:
+        return ''
+
+
+def _probe_node_runtimes() -> list[dict[str, Any]]:
+    """有界并行查询独立版本，保持命令顺序并缩短首次探测等待。"""
+    candidates: list[tuple[str, str]] = []
+    for name in NODE_COMMANDS:
+        path = shutil.which(name)
+        if not path:
+            continue
+        candidates.append((name, path))
+    if not candidates:
+        return []
+    with ThreadPoolExecutor(max_workers=min(4, len(candidates)), thread_name_prefix='harness-runtime-version') as pool:
+        versions = pool.map(_version_of, (path for _, path in candidates))
+        return [{'command': name, 'path': path, 'version': version}
+                for (name, path), version in zip(candidates, versions)]
+
+
+def _node_runtimes() -> list[dict[str, Any]]:
+    """探测 Node 侧运行时（带 TTL 缓存，避免每次调用都 spawn 子进程）。"""
+    return _cached("node", _probe_node_runtimes)
+
+
+def _probe_python_packages() -> tuple[list[dict[str, str]], int]:
+    packages: list[dict[str, str]] = []
+    limit = MAX_PACKAGES
+    total = 0
+    for dist in importlib_metadata.distributions():
+        name = (dist.metadata["Name"] or "").strip()
+        if not name:
+            continue
+        total += 1
+        insort(packages, {"name": name, "version": (dist.version or "").strip()},
+               key=lambda item: (item['name'].casefold(), item['version']))
+        if len(packages) > limit:
+            packages.pop()
+    return packages, total
+
+
+def _python_packages(limit: int) -> tuple[list[dict[str, str]], int]:
+    """枚举已安装 distribution（带 TTL 缓存；``limit`` 会被缓存键忽略）。"""
+    packages, total = _cached("packages", _probe_python_packages)
+    if limit == MAX_PACKAGES:
+        return packages, total
+    return packages[:limit], total
+
+
+def collect_workspace_dependencies(*, include_packages: bool = True) -> dict[str, Any]:
+    """探测当前工作区可用的运行时，返回结构化结果。"""
+    if type(include_packages) is not bool:
+        raise ToolExecutionError(tr('tool.arguments.boolean', argument='include_packages'))
+    site_dirs: list[str] = []
+    for entry in sys.path:
+        if not entry:
+            entry = os.getcwd()
+        try:
+            resolved = os.path.abspath(entry)
+        except (OSError, ValueError):
+            continue
+        if resolved not in site_dirs:
+            site_dirs.append(resolved)
+
+    data: dict[str, Any] = {
+        "python": {
+            "executable": sys.executable,
+            "version": sys.version.split()[0],
+            "implementation": sys.implementation.name,
+            "prefix": sys.prefix,
+            "site_packages_dirs": site_dirs,
+        },
+        "node": _node_runtimes(),
+        "cwd": os.getcwd(),
+    }
+    if include_packages:
+        packages, total = _python_packages(MAX_PACKAGES)
+        data["python"]["packages"] = packages
+        data["python"]["package_count"] = total
+        data["python"]["packages_truncated"] = total > len(packages)
+    return data
+
+
+def _render(data: dict[str, Any]) -> str:
+    python = data["python"]
+    lines = [
+        tr('python.workspace_tools.d077aa93c3ed'),
+        tr('workspace.python_runtime', version=python['version'], implementation=python['implementation']),
+        tr('python.workspace_tools.09beb1bb5b69', p0=f"{python['executable']}"),
+        tr('python.workspace_tools.2d78850be504', p0=f"{len(python['site_packages_dirs'])}", p1=f"{(python['site_packages_dirs'][0] if python['site_packages_dirs'] else tr('common.empty'))}"),
+    ]
+    if "package_count" in python:
+        suffix = tr('python.workspace_tools.77cde5d25373') if python.get("packages_truncated") else ""
+        lines.append(
+            tr('python.workspace_tools.b42179f3e4a7', p0=f"{python['package_count']}", p1=f'{suffix}')
+        )
+    node = data["node"]
+    if node:
+        lines.append(tr('python.workspace_tools.7597aaddc475'))
+        for item in node:
+            version = f" {item['version']}" if item["version"] else ""
+            lines.append(f"  {item['command']}{version} -> {item['path']}")
+    else:
+        lines.append(tr('python.workspace_tools.3d66984a18fe'))
+    lines.append("")
+    lines.append(tr('python.workspace_tools.6dfc0264e2ba'))
+    return "\n".join(lines)
+
+
+def build_workspace_dependency_tools() -> list[ToolDefinition]:
+    """构造 ``load_workspace_dependencies``。"""
+
+    async def load_workspace_dependencies(args: Any, ctx: ToolRunContext) -> ToolResult:
+        if not isinstance(args, dict):
+            raise ToolExecutionError(tr('python.workspace_tools.217393fbc154'))
+        include = args.get("include_packages", True)
+        if type(include) is not bool:
+            raise ToolExecutionError(tr('tool.arguments.boolean', argument='include_packages'))
+        try:
+            reading = asyncio.create_task(asyncio.to_thread(collect_workspace_dependencies, include_packages=include))
+            data = await join_cleanup(reading)
+        except Exception as exc:  # pragma: no cover - 探测异常罕见
+            raise ToolExecutionError(tr('python.workspace_tools.484acd7994ec', p0=f'{exc}')) from exc
+        return ToolResult(
+            content=[TextBlock(text=_render(data))],
+            display=data,
+            data=data,
+        )
+
+    return [
+        ToolDefinition(
+            schema={
+                "description_key": 'python.workspace_tools.d7179d748869',
+                "parameter_keys": {
+                    ('properties', 'include_packages', 'description'): 'python.workspace_tools.4005e269d0c1',
+                },
+                "name": "load_workspace_dependencies",
+                "description": (
+                    tr('python.workspace_tools.d7179d748869')
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "include_packages": {
+                            "type": "boolean",
+                            "description": (
+                                tr('python.workspace_tools.4005e269d0c1')
+                            ),
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            execute=load_workspace_dependencies,
+            concurrency_safe=True,
+            timeout=30.0,
+        )
+    ]
+
+
+__all__ = [
+    "build_workspace_dependency_tools",
+    "collect_workspace_dependencies",
+    "MAX_PACKAGES",
+]

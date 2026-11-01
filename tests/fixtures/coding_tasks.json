@@ -1,0 +1,535 @@
+{
+  "schema": 1,
+  "tasks": [
+    {
+      "id": "bug-boundary",
+      "category": "bugfix",
+      "prompt": {
+        "zh-CN": "修复边界：零必须判定为非负数。",
+        "en": "Fix the boundary: zero is nonnegative."
+      },
+      "files": {
+        "solution.py": "def result(value):\n    return value > 0\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "def result(value):\n    return value > 0\n",
+            "new_string": "def result(value):\n    return value >= 0\n"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "result(0)",
+          "expected": true
+        },
+        {
+          "expression": "result(-1)",
+          "expected": false
+        },
+        {
+          "expression": "result(2)",
+          "expected": true
+        }
+      ],
+      "reference_files": {
+        "solution.py": "def result(value):\n    return value >= 0\n"
+      }
+    },
+    {
+      "id": "bug-empty",
+      "category": "bugfix",
+      "prompt": {
+        "zh-CN": "修复空输入：空列表总和为零。",
+        "en": "Fix empty input: an empty sum is zero."
+      },
+      "files": {
+        "solution.py": "def result(values):\n    total = values[0]\n    return total + sum(values[1:])\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "def result(values):\n    total = values[0]\n    return total + sum(values[1:])\n",
+            "new_string": "def result(values):\n    return sum(values)\n"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "result([])",
+          "expected": 0
+        },
+        {
+          "expression": "result([1,2,3])",
+          "expected": 6
+        }
+      ],
+      "reference_files": {
+        "solution.py": "def result(values):\n    return sum(values)\n"
+      }
+    },
+    {
+      "id": "bug-caller",
+      "category": "bugfix",
+      "prompt": {
+        "zh-CN": "修复调用方：平方和应调用平方函数。",
+        "en": "Fix the caller: sum_squares must call square."
+      },
+      "files": {
+        "solution.py": "def square(x):\n    return x*x\ndef result(values):\n    return sum(values)\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "def square(x):\n    return x*x\ndef result(values):\n    return sum(values)\n",
+            "new_string": "def square(x):\n    return x*x\ndef result(values):\n    return sum(square(x) for x in values)\n"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "result([2,3])",
+          "expected": 13
+        },
+        {
+          "expression": "result([])",
+          "expected": 0
+        }
+      ],
+      "reference_files": {
+        "solution.py": "def square(x):\n    return x*x\ndef result(values):\n    return sum(square(x) for x in values)\n"
+      }
+    },
+    {
+      "id": "feature-default",
+      "category": "feature",
+      "prompt": {
+        "zh-CN": "新增可选前缀参数，默认保持原输出。",
+        "en": "Add an optional prefix while preserving the default output."
+      },
+      "files": {
+        "solution.py": "def result(name):\n    return name\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "def result(name):\n    return name\n",
+            "new_string": "def result(name, prefix=\"\"):\n    return prefix + name\n"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "result(\"Ada\")",
+          "expected": "Ada"
+        },
+        {
+          "expression": "result(\"Ada\", \"Hi \")",
+          "expected": "Hi Ada"
+        }
+      ],
+      "reference_files": {
+        "solution.py": "def result(name, prefix=\"\"):\n    return prefix + name\n"
+      }
+    },
+    {
+      "id": "feature-filter",
+      "category": "feature",
+      "prompt": {
+        "zh-CN": "添加最低值筛选并保留顺序。",
+        "en": "Add minimum-value filtering while preserving order."
+      },
+      "files": {
+        "solution.py": "def result(values, minimum=0):\n    return list(values)\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "def result(values, minimum=0):\n    return list(values)\n",
+            "new_string": "def result(values, minimum=0):\n    return [x for x in values if x >= minimum]\n"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "result([3,-1,2,0])",
+          "expected": [
+            3,
+            2,
+            0
+          ]
+        },
+        {
+          "expression": "result([3,1,2],2)",
+          "expected": [
+            3,
+            2
+          ]
+        }
+      ],
+      "reference_files": {
+        "solution.py": "def result(values, minimum=0):\n    return [x for x in values if x >= minimum]\n"
+      }
+    },
+    {
+      "id": "feature-stable-sort",
+      "category": "feature",
+      "prompt": {
+        "zh-CN": "按分数稳定排序，保留相同分数的原顺序。",
+        "en": "Sort by score stably, preserving equal-score order."
+      },
+      "files": {
+        "solution.py": "def result(rows):\n    return rows\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "def result(rows):\n    return rows\n",
+            "new_string": "def result(rows):\n    return sorted(rows, key=lambda row: row[1])\n"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "result([[\"b\",2],[\"a\",1],[\"c\",2]])",
+          "expected": [
+            [
+              "a",
+              1
+            ],
+            [
+              "b",
+              2
+            ],
+            [
+              "c",
+              2
+            ]
+          ]
+        }
+      ],
+      "reference_files": {
+        "solution.py": "def result(rows):\n    return sorted(rows, key=lambda row: row[1])\n"
+      }
+    },
+    {
+      "id": "refactor-helper",
+      "category": "refactor",
+      "prompt": {
+        "zh-CN": "提取共同的加税函数，保持业务结果。",
+        "en": "Extract the common tax calculation without changing behavior."
+      },
+      "files": {
+        "solution.py": "def result(a,b):\n    return a*1.1 + b*1.1\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "def result(a,b):\n    return a*1.1 + b*1.1\n",
+            "new_string": "def taxed(value):\n    return value*1.1\ndef result(a,b):\n    return taxed(a)+taxed(b)\n"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "round(result(10,20),2)",
+          "expected": 33.0
+        },
+        {
+          "expression": "'taxed' in result.__code__.co_names and callable(taxed)",
+          "expected": true
+        },
+        {
+          "expression": "taxed(5)",
+          "expected": 5.5
+        }
+      ],
+      "reference_files": {
+        "solution.py": "def taxed(value):\n    return value*1.1\ndef result(a,b):\n    return taxed(a)+taxed(b)\n"
+      }
+    },
+    {
+      "id": "refactor-module",
+      "category": "refactor",
+      "prompt": {
+        "zh-CN": "将倍增函数提取到 helpers.py，保持调用方行为。",
+        "en": "Move the doubling helper to helpers.py and preserve caller behavior."
+      },
+      "files": {
+        "solution.py": "def double(x):\n    return x*2\ndef result(values):\n    return [double(x) for x in values]\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "write",
+          "arguments": {
+            "path": "helpers.py",
+            "content": "def double(x):\n    return x*2\n"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "def double(x):\n    return x*2\ndef result(values):\n    return [double(x) for x in values]\n",
+            "new_string": "from helpers import double\ndef result(values):\n    return [double(x) for x in values]\n"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "result([1,2,3])",
+          "expected": [
+            2,
+            4,
+            6
+          ]
+        },
+        {
+          "expression": "double.__module__ == 'helpers'",
+          "expected": true
+        }
+      ],
+      "reference_files": {
+        "solution.py": "from helpers import double\ndef result(values):\n    return [double(x) for x in values]\n",
+        "helpers.py": "def double(x):\n    return x*2\n"
+      }
+    },
+    {
+      "id": "refactor-unicode",
+      "category": "refactor",
+      "prompt": {
+        "zh-CN": "提取常量并保留中文与 CRLF 换行。",
+        "en": "Extract a constant while preserving Chinese text and CRLF newlines."
+      },
+      "files": {
+        "solution.py": "def result():\r\n    return \"你好\"\r\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "def result():\r\n    return \"你好\"\r\n",
+            "new_string": "GREETING = \"你好\"\r\ndef result():\r\n    return GREETING\r\n"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "result()",
+          "expected": "你好"
+        },
+        {
+          "expression": "'GREETING' in result.__code__.co_names and GREETING == '你好'",
+          "expected": true
+        },
+        {
+          "expression": "b'\\n' not in open('solution.py','rb').read().replace(b'\\r\\n',b'') and b'\\r\\n' in open('solution.py','rb').read()",
+          "expected": true
+        }
+      ],
+      "reference_files": {
+        "solution.py": "GREETING = \"你好\"\r\ndef result():\r\n    return GREETING\r\n"
+      }
+    },
+    {
+      "id": "recovery-restart",
+      "category": "recovery",
+      "prompt": {
+        "zh-CN": "修复返回值，重开对话后保留已完成编辑。",
+        "en": "Fix the return value; preserve the successful edit when the conversation reopens."
+      },
+      "files": {
+        "solution.py": "def result():\n    return 1\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "def result():\n    return 1\n",
+            "new_string": "def result():\n    return 2\n"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "result()",
+          "expected": 2
+        }
+      ],
+      "scenario": "restart",
+      "reference_files": {
+        "solution.py": "def result():\n    return 2\n"
+      }
+    },
+    {
+      "id": "recovery-stale",
+      "category": "recovery",
+      "prompt": {
+        "zh-CN": "外部编辑后重新读取，再合并所需修改。",
+        "en": "After an external edit, reread and merge the requested change."
+      },
+      "files": {
+        "solution.py": "def result():\n    return 1\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "external_change": "# external edit\ndef result():\n    return 1\n",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "return 1",
+            "new_string": "return 2"
+          }
+        },
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "return 1",
+            "new_string": "return 2"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "result()",
+          "expected": 2
+        },
+        {
+          "expression": "open(\"solution.py\",encoding=\"utf-8\").read().startswith(\"# external edit\")",
+          "expected": true
+        }
+      ],
+      "scenario": "stale",
+      "reference_files": {
+        "solution.py": "# external edit\ndef result():\n    return 2\n"
+      }
+    },
+    {
+      "id": "recovery-unknown-write",
+      "category": "recovery",
+      "prompt": {
+        "zh-CN": "编辑结果保存中断后，核实文件，不重放已接受写入。",
+        "en": "After result persistence is interrupted, inspect the file and do not replay the accepted write."
+      },
+      "files": {
+        "solution.py": "def result():\n    return 1\n"
+      },
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "path": "solution.py"
+          }
+        },
+        {
+          "name": "edit",
+          "arguments": {
+            "path": "solution.py",
+            "old_string": "def result():\n    return 1\n",
+            "new_string": "def result():\n    return 2\n"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "expression": "result()",
+          "expected": 2
+        }
+      ],
+      "scenario": "unknown-write",
+      "reference_files": {
+        "solution.py": "def result():\n    return 2\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "C1": {
+    "verdict": "contradicted",
+    "source": "current.md"
+  },
+  "C2": {
+    "verdict": "unknown",
+    "source": "current.md"
+  },
+  "C3": {
+    "verdict": "contradicted",
+    "source": "current.md"
+  },
+  "C4": {
+    "verdict": "unknown",
+    "source": "field.md"
+  },
+  "C5": {
+    "verdict": "contradicted",
+    "source": "field.md"
+  },
+  "C6": {
+    "verdict": "unknown",
+    "source": "context.md"
+  }
+}

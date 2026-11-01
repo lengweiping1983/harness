@@ -1,0 +1,10 @@
+{
+  "title": "研究压力案例：版本冲突与推断边界",
+  "team": "evidence-review-review",
+  "required_members": [
+    "research",
+    "crosscheck",
+    "challenge"
+  ],
+  "prompt": "仅使用当前目录 context.md、old.md、current.md、field.md。禁止联网、执行命令和写文件。这是构造案例。请实际委派 research 与 crosscheck 分别核对版本适用性及推断边界，再让 challenge 接收两份原文检查分歧。最终输出一个 JSON 代码块：claims 数组逐条包含 id、verdict（supported/contradicted/unknown）、sources 数组（path 为相对文件名，quote 为逐字原文）；member_sources 数组列出三名成员的 member 与真实 agent_id。六条主张各出现一次。区分旧版事实、当前说明、局部观察及未提供的信息；不要用引用数量代替独立证据。主张：{\"C1\": \"K v2.4 不支持离线运行。\", \"C2\": \"K v2.4 在所有目标机器的并发上限恰好为 10。\", \"C3\": \"启用实验性恢复功能可以保证零数据丢失。\", \"C4\": \"20 个任务相比单任务具有更高吞吐量。\", \"C5\": \"现场的两篇介绍构成两份独立测量。\", \"C6\": \"用户可以接受故障后丢失最近一分钟数据。\"}"
+}
