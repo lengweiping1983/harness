@@ -408,6 +408,10 @@ export const ErrorBlock = memo(function ErrorBlock({ block, sessionId, readOnly 
   const original = block.messageCopy ? noticeText(block.messageCopy) : block.messageKey ? t(block.messageKey) : block.message
   const message = readOnly ? collaborationErrorMessage(block.code || 'run/error') : block.code ? collaborationErrorMessage(block.code, original) : original
   const failure = modelFailure(message, block.code)
+  const details = !readOnly && block.details && typeof block.details === 'object'
+    ? Object.fromEntries(Object.entries(block.details).filter(([key]) => key !== 'copy')) : null
+  const diagnostic = details && Object.keys(details).length ? JSON.stringify(details, null, 2) : null
+  const technicalDetails = <details className="mt-2 text-xs text-muted"><summary className="cursor-pointer">{t("ui.components.chat.blocks.MessageBlocks.c26fb419db3c")}</summary>{block.code && <p className="mt-1 font-mono">{block.code}</p>}{failure && <p className="mt-1 whitespace-pre-wrap break-words">{message}</p>}{diagnostic && <pre className="mt-1 whitespace-pre-wrap break-words font-mono leading-code">{diagnostic}</pre>}</details>
   return (
     <div className="animate-slide-up overflow-hidden rounded-lg border border-danger/30 bg-danger/8">
       <div className="flex items-center gap-2 border-b border-danger/20 px-2.5 py-1.5">
@@ -417,9 +421,10 @@ export const ErrorBlock = memo(function ErrorBlock({ block, sessionId, readOnly 
         </span>
         {block.turn != null || block.historical ? <span className="ml-auto text-xs text-muted">{block.turn != null ? t(block.historical ? 'ui.message.historicalFailureTurn' : 'ui.message.failureTurn', {turn: block.turn}) : t('ui.components.chat.blocks.MessageBlocks.590cdc817334')}</span> : null}
       </div>
-      {failure ? <div className="px-3 py-2 text-compact leading-5"><p>{failure.hint}</p><details className="mt-2 text-xs text-muted"><summary className="cursor-pointer">{t("ui.components.chat.blocks.MessageBlocks.c26fb419db3c")}</summary>{block.code && <p className="mt-1 font-mono">{block.code}</p>}<p className="mt-1 whitespace-pre-wrap break-words">{message}</p></details></div> : <pre className="overflow-x-auto px-3 py-2 font-mono text-xs leading-code whitespace-pre-wrap text-ink/85">
+      {failure ? <div className="px-3 py-2 text-compact leading-5"><p>{failure.hint}</p>{technicalDetails}</div> : <pre className="overflow-x-auto px-3 py-2 font-mono text-xs leading-code whitespace-pre-wrap text-ink/85">
         {message}
       </pre>}
+      {!failure && diagnostic ? <div className="px-3 pb-2">{technicalDetails}</div> : null}
       {!readOnly && (block.turn != null || block.historical) ? <div className="px-3 pb-2"><Button size="sm" variant="ghost" onClick={() => viewExecution(sessionId, block.turn)}>{t("ui.components.chat.blocks.MessageBlocks.3af0f63b3faa")}</Button></div> : null}
     </div>
   )

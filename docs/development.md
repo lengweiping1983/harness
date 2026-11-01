@@ -317,6 +317,8 @@ python -m venv .run/semantic-eval
 
 前端已存提示不保存创建时的产品翻译：目标续跑及中断提示保存资源键，审批记录保存决策、审核来源、原始原因和工具名，由 NoticeBlock 渲染时解析当前语言。原文提示继续保持原样。`noticeLanguage.test.ts` 与 `notice-language-smoke.mjs` 验证不重建 store blocks 的英文→中文→英文切换、嵌套审批翻译及原因原文，浏览器另覆盖明暗主题和窄宽屏。
 
+错误收敛回归覆盖 `AgentLoop` → `RunController` → 对话 store → `ErrorBlock`：带详情的 `HarnessError.__str__` 与 `to_dict()` 表达不同，不能用拼接文本判断同次失败。`test_turn_error_presentation.py` 核对模型请求、超时、资源错误、普通异常、步数及预算限制的实时帧、持久结束和运行回执；`test_turn_end_commit.py` 保留提交失败的单次尝试、原日志及结构化诊断断言。`errorConvergence.test.tsx` 覆盖模型请求／超时／响应／上下文、限制、持久化及普通错误的正反事件顺序、重复帧、历史恢复、持久位置、技术详情、访客隔离与英中英呈现，并确认不同轮次、代码、正文及详情的失败不被合并。组件静态渲染不代表浏览器主题、尺寸或交互验收。
+
 工具中断和未知错误的前端兜底保留资源键，工具收到真实终态后清除临时兜底身份；原始输出不按内容猜测语言。历史分页保存资源型错误或原始错误文本，传输层为自有超时、取消、网络及协议错误保留资源键和原始参数，展示时重新解析。`fallbackLanguage.test.ts`、HTTP回归和 `fallback-language-smoke.mjs` 覆盖迟到终态替换、原文保持、分页失败不重发及同一状态反复切换语言；浏览器使用真实 ToolBlock/ErrorBlock，覆盖双主题与窄宽屏。
 
 `tests/test_prompt_source_identity.py` 验证自定义命名片段即使与产品资源原文完全相同也不被翻译、基础提示与 MCP 自有标题按装配语言解析、外部正文与路径不变；MCP 说明的新增、替换和移除走真实提示词装配，提供有值的语言、目录和对话变量，核对服务器模板示例逐字保留及宿主标题英中英切换，不连接远端 MCP 服务。它还通过真实 Harness 队列验证排队目标续跑按实际执行语言读取资源。`test_policy_resource_identity.py` 在禁止反向翻译的条件下验证内置策略、摘要和检索引导。

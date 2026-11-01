@@ -3,6 +3,14 @@ import type { ErrorBlock, ResourceCopy, SessionEvent, SessionMessage, TurnBlock 
 
 export type TurnOutcomeBlock = ErrorBlock | TurnBlock
 
+/** 只合并同轮、同码及完整诊断一致的错误，不按标题或前缀近似匹配。 */
+export function sameTurnFailure(left: ErrorBlock, right: ErrorBlock): boolean {
+  if (left.turn !== right.turn || left.code !== right.code || left.messageKey !== right.messageKey) return false
+  if (left.details !== undefined && right.details !== undefined && JSON.stringify(left.details) !== JSON.stringify(right.details)) return false
+  return left.message === right.message || left.code !== undefined &&
+    (left.message === `[${left.code}] ${right.message}` || right.message === `[${left.code}] ${left.message}`)
+}
+
 const OUTCOMES: Record<string, { title: string; hint: string }> = {
   aborted: { get title() { return t("ui.components.chat.blocks.MessageBlocks.f006455e3baf") }, get hint() { return t("ui.lib.turnOutcome.cb158d172dfa") } },
   interrupted: { get title() { return t("ui.lib.turnOutcome.3cd1e27e45c8") }, get hint() { return t("ui.lib.turnOutcome.134c08d88971") } },
@@ -31,11 +39,12 @@ export function turnFailure(data: Record<string, unknown>, id: string, at: numbe
   const reason = data.reason
   const terminal = reason && typeof reason === 'object' ? reason as Record<string, unknown> : null
   if ((terminal?.kind ?? reason) !== 'error') return null
-  const error = terminal?.error && typeof terminal.error === 'object' ? terminal.error as Record<string, unknown> : null
+  const error = terminal?.error && typeof terminal.error === 'object' ? terminal.error as Record<string, unknown>
+    : typeof data.message === 'string' ? data : null
   const message = [error?.message, terminal?.message, data.error].find((value) => typeof value === 'string' && value.trim()) as string | undefined
   const text = message ?? ''
   const code = typeof error?.code === 'string' ? error.code : /^\[([^\]]+)\]/.exec(text)?.[1]
-  return { id, kind: 'error', at, message: text, messageCopy: runErrorCopy(error), messageKey: message == null ? 'ui.lib.turnOutcome.ac8aaa680b6c' : undefined, code, turn: typeof data.turn === 'number' ? data.turn : undefined }
+  return { id, kind: 'error', at, message: text, details: error?.details, messageCopy: runErrorCopy(error), messageKey: message == null ? 'ui.lib.turnOutcome.ac8aaa680b6c' : undefined, code, turn: typeof data.turn === 'number' ? data.turn : undefined }
 }
 
 export function turnOutcome(data: Record<string, unknown>, id: string, at: number): TurnOutcomeBlock | null {

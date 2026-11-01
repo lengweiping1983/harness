@@ -674,6 +674,7 @@ export interface NoticeBlock extends BlockBase { kind: 'notice'; text: NoticeTex
 export interface ErrorBlock extends BlockBase {
   kind: 'error'
   message: string
+  details?: unknown
   messageCopy?: ResourceCopy
   messageKey?: string
   code?: string
