@@ -7194,6 +7194,7 @@
   "desktop.release.electronMissing": "Electron 发行资源缺失：{path}。请先运行 node desktop/node_modules/electron/install.js（需要本地 zip 缓存或网络）。",
   "desktop.release.runtimeCount": "托管 Python 运行时必须且只能有一个，请使用全新的构建目录。",
   "desktop.release.runtimeMismatch": "托管 Python 与当前原生构建平台、架构或版本不匹配。",
+  "desktop.release.pythonInstallHelp": "CPython 3.14.10 引导失败，尚未开始准备 Electron。下载清单与 SHA-256 已固定在 desktop/python-downloads.json。请核对 uv 原始错误；网络受限时，可将 UV_PYTHON_INSTALL_MIRROR 设为授权镜像或存有固定压缩包的 file:// 目录。--no-registry 仅禁止写入 Windows 注册表。详见 desktop/README.md。",
   "desktop.release.staged": "桌面运行时已暂存到 {path}。",
   "desktop.release.skillsMissing": "内置技能目录缺失，请运行 package:prepare。",
   "desktop.release.bundleMismatch": "内置运行时与 {platform}/{arch}/{version} 不匹配，请在目标操作系统及架构上运行 package:prepare。",

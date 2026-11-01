@@ -19,6 +19,7 @@ from harness.llm.types import ToolUseBlock
 from harness.app.memory_semantic import LocalMemoryCandidates
 from harness.app.memory_semantic_worker import SemanticWorker
 from harness.core.errors import HarnessError
+from harness.core.language import current_language
 from tests.web_fixture import FixtureTransport
 
 
@@ -179,6 +180,41 @@ class SemanticWorkerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, re.escape(tr('python.memory.semantic.identity'))):
             await worker.search(self.store, self.root, 'wrong identity')
         self.assertIsNone(worker._process)
+
+    async def test_crash_diagnostic_waits_for_owned_log_drain_before_reporting(self):
+        """启动或请求崩溃先于日志读取时，错误仍须包含原始诊断。"""
+        for startup in (True, False):
+            with self.subTest(startup=startup):
+                worker = FixtureWorker(self.root)
+                self.addAsyncCleanup(worker.aclose)
+                diagnostic = 'native diagnostic 原始诊断'
+                script = (f'import sys;sys.stderr.write({diagnostic!r});sys.stderr.flush()'
+                          if startup else SCRIPT.replace("os._exit(17)",
+                              f"(sys.stderr.write({diagnostic!r}), sys.stderr.flush(), os._exit(17))"))
+                argv = worker._argv
+                worker._argv = lambda port: [*argv(port)[:2], script, *argv(port)[3:]]
+                release = asyncio.Event()
+                drain, dispose = worker._drain, worker._dispose
+
+                async def delayed_drain(stream):
+                    await release.wait()
+                    await drain(stream)
+
+                async def dispose_and_release():
+                    release.set()
+                    await dispose()
+
+                with patch.object(worker, '_drain', side_effect=delayed_drain), \
+                     patch.object(worker, '_dispose', side_effect=dispose_and_release):
+                    for language in ('en', 'zh-CN', 'en'):
+                        with self.subTest(language=language), current_language.set(language):
+                            release.clear()
+                            with self.assertRaises(HarnessError) as error:
+                                await asyncio.wait_for(worker.search(self.store, self.root, 'exit query'), 10)
+                            self.assertEqual(error.exception.code, 'memory/semantic-worker')
+                            self.assertEqual(error.exception.message,
+                                             tr('python.memory.semantic.exited', detail=diagnostic))
+                            self.assertIsNone(worker._process)
 
     async def test_valid_snapshot_error_preserves_warm_process_and_next_session(self):
         worker = FixtureWorker(self.root)

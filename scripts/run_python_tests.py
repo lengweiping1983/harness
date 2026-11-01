@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
+from functools import partial
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -12,6 +15,38 @@ import traceback
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+class DiagnosticTestResult(unittest.TextTestResult):
+    """按单个用例重置堆栈诊断，健康的长模块不受总时长误判。"""
+
+    def __init__(self, *args, traceback_timeout=120, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.traceback_timeout = traceback_timeout
+        self._module = None
+
+    def startTest(self, test):
+        module = test.__class__.__module__
+        if module != self._module:
+            self.stream.writeln(f'\nPython 模块：{module}')
+            self.stream.flush()
+            self._module = module
+        super().startTest(test)
+        faulthandler.dump_traceback_later(self.traceback_timeout, repeat=True, file=self.stream)
+
+    def stopTest(self, test):
+        try:
+            faulthandler.cancel_dump_traceback_later()
+        finally:
+            super().stopTest(test)
+
+
+def positive_seconds(value: str) -> float:
+    """拒绝无效诊断间隔，不能静默禁用长等待的堆栈证据。"""
+    seconds = float(value)
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise argparse.ArgumentTypeError('堆栈诊断间隔必须是有限正数')
+    return seconds
 
 
 def check_environment() -> None:
@@ -43,6 +78,8 @@ def main() -> int:
     """发现配置失效或没有用例时明确失败，避免静默跳过回归。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('-v', '--verbose', action='store_true')
+    parser.add_argument('--traceback-timeout', type=positive_seconds, default=120,
+                        help='单个用例超过此秒数后重复输出全部线程堆栈；不终止或跳过用例（默认 120）')
     args = parser.parse_args()
     print('Python 验证环境：' + json.dumps(environment_identity(), ensure_ascii=False), flush=True)
     try:
@@ -53,10 +90,16 @@ def main() -> int:
         return 1
     sys.path.insert(0, str(ROOT))
     suite = unittest.defaultTestLoader.discover(str(ROOT / 'tests'), top_level_dir=str(ROOT))
-    if suite.countTestCases() == 0:
+    count = suite.countTestCases()
+    if count == 0:
         print('Python 测试发现失败：没有注册用例', file=sys.stderr)
         return 1
-    result = unittest.TextTestRunner(verbosity=2 if args.verbose else 1).run(suite)
+    print(f'Python 测试发现：{count} 个用例；长等待堆栈间隔：{args.traceback_timeout:g} 秒', flush=True)
+    try:
+        result = unittest.TextTestRunner(verbosity=2 if args.verbose else 1, durations=10,
+            resultclass=partial(DiagnosticTestResult, traceback_timeout=args.traceback_timeout)).run(suite)
+    finally:
+        faulthandler.cancel_dump_traceback_later()
     return 0 if result.wasSuccessful() else 1
 
 

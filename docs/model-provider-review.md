@@ -64,6 +64,7 @@
 
 ## 已修正问题与回归
 
+- 本地语义 worker 在启动退出或响应 EOF 时，`memory_semantic_worker.SemanticWorker` 原先立即调用 `_failure()`，异步 `_drain` 可能尚未读到 stderr；随后 `search` 虽执行 `_dispose`，对外错误已冻结为空诊断。现先等待所属进程和日志收尾，再构造同一 `memory/semantic-worker` 错误。`test_crash_diagnostic_waits_for_owned_log_drain_before_reporting` 用日志释放屏障覆盖启动和请求阶段，核对原始中文诊断、错误码及进程释放；相同回归对修改前实现的两个阶段均失败。这说明诊断丢失已修复，不能据此将未复现的历史子进程退出归为某个环境原因。服务生命周期规则见 [扩展机制](extensions.md#可选本地语义记忆候选)。
 - Key 池构造原先直接调用 `_load()`，后续入口才由 `_transaction` 取得旁路锁，首次读取可能与另一实例的 `Path.replace` 发布竞争。构造现使用同一 `state_lock`；`test_key_pool_transactions.py` 以发布与读取屏障验证构造不能提前读取，并保留跨进程失败标记合并和保存失败后的重试。原先各处 Windows 锁适配在加锁前为初始空文件写占位字节，多个首次调用可在未取得锁时争用该字节；当前统一由 `core/file_lock.py` 直接锁定空区域，`test_file_lock_resources.py` 核对空文件互斥、跨进程竞争、原字节保持及释放后重入。产品规则见 [存储](storage.md)。
 - 目录总截止时间回归原先用 0.3 秒同时约束解释器启动与 HTTP 持续响应，Windows 尚未发送请求就可能到期，不能据此认定网络回收失败。`test_catalog_total_deadline.py` 分别使用受控未就绪读取进程与真实持续响应，核对启动阶段超时仍回收进程、请求确实进入、总预算不被活动延长、重复取消等待所属收尾和仅一次请求。产品 `catalog_fetch.read_catalog` 的总预算继续覆盖辅助进程启动与读取，不改为单次网络无活动超时。
 

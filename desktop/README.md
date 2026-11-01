@@ -56,7 +56,7 @@ npm --prefix desktop test
 
 安装版内置 CPython 3.14.10、锁定依赖、内置技能和前端，无需用户安装 Python、Node.js 或 npm；Git 与用户项目所需 SDK 由项目环境提供。应用更新不清理或迁移会话、凭据及用户设置。
 
-构建要求 Node.js 22+、npm、uv 0.13.6，并在目标系统和目标 CPU 架构上执行；该 uv 版本的运行时目录包含固定的 CPython 3.14.10：
+构建要求 Node.js 22+、npm、uv，并在目标系统和目标 CPU 架构上执行；保留的手动构建工作流使用 uv 0.13.6，本机 uv 0.11.5 也可读取仓库固定的下载清单，不依赖其内置目录是否包含 CPython 3.14.10：
 
 ```sh
 npm --prefix model-runtime ci
@@ -64,6 +64,17 @@ npm --prefix web ci
 npm --prefix desktop ci
 npm --prefix desktop run package
 ```
+
+Python 引导显式使用 `desktop/python-downloads.json`，固定 CPython 3.14.10、20261026 构建的下载地址与 SHA-256，来源为 [uv 0.13.6 上游清单](https://github.com/astral-sh/uv/blob/0.13.6/crates/uv-python-managed/download-metadata.json)中的 macOS／Windows arm64 和 x64 普通构建。升级运行时时同步更新清单、准备脚本、运行时元数据及回归。引导和平台／架构／版本检查在 Electron 准备前完成，失败保留 uv 原始错误并输出当前语言的处理指引，不降级 Python、不自动升级 uv。`--no-bin` 禁止安装全局命令，`--no-registry` 只禁止写入 Windows 注册表，与 Python 包索引或下载目录无关。
+
+网络受限时使用 uv 的标准 `UV_PYTHON_INSTALL_MIRROR` 设置授权镜像；它替换清单中的 GitHub release 下载前缀，保持日期子目录和文件名，仍按固定 SHA-256 校验。也可将镜像设为 `file://` 目录，预先放入对应平台的原始压缩包，例如本地目录的 `20261026/cpython-3.14.10+20261026-x86_64-pc-windows-msvc-install_only_stripped.tar.gz`。在 PowerShell 中设置后运行同一个打包入口：
+
+```powershell
+$env:UV_PYTHON_INSTALL_MIRROR = 'file:///D:/build-cache/python'
+npm --prefix desktop run package
+```
+
+该本地目录只替代 CPython 下载；Electron 和 Python 依赖仍需要各自的缓存或可用网络。清单由脚本参数指定，不使用继承的 `UV_PYTHON_DOWNLOADS_JSON_URL` 改写发行版本或哈希。镜像与 `file://` 规则见 [uv Python 下载说明](https://docs.astral.sh/uv/reference/cli/#uv-python-install)。
 
 产物位于 `.run/installers`：Windows x64 为 NSIS `.exe`；macOS arm64／x64 为 `.dmg`、更新用 `.zip`、blockmap 及 `latest-mac.yml`。准备阶段显式安装锁定版本的 Electron，构建复用已安装分发，不重复请求同一 Electron 压缩包。构建前校验运行时系统、CPU 和版本，不支持把 arm64 Python 放进 x64 安装包。仅准备应用可运行 `npm --prefix desktop run package:prepare` 和 `npm --prefix desktop run package:dir`。无签名凭据的本机开发构建可设置 `CSC_IDENTITY_AUTO_DISCOVERY=false`。
 
