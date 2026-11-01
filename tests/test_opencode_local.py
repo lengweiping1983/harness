@@ -410,9 +410,117 @@ class OpenCodeLocalTests(unittest.IsolatedAsyncioTestCase):
                             async for _ in transport.post_stream(BASE_URL+'/chat/completions',
                                     headers={'Authorization':'Bearer public'}, body=b'{}', timeout=2):pass
                         self.assertEqual(error.exception.code, 'llm/opencode-local-runtime')
-                        self.assertEqual(error.exception.message, tr('llm.opencode_local.runtime_failed'))
+                        self.assertEqual(error.exception.message, tr('ui.llm.opencodeLocalRuntimeFailed'))
                     script = 'import sys;sys.stdin.read();sys.stdout.buffer.write('+repr(metadata+b'\n')+');sys.stdout.flush()'
                     await self.run_child(script, consume)
+
+    async def test_network_failure_before_content_retries_through_real_adapter(self):
+        """无内容的瞬时断流可重试，成功工具调用仅交付一次。"""
+        counter = Path(self.directory.name)/'attempts'
+        diagnostic = json.dumps({'failure':'network', 'phase':'connect', 'network_error':'ConnectionResetError'})
+        success = b'{"status":200}\ndata: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_fixture","function":{"name":"fixture","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n'
+        script = ('import pathlib,sys;sys.stdin.read();'
+                  f'p=pathlib.Path({str(counter)!r});n=int(p.read_text()) if p.exists() else 0;p.write_text(str(n+1));'
+                  f'sys.stderr.write({diagnostic!r}) if n==0 else sys.stdout.buffer.write({success!r});'
+                  'sys.exit(1 if n==0 else 0)')
+        async def consume(transport):
+            adapter = OpenRouterAdapter('public', base_url=BASE_URL, transport=transport,
+                max_retries=1, retry_base_delay=0)
+            events = [event async for event in adapter.stream([UserMessage('hello')])]
+            calls = [event.tool_use for event in events if event.kind == 'tool_use']
+            self.assertEqual([(call.id, call.name, call.input) for call in calls], [('call_fixture','fixture',{})])
+            self.assertEqual(events[-1].kind, 'done')
+            self.assertEqual(counter.read_text(), '2')
+        await self.run_child(script, consume)
+
+    async def test_partial_network_failure_does_not_replay_or_deliver_incomplete_tool(self):
+        """已交付正文后禁止原请求重放，不把未完整的工具参数交给执行器。"""
+        counter = Path(self.directory.name)/'attempts'
+        diagnostic = json.dumps({'failure':'network', 'phase':'read', 'network_error':'ConnectionResetError'})
+        partial = b'{"status":200}\ndata: {"choices":[{"delta":{"content":"kept","tool_calls":[{"index":0,"id":"call_partial","function":{"name":"fixture","arguments":"{"}}]}}]}\n\n'
+        script = ('import pathlib,sys;sys.stdin.read();'
+                  f'p=pathlib.Path({str(counter)!r});p.write_text(p.read_text()+"x" if p.exists() else "x");'
+                  f'sys.stdout.buffer.write({partial!r});sys.stdout.flush();sys.stderr.write({diagnostic!r});sys.exit(1)')
+        async def consume(transport):
+            adapter = OpenRouterAdapter('public', base_url=BASE_URL, transport=transport, max_retries=2)
+            events = []
+            with self.assertRaises(LlmError) as caught:
+                async for event in adapter.stream([UserMessage('hello')]):events.append(event)
+            self.assertTrue(caught.exception.transient)
+            self.assertTrue(caught.exception.details['partial_output'])
+            self.assertEqual(caught.exception.details['attempts'], 1)
+            self.assertEqual(caught.exception.details['network_error'], 'ConnectionResetError')
+            self.assertEqual(''.join(event.text for event in events if event.kind == 'text'), 'kept')
+            self.assertFalse(any(event.kind in ('tool_use','done') for event in events))
+            self.assertEqual(counter.read_text(), 'x')
+        await self.run_child(script, consume)
+
+    async def test_idle_timeout_diagnostic_localizes_and_preserves_trace_fields(self):
+        """同一传输的英中英错误消费保留资源身份、阶段和实际配置秒数。"""
+        from harness.i18n import tr
+        from harness.llm.failure_diagnostics import failure_diagnostics
+        record = json.dumps({'failure':'idle_timeout', 'phase':'read', 'network_error':None})
+        async def consume(transport):
+            for language in ('en', 'zh-CN', 'en'):
+                with current_language.set(language):
+                    with self.assertRaises(LlmError) as caught:
+                        async for _ in transport.post_stream(BASE_URL+'/chat/completions',
+                                headers={'Authorization':'Bearer public'}, body=b'{}', timeout=2):pass
+                    error = caught.exception
+                    self.assertEqual(error.message, tr('ui.llm.opencodeLocalIdleTimeout', seconds=2))
+                    self.assertEqual(error.details['copy'], {'key':'ui.llm.opencodeLocalIdleTimeout','params':{'seconds':2}})
+                    self.assertEqual(failure_diagnostics(error)['phase'], 'read')
+                    self.assertEqual(failure_diagnostics(error)['seconds'], 2)
+                    self.assertTrue(error.transient)
+        await self.run_child('import sys;sys.stdin.read();print(\'{"status":200}\',flush=True);'
+                             f'sys.stderr.write({record!r});sys.exit(1)', consume)
+
+    async def test_oversized_and_invalid_diagnostics_are_drained_without_retry_or_text_leak(self):
+        """错误管道超过容量仍排空回收，不将第三方原文或歧义JSON纳入诊断。"""
+        records = ["'private'*40000", repr('{"failure":"network","failure":"runtime"}'),
+                   repr('{"failure":"network","phase":"connect","network_error":"secret"}')]
+        for record in records:
+            async def consume(transport):
+                with self.assertRaises(LlmError) as caught:
+                    async for _ in transport.post_stream(BASE_URL+'/chat/completions',
+                            headers={'Authorization':'Bearer public'}, body=b'{}', timeout=2):pass
+                self.assertFalse(caught.exception.transient)
+                self.assertNotIn('private', str(caught.exception))
+                self.assertNotIn('secret', str(caught.exception))
+            await self.run_child('import sys;sys.stdin.read();'
+                                 f'sys.stderr.write({record});sys.exit(1)', consume)
+
+    async def test_unknown_nonzero_exit_remains_terminal_and_keeps_bounded_trace_fields(self):
+        """未知退出不能因可重试优化而重放，追踪只保存确认的数字证据。"""
+        from harness.llm.failure_diagnostics import failure_diagnostics
+        async def consume(transport):
+            with self.assertRaises(LlmError) as caught:
+                async for _ in transport.post_stream(BASE_URL+'/chat/completions',
+                        headers={'Authorization':'Bearer public'}, body=b'{}', timeout=2):pass
+            error = caught.exception
+            self.assertFalse(error.transient)
+            self.assertEqual(error.details['runtime_exit_code'], 7)
+            self.assertEqual(error.details['response_bytes'], 1)
+            self.assertEqual(error.details['copy']['key'], 'ui.llm.opencodeLocalRuntimeExit')
+            self.assertEqual(failure_diagnostics(error), {'phase':'read','runtime_exit_code':7,
+                'response_bytes':1,'transient':False})
+        await self.run_child('import sys;sys.stdin.read();print(\'{"status":200}\',flush=True);'
+                             'sys.stdout.write("x");sys.stdout.flush();sys.exit(7)',consume)
+
+    async def test_spawn_failure_reports_localized_start_guidance_without_retry(self):
+        """启动失败与网络中断区分，保留当前语言资源身份。"""
+        from harness.i18n import tr
+        transport = self.transport()
+        with patch('harness.llm.opencode_local.asyncio.create_subprocess_exec', side_effect=OSError('private path')):
+            for language in ('en','zh-CN','en'):
+                with current_language.set(language):
+                    with self.assertRaises(LlmError) as caught:
+                        async for _ in transport.post_stream(BASE_URL+'/chat/completions',
+                                headers={'Authorization':'Bearer public'},body=b'{}',timeout=2):pass
+                    self.assertEqual(caught.exception.message, tr('ui.llm.opencodeLocalStartFailed'))
+                    self.assertFalse(caught.exception.transient)
+                    self.assertEqual(caught.exception.details['copy'], {'key':'ui.llm.opencodeLocalStartFailed'})
+                    self.assertNotIn('private',str(caught.exception))
 
     async def test_malformed_helper_output_fails_without_retry(self):
         async def consume(transport):

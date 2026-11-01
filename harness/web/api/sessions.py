@@ -76,10 +76,10 @@ def build_router(ctx: Any) -> Router:
         if selection is not None and (not isinstance(selection, str) or not selection.strip()):
             raise BadRequest(tr('python.plugins.81af4a868780'), code='agent/invalid-selection')
         request_id = request.header('X-Request-ID')
-        session = ctx.harness.create_session(
-            cwd=cwd, title=payload.get("title"),
-            **({'metadata': {'creation_request_id': request_id, 'creation_completed': False}} if request_id else {}),
-        )
+        metadata = {} if payload.get('title') else {'auto_title': 'awaiting'}
+        if request_id:
+            metadata.update(creation_request_id=request_id, creation_completed=False)
+        session = ctx.harness.create_session(cwd=cwd, title=payload.get("title"), metadata=metadata)
         # 新建时就把模型定死，省掉"建完会话再切一次模型"这一步。
         model = str(payload.get("model") or "").strip()
         if model:

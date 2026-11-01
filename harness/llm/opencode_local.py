@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 import tempfile
 
-from ..core.cleanup import join_cleanup
+from ..core.cleanup import join_cleanup, raise_cleanup_errors
 from ..core.errors import LlmError
 from ..core.language import current_language
 from ..i18n import tr
@@ -26,6 +26,7 @@ from ..tools.processes import stop_process
 
 BASE_URL = 'https://opencode.ai/inference/openai/v1'
 MAX_PROFILE_BYTES = 1024 * 1024
+MAX_RUNTIME_DIAGNOSTIC_BYTES = 4096
 # CLI退出后保留监督进程，宿主回收进程树前不丢失后代归属。
 _BOOTSTRAP_SUPERVISOR = r"""
 import json,subprocess,sys,time
@@ -44,6 +45,57 @@ async def _stop_stream_process(process):
         except ProcessLookupError:
             pass
     await process.wait()
+
+
+async def _runtime_diagnostic(stream):
+    """持续排空错误管道，仅保留有界前缀，避免阻塞或无界保存诊断。"""
+    prefix = bytearray()
+    while chunk := await stream.read(4096):
+        prefix.extend(chunk[:max(0, MAX_RUNTIME_DIAGNOSTIC_BYTES + 1 - len(prefix))])
+    return bytes(prefix)
+
+
+async def _finish_stream_process(process, diagnostic):
+    """逐项完成进程与错误管道收尾，保留全部原始失败。"""
+    errors = []
+    for operation in (_stop_stream_process(process), diagnostic):
+        try:
+            await operation
+        except BaseException as exc:
+            errors.append(exc)
+    raise_cleanup_errors(errors)
+
+
+def _runtime_failure(raw, *, phase, returncode, received, timeout, cause):
+    """仅信任当前辅助协议的固定枚举，未知退出不得猜测为可重试。"""
+    details = {'phase': phase, 'runtime_exit_code': returncode, 'response_bytes': received}
+    key, params, transient = 'ui.llm.opencodeLocalRuntimeFailed', {}, False
+    failure = None
+    try:
+        if len(raw) > MAX_RUNTIME_DIAGNOSTIC_BYTES:
+            raise ValueError
+        record = json.loads(raw.decode('utf-8'), object_pairs_hook=_unique_fields)
+        if (not isinstance(record, dict) or set(record) != {'failure', 'phase', 'network_error'}
+                or record['phase'] not in ('connect', 'read')
+                or record['failure'] not in ('idle_timeout', 'network', 'runtime')
+                or record['network_error'] not in (None, 'ConnectionResetError', 'ConnectionRefusedError',
+                    'BrokenPipeError', 'TimeoutError', 'gaierror')):
+            raise ValueError
+        failure = record['failure']
+        details.update(phase=record['phase'])
+        if record['network_error'] is not None:
+            details['network_error'] = record['network_error']
+    except (ValueError, TypeError, RecursionError):
+        pass
+    if isinstance(cause, TimeoutError) or failure == 'idle_timeout':
+        key, params, transient = 'ui.llm.opencodeLocalIdleTimeout', {'seconds': timeout}, True
+        details['seconds'] = timeout
+    elif failure == 'network' and details.get('network_error'):
+        key, transient = 'ui.llm.opencodeLocalNetworkFailed', True
+    elif returncode is not None and returncode != 0:
+        key, params = 'ui.llm.opencodeLocalRuntimeExit', {'exit_code': returncode}
+    details['copy'] = {'key': key, 'params': params}
+    return LlmError(tr(key, **params), code='llm/opencode-local-runtime', transient=transient, **details)
 
 
 async def _start_process(*args, stop, start_timeout, **kwargs):
@@ -210,9 +262,13 @@ class OpenCodeLocalTransport(Transport):
             process = await _start_process(str(self.executable),
                 str(Path(__file__).with_suffix('.mjs')), stop=_stop_stream_process, start_timeout=min(60, timeout + 5),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL, env=env)
+                stderr=asyncio.subprocess.PIPE, env=env)
         except (OSError, TimeoutError):
-            raise LlmError(tr('llm.opencode_local.runtime_failed'), code='llm/opencode-local-runtime') from None
+            key = 'ui.llm.opencodeLocalStartFailed'
+            raise LlmError(tr(key), code='llm/opencode-local-runtime', phase='connect', copy={'key': key}) from None
+        diagnostic = asyncio.create_task(_runtime_diagnostic(process.stderr))
+        cleanup = None
+        phase, received = 'connect', 0
         try:
             process.stdin.write(payload)
             await asyncio.wait_for(process.stdin.drain(), timeout=timeout + 5)
@@ -242,14 +298,22 @@ class OpenCodeLocalTransport(Transport):
                 raise LlmError(tr('llm.opencode_local.http_failed', status=status, reason=error),
                     status=status, transient=status == 429 or status >= 500,
                     retry_after=cooldown)
+            phase = 'read'
             while chunk := await asyncio.wait_for(process.stdout.read(65536), timeout=timeout + 5):
+                received += len(chunk)
                 yield chunk
             if await asyncio.wait_for(process.wait(), timeout=timeout + 5) != 0:
                 raise ValueError
-        except (TimeoutError, ValueError, KeyError, TypeError, OSError, RecursionError):
-            raise LlmError(tr('llm.opencode_local.runtime_failed'), code='llm/opencode-local-runtime') from None
+        except (TimeoutError, ValueError, KeyError, TypeError, OSError, RecursionError) as exc:
+            returncode = process.returncode
+            cleanup = asyncio.create_task(_finish_stream_process(process, diagnostic))
+            await join_cleanup(cleanup)
+            raise _runtime_failure(diagnostic.result(), phase=phase, returncode=returncode,
+                received=received, timeout=timeout, cause=exc) from exc
         finally:
-            await join_cleanup(asyncio.create_task(_stop_stream_process(process)))
+            if cleanup is None:
+                cleanup = asyncio.create_task(_finish_stream_process(process, diagnostic))
+            await join_cleanup(cleanup)
 
 
 async def bootstrap_profile(executable: Path, destination: Path) -> None:

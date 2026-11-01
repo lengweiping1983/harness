@@ -96,7 +96,6 @@ export function ProjectSidebar() {
   const setQuery = useAppStore((s) => s.setSessionQuery)
 
   const select = useAppStore((s) => s.selectSession)
-  const selectWorkspace = useAppStore((s) => s.selectWorkspace)
   const create = useAppStore((s) => s.startNewSession)
   const refreshSessions = useAppStore((s) => s.refreshSessions)
   const refreshWorkspaces = useAppStore((s) => s.refreshWorkspaces)
@@ -283,7 +282,6 @@ export function ProjectSidebar() {
               onToggleExpanded={toggleExpanded}
               onOpenMenu={openMenu}
               onSelect={select}
-              onSelectWorkspace={selectWorkspace}
               onCreate={showArchived ? undefined : create}
             />
           ))
@@ -339,7 +337,6 @@ interface GroupSectionProps {
   onToggleExpanded: (key: string) => void
   onOpenMenu: (event: MenuEvent, id: string) => void
   onSelect: (id: string) => void
-  onSelectWorkspace: (id: string | null) => void
   onCreate?: (workspaceId?: string | null) => void
 }
 
@@ -357,7 +354,6 @@ function GroupSection(props: GroupSectionProps) {
     onToggleExpanded,
     onOpenMenu,
     onSelect,
-    onSelectWorkspace,
     onCreate,
   } = props
 
@@ -411,15 +407,6 @@ function GroupSection(props: GroupSectionProps) {
           <MoreHorizontal className="h-3.5 w-3.5" />
         </IconButton>
       </div>
-
-      {/* 选中项目 = 决定"新会话建在哪"。点组头空白处即选中，比另设一个按钮更直觉。 */}
-      {onCreate && group.workspaceId && group.workspaceId !== activeWorkspaceId && !group.collapsed ? (
-        <button
-          type="button"
-          onClick={() => onSelectWorkspace(group.workspaceId)}
-          className="ml-6 inline-block text-2xs text-brand/80 hover:underline sm:opacity-0 sm:group-hover/project:opacity-100 sm:group-focus-within/project:opacity-100 focus-visible:opacity-100"
-        >{t("ui.components.sidebar.ProjectSidebar.828821b2341d")}</button>
-      ) : null}
 
       {group.collapsed ? null : (
         <div className="mt-0.5 space-y-px">

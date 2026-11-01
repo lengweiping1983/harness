@@ -136,7 +136,7 @@ it('freezes Agent and execution mode before awaiting a default save and preserve
   useDraftStore.getState().setExecutionMode('__unsaved__', 'goal')
   response.resolve(saved('high')); await save
   expect(await creation).toBe(true)
-  expect(create).toHaveBeenCalledExactlyOnceWith({title: 'Original', agent_selection: 'original'}, expect.any(String))
+  expect(create).toHaveBeenCalledExactlyOnceWith({agent_selection: 'original'}, expect.any(String))
   expect(useDraftStore.getState().bySession.__unsaved__).toMatchObject({agentSelection: {name: 'later'}, executionMode: 'goal'})
 })
 

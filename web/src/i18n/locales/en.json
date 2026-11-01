@@ -1608,7 +1608,6 @@
   "ui.components.sidebar.ProjectSidebar.8715fe9d17c9": "Add a project directory first, then start a conversation inside it.",
   "ui.components.sidebar.ProjectSidebar.df3d58c7d84b": "Settings",
   "ui.components.sidebar.ProjectSidebar.ef430e30fb08": "Project menu",
-  "ui.components.sidebar.ProjectSidebar.828821b2341d": "Set as the current project",
   "ui.components.sidebar.ProjectSidebar.e5fc62fa56e3": "+ Create a new conversation here",
   "ui.components.sidebar.ProjectSidebar.afd4b783536b": "Collapse",
   "ui.components.sidebar.ProjectSidebar.a91ae6035092": "Untitled conversation",
@@ -4727,5 +4726,10 @@
   "ui.widget.runtimeError": "The visualization reported a runtime error. Its source is preserved.",
   "ui.widget.restart": "Run again",
   "ui.widget.resourceFailed": "A script or resource could not be loaded.",
-  "ui.widget.initializing": "Initializing interactive preview"
+  "ui.widget.initializing": "Initializing interactive preview",
+  "ui.llm.opencodeLocalRuntimeFailed": "The local OpenCode runtime returned an invalid or incomplete response. The request has ended; completed tool actions are preserved. Check the runtime diagnostics before continuing.",
+  "ui.llm.opencodeLocalIdleTimeout": "The local OpenCode model connection received no response data for {seconds} seconds. The request has ended; completed tool actions are preserved.",
+  "ui.llm.opencodeLocalNetworkFailed": "The local OpenCode model connection was interrupted. The request has ended; completed tool actions are preserved.",
+  "ui.llm.opencodeLocalRuntimeExit": "The local OpenCode runtime exited abnormally (exit code {exit_code}). Response completeness could not be confirmed; completed tool actions are preserved.",
+  "ui.llm.opencodeLocalStartFailed": "Could not start the local OpenCode runtime. Check that the configured executable is available and can run with Bun enabled."
 }

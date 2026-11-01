@@ -143,7 +143,7 @@ body {
   outline-offset: -2px;
   box-shadow: none;
 }
-.ui-input-group input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus { outline: none; box-shadow: none; }
+.ui-input-group :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea):focus { outline: none; box-shadow: none; }
 .ui-field:disabled { @apply cursor-not-allowed opacity-50; }
 .ui-section-title { @apply text-base font-semibold leading-6 text-ink; }
 .ui-group-title { @apply text-xs font-semibold leading-5 text-muted; }
