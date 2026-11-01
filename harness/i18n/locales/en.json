@@ -51,7 +51,6 @@
   "runtime.dev.portOwnerUnknown": "Cannot safely identify the listener on port {port}.",
   "runtime.dev.stoppingPort": "Port {port} is occupied; stopping process {pid} and waiting for the port to be released.",
   "runtime.dev.portRange": "Ports must be between 1 and 65535.",
-  "runtime.dev.sandboxDetected": "Development service startup refused: this process has the {module} sandbox module loaded, which may redirect SQLite journal deletion to the Recycle Bin. At a task boundary, stop the old service, then launch scripts\\dev.cmd from File Explorer or run scripts/dev.py in an independent terminal. This launcher does not detach from the sandbox.",
   "ui.turnElapsed.hours": "{hours} hr {minutes} min {seconds} sec",
   "ui.turnElapsed.minutes": "{minutes} min {seconds} sec",
   "ui.turnElapsed.seconds": "{seconds} sec",

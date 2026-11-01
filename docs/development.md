@@ -30,7 +30,7 @@ python scripts/dev.py --port 8765 --web-port 5273
 
 macOS 已准备好仓库 `.venv` 时，可双击 `scripts/dev.command`，或执行 `./scripts/dev.command --port 8765 --web-port 5273`。入口自动切到仓库根，默认使用 `.venv/bin/python`；可用 `HARNESS_PYTHON` 指定已安装项目依赖的解释器。打开终端输出的 Vite 开发页面（默认 `http://127.0.0.1:5273`）使用前端热更新。 启动参数 `--language en` 或 `--language zh-CN` 同时指定启动提示与后端语言；省略时依次使用用户语言设置、`HARNESS_LANGUAGE` 和系统地区自动选择。
 
-Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/dev.cmd`；该入口固定使用 `.venv\Scripts\python.exe`，也可在独立终端执行 `scripts\dev.cmd --port 8765 --web-port 5273`。使用其他已安装依赖的解释器时，仍直接运行上面的 Python 命令。请从独立终端或资源管理器启动常驻开发服务，避免继承 AI 应用沙箱的文件删除拦截。`scripts/dev.py` 在创建子进程前检查当前 Windows 进程是否已加载已知的豆包 `aiep_sbox.dll`，检测到时拒绝启动并提示人工切换入口；不会自动脱离沙箱，也不保证识别所有沙箱产品。已经运行的服务不会因入口更新自动停止或迁移。
+Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/dev.cmd`；该入口固定使用 `.venv\Scripts\python.exe`，也可在独立终端执行 `scripts\dev.cmd --port 8765 --web-port 5273`。使用其他已安装依赖的解释器时，仍直接运行上面的 Python 命令。开发入口不按宿主应用名称或注入模块名阻止启动；操作系统权限和文件系统错误按实际失败报告。
 
 该入口同时管理 Vite 与后端，监控 `harness` 内的 Python、JSON 和 Markdown 文件，变化稳定后重启后端。后端和 Vite 均忽略测试目录（`tests`、`test`、`__tests__`）及测试文件（`test_*`、`*.test.*`、`*.spec.*`；后端另含 `*_test.py`）；修改测试不触发重启或页面热更新。运行源码与资源仍正常更新。重启会中断正在执行的任务。启动时若后端或前端端口被占用，入口自动向该端口的 TCP 监听进程发送终止信号，等待最多 5 秒；POSIX 平台超时后重新查询监听者，只对仍占用端口的原进程发送强制终止信号，再等待最多 5 秒，确认端口可监听后继续启动。Windows 的终止信号直接结束对应进程，同样复查端口。此行为同样适用于直接运行 `scripts/dev.py`，会中断占用端口的服务及其任务。macOS／Linux 通过 `lsof` 查询监听者，Windows 通过 PowerShell 的 `Get-NetTCPConnection` 查询；端口探测在 POSIX 使用地址复用以避开已关闭连接的 `TIME_WAIT`，Windows 不启用地址复用，保留默认的占用检测行为。无法识别、权限不足或端口未释放时明确报错，不启动新服务；不终止整个进程树，也不追杀后来接管端口的新进程。
 
@@ -58,6 +58,8 @@ Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/de
 | `make test PYTHON=.venv/bin/python` | Python 与 Web 聚合入口；不启动桌面或浏览器 |
 
 新增 Python 用例放在 `tests/test_*.py`；前端用例放在 `web/src/**/*.test.ts` 或 `.test.tsx`；桌面用例放在 `desktop/tests/**/*.test.mjs`。Node 发现脚本递归收集 .test.mjs 后传入显式文件列表，空目录不会启动 Node 默认发现。Python 和浏览器发现为空时失败；Node 独立发现器对空目录明确提示，不把空套件作为业务验收。Vitest 当前没有启用 --passWithNoTests。
+
+Python 聚合入口在发现测试前输出实际解释器、版本、基础安装目录、平台、UTF-8 模式、已加载的 `sitecustomize` 来源及 `os.open` 的目录句柄能力。随后在独立临时目录核对 `mkdir(exist_ok=True)` 和递归创建语义；macOS 另用 `/bin/ps` 读取本进程内存，核对课程运行器需要的监督命令。预检失败保留原异常栈、返回非零并明确说明未执行测试，不生成业务通过结论。`tests/test_test_discovery.py` 覆盖代理错误、命令拒绝／超时／异常回执、空发现及业务失败传播。预检只说明这些基础能力可用，不代表所有沙箱限制均已排除；仍须完整执行业务回归。解释器目录名称和宿主沙箱开关都不能单独证明失败归因，需结合原始异常调用链及同输入复测；大量用例通过也不能替代对剩余失败的定位。
 
 独立验证和测试发现入口统一启用 UTF-8 默认模式，浏览器夹具与桌面后端复用所属解释器的 UTF-8 环境；不要求为此逐个改写既有测试。运行库和生成器自身的文件边界仍显式指定编码，SDK 导入不改变宿主的默认编码或标准流。验证补丁原始字节的临时 Git 仓库在本地配置中固定 `core.autocrlf=false`、`core.eol=lf`，文本夹具显式保留换行；不改写开发者的 Git 配置，也不放宽 LF、CRLF、Unicode 分隔符或末行状态的断言。
 
