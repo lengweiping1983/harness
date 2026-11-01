@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
 import {createInterface} from 'node:readline'
@@ -23,6 +24,7 @@ try {
   const page = await browser.newPage({viewport: {width: 1440, height: 900}})
   await page.goto(url)
   const input = page.getByRole('textbox', {name: '输入消息', exact: true})
+  await chooseFixtureProject(page)
   await input.fill('plan visibility fixture request')
   await input.press('Enter')
   await page.getByText('fixture response verified', {exact: true}).waitFor()

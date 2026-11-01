@@ -1,3 +1,4 @@
+import {requireAcademySandbox} from './academy-environment.mjs'
 import {openAcademySection} from './academy-sections.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
@@ -152,6 +153,8 @@ try {
   const editor=panel.getByRole('textbox',{name:'练习代码',exact:true})
   await editor.waitFor()
   assert.ok((await editor.inputValue()).includes('def double(value)'))
+  projects=(await get('/projects')).projects
+  requireAcademySandbox(projects.find(project=>project.id!==studyProject.id))
   await panel.getByRole('button',{name:'检查练习',exact:true}).click()
   await panel.getByText('本课检查通过',{exact:true}).waitFor()
   projects=(await get('/projects')).projects

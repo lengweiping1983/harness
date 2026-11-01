@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
 import {cleanupFixture} from './fixture-cleanup.mjs'
@@ -43,6 +44,7 @@ try {
   await input.waitFor()
   await input.evaluate(element => element.blur())
   await page.keyboard.press('ControlOrMeta+Shift+u')
+  await chooseFixtureProject(page)
   const title = 'fork navigation fixture ' + language
   await input.fill(title)
   await input.press('Enter')

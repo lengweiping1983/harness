@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
 import {cleanupFixture} from './fixture-cleanup.mjs'
@@ -28,20 +29,24 @@ try {
   assert.ok((await page.request.patch(base + '/api/v1/ui-settings', {data: {language}})).ok())
   await page.addInitScript(theme => localStorage.setItem('harness.ui-theme', theme), theme)
   const errors = [], registrations = [], registered = []
+  let directory = '/test-project'
   page.on('pageerror', error => errors.push(error.message))
-  await page.route('**/api/v1/directories*', route => route.fulfill({json: {path: '/test-project', name: 'test-project', parent: '/', entries: [], roots: []}}))
-  await page.route('**/api/v1/workspaces', route => {
-    if (route.request().method() === 'POST') {registrations.push(route); return}
-    return route.fulfill({json: {workspaces: registered, default: '/test-project'}})
-  })
   await page.goto(base)
   const input = page.getByRole('textbox', {name: translations['ui.components.chat.Composer.a410452649b3'], exact: true})
   await input.waitFor()
   await input.evaluate(element => element.blur())
   await page.keyboard.press('ControlOrMeta+Shift+u')
+  await chooseFixtureProject(page)
   await input.fill('existing session setup')
   await input.press('Enter')
   await page.locator('[data-turn-completion]').last().waitFor()
+  await page.route('**/api/v1/directories*', route => route.fulfill({json: {path: directory, name: directory.slice(1), parent: '/', entries: [], roots: []}}))
+  await page.route('**/api/v1/workspace-options?*', route => route.fulfill({json: {cwd: directory, is_git: false, root: null, branch: null,
+    head: null, refs: [], local_branches: [], dirty: null}}))
+  await page.route('**/api/v1/workspaces', route => {
+    if (route.request().method() === 'POST') {registrations.push(route); return}
+    return route.fulfill({json: {workspaces: registered, default: directory}})
+  })
   await input.fill('保留现有会话的草稿')
   if (width < 600) await page.getByRole('button', {name: translations['ui.sidebar.expand'], exact: true}).click()
   const open = page.getByRole('button', {name: translations['ui.components.sidebar.ProjectSidebar.79f326be4409'], exact: true})
@@ -67,13 +72,16 @@ try {
   if (width < 600) await page.keyboard.press('Escape')
   assert.equal(await input.inputValue(), '保留现有会话的草稿')
   await page.locator('[data-turn-completion]').last().waitFor()
+  directory = '/second-project'
   if (width < 600) await page.getByRole('button', {name: translations['ui.sidebar.expand'], exact: true}).click()
   await open.click()
   await dialog.waitFor()
   const nextSent = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/api/v1/workspaces'))
   await register.click()
   await nextSent
-  await registrations[1].fulfill({json: {workspace: record}})
+  const second = {...record, id: directory, path: directory, name: directory.slice(1)}
+  registered.push(second)
+  await registrations[1].fulfill({json: {workspace: second}})
   await dialog.waitFor({state: 'hidden'})
   if (width < 600) await page.keyboard.press('Escape')
   assert.equal(await input.inputValue(), '', 'Current registration must still open a new draft')

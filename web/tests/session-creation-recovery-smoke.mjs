@@ -14,9 +14,17 @@ import {useAppStore} from '/src/store/app.ts'
 import {useDraftStore} from '/src/store/drafts.ts'
 import {setLocale,t} from '/src/i18n/index.ts'
 import {noticeText} from '/src/lib/noticeText.ts'
+import {api} from '/src/lib/api.ts'
 window.app=useAppStore;window.drafts=useDraftStore;window.locale=setLocale;window.copy=t;window.notice=noticeText
 useAppStore.setState({activeSessionId:null,activeWorkspaceId:null,workspaces:[],workspace:null,sessions:[],sessionCreating:false,toasts:[]})
 window.ready=true
+window.prepareCreation=async()=>{
+ const result=await api.listWorkspaces()
+ if(!result.ok||result.data.workspaces.length!==1)throw Error('Expected one isolated fixture project')
+ const project=result.data.workspaces[0]
+ useAppStore.setState({workspaces:[project],activeWorkspaceId:project.id})
+ useAppStore.getState().setNewSessionCheckout({cwd:project.path,mode:'local',expected_head:null,expected_branch:null})
+}
 `
 try{
  const ready=await withDeadline(()=>new Promise((resolve,reject)=>{
@@ -42,6 +50,7 @@ try{
    })
    await page.goto(server.resolvedUrls.local[0]+'__creation-recovery')
    await page.waitForFunction(()=>window.ready)
+   await page.evaluate(()=>window.prepareCreation())
    assert.equal(await page.evaluate(()=>window.app.getState().materializeSession()),false)
    assert.equal(writes,1);assert.ok(created,creationFailure+'\n'+diagnostics);assert.equal(created.metadata.creation_request_id,requestId);assert.equal(created.metadata.creation_completed,true)
    for(const locale of ['en','zh-CN','en']){
@@ -54,6 +63,7 @@ try{
    })
    assert.equal(retained,requestId)
    await page.reload();await page.waitForFunction(()=>window.ready)
+   await page.evaluate(()=>window.prepareCreation())
    assert.equal(await page.evaluate(()=>window.drafts.getState().bySession.__unsaved__.creationRequest.id),requestId)
    await page.evaluate(language=>window.locale(language),language)
    assert.equal(await page.evaluate(()=>window.app.getState().materializeSession()),true)

@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
 import {once} from 'node:events'
@@ -49,6 +50,7 @@ try {
         await page.locator('.composer-editor').waitFor()
         await page.locator('.composer-editor').evaluate(element => element.blur())
         await page.keyboard.press('ControlOrMeta+Shift+u')
+        await chooseFixtureProject(page)
         const input = page.getByRole('textbox', {name: t('ui.components.chat.Composer.a410452649b3'), exact: true})
         const remove = page.getByRole('button', {name: t('ui.composerMode.removePlan'), exact: true})
         const readOnly = page.getByRole('status').filter({hasText: t('ui.components.chat.Composer.77bdeab7a5b5')})

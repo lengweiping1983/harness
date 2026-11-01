@@ -46,11 +46,11 @@ await browserScenario(async ({server,browser}) => {
       const rect=selector=>document.querySelector(selector).getBoundingClientRect().toJSON()
       return {card:rect('.composer-card'),editor:rect('.composer-editor'),rail:rect('.composer-status-rail'),
         generation:rect('.composer-generation'),tasks:rect('.composer-tasks'),code:rect('.conversation-scroll pre'),
-        paragraph:rect('.conversation-scroll .md p'),scroll:document.documentElement.scrollWidth}
+        paragraph:rect('.conversation-scroll .md p'),dock:rect('.composer-dock'),scroll:document.documentElement.scrollWidth}
     })
     assert.ok(geometry.scroll<=width,'No document overflow')
     assert.ok(geometry.card.width>Math.min(width-80,1200),'Available workspace width is used')
-    assert.ok(1000-geometry.card.bottom<=10,'Composer stays near the bottom')
+    assert.ok(1000-geometry.dock.bottom<=10,'Composer and project settings stay near the bottom')
     assert.ok(geometry.editor.height<=70,'Empty editor leaves room for the conversation')
     assert.ok(Math.abs(geometry.tasks.top-geometry.generation.top)<2,'Normal size status and checklist share one row')
     assert.ok(geometry.rail.height<=34,'Collapsed status rail occupies one compact row')
@@ -93,7 +93,7 @@ await browserScenario(async ({server,browser}) => {
       const scroll=document.querySelector('.conversation-scroll'),user=scroll.querySelector('[data-row-id="request"]')
       return {userOffset:user.getBoundingClientRect().top-scroll.getBoundingClientRect().top,
         scrollTop:scroll.scrollTop,overflow:scroll.scrollHeight-scroll.clientHeight,
-        composerBottom:document.querySelector('.composer-card').getBoundingClientRect().bottom}
+        composerBottom:document.querySelector('.composer-dock').getBoundingClientRect().bottom}
     })
     assert.ok(shortGeometry.userOffset>=0&&shortGeometry.userOffset<160,'Short user messages follow the history/date headings at the top')
     assert.equal(shortGeometry.scrollTop,0,'Short conversations do not scroll away from the user message')

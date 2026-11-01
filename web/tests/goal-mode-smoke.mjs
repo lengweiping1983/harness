@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
 import {once} from 'node:events'
@@ -44,6 +45,7 @@ try {
       await page.goto(baseURL)
       const input = page.getByRole('textbox', {name: t('ui.components.chat.Composer.a410452649b3'), exact: true})
       await input.waitFor(); await input.evaluate(element => element.blur()); await page.keyboard.press('ControlOrMeta+Shift+u')
+      await chooseFixtureProject(page)
       const removeGoal = page.getByRole('button', {name: t('ui.composerMode.removeGoal'), exact: true})
       const removePlan = page.getByRole('button', {name: t('ui.composerMode.removePlan'), exact: true})
       const form = page.getByRole('form', {name: t('ui.components.chat.GoalDock.1d6e17611a7e'), exact: true})

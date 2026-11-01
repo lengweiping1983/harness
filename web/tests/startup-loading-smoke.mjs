@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
 import {createInterface} from 'node:readline'
@@ -68,6 +69,7 @@ try {
     await page.keyboard.press('Escape')
     assert.equal(await input.evaluate(element => element === document.activeElement), true, 'Loaded overlay restores focus to the original editor')
     if (width === 1440) {
+      await chooseFixtureProject(page)
       await input.fill('**startup lazy markdown** $x^2$')
       await input.press('Enter')
       await page.getByText('fixture response verified', {exact: true}).waitFor()

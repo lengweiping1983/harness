@@ -39,7 +39,8 @@ await browserScenario(async ({server,browser}) => {
     }
     const initial = await page.evaluate(() => window.copy('ui.http.invalidResponse'))
     await page.getByText(initial,{exact:true}).waitFor()
-    await page.clock.pauseAt(new Date())
+    // 暂停点取自浏览器自身时钟，避免宿主取整或调度差异产生倒退。
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
     const before = requests.length
     for (const locale of ['en','zh-CN','en']) for (const theme of ['light','dark']) for (const width of [390,1440]) {
       await page.setViewportSize({width,height:900})

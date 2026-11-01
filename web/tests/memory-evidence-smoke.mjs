@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import {cleanupFixture} from './fixture-cleanup.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
@@ -33,6 +34,7 @@ try {
       page.on('pageerror', error => errors.push(error.message))
       await page.addInitScript(theme => localStorage.setItem('harness.ui-theme', theme), theme)
       await page.goto(origin)
+      await chooseFixtureProject(page)
       await page.locator('.composer-editor').fill('evidence fixture')
       await page.locator('.composer-editor').press('Enter')
       await page.getByText('fixture response verified', {exact: true}).first().waitFor()

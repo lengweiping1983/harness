@@ -1,3 +1,4 @@
+import {requireAcademySandbox} from './academy-environment.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
 import {createInterface} from 'node:readline'
@@ -37,7 +38,7 @@ try {
   const editor = panel.getByRole('textbox', {name: '练习代码', exact: true})
   await editor.waitFor()
   const project = (await (await page.request.get(base + '/api/v1/academy/projects')).json()).projects[0]
-  if (project.sandbox === 'unavailable') throw Error('Comparison regression requires an installed OS sandbox')
+  requireAcademySandbox(project)
   const execute = async (value, check = false) => {
     if (value !== undefined) await editor.fill('value = ' + value + '\nprint(value)\n')
     const completed = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith(check ? '/check' : '/run'))

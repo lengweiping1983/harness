@@ -1,3 +1,4 @@
+import {requireAcademySandbox} from './academy-environment.mjs'
 import {openAcademySection} from './academy-sections.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
@@ -38,7 +39,7 @@ try {
   const editor = panel.getByRole('textbox', {name: '练习代码', exact: true})
   await editor.waitFor()
   const project = (await (await page.request.get(base + '/api/v1/academy/projects')).json()).projects[0]
-  if (project.sandbox === 'unavailable') throw Error('Focus ownership regression requires an installed OS sandbox')
+  requireAcademySandbox(project)
   const content = await editor.inputValue() + '\nprint("FOCUS_OWNER_RESULT")\n'
   await editor.fill(content)
   const endpoint = '**/api/v1/academy/projects/' + project.id + '/run'

@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
 import {createInterface} from 'node:readline'
@@ -29,6 +30,7 @@ try {
     await input.waitFor()
     await input.evaluate(element => element.blur())
     await page.keyboard.press('ControlOrMeta+Shift+u')
+    await chooseFixtureProject(page)
     const text = '起点标识\n' + '长历史原文验证。'.repeat(4000) + '\n唯一搜索标记\n' + '后续内容。'.repeat(4000) + '\n终点标识'
     await input.fill(text)
     await input.press('Enter')

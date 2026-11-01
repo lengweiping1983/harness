@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import {cleanupFixture, diagnoseFailure} from './fixture-cleanup.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
@@ -54,14 +55,25 @@ try {
     }
   }
   const errors = []
-  let contextWrites = 0
+  let contextWrites = 0, sessionWrites = 0
   page.on('pageerror', error => errors.push(error.message))
-  page.on('request', request => {if (new URL(request.url()).pathname === '/api/v1/settings' && request.method() === 'PATCH') contextWrites++})
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname
+    if (path === '/api/v1/settings' && request.method() === 'PATCH') contextWrites++
+    if (path === '/api/v1/sessions' && request.method() === 'POST') sessionWrites++
+  })
   await page.goto('http://127.0.0.1:' + ready.port)
   const input = page.getByRole('textbox', {name: '输入消息', exact: true})
   await input.fill('browser fixture request')
   await input.press('Enter')
+  await page.getByRole('dialog', {name: '选择项目', exact: true}).waitFor()
+  assert.equal(sessionWrites, 0, 'Missing project selection must not create a persistent conversation')
+  assert.equal(await input.inputValue(), 'browser fixture request', 'Project selection preserves the unsent message')
+  await chooseFixtureProject(page)
+  await input.fill('browser fixture request')
+  await input.press('Enter')
   await page.getByText('fixture response verified', {exact: true}).waitFor()
+  assert.equal(sessionWrites, 1, 'The checked project permits exactly one conversation creation')
   assert.equal(await page.getByRole('button', {name: '发送', exact: true}).isDisabled(), true)
   assert.equal(await input.inputValue(), '')
   const user = page.getByRole('article').filter({hasText: 'browser fixture request'})

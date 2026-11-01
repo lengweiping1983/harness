@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import {cleanupFixture, diagnoseFailure, withDeadline} from './fixture-cleanup.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
@@ -36,6 +37,7 @@ try {
       page.on('requestfailed', request => {if (request.url().includes('/memory')) memoryRequests.push({failed: request.failure(), url: request.url()})})
       await page.addInitScript(theme => localStorage.setItem('harness.ui-theme', theme), theme)
       await page.goto(origin)
+      await chooseFixtureProject(page)
       const composer = page.locator('.composer-editor')
       await composer.fill('memory fixture ' + [language, theme, width].join('/'))
       await composer.press('Enter')

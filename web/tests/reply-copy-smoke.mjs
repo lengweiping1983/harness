@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
 import {cleanupFixture} from './fixture-cleanup.mjs'
@@ -46,6 +47,7 @@ try {
   await input.waitFor()
   await input.evaluate(element => element.blur())
   await page.keyboard.press('ControlOrMeta+Shift+u')
+  await chooseFixtureProject(page)
   await input.fill('reply copy fixture request ' + language)
   await input.press('Enter')
   const completion = page.locator('[data-turn-completion]').last()

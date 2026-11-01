@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url'
 import assert from 'node:assert/strict'
 import {browserScenario} from './browser-scenario.mjs'
 
@@ -89,7 +90,7 @@ await browserScenario(async ({server,browser}) => {
     // 截图保留未读蓝点和通知的真实布局。
     completed('b'); await poll()
     await page.waitForFunction(expected => window.sent.length === expected, prior + 2)
-    await page.screenshot({path: screenshot.pathname})
+    await page.screenshot({path: fileURLToPath(screenshot)})
     await page.getByRole('button', {name: 'Background 原文', exact: true}).press('Enter')
     await dot.waitFor({state:'detached'})
   }

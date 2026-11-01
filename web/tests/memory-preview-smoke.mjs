@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import {cleanupFixture} from './fixture-cleanup.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
@@ -35,6 +36,7 @@ try {
       page.on('request', request => {if (request.url().endsWith('/memory/preview')) requests++})
       await page.addInitScript(theme => localStorage.setItem('harness.ui-theme', theme), theme)
       await page.goto(origin)
+      await chooseFixtureProject(page)
       await page.locator('.composer-editor').fill('preview fixture')
       await page.locator('.composer-editor').press('Enter')
       await page.getByText('fixture response verified', {exact: true}).first().waitFor()

@@ -34,7 +34,8 @@ await browserScenario(async ({server,browser})=>{
   await page.clock.install()
   await page.goto(server.resolvedUrls.local[0]+'__inspector-navigation')
   await page.waitForFunction(()=>window.reads.length===1)
-  await page.clock.pauseAt(new Date())
+  // 暂停点取自浏览器自身时钟，避免宿主取整或调度差异产生倒退。
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
   const panel=page.locator('#inspector-tab-content'), select=page.locator('.inspector-section-switcher select')
   const labels=locale=>locale==='en'?{progress:'Progress',details:'Execution details',review:'Changes',resources:'Files, preview and terminal',help:'Learning and help',log:'Request and tool log',history:'Task history'}:{progress:'进度',details:'执行详情',review:'变更',resources:'文件、预览与终端',help:'学习与帮助',log:'请求与工具日志',history:'任务历史'}
   const matrix=async check=>{

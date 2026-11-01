@@ -1,3 +1,4 @@
+import {requireAcademySandbox} from './academy-environment.mjs'
 import {openAcademySection} from './academy-sections.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
@@ -56,11 +57,12 @@ try{
   const editor=panel.getByRole('textbox',{name:'练习代码',exact:true})
   await editor.waitFor()
   assert.ok((await editor.inputValue()).includes('learner ='))
+  const firstProject=(await get('/projects')).projects[0]
+  requireAcademySandbox(firstProject)
   const check=panel.getByRole('button',{name:'检查练习',exact:true})
   await check.click()
   await panel.getByText('本课检查通过',{exact:true}).waitFor()
   // 完成后只需一次显式继续操作；回执丢失和刷新不能重复切课。
-  const firstProject=(await get('/projects')).projects[0]
   const pythonCourse=(await get('/courses/python-foundations')).course
   assert.equal(await panel.locator('[data-academy-task]').textContent(),pythonCourse.lessons[0].exercise)
   const nextLesson=pythonCourse.lessons[1]

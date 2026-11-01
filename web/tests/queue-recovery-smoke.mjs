@@ -1,3 +1,4 @@
+import {chooseFixtureProject} from './conversation-project.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
 import {once} from 'node:events'
@@ -39,6 +40,7 @@ try {
   await input.waitFor()
   await input.evaluate(element => element.blur())
   await page.keyboard.press('ControlOrMeta+Shift+u')
+  await chooseFixtureProject(page)
   await input.fill('queue fixture setup')
   await input.press('Enter')
   await page.getByText('fixture response verified', {exact: true}).waitFor()

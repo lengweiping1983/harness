@@ -29,8 +29,10 @@ await browserScenario(async({server,browser})=>{
   for(const language of ['en','zh-CN','en']){
   await page.evaluate(config=>{document.documentElement.classList.toggle('dark',config.theme==='dark');window.configure(config)},{language,theme,size:14,running:false,empty:false,compact:true})
   const card=page.locator('.composer-card');await card.waitFor()
-  const gap=await card.evaluate(node=>innerHeight-node.getBoundingClientRect().bottom)
+  const gap=await page.locator('.composer-dock').evaluate(node=>innerHeight-node.getBoundingClientRect().bottom)
   assert.ok(gap>=0&&gap<=9,`Composer bottom gap ${gap}: ${language} ${theme} ${width}`)
+  const project=page.locator('.composer-dock [aria-label]').filter({has:page.getByRole('button',{name:language==='en'?'Choose a project':'选择项目',exact:true})})
+  assert.ok(await project.evaluate(node=>node.getBoundingClientRect().top>=node.closest('.composer-dock').querySelector('.composer-card').getBoundingClientRect().bottom),'Project settings follow the editor without overlapping it')
   assert.equal(await page.locator('.composer-help').count(),0)
   }
   await page.close()
