@@ -151,7 +151,7 @@ const UserContent = memo(function UserContent({ block, sessionId, speakerLabel, 
 
   return (
     <article className={cn('group/message relative flex max-w-full flex-col', other ? 'mr-auto items-start' : 'ml-auto items-end', editing && 'w-full')}>
-      <div data-user-message-bubble="" className={cn('min-w-0 max-w-full rounded-2xl bg-raised px-4 py-3 sm:max-w-xl', editing && 'w-full sm:max-w-full')}>
+      <div data-user-message-bubble="" className={cn('min-w-0 max-w-full rounded-2xl bg-raised px-4 py-3 sm:max-w-xl', editing && 'ui-input-group w-full border border-line transition-colors sm:max-w-full')}>
         <header className={cn('mb-1 flex flex-wrap items-center gap-2', !other && !block.steeringStatus && 'sr-only')}>
           {speakerLabel && <AgentAvatar src={speakerAvatar} name={speakerLabel} className="h-6 w-6 rounded-full text-2xs" />}
           <span className="text-2xs font-medium text-muted">{speakerLabel || block.requester?.display_name || t(readOnly ? "ui.shared.user" : "ui.components.chat.blocks.MessageBlocks.a0c7716669b5")}</span>
@@ -171,7 +171,7 @@ const UserContent = memo(function UserContent({ block, sessionId, speakerLabel, 
         ) : null}
         {editing ? <div>
           <textarea ref={editor} autoFocus aria-label={t('ui.messageEdit.action')} value={editText} disabled={sending}
-            className="block min-h-20 w-full resize-none overflow-y-auto border-0 bg-transparent text-base leading-reading text-ink outline-none"
+            className="block min-h-12 w-full resize-none overflow-y-auto rounded-lg border-0 bg-transparent p-0 text-base leading-reading text-ink outline-none disabled:opacity-60"
             onChange={event => sessionId && useDraftStore.getState().setInlineEdit(sessionId, editKey, event.target.value)}
             onKeyDown={event => {
               if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
