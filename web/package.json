@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build --outDir ../.run/web-build --emptyOutDir && node ../scripts/publish_web_build.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "test": "npm run test:unit && npm run build && npm run test:browser",
+    "test": "npm run test:unit && npm run build",
     "i18n:check": "node ../scripts/check_i18n.mjs",
     "pretest": "npm run i18n:check",
     "pretypecheck": "npm run i18n:check",

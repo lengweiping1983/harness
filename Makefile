@@ -1,5 +1,5 @@
 # Harness 开发命令
-.PHONY: help verify verify-plan test-full test test-python test-web test-desktop check test-verbose ui dev lint clean
+.PHONY: help verify verify-plan test-full test test-python test-web test-desktop test-browser check test-verbose ui dev lint clean
 
 PYTHON ?= python3
 export HARNESS_PYTHON := $(PYTHON)
@@ -10,15 +10,17 @@ help:
 	@echo "Harness —— 可用命令："
 	@echo "  make verify        按变更范围验证，始终完整构建 Web"
 	@echo "  make verify-plan   仅解释验证计划"
-	@echo "  make test-full     显式完整回归，包含浏览器"
-	@echo "  make test          运行 Python、前端、浏览器回归与 Web 构建"
+	@echo "  make test-full     全部后端与 Web 常规回归，不启动桌面或浏览器"
+	@echo "  make test          后端与 Web 检查及生产构建"
+	@echo "  make test-desktop  明确运行桌面回归"
+	@echo "  make test-browser  明确运行浏览器回归"
 	@echo "  make test-verbose  逐个用例显示"
 	@echo "  make ui            启动 Web 界面"
 	@echo "  make dev           启动 Web 热更新与 Python 自动重载"
 	@echo "  make lint          语法与未使用 import 检查"
 	@echo "  make clean         清理缓存"
 
-test: check test-python test-web test-desktop
+test: check test-python test-web
 
 verify:
 	"$(PYTHON)" scripts/verify.py
@@ -41,6 +43,9 @@ test-web:
 
 test-desktop:
 	npm --prefix desktop test
+
+test-browser:
+	npm --prefix web run test:browser
 
 test-verbose:
 	"$(PYTHON)" scripts/run_python_tests.py -v

@@ -45,9 +45,9 @@ await browserScenario(async({server,browser})=>{
   const badges=await page.locator('section span').evaluateAll(nodes=>nodes.map(node=>{const s=getComputedStyle(node);return {color:s.color.match(/[\d.]+/g).map(Number),background:s.backgroundColor.match(/[\d.]+/g).map(Number)}}))
   for(const badge of badges){const alpha=badge.background[3]??1;const background=badge.background.slice(0,3).map((v,i)=>v*alpha+values.tokens.canvas[i]*(1-alpha));assert.ok(contrast(badge.color,background)>=4.5,theme+' badge '+JSON.stringify(badge))}
   const select=page.getByLabel('Select');await select.focus()
-  await page.waitForFunction(()=>{const s=getComputedStyle(document.querySelector('select'));return s.borderColor===s.outlineColor})
-  const focus=await select.evaluate(node=>{const s=getComputedStyle(node);return {border:s.borderColor,outline:s.outlineColor,accent:getComputedStyle(document.querySelector('input[type=range]')).accentColor}})
-  assert.equal(focus.border,focus.outline);assert.equal(focus.accent,focus.outline)
+  await page.waitForFunction(()=>{const s=getComputedStyle(document.querySelector('select'));return s.outlineStyle==='solid'&&s.outlineWidth==='2px'})
+  const focus=await select.evaluate(node=>{const s=getComputedStyle(node);return {outline:s.outlineColor,offset:s.outlineOffset,shadow:s.boxShadow,accent:getComputedStyle(document.querySelector('input[type=range]')).accentColor}})
+  assert.equal(focus.offset,'-2px');assert.equal(focus.shadow,'none');assert.equal(focus.accent,focus.outline)
   const title=await page.locator('.ui-group-title').textContent()
   if(language==='zh-CN')assert.equal(title,'钩子统计信息')
   const send=page.locator('.composer-card button').last()

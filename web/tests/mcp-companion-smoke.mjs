@@ -82,6 +82,7 @@ await browserScenario(async({server,browser})=>{
  await panel.getByRole('button',{name:'Disable continuation',exact:true}).waitFor()
  assert.deepEqual(configurations[1],{enabled:true,port:8877})
  await panel.getByRole('button',{name:'Show',exact:true}).click()
+ await panel.getByRole('button',{name:'Hide',exact:true}).waitFor()
  assert.equal(await panel.getByLabel(await label('token'),{exact:true}).inputValue(),'a'.repeat(64))
  await panel.getByRole('button',{name:'Hide',exact:true}).click()
  await panel.getByLabel(await label('port'),{exact:true}).fill('8899')

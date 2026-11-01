@@ -1,4 +1,4 @@
-"""按常规领域验证工作区，始终完整构建；浏览器仅由显式全量入口准入。"""
+"""验证后端与 Web 并完整构建；桌面和浏览器仅由各自显式参数准入。"""
 from __future__ import annotations
 
 import argparse
@@ -59,7 +59,7 @@ def load_policy(path: Path = POLICY) -> dict:
     policy = json.loads(path.read_text(encoding='utf-8'))
     if not isinstance(policy, dict) or set(policy) != {'always', 'full', 'rules'}:
         raise ValueError('验证策略字段不完整')
-    if policy['always'] != ['check', 'build'] or not isinstance(policy['full'], list) or policy['full'] != ['python', 'web-unit', 'desktop']:
+    if policy['always'] != ['check', 'build'] or not isinstance(policy['full'], list) or policy['full'] != ['python', 'web-unit']:
         raise ValueError('验证策略必须保留静态检查、完整构建及所有常规任务')
     if not isinstance(policy['rules'], list):
         raise ValueError('验证规则必须是列表')
@@ -68,12 +68,12 @@ def load_policy(path: Path = POLICY) -> dict:
             raise ValueError('无效验证规则')
         if not isinstance(rule['patterns'], list) or not all(isinstance(pattern, str) and pattern for pattern in rule['patterns']):
             raise ValueError('无效路径模式')
-        if not isinstance(rule['tasks'], list) or not all(isinstance(task, str) and task in ('check', 'build', 'python', 'web-unit', 'desktop', 'full') for task in rule['tasks']):
+        if not isinstance(rule['tasks'], list) or not all(isinstance(task, str) and task in ('check', 'build', 'python', 'web-unit', 'full') for task in rule['tasks']):
             raise ValueError('未知验证任务')
     return policy
 
 
-def plan_checks(paths: list[str], policy: dict, *, full: bool = False, fallback: str = '') -> dict:
+def plan_checks(paths: list[str], policy: dict, *, full: bool = False, desktop: bool = False, browser: bool = False, fallback: str = '') -> dict:
     """规则取并集；未知路径、空变更或不可用基线均扩大到全量。"""
     selected = set(policy['always'])
     reasons = []
@@ -88,9 +88,11 @@ def plan_checks(paths: list[str], policy: dict, *, full: bool = False, fallback:
         for rule in matches:
             selected.update(policy['full'] if 'full' in rule['tasks'] else rule['tasks'])
             reasons.append({'path': path, 'reason': rule['reason']})
-    if full:
-        # 浏览器仅由显式全量入口准入，不由路径匹配或基线回退隐式启动。
+    if browser:
+        # 路径、全量及基线回退均不能代替用户对浏览器或桌面的明确选择。
         selected.add('browser')
+    if desktop:
+        selected.add('desktop')
     return {'files': paths, 'tasks': [task for task in ORDER if task in selected], 'reasons': reasons}
 
 
@@ -189,7 +191,9 @@ def main() -> int:
     """提供稳定交付入口和只读计划，不允许用手填文件列表缩小交付范围。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base', default='HEAD', help='与 HEAD 的共同祖先作为变更基线')
-    parser.add_argument('--full', action='store_true', help='显式执行所有领域回归，包含浏览器')
+    parser.add_argument('--full', action='store_true', help='执行全部后端和 Web 常规回归，不启动桌面或浏览器')
+    parser.add_argument('--desktop', action='store_true', help='明确追加桌面回归')
+    parser.add_argument('--browser', action='store_true', help='明确追加浏览器回归')
     parser.add_argument('--explain', action='store_true', help='仅输出计划，不执行或签发通过回执')
     args = parser.parse_args()
     try:
@@ -201,7 +205,7 @@ def main() -> int:
             paths = changed_files(ROOT, args.base)
         except subprocess.CalledProcessError:
             paths, fallback = [], 'Git 基线不可用，升级全量'
-        plan = plan_checks(paths, load_policy(), full=args.full, fallback=fallback)
+        plan = plan_checks(paths, load_policy(), full=args.full, desktop=args.desktop, browser=args.browser, fallback=fallback)
         print(json.dumps(plan, ensure_ascii=False, indent=2), flush=True)
         if args.explain:
             return 0

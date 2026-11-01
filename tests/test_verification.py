@@ -22,11 +22,11 @@ class VerificationPolicyTests(unittest.TestCase):
         self.assertEqual(self.tasks('docs/api.md'), {'check', 'build'})
         self.assertEqual(self.tasks('harness/llm/transport.py'), {'check', 'build', 'python'})
         self.assertEqual(self.tasks('web/src/lib/http.ts'), {'check', 'build', 'web-unit'})
-        self.assertEqual(self.tasks('desktop/downloads.mjs'), {'check', 'build', 'desktop'})
+        self.assertEqual(self.tasks('desktop/downloads.mjs'), {'check', 'build', 'python', 'web-unit'})
         self.assertIn('python', self.tasks('README.md'))
 
     def test_shared_unknown_and_infrastructure_force_all_core_domains(self):
-        full = {'check', 'build', 'python', 'web-unit', 'desktop'}
+        full = {'check', 'build', 'python', 'web-unit'}
         for path in ('harness/session/store.py', 'harness/tools/builtin/new.mjs', 'harness/new_domain/data.json',
                      'scripts/new.py', 'web/package-lock.json', 'web/vite.config.ts',
                      'tests/web_fixture.py', 'new-domain/data.json', 'desktop/requirements.lock'):
@@ -35,20 +35,29 @@ class VerificationPolicyTests(unittest.TestCase):
         self.assertEqual(self.tasks(), full)
         self.assertEqual(set(verify.plan_checks(['docs/api.md'], self.policy, fallback='缺少基线')['tasks']), full)
 
-    def test_mixed_changes_keep_core_union_and_browser_requires_explicit_full(self):
+    def test_mixed_changes_and_full_never_implicitly_start_specialized_suites(self):
         selected = self.tasks('tests/test_questions.py', 'web/src/store/queue.ts', 'harness/llm/transport.py')
         self.assertEqual(selected, {'check', 'build', 'python', 'web-unit'})
         for paths in ([], ['docs/api.md'], ['web/src/lib/http.ts']):
             with self.subTest(paths=paths):
                 plan = verify.plan_checks(paths, self.policy, full=True)
-                self.assertEqual(set(plan['tasks']), {'check', 'build', 'python', 'web-unit', 'browser', 'desktop'})
+                self.assertEqual(set(plan['tasks']), {'check', 'build', 'python', 'web-unit'})
+
+    def test_desktop_and_browser_require_independent_explicit_selection(self):
+        for desktop, browser in ((False, False), (True, False), (False, True), (True, True)):
+            for full in (False, True):
+                with self.subTest(desktop=desktop, browser=browser, full=full):
+                    plan = verify.plan_checks(['scripts/verify.py'], self.policy, full=full, desktop=desktop, browser=browser)
+                    self.assertEqual('desktop' in plan['tasks'], desktop)
+                    self.assertEqual('browser' in plan['tasks'], browser)
+                    self.assertTrue({'check', 'build', 'python', 'web-unit'} <= set(plan['tasks']))
 
     def test_invalid_policy_cannot_disable_build_or_hide_unknown_tasks(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'policy.json'
             for content in ({}, [], {**self.policy, 'always': ['check']},
                             *({**self.policy, 'rules': [{'patterns': ['*'], 'tasks': [task], 'reason': '错误'}]}
-                              for task in ('typo', 'browser', 'runtime'))):
+                              for task in ('typo', 'browser', 'desktop', 'runtime'))):
                 path.write_text(json.dumps(content))
                 with self.assertRaises(ValueError):
                     verify.load_policy(path)
@@ -57,14 +66,23 @@ class VerificationPolicyTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         ci = yaml.load((root / '.github/workflows/ci.yml').read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
         browser = yaml.load((root / '.github/workflows/browser-tests.yml').read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
+        desktop = yaml.load((root / '.github/workflows/desktop-tests.yml').read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
+        installers = yaml.load((root / '.github/workflows/desktop-build.yml').read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
         self.assertEqual(set(ci['on']), {'push', 'pull_request', 'merge_group', 'workflow_dispatch'})
         self.assertEqual(set(browser['on']), {'workflow_dispatch'})
-        self.assertEqual(set(ci['jobs']), {'unittest', 'web-desktop', 'required'})
-        self.assertEqual(set(ci['jobs']['required']['needs']), {'unittest', 'web-desktop'})
+        self.assertEqual(set(desktop['on']), {'workflow_dispatch'})
+        self.assertEqual(set(installers['on']), {'workflow_dispatch'})
+        self.assertEqual(set(ci['jobs']), {'unittest', 'web', 'required'})
+        self.assertEqual(set(ci['jobs']['required']['needs']), {'unittest', 'web'})
         commands = '\n'.join(step.get('run', '') for job in ci['jobs'].values() for step in job['steps'])
         self.assertIn('npm --prefix web run test:unit', commands)
         self.assertIn('npm --prefix web run build', commands)
         self.assertNotIn('test:browser', commands)
+        self.assertNotIn('npm --prefix desktop test', commands)
+        web = json.loads((root / 'web/package.json').read_text(encoding='utf-8'))
+        self.assertNotIn('test:browser', web['scripts']['test'])
+        make = (root / 'Makefile').read_text(encoding='utf-8')
+        self.assertIn('test: check test-python test-web\n', make)
         self.assertEqual(browser['jobs']['browser']['strategy']['matrix']['shard'], ['1', '2', '3', '4'])
 
 

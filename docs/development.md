@@ -14,6 +14,8 @@
 
 Python 构建以 `pyproject.toml` 为唯一配置入口：包发现、包内资源与 `build_py` 钩子注册均在 `[tool.setuptools]` 下声明。`build_support.py` 实现 `.harness/skills` 的同级资源复制与路径检查；`MANIFEST.in` 将构建模块和系统技能纳入 sdist。`python -m unittest tests.test_build_distribution` 使用临时项目验证 wheel、sdist 重建、资源字节、删除资源后的重建及无预装技能构建。
 
+模型桥接的许可证源和随包运行时由 `.gitattributes` 固定为 LF，避免 Windows 的 `core.autocrlf` 改写字节后使生成同步检查失败。已有检出目录不会因新增属性自动重写文件；遇到该错误时先保留本地修改，再核对许可证源的行尾并重新运行生成器，不跳过同步检查或手工修改生成产物。
+
 显式 Superagent 飞书信道使用 `.[superagent]` 可选依赖中的 cryptography 处理加密 Webhook；普通运行未启用该信道时不导入加密库。`.[test]` 同时包含该依赖，回归以本机 HTTP 和隔离凭据验证信道，不要求真实账号。配置与当前限制见 [Superagent 模式](superagent.md#飞书加密-webhook-与原消息回复)。
 
 ## 开发服务的重载边界
@@ -48,12 +50,12 @@ Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/de
 | `npm --prefix web run typecheck` | TypeScript 与语言资源检查 |
 | `npm --prefix web run test:unit` | HTTP／响应协议、复制、命令展示、恢复回执、目标／计划／停止及终端摘录隔离回归 |
 | `npm --prefix web run test:browser` | 自动发现全部默认浏览器场景；使用临时后端及受控传输 |
-| `npm --prefix web test` | Vitest、生产构建与浏览器发现入口 |
+| `npm --prefix web test` | Web／桥接单测及完整生产构建；不启动浏览器 |
 | `npm --prefix desktop test` | macOS／Windows 启动配置、后端监管／停止与原生权限管理器回归；平台分支使用替身 |
-| `make verify PYTHON=.venv/bin/python` | 按变更选择非浏览器常规领域，始终完整构建 Web |
+| `make verify PYTHON=.venv/bin/python` | 按变更选择后端与 Web 常规领域，始终完整构建 Web |
 | `make verify-plan PYTHON=.venv/bin/python` | 只解释本次选择，不运行检查、不签发通过回执 |
-| `make test-full PYTHON=.venv/bin/python` | 显式完整构建及所有领域回归，包含浏览器 |
-| `make test PYTHON=.venv/bin/python` | 保留原有 Python、Web 与桌面聚合入口 |
+| `make test-full PYTHON=.venv/bin/python` | 全部后端与 Web 常规回归及完整构建；不启动桌面或浏览器 |
+| `make test PYTHON=.venv/bin/python` | Python 与 Web 聚合入口；不启动桌面或浏览器 |
 
 新增 Python 用例放在 `tests/test_*.py`；前端用例放在 `web/src/**/*.test.ts` 或 `.test.tsx`；桌面用例放在 `desktop/tests/**/*.test.mjs`。Node 发现脚本递归收集 .test.mjs 后传入显式文件列表，空目录不会启动 Node 默认发现。Python 和浏览器发现为空时失败；Node 独立发现器对空目录明确提示，不把空套件作为业务验收。Vitest 当前没有启用 --passWithNoTests。
 
@@ -70,6 +72,8 @@ Web 单测入口也执行 `model-runtime/tests` 的桥接转录回归；Python �
 新增浏览器用例放在 `web/tests/*-smoke.mjs`，由 `run-core.mjs` 顺序运行，失败返回非零。保留的 `browser-scenario.mjs` 提供 Vite 启停、可选入口预转换、浏览器启动和资源回收；`python-fixture.mjs` 提供统一解释器选择。浏览器选择顺序为显式 `HARNESS_TEST_BROWSER`、已安装的 Playwright Chromium、本机 Chrome／Edge／Chromium（macOS 标准应用目录、Windows 系统及用户安装目录、Linux PATH）。显式配置错误或选定浏览器启动失败不会静默切换；`launchBrowser` 的显式 `executablePath`／`channel` 仍优先。套件在启动业务场景前执行一次启动及关闭预检，打印可执行文件路径和版本，并向所有场景传递同一路径；找不到浏览器时给出安装指令并立即失败。CI 建议在 `web` 目录运行 `npx playwright-core install chromium` 固定依赖匹配版本，本机浏览器版本由本机安装决定。测试不自动下载或修改浏览器安装。`runtime-smoke.mjs` 启动临时目录中的真实后端，用确定性传输验证对话路径；不读取用户凭据、不访问在线模型，退出时回收本次启动的服务。
 
 完整套件中的扩展场景需要命令行加载未打包扩展。Chrome／Edge 官方发行版已移除所需参数；按 [Playwright 扩展测试说明](https://playwright.dev/docs/chrome-extensions) 安装并选择配套 Chromium。普通页面启动预检通过不代表扩展能够加载，不能因此跳过扩展场景或把等待工作线程超时判为通过。
+
+课程实际执行场景还需要操作系统沙箱：Linux 安装 bubblewrap 后须核对命名空间可实际创建，macOS 使用系统 sandbox-exec；Windows 当前拒绝课程运行。手动浏览器工作流在标准 Ubuntu runner 安装并预检 bubblewrap。缺少沙箱时修复环境，不将这些执行场景改成跳过或无隔离执行。
 
 `context-empty-smoke.mjs` 复用共享夹具清理入口；浏览器关闭失败或超时仍尝试回收后端，场景错误与清理错误一起保留。空上下文的八组语言、主题和尺寸断言保持完整。
 
@@ -93,7 +97,7 @@ lint 检查 Python 语法与未使用导入；语言、协议、UI 规范和发�
 
 日常交付使用 `make verify PYTHON=.venv/bin/python`，策略源为 `scripts/verification_policy.json`，执行器为 `scripts/verify.py`。不需要随功能或目录调整根目录 `AGENTS.md`；修改领域边界时维护策略和对应回归。新增未知路径默认全量，不需要先修改规则才能验证。
 
-执行器合并暂存、未暂存和未跟踪文件，重命名按旧路径删除、新路径增加参与选择。默认基线为 HEAD；需要覆盖分支已提交变更时运行 `.venv/bin/python scripts/verify.py --base origin/main`，使用其与 HEAD 的共同祖先。浅克隆、缺失基线和无工作区变更均升级到全部常规领域，不隐式启动浏览器。不能手填缩小交付文件范围；`make test-full` 才显式包含完整浏览器套件。
+执行器合并暂存、未暂存和未跟踪文件，重命名按旧路径删除、新路径增加参与选择。默认基线为 HEAD；需要覆盖分支已提交变更时运行 `.venv/bin/python scripts/verify.py --base origin/main`，使用其与 HEAD 的共同祖先。浅克隆、缺失基线和无工作区变更均升级到全部常规领域，不隐式启动桌面或浏览器。不能手填缩小交付文件范围；`--full` 仅扩大后端与 Web 常规范围，`--desktop`、`--browser` 分别明确追加对应专项，二者互不启用。
 
 所有计划都执行 Python lint、协议和语言生成同步检查，并运行完整 `npm --prefix web run build`（包括语言/UI 规则、tsc、Vite、资源发布）。不缓存构建或测试成功结果，不以 `typecheck` 替代生产构建。构建完成后逐文件比对 `.run/web-build` 和 `web/dist` 的资源清单及 SHA-256，包括懒加载分片和静态资源；缺少入口/资源、内容不一致、符号链接或额外旧文件均失败。真实服务固定读取本轮 `web/dist`，验证结束再次核对产物未变。
 
@@ -105,7 +109,7 @@ lint 检查 Python 语法与未使用导入；语言、协议、UI 规范和发�
 | 后端模型传输、网络、提示词与语言资源 | Python 全套 |
 | `tests/test_*.py` | Python 全套；跨层 fixture 另升级全量 |
 | Web 源码与测试 | Web 全部单测 |
-| 普通桌面模块 | 桌面全套 |
+| 普通桌面模块 | 全部后端与 Web 常规回归；桌面专项须明确指定 |
 | 核心循环、应用装配、对话、工具、执行、Web/MCP 服务、团队收尾与公共夹具 | 所有常规领域 |
 | 脚本、协议/构建/依赖配置、CI、发行资源及未知路径 | 所有常规领域 |
 
@@ -113,7 +117,7 @@ lint 检查 Python 语法与未使用导入；语言、协议、UI 规范和发�
 
 执行开始、完成或失败时更新本地 `output/verification.json`；包含输入指纹、选择理由、命令、耗时、退出码、未执行项及构建资源摘要。第一次失败停止后续步骤并标记未执行。验证期间源码、资源或 HEAD 变化使本轮失败，需要重跑；执行被中断时回执保持非通过。`--explain` 仅输出计划，不修改回执。回执只是本轮证据，不是后续输入的成功缓存。
 
-本地相关常规领域验证通过即可交付，不重复运行无关领域。修改验证基础设施或影响无法界定时，执行器保守选择全部常规领域；CI 保留这些领域的完整门禁、实际 Python wheel 构建和隔离资源验证。浏览器由手动工作流或显式 `make test-full` 执行，不属于常规门禁，未执行时必须明确报告。这里的完整 Web 构建不代表已生成或签名各平台桌面安装包，发行验收仍遵循 `desktop/README.md`。
+本地相关常规领域验证通过即可交付，不重复运行无关领域。修改验证基础设施或影响无法界定时，执行器保守选择全部常规领域；CI 保留这些领域的完整门禁、实际 Python wheel 构建和隔离资源验证。桌面与浏览器分别由独立手动工作流、`make test-desktop`／`make test-browser` 或执行器的 `--desktop`／`--browser` 明确启动，不属于常规门禁，未执行时必须明确报告。这里的完整 Web 构建不代表已生成或签名各平台桌面安装包，发行验收仍遵循 `desktop/README.md`。
 
 ## 生成文件与修改边界
 

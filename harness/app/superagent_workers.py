@@ -294,7 +294,7 @@ class SuperagentWorkers:
         result = matches[0]
         spec = self._profiles[row['profile_id']]
         root = self.harness.worktrees.git(Path(spec['repo']), 'rev-parse', '--show-toplevel').strip()
-        if (result['repo'] != root or result['base_commit'] != row['commit_id'] or result['status'] != 'active'
+        if (Path(result['repo']).resolve() != Path(root).resolve() or result['base_commit'] != row['commit_id'] or result['status'] != 'active'
                 or row['workspace_id'] is not None and result['id'] != row['workspace_id']
                 or not Path(result['path']).is_dir()):
             raise _error('conflict')

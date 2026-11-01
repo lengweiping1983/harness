@@ -20,17 +20,21 @@ export function TurnElapsed({ activity, active }: { activity: TurnActivity; acti
   const visible = usePageVisible()
   const ticking = active && activity.endedAt === undefined && activity.endSeq === undefined
   const anchor = useMemo(() => ({ wall: Date.now(), monotonic: performance.now() }), [activity.turn, activity.startedAt])
-  const [, tick] = useState(0)
+  const [clock, setClock] = useState(() => ({anchor, now: anchor.wall}))
   useEffect(() => {
     if (!ticking || !visible) return
-    const timer = window.setInterval(() => tick(value => value + 1), 1000)
+    const update = () => {
+      if (!document.hidden) setClock({anchor, now: anchor.wall + Math.max(0, performance.now() - anchor.monotonic)})
+    }
+    update()
+    const timer = window.setInterval(update, 1000)
     return () => window.clearInterval(timer)
   }, [ticking, visible, anchor])
-  const elapsed = turnElapsed(activity, ticking ? anchor.wall + Math.max(0, performance.now() - anchor.monotonic) : undefined)
+  const elapsed = turnElapsed(activity, ticking ? clock.anchor === anchor ? clock.now : anchor.wall : undefined)
   const duration = elapsed === null ? null : formatElapsedDuration(elapsed)
   const key = ticking ? 'working' : activity.endedAt === undefined || activity.endSeq === undefined ? 'unknown'
     : activity.reason === 'completed' ? 'completed' : activity.reason === 'interrupted' ? 'interrupted' : ['aborted', 'cancelled'].includes(activity.reason ?? '') ? 'stopped' : 'ended'
-  return <span data-turn-elapsed={activity.turn} data-timing-active={ticking ? 'true' : 'false'}
+  return <span data-turn-elapsed={activity.turn} data-timing-active={ticking && visible ? 'true' : 'false'}
     title={t('ui.turnElapsed.hint')} className="inline-flex min-w-0 items-center gap-1.5 tabular-nums">
     {ticking ? <Loader2 aria-hidden className="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none" /> : null}
     <span>{t(LABELS[key][duration === null ? 1 : 0], { duration: duration ?? '' })}</span>

@@ -23,14 +23,17 @@ await browserScenario(async({server,browser})=>{
   await page.getByText(await page.evaluate(()=>window.copy('ui.context.advanced')),{exact:true}).click()
   for(const locale of ['en','zh-CN','en'])for(const theme of ['light','dark'])for(const width of [390,1440]){
    await page.setViewportSize({width,height:900});await page.evaluate(({locale,theme})=>{window.locale(locale);document.documentElement.className=theme;document.documentElement.dataset.theme=theme},{locale,theme})
-   const expected=await page.evaluate(({locale,mode})=>({budget:window.copy('ui.context.workingBudget',{count:(10000).toLocaleString(locale)}),window:window.copy('ui.context.window',{count:(12000).toLocaleString(locale)}),result:mode==='failed'?window.copy('ui.context.failed',{reason:'Original failure 原文'}):window.copy('ui.context.completedUsage',{result:window.copy(mode==='project'?'ui.context.projectCompleted':'ui.context.completed',{count:2}),before:(12345).toLocaleString(locale),after:(1234).toLocaleString(locale)})}),{locale,mode})
+   const expected=await page.evaluate(({locale,mode})=>({window:window.copy('ui.context.window',{count:(12000).toLocaleString(locale)}),result:mode==='failed'?window.copy('ui.context.failed',{reason:'Original failure 原文'}):window.copy('ui.context.completedUsage',{result:window.copy(mode==='project'?'ui.context.projectCompleted':'ui.context.completed',{count:2}),before:(12345).toLocaleString(locale),after:(1234).toLocaleString(locale)})}),{locale,mode})
    for(const text of Object.values(expected))await page.getByText(text,{exact:true}).waitFor()
    for(const id of ['efficient','balanced','extended']){
     const title=await page.evaluate(id=>window.copy('ui.context.preset.'+id),id)
     const note=await page.evaluate(id=>window.copy('ui.context.preset.'+id+'.note'),id)
     await page.getByRole('button').filter({has:page.getByText(title,{exact:true})}).getByText(note,{exact:true}).waitFor()
+    const budget=await page.evaluate(({id,locale})=>window.copy(id==='extended'?'ui.context.presetBudgetLimited':'ui.context.presetBudget',{percent:{efficient:40,balanced:60,extended:80}[id],count:({efficient:4800,balanced:7200,extended:9200}[id]).toLocaleString(locale)}),{id,locale})
+    await page.getByRole('button').filter({has:page.getByText(title,{exact:true})}).getByText(budget,{exact:true}).waitFor()
+    assert.equal(await page.getByRole('button').filter({has:page.getByText(title,{exact:true})}).getAttribute('aria-pressed'),id==='balanced'?'true':'false')
    }
-   for(const key of ['context_working_budget','tool_result_max_chars','summary_max_tokens','output_reserve','context_window']){
+   for(const key of ['tool_result_max_chars','summary_max_tokens','output_reserve','context_window']){
     const label=await page.evaluate(key=>window.copy('ui.context.'+key),key)
     await page.getByRole('spinbutton',{name:label,exact:true}).waitFor()
    }

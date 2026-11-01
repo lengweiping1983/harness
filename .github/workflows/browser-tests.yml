@@ -37,6 +37,12 @@ jobs:
       - run: npm --prefix model-runtime ci
       - run: npm --prefix web ci
       - run: npm --prefix desktop ci
+      - name: 准备课程执行沙箱
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y bubblewrap apparmor-profiles
+          sudo apparmor_parser -r /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+          bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev -- /bin/true
       - name: 安装浏览器及系统依赖
         working-directory: web
         run: npx playwright-core install --with-deps chromium

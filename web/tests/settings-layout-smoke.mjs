@@ -25,7 +25,7 @@ try {
   await page.keyboard.press('Control+,')
   const basicPages = page.locator('nav button[data-page]:visible')
   await basicPages.first().waitFor({state: 'visible'})
-  assert.equal(await basicPages.count(), 15)
+  assert.deepEqual(await basicPages.evaluateAll(nodes=>nodes.map(node=>node.dataset.page)), ['general','models','permissions','shortcuts','personality','agents','skills','tools','memory','connectors','plugins','mcpServer','hooks','automations'])
   await basicPages.last().focus()
   await page.keyboard.press('ArrowDown')
   assert.equal(await basicPages.first().evaluate(el => el === document.activeElement), true)

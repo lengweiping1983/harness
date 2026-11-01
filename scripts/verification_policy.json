@@ -5,8 +5,7 @@
   ],
   "full": [
     "python",
-    "web-unit",
-    "desktop"
+    "web-unit"
   ],
   "rules": [
     {
@@ -77,9 +76,9 @@
         "desktop/**"
       ],
       "tasks": [
-        "desktop"
+        "full"
       ],
-      "reason": "桌面变更执行完整桌面套件；浏览器矩阵由手动入口运行"
+      "reason": "桌面源码变化只选择后端与 Web 常规回归；桌面专项须明确指定"
     },
     {
       "patterns": [

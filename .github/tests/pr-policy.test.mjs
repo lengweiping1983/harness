@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const source = readFileSync(new URL('../workflows/pr-policy.yml', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../workflows/pr-policy.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const script = source.split('          script: |\n')[1].split('\n').map(line => line.slice(12)).join('\n');
 const run = new (Object.getPrototypeOf(async function () {}).constructor)('context', 'core', 'github', script);
 const valid = 'Closes #123\n\n## 变更与验收\n复现问题后修复行为，并提供可核验依据。\n\n## 验证证据\n执行完整回归，结果与当前输入一致。\n\n## 风险与回退\n通过回退提交恢复行为，不修改用户数据。';

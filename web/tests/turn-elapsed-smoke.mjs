@@ -47,7 +47,8 @@ window.render()
 await browserScenario(async({server,browser})=>{
  const page=await browser.newPage(),errors=[]
  page.on('pageerror',error=>errors.push(error.message))
- await page.clock.install({time:new Date('2026-10-26T04:00:00Z')})
+  await page.clock.install({time:new Date('2026-10-26T04:00:00Z')})
+  await page.clock.pauseAt(new Date('2026-10-26T04:00:01Z'))
  await page.route('**/api/v1/sessions/*/turns/*/completion*',route=>route.fulfill({json:{turn:1,end_seq:20,final_response_seq:route.request().url().includes('complete-owner')?19:null,response_seq:19,ended_at:0,feedback:null,delivery:{run_id:'fixture',start_seq:0,tool_executions:0,failed_tools:0,unknown_tools:0,artifacts:[],artifact_count:0,verification:'unverified',checks:[]},hooks:{total:0,runs:0,blocked:0,unsuccessful:0,counts:{},duration_ms:0,rows:[],offset:0,next_offset:null}}}))
  await page.goto(server.resolvedUrls.local[0]+'__turn-elapsed')
  const timer=page.locator('[data-turn-elapsed="1"]')
@@ -129,7 +130,7 @@ await browserScenario(async({server,browser})=>{
   Object.defineProperty(document,'hidden',{configurable:true,get:()=>window.testHidden})
   document.dispatchEvent(new Event('visibilitychange'))
  })
- await page.waitForFunction(()=>document.hidden)
+ await page.waitForFunction(()=>document.hidden&&document.querySelector('[data-turn-elapsed]')?.dataset.timingActive==='false')
  const hiddenTime=await timer.textContent();await page.clock.runFor(5000)
  assert.equal(await timer.textContent(),hiddenTime)
  await page.evaluate(()=>{window.testHidden=false;document.dispatchEvent(new Event('visibilitychange'))})

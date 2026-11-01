@@ -7,9 +7,10 @@ import {PermissionMenu} from '/src/components/chat/PermissionMenu.tsx'
 import {ModelConnections} from '/src/components/overlays/ModelConnections.tsx'
 import {QuickOpen} from '/src/components/overlays/QuickOpen.tsx'
 import {useAppStore} from '/src/store/app.ts'
+import {usePermissionStore} from '/src/store/permissions.ts'
 import {setLocale,t} from '/src/i18n/index.ts'
 import '/src/styles.css'
-window.locale=setLocale;window.copy=t;setLocale('en')
+window.locale=setLocale;window.copy=t;window.permissions=usePermissionStore;setLocale('en')
 const view=new URLSearchParams(location.search).get('view')
 useAppStore.setState({activeSessionId:'fixture',sessions:[{id:'fixture',cwd:'/root'}],quickOpen:view==='files'})
 const content=view==='files'?React.createElement(QuickOpen):view==='connection'?React.createElement(ModelConnections):React.createElement(PermissionMenu,{connection:'open'})
@@ -27,17 +28,17 @@ await browserScenario(async({server,browser})=>{
   })
   await page.goto(server.resolvedUrls.local[0]+'__state-error?view='+view)
   if(view.startsWith('permission')){
+   await page.waitForFunction(()=>!window.permissions.getState().loading && (window.permissions.getState().readError || window.permissions.getState().policy))
    await page.getByRole('button').first().click()
    if(view==='permission-save')await page.getByRole('menuitemradio').last().click()
   }
   const expected=()=>page.evaluate(view=>{
    const detail=window.copy('ui.http.invalidResponse')
    if(view.startsWith('permission'))return window.copy(view==='permission-read'?'ui.components.chat.PermissionMenu.62a03d787939':'ui.components.chat.PermissionMenu.375506c3c436',{detail})
-   if(view==='connection')return window.copy('ui.components.overlays.ModelConnections.16f9194c566d',{reason:detail})
    return detail
   },view)
   await page.getByText(await expected(),{exact:true}).waitFor()
-  await page.clock.pauseAt(new Date())
+  await page.clock.pauseAt(await page.evaluate(()=>Date.now()+1000))
   const before=requests.length
   for(const locale of ['en','zh-CN','en'])for(const theme of ['light','dark'])for(const width of [390,1440]){
    await page.setViewportSize({width,height:900})

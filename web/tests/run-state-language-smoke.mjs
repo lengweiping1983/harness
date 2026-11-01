@@ -34,9 +34,13 @@ import '/src/styles.css'
 await setLocale('en');window.locale=setLocale;window.writes=0
 const records=${JSON.stringify(snapshots.records)}
 const view=new URLSearchParams(location.search).get('view')
-createRoot(document.getElementById('root')).render(React.createElement(React.Fragment,null,
+const root=createRoot(document.getElementById('root'))
+let showReview=false
+function render(){root.render(React.createElement(React.Fragment,null,
  ...records.map(record=>React.createElement(RunHistoryCard,{key:record.id,record,sessionId:'session',busy:false,onContinue:()=>window.writes++,onOriginal:()=>window.writes++})),
- view?React.createElement(RecoveryReview,{record:records.find(record=>record.id===view),sessionId:'session',onClose:()=>{},onSubmitted:()=>window.writes++,onOriginal:()=>window.writes++}):null))
+ view&&showReview?React.createElement(RecoveryReview,{record:records.find(record=>record.id===view),sessionId:'session',onClose:()=>{},onSubmitted:()=>window.writes++,onOriginal:()=>window.writes++}):null))}
+window.openReview=()=>{showReview=true;render()}
+render()
 `
 await browserScenario(async({server,browser})=>{
  for(const view of ['', 'incomplete','restarted']){
@@ -49,6 +53,9 @@ await browserScenario(async({server,browser})=>{
    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(snapshots.previews[id])})
   })
   await page.goto(server.resolvedUrls.local[0]+'__run-state'+(view?'?view='+view:''))
+  const external=page.locator('[data-run-id="external"]')
+  await external.locator('summary').filter({hasText:'Technical details'}).click()
+  if(view)await page.evaluate(()=>window.openReview())
   for(const locale of ['en','zh-CN','en'])for(const theme of ['light','dark'])for(const width of [390,1440]){
    await page.setViewportSize({width,height:900})
    await page.evaluate(async({locale,theme})=>{await window.locale(locale);document.documentElement.classList.toggle('dark',theme==='dark')},{locale,theme})

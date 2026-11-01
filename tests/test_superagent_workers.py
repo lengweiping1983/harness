@@ -109,6 +109,19 @@ class SuperagentWorkersTests(unittest.IsolatedAsyncioTestCase):
         task_id = next(iter(self.factory.ready_catalog(['github'])))
         return router, self.factory.worker(task_id)
 
+    async def test_workspace_repository_identity_accepts_equivalent_paths_and_rejects_other_roots(self):
+        _, row = await self.initial_task()
+        record = self.factory._workspace(row)
+        equivalent = {**record, 'repo': str(self.repo.parent) + '/./' + self.repo.name}
+        with patch.object(self.host.worktrees, 'list', return_value=[equivalent]):
+            self.assertEqual(self.factory._workspace(row)['id'], record['id'])
+        other = self.root / 'different-repository'
+        other.mkdir()
+        with patch.object(self.host.worktrees, 'list', return_value=[{**record, 'repo': str(other)}]):
+            with self.assertRaises(HarnessError) as failure:
+                self.factory._workspace(row)
+            self.assertEqual(failure.exception.code, 'superagent/conflict')
+
     async def test_router_reuses_created_worker_and_subscribes_new_thread_for_direct_followups(self):
         router, row = await self.initial_task()
         second = self.receive('review', thread_ids=['pr/2'], text='Continue the parser fix here; use solution B.')

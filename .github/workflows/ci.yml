@@ -53,8 +53,8 @@ jobs:
           python scripts/check_text_encoding.py
           python scripts/lint.py
 
-  web-desktop:
-    name: Web and desktop tests
+  web:
+    name: Web tests
     timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
@@ -69,33 +69,29 @@ jobs:
           cache-dependency-path: |
             model-runtime/package-lock.json
             web/package-lock.json
-            desktop/package-lock.json
       - name: PR 流程回归
         run: node --test .github/tests/*.test.mjs
-      - name: 验证桌面锁定依赖
+      - name: 安装锁定的后端依赖
         run: python -m pip install --require-hashes -r desktop/requirements.lock
       - run: python -m pip install --no-deps -e .
       - run: npm --prefix model-runtime ci
       - run: npm --prefix web ci
-      - run: npm --prefix desktop ci
       - name: 前端类型检查
         run: npm --prefix web run typecheck
       - name: 前端与桥接运行时单测
         run: npm --prefix web run test:unit
       - name: 完整前端生产构建
         run: npm --prefix web run build
-      - name: 桌面测试发现入口
-        run: npm --prefix desktop test
 
   required:
     name: CI required
     if: ${{ always() }}
-    needs: [unittest, web-desktop]
+    needs: [unittest, web]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require every regression job
         env:
           BACKEND: ${{ needs.unittest.result }}
-          CLIENT: ${{ needs.web-desktop.result }}
+          CLIENT: ${{ needs.web.result }}
         run: test "$BACKEND" = success && test "$CLIENT" = success

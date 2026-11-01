@@ -39,7 +39,7 @@ await browserScenario(async({server,browser})=>{
   }
   const expected=()=>page.evaluate(view=>view==='market-unknown'?window.copy('ui.extensions.unknownResult',{reason:window.copy('ui.lib.api.4a5f658ed9ae',{detail:window.networkDetail})}):window.copy('ui.http.invalidResponse'),view)
   const wait=async()=>page.waitForFunction(text=>Array.from(document.querySelectorAll('[role=alert]')).some(element=>element.textContent.startsWith(text)),await expected())
-  await wait();await page.clock.pauseAt(new Date());const before=requests.length
+  await wait();await page.clock.pauseAt(await page.evaluate(()=>Date.now()+1000));const before=requests.length
   for(const locale of ['en','zh-CN','en'])for(const theme of ['light','dark'])for(const width of [390,1440]){
    await page.setViewportSize({width,height:900});await page.evaluate(({locale,theme})=>{window.locale(locale);document.documentElement.className=theme;document.documentElement.dataset.theme=theme},{locale,theme})
    await wait()

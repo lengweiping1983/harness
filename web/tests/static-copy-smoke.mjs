@@ -49,7 +49,7 @@ await browserScenario(async({server,browser})=>{
       assert.equal(await page.evaluate(()=>window.suggestions.at(-1)),strings[suggestions[0]])
       await page.evaluate(({language,theme})=>window.configure('settings',language,theme),{language,theme})
       for(const group of ['agents','connections','advanced']) {const button=page.getByRole('button',{name:strings['ui.settings.groups.'+group],exact:true});if(await button.getAttribute('aria-expanded')==='false')await button.click()}
-      for(const key of ['ui.memory.heading','ui.context.settings','ui.agents.directory','ui.extensions.skills','ui.extensions.connectors','ui.extensions.plugins']){
+      for(const key of ['ui.memory.heading','ui.settings.tools.title','ui.agents.directory','ui.extensions.skills','ui.extensions.connectors','ui.extensions.plugins']){
         await page.getByRole('button',{name:strings[key],exact:true}).waitFor()
       }
       assert.equal(await page.evaluate(()=>window.failLanguage()),strings['ui.settings.persistFailed'])

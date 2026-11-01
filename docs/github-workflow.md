@@ -2,6 +2,8 @@
 
 仓库的持续回归、PR 正文检查和桌面安装包构建由 `.github/workflows/` 管理。本地验证入口见 [开发与测试](development.md)，安装包准备与签名见 [桌面文档](../desktop/README.md)。
 
+当前公开仓库的贡献闭环使用免费规则集与标准 GitHub 托管 runner，不依赖付费套餐、较大 runner 或付费审查服务。公开仓库标准 runner 的运行时长免费，依据 [GitHub Actions 计费说明](https://docs.github.com/en/actions/concepts/billing-and-usage)；仓库可见性或 runner 类型变化后须重新核对，不自动切换付费方案。安装包签名和产物存储属于独立发行范围，不是贡献闭环的验收前提。
+
 ## 持续回归
 
 日常贡献从 [贡献指南](../CONTRIBUTING.md)进入，按 Issue、Draft PR、本地验证、Ready、审查、squash 合并及 main 核对完成闭环。本页维护实际工作流与远端配置的边界。
@@ -11,18 +13,18 @@
 | 作业／检查 | 执行内容 |
 |---|---|
 | `Python tests` | Ubuntu、Python 3.14、Node.js 22；安装 Python 测试依赖及浏览器语言资源验证所需的 Web 锁文件依赖，构建 wheel，隔离验证发行资源，运行后端测试发现、协议与语言生成同步、编码和 lint 检查 |
-| `Web and desktop tests` | Ubuntu、Python 3.14、Node.js 22；运行 PR 策略回归，安装带哈希的桌面 Python 依赖与各 npm 锁文件依赖，执行前端类型检查、完整 Web／桥接运行时单测、生产构建及桌面测试发现 |
-| `CI required` | 等待 Python 和 Web／桌面两个作业，仅当两者结果均为 `success` 时通过；失败、取消或跳过均不能通过汇总检查 |
+| `Web tests` | Ubuntu、Python 3.14、Node.js 22；运行 PR 策略回归，安装锁定依赖，执行前端类型检查、完整 Web／桥接运行时单测及生产构建 |
+| `CI required` | 等待 Python 和 Web 两个作业，仅当两者结果均为 `success` 时通过；失败、取消或跳过均不能通过汇总检查 |
 
-常规 CI 不启动浏览器。上述桌面回归运行在 Ubuntu，原生安装包由独立工作流构建。
+常规 CI 不启动桌面或浏览器回归。`desktop-tests.yml` 的 `Desktop regression` 仅允许手动触发，在 Windows 和 macOS 标准 runner 执行桌面套件；不属于 `CI required`。只有用户明确要求对应专项时才触发桌面或浏览器工作流。
 
 ## 手动浏览器回归
 
-`browser-tests.yml` 仅由 `workflow_dispatch` 手动触发，不在 PR、推送或合并组事件上运行，也不属于 `CI required`。在 Actions 中选择 `Browser regression` 和目标分支后显式启动。浏览器检查未执行或失败时，不能以常规门禁通过宣称界面验收完成；已知环境与夹具问题保留在 [Issue #21](https://github.com/lengweiping1983/harness/issues/21)。
+`browser-tests.yml` 仅由 `workflow_dispatch` 手动触发，不在 PR、推送或合并组事件上运行，也不属于 `CI required`。在 Actions 中选择 `Browser regression` 和目标分支后显式启动。浏览器检查未执行或失败时，不能以常规门禁通过宣称界面验收完成；发现问题时按实际失败日志建立 Issue，不使用未经核实的问题链接。
 
-工作流使用四个独立 Ubuntu 作业，分别准备 Python 3.14、Node.js 22、配套 Chromium 和系统依赖，并完成生产构建。按排序后的场景位置取模分组，所有发现的完整场景恰好进入一组，不拆分场景内部的语言、主题或尺寸断言；各组独立拥有后端、端口和临时数据，`fail-fast: false` 保留其他组结果，每组限时 45 分钟。
+工作流使用四个独立 Ubuntu 作业，分别准备 Python 3.14、Node.js 22、配套 Chromium 和系统依赖，并完成生产构建。课程执行场景另安装 bubblewrap 与发行版 AppArmor 配置，加载仅针对 bwrap 的 `bwrap-userns-restrict` 配置后，实际预检文件、网络和进程命名空间；不关闭全局 AppArmor 限制，预检失败立即停止，不降级为无隔离执行。按排序后的场景位置取模分组，所有发现的完整场景恰好进入一组，不拆分场景内部的语言、主题或尺寸断言；各组独立拥有后端、端口和临时数据，`fail-fast: false` 保留其他组结果，每组限时 45 分钟。
 
-本地显式 `make test-full` 包含完整浏览器套件，也可用 `npm --prefix web run test:browser -- --shard=1/4` 诊断单组。单组通过不代表完整套件通过；分组不接受额外场景选择，非法编号或会产生空组的数量明确失败。浏览器准备见开发文档。
+本地显式 `make test-browser` 运行完整浏览器套件；`make test-full` 仅运行后端与 Web 常规门禁。浏览器单组诊断可用 `npm --prefix web run test:browser -- --shard=1/4`。单组通过不代表完整套件通过；分组不接受额外场景选择，非法编号或会产生空组的数量明确失败。浏览器准备见开发文档。
 
 ## PR 正文检查
 
@@ -41,12 +43,14 @@
 
 `.github/rulesets/default-branch.json` 是供导入的规则模板，仓库文件本身不会应用远端设置。模板针对默认分支，禁止删除和非快进更新，要求 PR、已解决的审查讨论、squash 合并及严格的 `CI required`／`PR policy` 检查；独立批准数量为 0，未配置 bypass。远端是否已启用须读取实际规则确认。
 
+维护者在仓库 Settings → Rules → Rulesets 导入该 JSON，核对目标为默认分支、状态为 Active、两项必需检查名称与 Actions 完全一致，并保存后回查。连接器不能读取传统分支保护或管理规则时，需要已登录的维护者网页会话；权限错误不代表规则存在或已生效。普通贡献 PR 仍须实际通过 `PR policy`，不能用 Dependabot 的跳过结果代替验证。
+
 `.github/ISSUE_TEMPLATE/` 提供缺陷报告、功能提案和工程任务表单，禁用空白 Issue。各表单分别收集复现与实际行为、用户问题与验收标准、工程范围与验证方案；日志和示例不得包含凭据或用户数据。
 
 Dependabot 每周检查 GitHub Actions、`web` npm、`desktop` npm 和根目录 pip 依赖，每组最多保留 3 个更新 PR。GitHub Actions 的全部更新合为一个分组；npm 与 pip 只把 minor 和 patch 合入分组，主版本仍单独成 PR，保留逐个审查升级风险的机会。分组只决定 PR 的聚合方式，不改变锁文件和版本范围本身，实际升级结果仍按业务 CI 验证。桌面带哈希的 Python 锁文件仍按发行流程维护。
 
 ## 安装包与构建产物
 
-`desktop-build.yml` 在手动触发或推送 `desktop-v*` 标签时运行，构建矩阵为 macOS ARM64、macOS x64 和 Windows x64。各作业使用 Node.js 22，安装 npm 依赖并执行前端类型检查、桌面回归，再调用桌面打包入口准备运行时与安装包；签名凭据通过对应平台的仓库 secrets 提供。
+`desktop-build.yml` 仅在明确要求构建桌面安装包后手动触发，标签推送不自动启动，构建矩阵为 macOS ARM64、macOS x64 和 Windows x64。各作业使用 Node.js 22，安装 npm 依赖并执行前端类型检查、桌面回归，再调用桌面打包入口准备运行时与安装包；签名凭据通过对应平台的仓库 secrets 提供。
 
 各平台安装包及更新元数据上传为 `Harness-<平台>-<架构>` artifact。全部平台构建成功后，Ubuntu 汇总作业调用 `desktop/release-assets.mjs` 整理为 `Harness-release-assets`；两类 artifact 均保留 14 天，缺少产物时失败。该工作流上传构建产物，不创建 GitHub Release。

@@ -19,7 +19,7 @@ await browserScenario(async ({server, browser}) => {
   const writes=[]
   await page.route('**/api/v1/settings',route=>{
     if(route.request().method()!=='GET')writes.push(route.request().method())
-    return route.fulfill({json:{config:{permission_policy:'request_approval',max_steps:10,token_budget:null,network_timeout:60},effective:{model:'Redundant model',context_window:12000,max_tokens:2000,sources:['manual']}}})
+    return route.fulfill({json:{config:{permission_policy:'request_approval',max_steps:10,token_budget:null,network_timeout:60,context_auto_manage:true,context_working_budget:7200,tool_result_max_chars:12000,tool_schema_mode:'auto',summary_max_tokens:8192,output_reserve:1000,context_window:12000},effective:{model:'Redundant model',context_window:12000,max_tokens:2000,sources:['manual']}}})
   })
   await page.goto(server.resolvedUrls.local[0] + '__settings-search')
   const search = page.locator('input[type="search"]')

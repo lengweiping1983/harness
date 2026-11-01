@@ -42,7 +42,7 @@ await browserScenario(async({server,browser})=>{
    if(view==='files-error'||view==='files-page'||view==='files-register-error')await page.getByText(await page.evaluate(()=>window.copy('ui.http.invalidResponse')),{exact:true}).waitFor()
    if(view==='files-summary')await page.getByText(locale==='zh-CN'?'目录：1 · 文件：1':'Folders: 1 · Files: 1',{exact:true}).waitFor()
    if(view==='prompts'){
-    const summary=locale==='zh-CN'?'以下是当前对话的系统指令投影；历史请求以档案为准。段数：2 · 字符数：10。':"The following is the current conversation's system-instruction projection; historical requests use archived records. Sections: 2 · Characters: 10."
+    const summary=resources[locale]['ui.prompts.summary'].replace('{count}','2').replace('{characters}','10')
     await page.getByText(summary,{exact:true}).waitFor()
     for(const count of [3,7])await page.getByText((locale==='zh-CN'?'字符数：':'Characters: ')+count,{exact:true}).waitFor()
     await page.getByText('constructor',{exact:true}).waitFor()

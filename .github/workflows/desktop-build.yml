@@ -1,8 +1,6 @@
 name: Desktop installers
 on:
   workflow_dispatch:
-  push:
-    tags: ['desktop-v*']
 permissions:
   contents: read
 jobs:

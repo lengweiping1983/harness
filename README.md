@@ -116,7 +116,7 @@ make verify-plan PYTHON=.venv/bin/python
 make verify PYTHON=.venv/bin/python
 ```
 
-`verify-plan` 只解释选择；`verify` 根据当前变更运行相关常规领域回归，始终检查生成同步并完成 Web 生产构建及发布资源核对。README 也是发行输入，会选择 Python 回归。CI 保留完整 Python、Web 单测及桌面门禁；浏览器由独立手动工作流或显式 `make test-full PYTHON=.venv/bin/python` 执行，常规通过不代表浏览器验收。环境准备、独立检查命令和浏览器选择见 [开发与测试](docs/development.md)；选择依据维护在 [验证策略](scripts/verification_policy.json) 与 [执行器](scripts/verify.py)。
+`verify-plan` 只解释选择；`verify` 根据当前变更运行相关常规领域回归，始终检查生成同步并完成 Web 生产构建及发布资源核对。README 也是发行输入，会选择 Python 回归。CI 保留完整 Python 与 Web 单测门禁。只有明确要求桌面或浏览器专项时，才通过各自手动工作流、`make test-desktop` 或 `make test-browser` 运行；默认验证和 `make test-full` 均不启动这两类专项，常规通过不代表专项验收。环境准备、独立检查命令和浏览器选择见 [开发与测试](docs/development.md)；选择依据维护在 [验证策略](scripts/verification_policy.json) 与 [执行器](scripts/verify.py)。
 
 ## 文档与协作
 

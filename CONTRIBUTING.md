@@ -11,10 +11,9 @@ python3.14 -m venv .venv
 .venv/bin/python -m pip install -e ".[test]"
 npm --prefix model-runtime ci
 npm --prefix web ci
-npm --prefix desktop ci
 ```
 
-已有 Python 3.14+ 环境可复用；旧版本环境需显式另建，不覆盖或迁移。Windows 将 Python 路径换为 `.venv\Scripts\python.exe`。常规验证无需安装浏览器；模型凭据不属于离线回归的环境准备。
+已有 Python 3.14+ 环境可复用；旧版本环境需显式另建，不覆盖或迁移。Windows 将 Python 路径换为 `.venv\Scripts\python.exe`。桌面与浏览器专项只在明确要求时准备并运行；常规验证无需安装桌面依赖或浏览器；模型凭据不属于离线回归的环境准备。
 
 ## 完成一次贡献
 
@@ -36,7 +35,7 @@ git fetch origin main
 
 修改验证基础设施或无法确定影响时，`make verify` 保守选择全部常规领域。验证始终包含完整生产构建和生成同步；运行期间不改源码或 HEAD。检查退出码及 `output/verification.json` 中的 `passed`、`inputs_unchanged`、`build_unchanged`，再报告通过。`output/` 仅保留本地，在 PR 正文填写脱敏证据。
 
-浏览器回归由 Actions 的 `Browser regression` 手动工作流或本地显式 `make test-full PYTHON=.venv/bin/python` 运行，不属于常规 PR 门禁。手动准备配套 Chromium 和系统依赖见开发文档；普通 Chrome／Edge 能启动不代表扩展场景可运行。常规验证通过时仍需明确浏览器未执行，不能宣称浏览器验收通过。
+浏览器回归由 Actions 的 `Browser regression` 手动工作流或本地显式 `make test-browser PYTHON=.venv/bin/python` 运行，不属于常规 PR 门禁。手动准备配套 Chromium 和系统依赖见开发文档；普通 Chrome／Edge 能启动不代表扩展场景可运行。常规验证通过时仍需明确浏览器未执行，不能宣称浏览器验收通过。
 
 PR 模板中的勾选清单只是提醒；“变更与验收”“验证证据”“风险与回退”仍需填写实际说明。机器检查正文结构和 Issue 身份，不能证明验证已执行或业务已完成。大任务拆成可独立验收的子 Issue，每个 PR 用关闭关键词关联本次完成的子 Issue，父 Issue 仅引用，避免部分交付提前关闭整个任务。新提交需要重新验证；回归通过新 Issue 和回退 PR 跟踪，不能通过重置用户运行数据回退代码。
 
