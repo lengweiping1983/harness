@@ -22,8 +22,9 @@ def provisional_title(text: str) -> str:
 
 
 class SessionTitles:
-    def __init__(self, harness):
+    def __init__(self, harness, *, timeout: float = 30):
         self.harness = harness
+        self.timeout = timeout
         self.tasks: dict[str, asyncio.Task] = {}
         self.errors: list[BaseException] = []
         self.closed = False
@@ -76,7 +77,7 @@ class SessionTitles:
         try:
             if self.harness.has_model_credentials:
                 config = self.harness._session_llm_config(session).merged(max_tokens=256, reasoning_effort=None)
-                async with asyncio.timeout(30):
+                async with asyncio.timeout(self.timeout):
                     response = await self.harness.adapter.complete(
                         [SystemMessage(tr('session.title.prompt')), UserMessage(text[:12000])],
                         config=config, tools=[])

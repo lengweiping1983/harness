@@ -128,6 +128,45 @@ class SessionTitleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(prompts[0][1], prompts[2][1])
         self.assertNotEqual(prompts[0][1], prompts[1][1])
 
+    async def test_timeout_and_repeated_close_wait_for_request_cleanup(self):
+        entered, cleaning, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        async def complete(*args, **kwargs):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                await release.wait()
+        self.complete.side_effect = complete
+        session = self.create()
+        await self.append(session, 'Task')
+        await entered.wait()
+        first = asyncio.create_task(self.titles.close())
+        await cleaning.wait()
+        second = asyncio.create_task(self.titles.close())
+        first.cancel()
+        await asyncio.sleep(0)
+        self.assertFalse(first.done())
+        self.assertFalse(second.done())
+        release.set()
+        results = await asyncio.gather(first, second, return_exceptions=True)
+        self.assertIsInstance(results[0], asyncio.CancelledError)
+        self.assertIsNone(results[1])
+        self.assertEqual(session.header.metadata['auto_title'], 'fallback')
+        self.complete.assert_awaited_once()
+
+    async def test_timeout_retains_fallback_without_replaying_model_request(self):
+        self.titles.timeout = .001
+        async def complete(*args, **kwargs):
+            await asyncio.Event().wait()
+        self.complete.side_effect = complete
+        session = self.create()
+        await self.append(session, 'Task')
+        await self.settle()
+        self.assertEqual(session.header.title, 'Task')
+        self.assertEqual(session.header.metadata['auto_title'], 'fallback')
+        self.complete.assert_awaited_once()
+
     async def test_parallel_sessions_delete_and_shutdown_keep_original_ownership(self):
         entered, release = asyncio.Event(), asyncio.Event()
         async def complete(*args, **kwargs):
