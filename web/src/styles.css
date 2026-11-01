@@ -1000,3 +1000,44 @@ body {
 @container academy (min-width: 64rem) {
   .academy-assistant-jump { display: none; }
 }
+
+/* macOS 原生窗口按钮与现有三栏页头共用顶栏，仅可信桌面 preload 启用。 */
+:root[data-desktop-platform='darwin'] .app-shell {
+  --workspace-header-height: 44px;
+  --desktop-traffic-light-inset: 88px;
+}
+:root[data-desktop-platform='darwin'] :is(.sidebar-tab-header, .conversation-tab-header, .inspector-tab-header) {
+  -webkit-app-region: drag;
+  user-select: none;
+  background: rgb(var(--c-rail));
+}
+:root[data-desktop-platform='darwin'] :is(.sidebar-tab-header, .conversation-tab-header, .inspector-tab-header) :is(button, a, input, select, textarea, [role='tab'], [role='separator']) {
+  -webkit-app-region: no-drag;
+}
+:root[data-desktop-platform='darwin'] .app-shell[data-mode='columns'] .sidebar-tab-header {
+  padding-left: var(--desktop-traffic-light-inset);
+}
+:root[data-desktop-platform='darwin'] .sidebar-header-logo { display: none; }
+:root[data-desktop-platform='darwin'] .sidebar-header-new { width: 32px; padding: 0; }
+:root[data-desktop-platform='darwin'] .sidebar-header-new > span { display: none; }
+:root[data-desktop-platform='darwin'] .conversation-tab-header [role='tab'] {
+  font-size: var(--text-body);
+  line-height: 1.25rem;
+}
+:root[data-desktop-platform='darwin'] .app-shell[data-mode='columns'][data-sidebar='0']:not([data-inspector-expanded='1']) .conversation-tab-header,
+:root[data-desktop-platform='darwin'] .app-shell[data-mode='columns'][data-sidebar='0'][data-inspector-expanded='1'] .inspector-tab-header,
+:root[data-desktop-platform='darwin'] .app-shell[data-mode='overlay'] .conversation-tab-header {
+  padding-left: var(--desktop-traffic-light-inset);
+}
+:root[data-desktop-platform='darwin'] .workspace-divider { top: var(--workspace-header-height); }
+/* 加载和失败状态仍保留可拖动区域，不让骨架占据原生按钮位置。 */
+:root[data-desktop-platform='darwin'] #root:has(> [aria-busy='true'])::before,
+:root[data-desktop-platform='darwin'] #root:has(> .desktop-boot-error)::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto;
+  height: 44px;
+  z-index: 40;
+  background: rgb(var(--c-rail));
+  -webkit-app-region: drag;
+}

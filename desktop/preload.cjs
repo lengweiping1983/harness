@@ -1,4 +1,10 @@
 const {contextBridge, ipcRenderer} = require('electron')
+// 由可信宿主标记平台，网页与 Windows 不启用 macOS 窗口装饰。
+if (process.platform === 'darwin') {
+  window.addEventListener('DOMContentLoaded', () => {
+    document.documentElement.dataset.desktopPlatform = 'darwin'
+  }, {once: true})
+}
 contextBridge.exposeInMainWorld('harnessDesktop', {
   notifyTask: payload => ipcRenderer.invoke('task-notification', payload),
   clearTaskNotification: sessionId => ipcRenderer.invoke('task-notification-clear', sessionId),

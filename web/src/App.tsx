@@ -177,7 +177,7 @@ export default function App() {
 
   if (bootError) {
     return (
-      <div className="flex h-dvh items-center justify-center bg-canvas px-6">
+      <div className="desktop-boot-error flex h-dvh items-center justify-center bg-canvas px-6">
         <EmptyHint
           icon={<AlertTriangle className="h-6 w-6 text-danger" />}
           title={t("ui.App.354dca62058c")}

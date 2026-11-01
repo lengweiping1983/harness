@@ -188,7 +188,7 @@ export function ProjectSidebar() {
     <div className="flex h-full min-h-0 flex-col">
       {/* 顶栏：收起、刷新和新会话。 */}
       <header className="sidebar-tab-header flex items-center gap-1 px-2">
-        <HarnessLogo className="mr-1 h-6 w-6 shrink-0" />
+        <HarnessLogo className="sidebar-header-logo mr-1 h-6 w-6 shrink-0" />
         <WorkspaceAction action="collapse-left" label={t('ui.sidebar.collapse')} data-panel-toggle="left" aria-controls="project-sidebar" onClick={() => useAppStore.getState().toggleSidebar()} />
         <IconButton
           label={t("ui.components.sidebar.ProjectSidebar.aee887434131")}
@@ -201,7 +201,7 @@ export function ProjectSidebar() {
         </IconButton>
         <div className="ml-auto flex items-center gap-1">
           {!showArchived ? <Tooltip content={t("ui.components.sidebar.ProjectSidebar.d48816a87262")}>
-            <Button size="sm" variant="ghost" onClick={() => void create()} icon={<MessageSquarePlus className="h-3.5 w-3.5" />}>{t("ui.components.sidebar.ProjectSidebar.c57c30bc05f7")}</Button>
+            <Button size="sm" variant="ghost" className="sidebar-header-new" aria-label={t("ui.components.sidebar.ProjectSidebar.c57c30bc05f7")} onClick={() => void create()} icon={<MessageSquarePlus className="h-3.5 w-3.5" />}><span>{t("ui.components.sidebar.ProjectSidebar.c57c30bc05f7")}</span></Button>
           </Tooltip> : null}
         </div>
       </header>

@@ -52,7 +52,7 @@ async function startDesktop() {
     origin = new URL(applicationURL).origin
   } catch (error) {dialog.showErrorBox('Harness startup failed', String(error)); app.quit(); throw error}
   downloads = new BrowserDownloads(() => path.join(app.getPath('downloads'), 'Harness'), () => browser.publish())
-  window = new BrowserWindow({width: 1440, height: 960, minWidth: 800, minHeight: 600, title: 'Harness', icon: brandIcon, webPreferences: {preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true}})
+  window = new BrowserWindow({width: 1440, height: 960, minWidth: 800, minHeight: 600, title: 'Harness', icon: brandIcon, ...(process.platform === 'darwin' ? {titleBarStyle: 'hiddenInset', trafficLightPosition: {x: 16, y: 15}} : {}), webPreferences: {preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true}})
   instanceReady()
   let menuReady = false
   const updates = new DesktopUpdates({updater:updaterPackage.autoUpdater, packaged:app.isPackaged, notify:() => installMenu(menuReady)})
