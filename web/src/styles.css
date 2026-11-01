@@ -672,21 +672,10 @@ body {
 
   @supports (corner-shape: superellipse(1.5)) {
     .composer-card,
-    .suggest-card,
     .kbd {
       corner-shape: superellipse(1.5);
     }
   }
-
-.suggest-card {
-    border: 1px solid rgb(var(--c-line));
-    box-shadow: none;
-    transition: background-color 150ms ease, border-color 150ms ease;
-}
-.suggest-card:hover {
-    border-color: rgb(var(--c-brand) / 0.4);
-    box-shadow: none;
-}
 
 .composer-dock {
     background: rgb(var(--c-surface));

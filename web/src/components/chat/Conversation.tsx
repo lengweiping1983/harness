@@ -6,7 +6,7 @@ import { MessageNavigator } from './MessageNavigator'
 import { t, useLocale } from '@/i18n'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ArrowDown, Brain, ChevronRight, ListOrdered, MessageSquarePlus, RotateCw, WifiOff } from 'lucide-react'
+import { ArrowDown, Brain, ChevronRight, ListOrdered, RotateCw, WifiOff } from 'lucide-react'
 import type { Block, QuestionBlock } from '@/types'
 import { api, unwrap } from '@/lib/api'
 import { cn, createDateHeadingFormatter } from '@/lib/utils'
@@ -52,13 +52,6 @@ type Item =
 
 type NavigationTarget = { sessionId: string | null } & ({ id: string } | { sourceSeq: number })
 
-const SUGGESTION_KEYS = [
-  "ui.components.chat.Conversation.b2b6ca2ea1f1",
-  "ui.components.chat.Conversation.8eb6b977850f",
-  "ui.components.chat.Conversation.0ac196393e3f",
-  "ui.components.chat.Conversation.20061c1959d0",
-]
-
 const EMPTY_TURNS: Record<number, TurnActivity> = {}
 
 export function Conversation({
@@ -69,7 +62,6 @@ export function Conversation({
   running,
   streaming,
   connection,
-  onSuggest,
   history,
   onRefreshHistory,
   onReconnect,
@@ -81,7 +73,6 @@ export function Conversation({
   running: boolean
   streaming: boolean
   connection: string
-  onSuggest?: (text: string) => void
   history?: LoadedHistory | null
   onReconnect?: () => void
   onRefreshHistory?: () => void
@@ -589,7 +580,7 @@ export function Conversation({
         className={cn('conversation-scroll min-h-0 flex-1 overflow-y-auto', !isEmpty && 'flex flex-col')}
       >
         {isEmpty ? (
-          readOnly ? <div className="p-8 text-center text-sm text-muted">{t('ui.shared.emptyConversation')}</div> : queuedEmpty === 'none' ? <EmptyState onSuggest={onSuggest} /> : <QueuedEmptyState state={queuedEmpty} />
+          readOnly ? <div className="p-8 text-center text-sm text-muted">{t('ui.shared.emptyConversation')}</div> : queuedEmpty === 'none' ? <EmptyState /> : <QueuedEmptyState state={queuedEmpty} />
         ) : (
           <div
             className="relative mx-auto w-full shrink-0 px-6 py-6"
@@ -733,12 +724,12 @@ function QueuedEmptyState({ state }: { state: 'paused' | 'environment' | 'queued
   </div>
 }
 
-function EmptyState({ onSuggest }: { onSuggest?: (text: string) => void }) {
+function EmptyState() {
   useLocale()
 
   return (
     <div
-      className="welcome-panel mx-auto flex w-full min-w-0 flex-col items-center gap-9 px-6 pb-2 pt-10 text-center"
+      className="welcome-panel mx-auto flex w-full min-w-0 flex-col items-center gap-6 px-6 pb-8 pt-8 text-center"
       style={{ maxWidth: 'var(--chat-content-width)' }}
     >
       <div className="welcome-mark relative">
@@ -747,27 +738,6 @@ function EmptyState({ onSuggest }: { onSuggest?: (text: string) => void }) {
       <div className="welcome-copy space-y-3.5">
         <h2 className="text-2xl leading-9 font-semibold tracking-tight text-ink">{t("ui.components.chat.Conversation.e33a219fc51f")}</h2>
         <p className="mx-auto max-w-md text-sm leading-relaxed text-muted">{t("ui.components.chat.Conversation.2838a5c07278")}</p>
-      </div>
-      <div className="welcome-suggestions grid w-full min-w-0 gap-3 sm:grid-cols-2">
-        {SUGGESTION_KEYS.map((key) => {
-          const text = t(key)
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onSuggest?.(text)}
-              className={cn(
-                  'suggest-card group flex min-w-0 items-center gap-3.5 rounded-2xl bg-raised/55 px-4 py-3.5 text-left text-sm font-medium text-muted',
-                  'hover:bg-surface hover:text-ink',
-              )}
-            >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line bg-surface text-faint transition-colors group-hover:border-brand/30 group-hover:bg-brand/10 group-hover:text-brand">
-                <MessageSquarePlus className="h-3.5 w-3.5" />
-              </span>
-              <span className="min-w-0 flex-1 truncate">{text}</span>
-            </button>
-          )
-        })}
       </div>
     </div>
   )

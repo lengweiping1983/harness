@@ -242,10 +242,11 @@ export default function App() {
         conversation={{
           turns: chat.turnActivity, history: chat.history, onRefreshHistory: channel.refreshHistory,
           onReconnect: activeSessionId ? channel.reconnect : undefined, blocks: visibleBlocks,
-          running: chat.running, streaming, connection: chat.connection, onSuggest: onSend,
+          running: chat.running, streaming, connection: chat.connection,
         }}
       >
             <Composer
+              showSuggestions={chat.blocks.length === 0}
               goalPanel={activeSessionId && <GoalDock key={activeSessionId} sessionId={activeSessionId} state={chat.goalState} running={chat.running}
               openRequest={goalOpenRequest?.sessionId === activeSessionId ? goalOpenRequest.serial : 0} />}
               steering={chat.steering}

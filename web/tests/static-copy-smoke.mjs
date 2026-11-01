@@ -6,6 +6,7 @@ const entry = `
 import React from 'react'
 import {createRoot} from 'react-dom/client'
 import {Conversation} from '/src/components/chat/Conversation.tsx'
+import {ConversationSuggestions} from '/src/components/chat/ConversationSuggestions.tsx'
 import {QuestionCard} from '/src/components/chat/blocks/QuestionCard.tsx'
 import {SettingsDialog} from '/src/components/overlays/SettingsDialog.tsx'
 import {useAppStore} from '/src/store/app.ts'
@@ -19,7 +20,9 @@ function Fixture({view}) {
   useLocale()
   return view==='settings'?React.createElement(SettingsDialog):view==='question'
     ?React.createElement(QuestionCard,{block:question,sessionId:null,onAnswer:(id,answers)=>window.answers.push({id,answers})})
-    :React.createElement(Conversation,{blocks:[],running:false,streaming:false,connection:'open',onSuggest:text=>window.suggestions.push(text)})
+    :React.createElement(React.Fragment,null,
+      React.createElement(Conversation,{blocks:[],running:false,streaming:false,connection:'open'}),
+      React.createElement(ConversationSuggestions,{onChoose:text=>window.suggestions.push(text)}))
 }
 const root=createRoot(document.getElementById('root'))
 window.configure=(view,language,theme)=>{

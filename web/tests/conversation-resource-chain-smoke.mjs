@@ -7,6 +7,7 @@ const entry=`
 import React from 'react'
 import {createRoot} from 'react-dom/client'
 import {Conversation} from '/src/components/chat/Conversation.tsx'
+import {ConversationSuggestions} from '/src/components/chat/ConversationSuggestions.tsx'
 import {useAppStore} from '/src/store/app.ts'
 import {useChatStore,emptySession} from '/src/store/chat.ts'
 import {useDraftStore} from '/src/store/drafts.ts'
@@ -24,7 +25,9 @@ window.show=mode=>{
  const running=!['empty','idle','approval','input','sending'].includes(mode),streaming=mode==='streaming'
  useChatStore.setState({sessions:{owner:{...emptySession(),blocks,running,generation}}})
  useDraftStore.setState({submissions:{owner:mode==='sending'?[{action:'send',status:'sending'}]:[]}})
- root.render(React.createElement(Conversation,{blocks,running,streaming,connection:'connected',readOnly:mode!=='empty',onSuggest:text=>window.suggestions.push(text)}))
+ root.render(React.createElement(React.Fragment,null,
+   React.createElement(Conversation,{blocks,running,streaming,connection:'connected',readOnly:mode!=='empty'}),
+   mode==='empty'?React.createElement(ConversationSuggestions,{onChoose:text=>window.suggestions.push(text)}):null))
 }
 window.show('empty')
 `

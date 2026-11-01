@@ -1,6 +1,7 @@
 import {noticeText} from '@/lib/noticeText'
 import {ComposerDock, ComposerCard, ComposerEditor, ComposerToolbar, ComposerSendButton} from './ComposerSurface'
 import {NewConversationProject} from './NewConversationProject'
+import {ConversationSuggestions} from './ConversationSuggestions'
 import { ComposerAttachments } from './ComposerAttachments'
 import { useComposerSubmission } from '@/hooks/useComposerSubmission'
 import { useComposerKeyboard } from '@/hooks/useComposerKeyboard'
@@ -69,6 +70,7 @@ export interface ComposerProps {
   stopping?: boolean
   queued: number
   queuePaused?: boolean
+  showSuggestions?: boolean
   planMode: boolean
   planPending?: boolean | null
   connection: string
@@ -89,6 +91,7 @@ export function Composer({
   stopping = false,
   queued,
   queuePaused = false,
+  showSuggestions = false,
   planMode,
   planPending = null,
   connection,
@@ -108,6 +111,7 @@ export function Composer({
   const planSave = usePlanModeStore((s) => sessionId ? s.saves[sessionId] : undefined)
   const [queueWorking, setQueueWorking] = useState(false)
   const creatingSession = useAppStore(s => s.sessionCreating)
+  const newSessionRevision = useAppStore(s => s.newSessionRevision)
   const baseControlBusy = creatingSession || queueWorking || stopBusy || Boolean(planSave?.pending)
   const draftKey = sessionId ?? '__unsaved__'
   const teamAddress = useDraftStore(s => s.bySession[draftKey]?.teamAddress)
@@ -468,6 +472,13 @@ export function Composer({
         </ComposerCard>
 
         {!sessionId && <NewConversationProject />}
+        {showSuggestions && !running && queued === 0 && !value && attachments.drafts.length === 0 && submissions.length === 0 && <ConversationSuggestions disabled={controlBusy} onChoose={text => {
+          const state = useAppStore.getState()
+          const draft = useDraftStore.getState().bySession[draftKey]
+          if (state.activeSessionId !== sessionId || state.newSessionRevision !== newSessionRevision || state.sessionCreating || draft?.text || draft?.attachments.length) return
+          setValue(text)
+          pendingCompletion.current = {text, caret: text.length, draftKey}
+        }} />}
 
         {running ? <span id="queued-followup-hint" className="sr-only">{t("ui.components.chat.Composer.49bc7900e665")}</span> : null}
 

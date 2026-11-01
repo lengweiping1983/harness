@@ -16,11 +16,11 @@ export function NewConversationProject() {
     const state = useAppStore.getState()
     if (state.activeSessionId === null && state.newSessionRevision === revision && state.activeWorkspaceId === workspace?.id) setCheckout(value, status)
   }, [revision, workspace?.id, setCheckout])
-  return <div className="space-y-2 px-3 py-2" aria-label={t('ui.newConversation.projectSettings')}>
+  return <div className="refresh-action-container flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-b-2xl bg-raised/60 px-3 py-2" aria-label={t('ui.newConversation.projectSettings')}>
     <Button size="sm" variant="ghost" disabled={busy} title={workspace?.path} icon={<Folder className="h-3.5 w-3.5" />}
       iconRight={<ChevronDown className="h-3 w-3" />} onClick={() => useAppStore.getState().setWorkspacePickerOpen(true, 'select')}>
       <span className="max-w-path truncate">{workspace?.name ?? t('ui.newConversation.chooseProject')}</span>
     </Button>
-    {workspace && <ConversationCheckout key={revision} cwd={workspace.path} value={checkout} disabled={busy} onChange={applyCheckout} />}
+    {workspace && <ConversationCheckout key={revision} compact cwd={workspace.path} value={checkout} disabled={busy} onChange={applyCheckout} />}
   </div>
 }

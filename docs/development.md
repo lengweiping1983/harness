@@ -584,7 +584,7 @@ workflow 的 Node 子进程由 Python 为本次启动设置 `HARNESS_WORKFLOW_LA
 
 工作区选择、创建文件夹和项目登记三个浏览器用例复用共享有界夹具清理入口；原场景失败不会被浏览器或后端回收失败覆盖。路径表单同时验证输入法组合标志和键码229的Enter不导航，普通Enter仍发起一次读取。
 
-新对话项目与检出使用 `tests/test_conversation_workspace.py` 的真实临时 Git 仓库验证本地分支、脏目录拒绝、隔离检出、子目录、首次提交前限制及失败保留。前端 `newConversationProject.test.ts`、`conversationCheckout.test.tsx` 与 `composerCheckoutOwnership.test.ts` 验证创建准入、原请求回查、来源项目分组、双语控件与检出选项往返后的草稿归属；组件呈现和钩子夹具不代表真实浏览器布局或桌面实机验收。
+新对话项目与检出使用 `tests/test_conversation_workspace.py` 的真实临时 Git 仓库验证本地分支、脏目录拒绝、隔离检出、子目录、首次提交前限制及失败保留。前端 `newConversationProject.test.ts`、`conversationCheckout.test.tsx` 与 `composerCheckoutOwnership.test.ts` 验证创建准入、原请求回查、来源项目分组、双语控件与检出选项往返后的草稿归属；`conversationSuggestions.test.tsx` 经过实际输入区及推荐列表核对英中英呈现、列表与编辑器顺序、只填草稿不发送、已有输入与切换后的选择隔离。组件呈现和钩子夹具不代表真实浏览器布局或桌面实机验收。
 
 差异复制和侧栏分叉浏览器场景复用共享有界夹具清理。差异复制的页面诊断使用diagnoseFailure，诊断读取失败仍保留业务原错误；剪贴板回退、焦点恢复及迟到分叉草稿隔离断言保持。
 

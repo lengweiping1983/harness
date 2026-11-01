@@ -4753,6 +4753,7 @@
   "ui.newConversation.dirtyIsolated": "未提交的修改保留在原目录，不复制到工作树。",
   "ui.newConversation.dirtyLocal": "此目录有未提交的修改。切换分支将被阻止；使用当前分支会保留修改。",
   "ui.newConversation.projectSettings": "项目与检出设置",
+  "ui.newConversation.suggestions": "试试这些任务",
   "ui.newConversation.registeredProjects": "已添加的项目",
   "ui.newConversation.useProject": "使用此项目",
   "ui.newConversation.refresh": "刷新项目选项",

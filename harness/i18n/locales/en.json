@@ -8234,6 +8234,7 @@
   "ui.newConversation.dirtyIsolated": "Uncommitted changes stay in the original directory and are not copied to the worktree.",
   "ui.newConversation.dirtyLocal": "This directory has uncommitted changes. Switching branches is blocked; using the current branch preserves them.",
   "ui.newConversation.projectSettings": "Project and checkout",
+  "ui.newConversation.suggestions": "Task ideas",
   "ui.newConversation.registeredProjects": "Added projects",
   "ui.newConversation.useProject": "Use this project",
   "ui.newConversation.refresh": "Refresh project options",
