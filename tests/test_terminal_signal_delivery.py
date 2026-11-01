@@ -18,7 +18,9 @@ class TerminalSignalDeliveryTests(unittest.IsolatedAsyncioTestCase):
             for failure in (PermissionError('Original denied'), ProcessLookupError('Original gone')):
                 with self.subTest(language=language, failure=type(failure).__name__):
                     session = self.session()
-                    with current_language.set(language), patch('harness.tools.builtin.terminal_tools.sys.platform', 'linux'), patch('os.getpgid', return_value=456), patch('os.killpg', side_effect=failure) as send:
+                    send = Mock(side_effect=failure)
+                    posix = SimpleNamespace(getpgid=Mock(return_value=456), killpg=send)
+                    with current_language.set(language), patch('harness.tools.builtin.terminal_tools.sys.platform', 'linux'), patch('harness.tools.builtin.terminal_tools.os', posix):
                         with self.assertRaises(TerminalError) as caught:
                             await session.signal('SIGTERM')
                     self.assertIs(caught.exception.__cause__, failure)
@@ -38,7 +40,9 @@ class TerminalSignalDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_success_uses_actual_group_and_foreground_transport_once(self):
         session = self.session()
-        with patch('harness.tools.builtin.terminal_tools.sys.platform', 'linux'), patch('os.getpgid', return_value=456), patch('os.killpg') as send:
+        send = Mock()
+        posix = SimpleNamespace(getpgid=Mock(return_value=456), killpg=send)
+        with patch('harness.tools.builtin.terminal_tools.sys.platform', 'linux'), patch('harness.tools.builtin.terminal_tools.os', posix):
             self.assertEqual(await session.signal('SIGTERM'), {'delivered': True, 'targetPgid':456})
             self.assertEqual(send.call_args.args[0],456)
             send.assert_called_once()

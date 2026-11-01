@@ -17,7 +17,7 @@ from harness.web.router import Request
 class PluginAvatarReceiptTests(unittest.TestCase):
     def test_avatar_replacement_with_same_size_and_time_changes_etag_and_body(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             path = root / 'avatar.svg'
             path.write_bytes(b'<svg>original</svg>')
             agent = SimpleNamespace(path=root/'AGENTS.md', metadata={'avatar': 'avatar.svg'}, name='fixture')
@@ -37,7 +37,7 @@ class PluginAvatarReceiptTests(unittest.TestCase):
 
     def test_avatar_changed_during_bounded_read_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             target = root/'avatar.svg'
             target.write_bytes(b'<svg>original</svg>')
             fdopen = os.fdopen
@@ -57,17 +57,17 @@ class PluginAvatarReceiptTests(unittest.TestCase):
                     target.write_bytes(b'<svg>changed</svg>')
                     return raw
             with patch('harness.web.api.plugins.os.fdopen', ChangedRead):
-                with self.assertRaises(OSError):
+                with self.assertRaisesRegex(OSError, 'avatar file changed during read'):
                     _read_avatar(target, root)
             self.assertEqual(target.read_bytes(), b'<svg>changed</svg>')
 
     def test_oversized_avatar_is_rejected_before_reading_and_original_is_preserved(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             target = root/'huge.png'
             with target.open('wb') as stream:
                 stream.truncate(MAX_AVATAR_BYTES+1)
-            with self.assertRaises(OSError):
+            with self.assertRaisesRegex(OSError, 'avatar file exceeds limit or is not regular'):
                 _read_avatar(target, root)
             self.assertEqual(target.stat().st_size, MAX_AVATAR_BYTES+1)
             target.write_bytes(b'Original bytes')
@@ -102,6 +102,6 @@ class PluginAvatarReceiptTests(unittest.TestCase):
                         with self.assertRaises(ServiceUnavailable) as caught:
                             handler(request, **params)
                     self.assertEqual(caught.exception.message, tr('plugin.install.refreshFailed'))
-                    self.assertEqual(caught.exception.details, {'installed': True, 'path': '/installed/fixture'})
+                    self.assertEqual(caught.exception.details, {'installed': True, 'path': str(Path('/installed/fixture'))})
                     self.assertIs(caught.exception.__cause__, error)
                     install.assert_called_once()

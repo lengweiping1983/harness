@@ -14,38 +14,66 @@ from harness.llm.catalog_fetch import read_catalog
 from harness.tools.builtin.subagent_model_tools import build_list_subagent_models_tool
 
 
+TOTAL_TIMEOUT = 3.0
+
+
 @contextmanager
 def endpoint(mode):
-    observed={'requests':0,'authorization':None}
+    observed={'requests':0,'authorization':None,'started':threading.Event()}
     disconnected=threading.Event()
+    stopping=threading.Event()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass
         def do_GET(self):
             observed['requests']+=1
             observed['authorization']=self.headers.get('Authorization')
+            observed['started'].set()
             self.send_response(200);self.end_headers()
             try:
                 if mode=='slow':
-                    for _ in range(100):
-                        self.wfile.write(b' ');self.wfile.flush();time.sleep(.03)
+                    for _ in range(1000):
+                        self.wfile.write(b' ');self.wfile.flush()
+                        if stopping.wait(.03):break
                 else:self.wfile.write(b'x'*1000 if mode=='large' else b'{"data":[]}')
             except (BrokenPipeError,ConnectionResetError):disconnected.set()
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    server.daemon_threads=False
     thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.02});thread.start()
     try:yield f'http://127.0.0.1:{server.server_port}',observed,disconnected
-    finally:server.shutdown();server.server_close();thread.join(2)
+    finally:stopping.set();server.shutdown();server.server_close();thread.join(2)
 
 
 class CatalogTotalDeadlineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_total_deadline_also_reclaims_a_reader_still_starting(self):
+        """启动尚未发出HTTP请求时也受总预算约束，返回前必须回收进程。"""
+        children = []
+        original = subprocess.Popen
+        def spawn(*args, **kwargs):
+            process = original(*args, **kwargs)
+            children.append(process)
+            return process
+        for language in ('en', 'zh-CN', 'en'):
+            with current_language.set(language), \
+                 patch('harness.llm.catalog_fetch._READER', 'import time;time.sleep(30)'), \
+                 patch('harness.llm.catalog_fetch.subprocess.Popen', side_effect=spawn):
+                started = time.monotonic()
+                with self.assertRaises(TimeoutError) as error:
+                    await asyncio.to_thread(read_catalog, 'http://127.0.0.1:1', 'fixture-key', timeout=.05, limit=32)
+                self.assertEqual(str(error.exception), tr('tools.models.catalogTimeout'))
+                self.assertLess(time.monotonic() - started, 3)
+                self.assertIsNotNone(children[-1].poll())
+        self.assertEqual(len(children), 3)
+
     async def test_continuously_active_response_cannot_extend_total_deadline(self):
         for language in ('en','zh-CN','en'):
             with current_language.set(language),endpoint('slow') as (url,observed,closed):
                 started=time.monotonic()
                 with self.assertRaises(TimeoutError) as error:
-                    await asyncio.to_thread(read_catalog,url,'fixture-key',timeout=.3,limit=1024)
+                    await asyncio.to_thread(read_catalog,url,'fixture-key',timeout=TOTAL_TIMEOUT,limit=1024)
                 self.assertEqual(str(error.exception),tr('tools.models.catalogTimeout'))
-                self.assertLess(time.monotonic()-started,2)
-                self.assertTrue(await asyncio.to_thread(closed.wait,1))
+                self.assertLess(time.monotonic()-started,TOTAL_TIMEOUT+2)
+                self.assertEqual(observed['requests'],1)
+                self.assertTrue(await asyncio.to_thread(closed.wait,2))
                 self.assertEqual(observed['requests'],1)
 
     async def test_byte_limit_precedes_json_and_key_is_not_in_process_arguments(self):
@@ -60,22 +88,18 @@ class CatalogTotalDeadlineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(observed['requests'],1)
 
     async def test_cancelled_tool_waits_for_its_process_deadline_without_replay(self):
-        with endpoint('slow') as (url,observed,closed),patch('harness.tools.builtin.subagent_model_tools.CATALOG_TIMEOUT',.3):
+        with endpoint('slow') as (url,observed,closed),patch('harness.tools.builtin.subagent_model_tools.CATALOG_TIMEOUT',TOTAL_TIMEOUT):
             tool=build_list_subagent_models_tool(base_url=url,model='fixture/model')
             task=asyncio.create_task(tool.execute({'provider':'openrouter'},None))
             try:
-                async with asyncio.timeout(2):
-                    while observed['requests']==0:
-                        if task.done():
-                            await task
-                            self.fail('Catalog completed before the HTTP request')
-                        await asyncio.sleep(.005)
+                self.assertTrue(await asyncio.to_thread(observed['started'].wait,TOTAL_TIMEOUT+2))
+                self.assertFalse(task.done())
                 task.cancel();await asyncio.sleep(0);task.cancel();await asyncio.sleep(0)
                 self.assertFalse(task.done())
                 with self.assertRaises(BaseExceptionGroup) as error:await task
                 self.assertIsInstance(error.exception.exceptions[0],asyncio.CancelledError)
                 self.assertIsInstance(error.exception.exceptions[1],TimeoutError)
-                self.assertTrue(await asyncio.to_thread(closed.wait,1))
+                self.assertTrue(await asyncio.to_thread(closed.wait,2))
                 self.assertEqual(observed['requests'],1)
             finally:
                 if not task.done():task.cancel()

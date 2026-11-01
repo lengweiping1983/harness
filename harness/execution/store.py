@@ -4,10 +4,10 @@ from __future__ import annotations
 from ..i18n import tr
 
 from ..core.sqlite import prepare_database
+from ..core.file_lock import lock_file
 
 import json
 import math
-import os
 from pathlib import Path
 import sqlite3
 import time
@@ -79,16 +79,7 @@ class ExecutionStore:
         home.mkdir(parents=True, exist_ok=True)
         self._owner = (home / "executor.owner").open("a+b")
         try:
-            if os.fstat(self._owner.fileno()).st_size == 0:
-                self._owner.write(b"0")
-                self._owner.flush()
-            self._owner.seek(0)
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(self._owner.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self._owner.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_file(self._owner)
         except OSError:
             self._owner.close()
             fail("execution/store-in-use", tr('execution.store.c4c64233c935'))

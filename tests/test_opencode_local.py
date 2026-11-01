@@ -365,7 +365,7 @@ class OpenCodeLocalTests(unittest.IsolatedAsyncioTestCase):
                 with current_language.set(language):
                     with self.assertRaises(LlmError) as caught:
                         async for _ in adapter.stream([UserMessage('hello')]):pass
-                    self.assertEqual(caught.exception.message, tr('llm.opencode_local.request_rejected', reason=reason+'\n'))
+                    self.assertEqual(caught.exception.message, tr('llm.opencode_local.request_rejected', reason=reason+os.linesep))
                 self.assertEqual(caught.exception.code, 'llm/opencode-local-rejected')
                 self.assertEqual(caught.exception.details['status'], 429)
                 self.assertEqual(caught.exception.details['retry_after'], 80000)

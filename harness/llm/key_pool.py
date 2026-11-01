@@ -118,7 +118,12 @@ class ApiKeyPool:
         self._async_lock = asyncio.Lock()
         self._state_lock = threading.RLock()
         self._persistence_suspended = False
-        self._load()
+        try:
+            with state_lock(self._state_path) if self._state_path is not None else nullcontext():
+                self._load()
+        except OSError:
+            self.persistence_error = True
+            logger.warning(tr('feedback.8e14831a596a'))
 
     # -- 只读信息 --------------------------------------------------------
     @property

@@ -6,11 +6,39 @@ from unittest.mock import patch
 from harness.core.errors import ToolExecutionError
 from harness.core.language import current_language
 from harness.i18n import tr
-from harness.tools.builtin.code_tools import build_code_tools
+from harness.tools.builtin.code_tools import _which, build_code_tools
 from harness.tools.builtin.subagent_model_tools import build_list_subagent_models_tool
 
 
 class ExecutionCatalogLanguageTests(unittest.IsolatedAsyncioTestCase):
+    def test_windows_bash_skips_wsl_launcher_and_finds_native_interpreter(self):
+        """WSL启动器与本机脚本解释器不能只按同名可执行文件混为一谈。"""
+        import os
+        from pathlib import Path
+        launchers = (r'C:\Windows\System32\bash.exe', r'C:\Windows\Sysnative\bash.exe',
+                     r'C:\fixture\Microsoft\WindowsApps\bash.exe')
+        for launcher in launchers:
+            for native in ('/fixture/native/bash.exe', None):
+                def which(name, *, path=None):
+                    if name == 'bash':
+                        return launcher if path is None else native
+                    return None
+                with self.subTest(launcher=launcher, native=native), \
+                     patch.dict(os.environ, {'SystemRoot': r'C:\Windows', 'LOCALAPPDATA': r'C:\fixture'}), \
+                     patch('harness.tools.builtin.code_tools.sys.platform', 'win32'), \
+                     patch('harness.tools.builtin.code_tools.shutil.which', side_effect=which):
+                    self.assertEqual(_which('bash'), native)
+        launcher = launchers[0]
+        with patch.dict(os.environ, {'SystemRoot': r'C:\Windows'}), \
+             patch('harness.tools.builtin.code_tools.sys.platform', 'win32'), \
+             patch('harness.tools.builtin.code_tools.shutil.which', side_effect=[launcher, None, '/fixture/Git/cmd/git.exe']), \
+             patch.object(Path, 'is_file', return_value=True):
+            self.assertEqual(_which('bash'), str(Path('/fixture/Git/bin/bash.exe')))
+        with patch('harness.tools.builtin.code_tools.sys.platform', 'win32'), \
+             patch('harness.tools.builtin.code_tools.shutil.which', side_effect=[None, None, '/fixture/Git/cmd/git.exe']), \
+             patch.object(Path, 'is_file', return_value=True):
+            self.assertEqual(_which('bash'), str(Path('/fixture/Git/bin/bash.exe')))
+
     async def test_model_efforts_and_missing_interpreter_follow_language(self):
         code = build_code_tools(None)[0]
         models = build_list_subagent_models_tool(base_url='https://fixture.invalid', model='fixture/model')

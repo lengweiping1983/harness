@@ -64,6 +64,9 @@
 
 ## 已修正问题与回归
 
+- Key 池构造原先直接调用 `_load()`，后续入口才由 `_transaction` 取得旁路锁，首次读取可能与另一实例的 `Path.replace` 发布竞争。构造现使用同一 `state_lock`；`test_key_pool_transactions.py` 以发布与读取屏障验证构造不能提前读取，并保留跨进程失败标记合并和保存失败后的重试。原先各处 Windows 锁适配在加锁前为初始空文件写占位字节，多个首次调用可在未取得锁时争用该字节；当前统一由 `core/file_lock.py` 直接锁定空区域，`test_file_lock_resources.py` 核对空文件互斥、跨进程竞争、原字节保持及释放后重入。产品规则见 [存储](storage.md)。
+- 目录总截止时间回归原先用 0.3 秒同时约束解释器启动与 HTTP 持续响应，Windows 尚未发送请求就可能到期，不能据此认定网络回收失败。`test_catalog_total_deadline.py` 分别使用受控未就绪读取进程与真实持续响应，核对启动阶段超时仍回收进程、请求确实进入、总预算不被活动延长、重复取消等待所属收尾和仅一次请求。产品 `catalog_fetch.read_catalog` 的总预算继续覆盖辅助进程启动与读取，不改为单次网络无活动超时。
+
 - 本机 OpenCode 的系统上下文曾由 `895ffe052` 引入，`302afaad8` 清理时移除。此次对照同一 `https://opencode.ai/inference/openai/v1` 地址，原生请求和保留完整原生请求体的 Bun 转发均成功；删除上下文返回 `FreeUsageLimitError`。恢复上下文后，当前 Harness 请求中的 `spawn_agent` 仍触发相同拒绝；仅将该协议名映射为原生 `subagent` 即成功，其余工具定义无需移除。现恢复显式上下文与容量计入，并在请求、历史及响应之间双向映射名称，调用身份、参数和权限仍归 Harness。设置入口同时拒绝缺失资料后的 HTTP 静默回退；准备流程固定 `PWD`、私有服务与临时数据，避免钩子落在错误项目及常驻端口冲突。`test_opencode_local.py` 覆盖真实供应商分发、协议往返、分片工具调用、名称冲突、英中英消费、拒绝原文及进程回收。macOS 的 OpenCode 2.1.4 已通过 `deepseek-v4.1-flash-free` 设置链路在线文件读写、历史续接及另一对话隔离；`big-pickle` 也通过单接口在线检查。该实测不证明供应商识别规则完整、免费配额永久可用或其他操作系统已经验收。产品配置与生命周期统一见 [本机 OpenCode](opencode-local.md)。
 
 - 生成配置原先暴露单次思考／总输出字符限制，并在普通 SSE、原生桥接与订阅工作器中执行；普通传输还会因有效进展超时停止，工具循环和收尾纠正也有固定次数终止。现移除对应配置、环境入口、SettingsPatch 字段、实时限制快照及运行拦截，仅保留默认无限的步骤／Token 预算及默认 180 秒网络超时。`test_generation_policy.py` 核对默认值、协议字段、心跳流、重复并行读取与多次收尾纠正；`test_adapter_stream_cleanup.py` 保留网络超时和全部所属流收尾，`test_plan_completion.py` 继续以显式步骤预算验证未审批时不可写入。设置页公共输入焦点改为边界内单层描边；本机页面读取确认三项设置及焦点无阴影、无外圈。

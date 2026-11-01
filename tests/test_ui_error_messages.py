@@ -133,16 +133,17 @@ class UiErrorMessageTests(unittest.TestCase):
             file.write_text('fixture', encoding='utf-8')
             router = build_router(SimpleNamespace())
             handler, params = router.resolve('GET', '/api/v1/directories')
-            for language in ('zh-CN', 'en'):
+            for language in ('en', 'zh-CN', 'en'):
                 messages = []
                 with current_language.set(language):
-                    for path, code in ((root / 'missing', 'dir/not-found'), (file, 'dir/not-a-directory'), ('\0', 'dir/invalid-path')):
+                    for path, code in ((root / 'missing', 'dir/not-found'), (file, 'dir/not-a-directory'),
+                                       ('\0', 'dir/invalid-path'), (str(root) + '\0missing', 'dir/invalid-path')):
                         request = Request('GET', '/api/v1/directories', {'path': [str(path)]}, {}, b'')
                         with self.assertRaises(BadRequest) as caught:
                             handler(request, **params)
                         self.assertEqual(caught.exception.code, code)
                         messages.append(str(caught.exception))
-                self.assertEqual(len(set(messages)), len(messages))
+                self.assertEqual(len(set(messages)), 3)
 
     def test_domain_http_status_keeps_failure_identity(self):
         """持久化失败不是客户端输入错误，不存在会话也不是参数错误。"""

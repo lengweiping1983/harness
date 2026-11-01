@@ -67,6 +67,14 @@ LSP 文档符号回归使用 UTF-8 字节写入和核对源码夹具，覆盖 LF
 
 验证中文子进程输出时，夹具同时固定子进程输出与父进程解码为 UTF-8。目录链接夹具在 POSIX 使用符号链接，在 Windows 使用无需管理员权限的真实 NTFS 目录联接，并核对链接目标。静态资源路径回归在 POSIX 覆盖文件符号链接，在 Windows 通过目录联接及目录首页解析覆盖相同 URL 的越界拒绝、链接替换和根内资源读取；这不代表已在 Windows 验收文件符号链接。MCP 测试同正式调用方一样显式传入配置语言。
 
+真实子进程的文本输出按实际解释器核对：Python `print` 使用本机行尾，Node 和 Bash 的显式 LF 保持 LF；显式字节输出另覆盖 LF、CRLF、CR 和无末尾换行，stdout、stderr 均须逐字保留。不能对所有输出统一去除 `\r` 或放宽为任意行尾来掩盖产品改写。`run_code` 在 Windows 排除 System32、Sysnative 和 WindowsApps 中的 WSL Bash 启动入口，沿 PATH 或 Git for Windows 的原生 Bash 运行本机临时脚本；不可用时沿原缺失解释器错误返回。
+
+路径回归从真实临时目录推导本机路径；需要与已打开句柄比较的根先 `resolve()`，避免 Windows 短路径与长路径表示差异。头像有界读取须核对具体拒绝原因，不能用任意 `OSError` 将读取前的路径拒绝当作读取中变化。目录选择器显式拒绝 NUL 并使用 `dir/invalid-path`，真实缺失目录和普通文件仍分别返回现有码。安装根替换夹具在 POSIX 核对替换后的身份拒绝；Windows 的已打开安装锁会在根目录改名前拒绝，核对拒绝路径、外部原件保持和所属暂存清理，不将未发生的替换写成已验收。
+
+异平台分支模拟在被测模块内注入完整的系统接口替身，不能假定 Windows 存在 POSIX 的 `os.getpgid`／`os.killpg`，也不向宿主全局 `os` 添加缺失接口。`test_terminal_signal_delivery.py` 使用模块局部替身核对进程组身份、前台信号传递、失败原异常和英中英提示；模拟通过不代替对应平台的真实终端验收。
+
+目录总截止时间分开验证启动超时和已开始的持续响应：前者用受控未就绪辅助进程核对返回前已经退出，后者确认 HTTP 已进入后核对总预算、取消收尾、连接释放和单次请求，避免把解释器必须在数百毫秒内启动作为业务前提。临时 HTTP 夹具显式通知并等待响应线程收尾。文件锁回归覆盖空文件、不同进程竞争、既有字节保留和释放后重入；Key 池以发布屏障验证构造读取也等待同一事务。临时目录清理须晚于所属连接、进程和线程的显式关闭，不能依靠垃圾回收、固定睡眠或吞掉 `PermissionError`。
+
 Web 单测入口也执行 `model-runtime/tests` 的桥接转录回归；Python 传输回归直接运行随包交付的桥接文件。Web 单测入口在 Windows 启动 Vitest 前启用文件监听轮询，避免原生监听的 libuv 断言导致工作进程退出；Vitest 使用最多两个工作进程。需要完整组件的渲染测试在收集阶段静态加载组件，不把首次模块转换计入业务断言的超时，也不扩大测试超时。
 
 新增浏览器用例放在 `web/tests/*-smoke.mjs`，由 `run-core.mjs` 顺序运行，失败返回非零。保留的 `browser-scenario.mjs` 提供 Vite 启停、可选入口预转换、浏览器启动和资源回收；`python-fixture.mjs` 提供统一解释器选择。浏览器选择顺序为显式 `HARNESS_TEST_BROWSER`、已安装的 Playwright Chromium、本机 Chrome／Edge／Chromium（macOS 标准应用目录、Windows 系统及用户安装目录、Linux PATH）。显式配置错误或选定浏览器启动失败不会静默切换；`launchBrowser` 的显式 `executablePath`／`channel` 仍优先。套件在启动业务场景前执行一次启动及关闭预检，打印可执行文件路径和版本，并向所有场景传递同一路径；找不到浏览器时给出安装指令并立即失败。CI 建议在 `web` 目录运行 `npx playwright-core install chromium` 固定依赖匹配版本，本机浏览器版本由本机安装决定。测试不自动下载或修改浏览器安装。`runtime-smoke.mjs` 启动临时目录中的真实后端，用确定性传输验证对话路径；不读取用户凭据、不访问在线模型，退出时回收本次启动的服务。

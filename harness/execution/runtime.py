@@ -14,7 +14,7 @@ from contextlib import nullcontext
 
 from ..i18n import tr
 from ..core.errors import HarnessError, SkillNotFoundError
-from ..core.cleanup import join_cleanup
+from ..core.cleanup import join_cleanup, raise_cleanup_errors
 from ..core.jsonutil import to_jsonable
 from ..llm.types import TextBlock, ToolUseBlock
 from ..plugins.state import EscStateStore
@@ -49,6 +49,17 @@ class ExecutionRuntime(PipelineRuntime):
         self.execution_environment = environment if environment is not None else LocalExecutionEnvironment()
         self._configured_projects = dict(config.projects)
         self.store = ExecutionStore(config.home)
+        try:
+            self._initialize(config)
+        except BaseException as primary:
+            try:
+                self.store.close()
+            except BaseException as cleanup:
+                raise_cleanup_errors([primary, cleanup])
+            raise
+
+    def _initialize(self, config: ExecutionConfig) -> None:
+        """装配注册表及运行登记；构造失败由所属入口关闭已取得的存储。"""
         #: 技能启用状态（安装 ≠ 启用）；与本地 Agent 共用同一 home 的显式关闭项
         self.skill_home = config.skill_home if config.skill_home is not None else config.home
         self.esc_state = EscStateStore(self.skill_home)

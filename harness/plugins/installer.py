@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Literal
 
 from ..core.errors import ValidationError
+from ..core.file_lock import lock_file, unlock_file
 from ..agents.parser import parse_agent_file
 from ..skills.parser import is_valid_skill_name, parse_skill_file
 from ..skills.paths import installation_path, installation_root, validate_installation
@@ -47,24 +48,11 @@ DIR_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 def _installation_lock(root: Path, name: str):
     """安装和卸载共用稳定旁路锁，竞争时拒绝，不删除锁文件。"""
     with (root / ('.' + name + '.install.lock')).open('a+b') as stream:
-        if os.name == 'nt':
-            import msvcrt
-            if stream.seek(0, 2) == 0:
-                stream.write(b'0')
-                stream.flush()
-            stream.seek(0)
-            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_file(stream)
         try:
             yield
         finally:
-            if os.name == 'nt':
-                stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            unlock_file(stream)
 
 
 def validate(src: Path, kind: Kind) -> dict:

@@ -18,6 +18,7 @@ from harness.i18n import tr
 from ..arguments import finite_number, string_argument
 
 import asyncio
+import ntpath
 import os
 import shutil
 import sys
@@ -84,7 +85,29 @@ _MISSING_HINT_KEYS = {
 
 
 def _which(name: str) -> str | None:
-    return shutil.which(name)
+    """Windows临时脚本需要原生解释器，WSL入口不接受本机脚本路径。"""
+    candidate = shutil.which(name)
+    if name != 'bash' or sys.platform != 'win32':
+        return candidate
+    windows = os.environ.get('SystemRoot', r'C:\Windows')
+    launchers = {ntpath.normcase(ntpath.join(windows, folder, 'bash.exe'))
+                 for folder in ('System32', 'Sysnative')}
+    local = os.environ.get('LOCALAPPDATA')
+    if local:
+        launchers.add(ntpath.normcase(ntpath.join(local, 'Microsoft', 'WindowsApps', 'bash.exe')))
+    if candidate is not None and ntpath.normcase(candidate) not in launchers:
+        return candidate
+    search = os.pathsep.join(part for part in os.get_exec_path()
+                             if ntpath.normcase(ntpath.join(part, 'bash.exe')) not in launchers)
+    native = shutil.which('bash', path=search)
+    if native is not None:
+        return native
+    git = shutil.which('git')
+    if git is not None:
+        bundled = Path(git).parent.parent / 'bin' / 'bash.exe'
+        if bundled.is_file():
+            return str(bundled)
+    return None
 
 
 def _resolve_python() -> str:

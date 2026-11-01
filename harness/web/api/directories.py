@@ -50,6 +50,8 @@ def _resolve_dir(raw: str | None) -> tuple[Path | None, str | None]:
     text = (raw or "").strip()
     if not text:
         return Path.home().resolve(), None
+    if '\0' in text:
+        return None, "dir/invalid-path"
     try:
         target = Path(text).expanduser().resolve()
     except (OSError, ValueError):

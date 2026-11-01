@@ -1,8 +1,8 @@
 """跨进程仓库执行锁，显式关闭或进程退出时释放。"""
 from __future__ import annotations
 
-import os
 from pathlib import Path
+from ..core.file_lock import lock_file
 from .board import BoardError
 
 
@@ -12,16 +12,7 @@ class RepositoryLease:
     def __init__(self, git_dir: Path):
         self.stream = (git_dir / 'harness-development.lock').open('a+b')
         try:
-            if os.name == 'nt':
-                import msvcrt
-                if self.stream.seek(0, 2) == 0:
-                    self.stream.write(b'0')
-                    self.stream.flush()
-                self.stream.seek(0)
-                msvcrt.locking(self.stream.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self.stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_file(self.stream)
         except (OSError, BlockingIOError) as exc:
             self.stream.close()
             raise BoardError('board/project-busy') from exc

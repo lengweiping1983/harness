@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from harness.plugins.installer import install_from_directory, uninstall
 from harness.skills.paths import installation_root
+from tests.filesystem_links import directory_link
 
 
 class InstallationPublicationTests(unittest.TestCase):
@@ -138,11 +139,18 @@ class InstallationPublicationTests(unittest.TestCase):
             copy = shutil.copytree
             def replace_then_copy(src, dst):
                 target_root.rename(moved)
-                target_root.symlink_to(outside, target_is_directory=True)
+                directory_link(target_root, outside)
                 return copy(src, dst)
             with patch('harness.plugins.installer.shutil.copytree', side_effect=replace_then_copy):
-                with self.assertRaises(ValidationError):
-                    install_from_directory(source, kind='skill', home=root/'runtime')
+                if os.name == 'nt':
+                    # Windows禁止改名包含本次已打开锁文件的目录，拒绝发生在替换前。
+                    with self.assertRaises(PermissionError) as caught:
+                        install_from_directory(source, kind='skill', home=root/'runtime')
+                    self.assertEqual(caught.exception.filename, str(target_root))
+                    self.assertFalse(moved.exists())
+                else:
+                    with self.assertRaises(ValidationError):
+                        install_from_directory(source, kind='skill', home=root/'runtime')
             self.assertEqual((outside/'private.txt').read_bytes(), b'External original')
             self.assertEqual([item.name for item in outside.iterdir()], ['private.txt'])
             self.assertFalse((moved/source.name).exists())

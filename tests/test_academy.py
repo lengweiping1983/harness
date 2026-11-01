@@ -17,6 +17,7 @@ from harness.core.language import current_language
 from harness.web.api.academy import build_router
 from harness.web.errors import ApiError
 from harness.web.router import Request
+from tests.filesystem_links import directory_link
 
 
 def write_engine_fixture(root):
@@ -168,7 +169,7 @@ class AcademyServiceTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(AcademyError):
                 self.service.source(self.pid, raw)
         path = Path(self.project['root']) / 'link'
-        path.symlink_to(self.root)
+        directory_link(path, self.root)
         with self.assertRaises(AcademyError):
             self.service.source(self.pid, 'link/missing')
         path.unlink()

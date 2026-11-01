@@ -7,15 +7,51 @@ import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 from harness.llm.key_pool import ApiKeyPool
+from harness.llm.key_pool_lock import state_lock
 
 KEYS=['fixture-first','fixture-second','fixture-third','fixture-fourth']
 
 
 class KeyPoolTransactionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_constructor_waits_for_pending_publication_before_loading(self):
+        """首次读取也属于事务，不能与另一实例的原子发布争用文件句柄。"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'pool.json'
+            pool = ApiKeyPool(KEYS, state_path=path)
+            entered, release, loading = threading.Event(), threading.Event(), threading.Event()
+            original = Path.replace
+            def replace(source, target):
+                entered.set()
+                if not release.wait(10):
+                    raise TimeoutError('publication not released')
+                return original(source, target)
+            @contextmanager
+            def acquiring(target):
+                if entered.is_set():
+                    loading.set()
+                with state_lock(target):
+                    yield
+            with patch.object(Path, 'replace', replace), \
+                 patch('harness.llm.key_pool.state_lock', acquiring), ThreadPoolExecutor(max_workers=2) as executor:
+                saving = executor.submit(pool.rotate)
+                reading = None
+                try:
+                    self.assertTrue(await asyncio.to_thread(entered.wait, 5))
+                    reading = executor.submit(ApiKeyPool, KEYS, state_path=path)
+                    self.assertTrue(await asyncio.to_thread(loading.wait, 5))
+                    self.assertFalse(reading.done())
+                finally:
+                    release.set()
+                    await asyncio.wrap_future(saving)
+                loaded = await asyncio.wrap_future(reading)
+                self.assertEqual(loaded.current(), (1, KEYS[1]))
+                self.assertFalse(loaded.persistence_error)
+
     async def test_independent_instances_preserve_each_failure_and_latest_rotation(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'pool.json'
