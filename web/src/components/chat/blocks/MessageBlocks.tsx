@@ -14,6 +14,7 @@ import {
   Brain,
   ChevronRight,
   CircleCheck,
+  CircleStop,
   Info,
   Layers,
   Square,
@@ -698,7 +699,7 @@ export const TurnBlock = memo(function TurnBlock({ block, sessionId }: { block: 
     <section data-turn-outcome={block.reason} data-turn-number={block.turn} aria-label={copy.title}
       className={cn('rounded-xl border px-3 py-2.5 text-xs', stopped ? 'border-line bg-raised/30 text-muted' : 'border-warn/25 bg-warn/5 text-muted')}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        {stopped ? <Square aria-hidden className="h-3.5 w-3.5" /> : <AlertTriangle aria-hidden className="h-3.5 w-3.5 text-warn" />}
+        {stopped ? <CircleStop aria-hidden className="h-3.5 w-3.5" /> : <AlertTriangle aria-hidden className="h-3.5 w-3.5 text-warn" />}
         <span className="font-medium text-ink">{copy.title}</span>
         {block.turn != null || block.historical ? <span className="ml-auto text-2xs text-faint">{block.turn != null ? t(block.historical ? 'ui.message.historicalStatusTurn' : 'ui.message.statusTurn', {turn: block.turn}) : t('ui.components.chat.blocks.MessageBlocks.7345d4847180')}</span> : null}
       </div>
