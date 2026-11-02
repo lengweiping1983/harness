@@ -12,6 +12,22 @@
 
 ---
 
+## 〇、REA 证据：本地 WorkBuddy 的真实结构
+
+下面三节的 R/E/A 以对本地 WorkBuddy（`resources/app.asar`，182 MB）的 REA 静态重建为事实基础，而不是只看界面推断。
+
+- **内核同源**：应用内嵌 `genie/agent-harness/`，含 `bin/agent-harness.js`、`cli/dist-server/codebuddy.js` 与 `lib/skills/{handlers,rpcs,schemas,service}`。也就是说 WorkBuddy 与本次迁移的 harness **共用同一套 agent 内核**，差别在内核之上的产品外壳（技能、插件、连接器）。
+- **能力以技能与工作流承载**：内置能力落在 `.../skills/<name>`（`miora-*` 系列、`mini-program-development`、`sites`、`skill-creator` 等）与 `cli/builtin/workflows/*.workflow.js`；办公能力「深度研究」就是 `deep-research.workflow.js`。
+- **三场景的真实分工**（REA 产物中的标识符命中次数）：
+  - 办公 → `automation`（192 次）：自动化与调度子系统。
+  - 设计 → `ardot`（143 次，设计画布）+ `miora`（231 次，图像 / 视频生成）。
+  - 开发 → 无独立引擎，直接由技能体系承载。
+- **前端形态**：Rspack/Webpack 代码分割——`cli/dist/codebuddy-lite-wb.mjs` 为主包，`cli/dist/lazy-lite-wb/<id>.<hash>.mjs`（20 余个）加 `manifest.js` 为懒加载分块。场景与能力的切换靠分块懒加载完成，**不是三套独立页面**。
+
+> **口径与局限（必须记录）**：REA 共编目 7190 个文件，受单文件 300 秒上限约束，`cli/dist/codebuddy-lite-wb.mjs` 超时中断，故上述结论取自已完成部分的结构事实，且 REA 自身标注了「图覆盖不完整，不可用事实必须显式存疑」。产物中未出现「定时任务 / 日常开发 / 网站设计」等中文文案串——REA 保留的是标识符而非任意 UI 文案，因此本节以结构与标识符命中为准；**界面层事实由三张场景截图提供**（三者为同一欢迎首页在「场景 → 能力」两组选中态下的样子）。
+
+---
+
 ## 一、办公：定时任务
 
 ### R：用户要什么
@@ -116,7 +132,9 @@
 
 ## 四、开始页：场景入口
 
-三个场景最后需要一个**用户看得见的入口**。落点开始页（空对话欢迎区）：`web/src/components/chat/ConversationScenarios.tsx` 在标题与输入框之间渲染三张场景卡——**定时任务 / 日常开发 / 网站设计**，图标加一句话说明。点击沿用推荐任务的同一套规则：只填入输入框草稿（已有输入、附件或正在创建会话时不覆盖用户状态），由用户编辑后发送。
+三个场景最后需要一个**用户看得见的入口**。WorkBuddy 的入口是**两级**的——一级场景（办公 / 开发 / 设计）配二级能力（定时任务、日常开发、网站设计等），两级共用一个输入框、一个模型选择器、一条工作空间与权限条，切换的只是被预置的能力提示与技能；能力本身又由技能与工作流承载（见第〇节）。Harness 按「每场景各取一个能力」的口径落三张卡，并在卡面保留这一两级语义。
+
+落点开始页（空对话欢迎区）：`web/src/components/chat/ConversationScenarios.tsx` 在标题与输入框之间渲染三张场景卡，每张以**场景标签 + 能力名 + 一句话说明**呈现——「办公 · 定时任务」「开发 · 日常开发」「设计 · 网站设计」。点击沿用推荐任务的同一套规则：只填入输入框草稿（已有输入、附件或正在创建会话时不覆盖用户状态），由用户编辑后发送。
 
 - 定时任务卡填入自然语言前缀（"帮我创建一个定时任务："），交给 `schedule_automation`；
 - 日常开发卡填入 `/skill project-onboarding `，网站设计卡填入 `/skill website-design `，走服务端 `/skill` 斜杠命令把技能正文注入为有效输入——开始页因此同时成为系统技能的可发现入口，而不是平行于技能体系的另一套入口。
@@ -130,7 +148,7 @@
 改动按仓库约定做了回归（不重复跑完整套，只跑相关域）：
 
 - 后端：`tests/test_schedule_current_contract.py`（新增每月 / 每年的契约与持久化）、`tests/test_automation_tool.py`（`update_automation` 的归属校验与改计划后重算到期）、`tests/test_system_skills.py`（四个系统技能可被解析与注册）、`tests/test_workspace_html_preview.py`（沙箱头、相对资源解析、越界拒绝），以及自动化归属 / 租约 / 创建身份、提示词策略与资源一致性等既有回归。
-- 前端：`web/src/lib/__tests__/fileLinks.test.ts`（预览地址与网页判定）、`presentationLanguage.test.tsx`（每月 / 每年日程文案双语）、`automationCreation.test.ts`、`conversationScenarios.test.tsx`（场景卡双语渲染、填草稿与防覆盖）、`web/tests/static-copy-smoke.mjs`（欢迎区场景卡文案纳入浏览器冒烟）。
+- 前端：`web/src/lib/__tests__/fileLinks.test.ts`（预览地址与网页判定）、`presentationLanguage.test.tsx`（每月 / 每年日程文案双语）、`automationCreation.test.ts`、`conversationScenarios.test.tsx`（场景卡双语渲染、**场景标签渲染**、填草稿与防覆盖）、`web/tests/static-copy-smoke.mjs`（欢迎区场景卡文案纳入浏览器冒烟）。
 - 同步与静态检查：`scripts/generate_i18n.py`、`scripts/generate_protocol.py`、`scripts/lint.py`、`npm --prefix web run typecheck`。新增路由会进入生成的 `docs/openapi-v1.json`。
 
 ## 六、边界一览
@@ -140,4 +158,4 @@
 | 定时任务 | 每月 / 每年调度、对话内改任务 | 进程外调度与启动补跑（本地框架约束）；连接器 / 专家绑定（与会话归属模型冲突） |
 | 日常开发 | 上手文档、代码审查、技术文档三个系统技能 | 开发模式入口（已有等价入口）；新的审查 / 文档工具（已有取证与验收链路） |
 | 网站设计 | 网页预览与站点相对资源解析、`website-design` 技能 | 矢量设计画布（独立产品形态）；图片 / 视频生成与二进制写入（既有约束，技能内以 SVG 替代）；站点发布（独立基础设施议题） |
-| 开始页 | 三个场景入口卡（填草稿，复用推荐任务与 `/skill` 规则） | 独立的模式切换页（开始页卡片已覆盖发现性，多一层模式只是换名字） |
+| 开始页 | 三个场景入口卡，卡面带**场景标签**（办公 / 开发 / 设计），填草稿，复用推荐任务与 `/skill` 规则 | 独立的模式切换页（开始页卡片已覆盖发现性，多一层模式只是换名字）；不铺 WorkBuddy 的完整二级能力列表（本次每场景只取一个能力，其余统一由技能体系承载，避免与技能目录重复） |

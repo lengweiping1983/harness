@@ -7,6 +7,7 @@ import {setLocale, t} from '@/i18n'
 
 const titles = ['5f3a9c1e8d2b', '7c4d2e9a6f18', '9e5f1b7c3a46']
 const descriptions = ['3d8a2c6e4b97', '6b1e4d8a2c59', '2c7f5a9d1e83']
+const scenes = ['sceneOffice', 'sceneDevelopment', 'sceneDesign']
 
 const initialApp = useAppStore.getState(), initialDrafts = useDraftStore.getState()
 
@@ -21,7 +22,7 @@ it('renders the three scenario entries bilingually with localized copy', () => {
     setLocale(language)
     const html = renderToStaticMarkup(<ConversationScenarios />)
     expect(html).toContain(`aria-label="${t('ui.components.chat.Conversation.a7f2e5c9d481')}"`)
-    for (const key of [...titles, ...descriptions]) expect(html).toContain(t('ui.components.chat.Conversation.' + key))
+    for (const key of [...titles, ...descriptions, ...scenes]) expect(html).toContain(t('ui.components.chat.Conversation.' + key))
   }
 })
 
