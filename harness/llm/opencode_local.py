@@ -394,7 +394,7 @@ throw Error('harness_profile_captured');
 
 
 def main():
-    """显式准备本机接入资料，不改模型列表、用户登录和已有运行目录。"""
+    """显式准备本机接口资料，不改模型列表、用户登录和已有运行目录。"""
     selector = argparse.ArgumentParser(add_help=False)
     selector.add_argument('--language', choices=('zh-CN', 'en'), default='zh-CN')
     language, _ = selector.parse_known_args()

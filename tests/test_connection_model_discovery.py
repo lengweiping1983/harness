@@ -179,7 +179,7 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertIn(tr('models.discovery.failed'), str(error.exception))
 
     def test_inherited_endpoint_uses_template_address(self):
-        """接入留空地址时沿用模板地址探测，不是请求相对路径。"""
+        """接口留空地址时沿用模板地址探测，不是请求相对路径。"""
         template = next(row for row in directory() if row['id'] == 'qwen-token-plan-cn')
         server = CatalogServer({'data': [{'id': 'remote-only'}]})
         stub = dict(template, base_url=server.url)
@@ -220,7 +220,7 @@ class ModelDiscoveryTests(unittest.TestCase):
         connection['models'][0]['model'] = 'reasoner-new'
         connection['model_catalog'] = result['models']
         store = self.host.provider_connections
-        snapshot = store.save([{'id': 'supplier', 'name': '接入', 'type': 'qwen-token-plan-cn', 'connections': [connection]}], store.revision)
+        snapshot = store.save([{'id': 'supplier', 'name': '接口', 'type': 'qwen-token-plan-cn', 'connections': [connection]}], store.revision)
         reopened = ProviderConnections(store.home)
         cached = reopened.snapshot()['providers'][0]['connections'][0]['model_catalog']
         self.assertEqual([row['id'] for row in cached], ['reasoner-new'])
@@ -230,7 +230,7 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertNotIn('fixture-discovery-key', json.dumps(reopened.snapshot()))
         connection['model_catalog'] = []
         connection['models'] = []
-        cleared = store.save([{'id': 'supplier', 'name': '接入', 'type': 'qwen-token-plan-cn', 'connections': [connection]}], store.revision)
+        cleared = store.save([{'id': 'supplier', 'name': '接口', 'type': 'qwen-token-plan-cn', 'connections': [connection]}], store.revision)
         self.assertEqual(cleared['providers'][0]['connections'][0]['model_catalog'], [])
         self.assertEqual(ProviderConnections(store.home).catalog(), [])
 
@@ -278,7 +278,7 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertEqual(store.revision, revision)
 
     def test_catalog_metadata_supports_the_registered_provider_capabilities(self):
-        """所有当前内置能力元数据都能作为接入缓存保存，保留分段计费和环境地址。"""
+        """所有当前内置能力元数据都能作为接口缓存保存，保留分段计费和环境地址。"""
         for provider in directory():
             with self.subTest(provider=provider['id']):
                 rows = normalize_model_catalog(provider['models'])

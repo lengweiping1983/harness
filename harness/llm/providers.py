@@ -44,7 +44,7 @@ def decode(raw):
 
 
 def directory():
-    """目录来自固定版本供应商运行库，接入只在用户保存后创建。"""
+    """目录来自固定版本供应商运行库，接口只在用户保存后创建。"""
     rows = decode((RUNTIME / 'catalog.json').read_bytes())
     for row in rows:
         if row['id'] == 'opencode':

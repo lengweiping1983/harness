@@ -30,7 +30,7 @@ python -m harness.llm.opencode_local --executable '<已安装的 opencode-cli.ex
 
 ## 模型连接与启用条件
 
-在模型配置中添加“OpenCode Local”，选择模板模型或手工填写模型 ID。该接入使用本机资料认证，不要求填写 API Key。原单接口 SDK 的等价显式参数如下：
+在模型配置中添加“OpenCode Local”，选择模板模型或手工填写模型 ID。该接口使用本机资料认证，不要求填写 API Key。原单接口 SDK 的等价显式参数如下：
 
 | 字段 | 值 |
 |---|---|
@@ -38,7 +38,7 @@ python -m harness.llm.opencode_local --executable '<已安装的 opencode-cli.ex
 | 基础地址 | `https://opencode.ai/inference/openai/v1` |
 | Key | `public` |
 
-设置中的 OpenCode Local 要求上述官方地址与 `opencode_local` 认证；没有本机资料时明确返回 `llm/opencode-local-profile`，不静默退回普通 HTTP 或通用供应商桥接。模型名不单独参与传输选择。接入工作器沿用宿主当前网络超时、上下文上限及提示缓存模式。
+设置中的 OpenCode Local 要求上述官方地址与 `opencode_local` 认证；没有本机资料时明确返回 `llm/opencode-local-profile`，不静默退回普通 HTTP 或通用供应商桥接。模型名不单独参与传输选择。接口工作器沿用宿主当前网络超时、上下文上限及提示缓存模式。
 
 原单接口 SDK 在未注入自定义传输、基础地址匹配且 Key 为 `public` 时检查本机资料；没有默认资料且未显式配置环境变量时仍沿用普通 HTTP。两种入口均不自动安装 OpenCode。
 

@@ -22,7 +22,7 @@ DISCOVERY_PROTOCOLS = ('openai-completions', 'openai-responses', 'anthropic-mess
 
 
 class ProviderAuthorizations:
-    """授权任务归属于明确接入，关闭宿主时等待所有任务回收。"""
+    """授权任务归属于明确接口，关闭宿主时等待所有任务回收。"""
 
     def __init__(self, store):
         self.store = store

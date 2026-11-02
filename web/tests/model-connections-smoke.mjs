@@ -23,7 +23,7 @@ await browserScenario(async({server,browser})=>{
   if(url.pathname==='/api/v1/models')return route.fulfill({json:{models:[],active:'',providers:[]}})
   if(url.pathname==='/api/v1/connection'){
    if(route.request().method()==='GET')return route.fulfill({json:current})
-   writes++;const payload=route.request().postDataJSON();assert.equal(payload.providers[0].connections[0].keys[0].value,undefined);assert.equal(payload.revision,current.revision)
+   writes++;const payload=route.request().postDataJSON();assert.equal(payload.providers[0].connections[0].keys[0].value,undefined);assert.equal(payload.revision,current.revision);assert.equal(payload.providers[0].connections[0].name,'Gateway 原文');assert.equal(payload.providers[0].connections[0].protocol,'openai-responses')
    entered();await new Promise(resolve=>{release=resolve});return route.fulfill({json:{config:{},routing:routing('Obsolete 原文')}})
   }
   errors.push('Unexpected request '+url.pathname);return route.fulfill({status:500,json:{error:'Unexpected fixture request'}})
@@ -38,6 +38,19 @@ await browserScenario(async({server,browser})=>{
  }
  await page.getByRole('button',{name:'Edit',exact:true}).click()
  const name=page.getByLabel('Provider name',{exact:true}).first();await name.fill('Draft 原文')
+ for(const language of ['en','zh-CN','en']){
+  await page.evaluate(language=>window.locale(language),language)
+  const labels=await page.evaluate(()=>Object.fromEntries(['protocol','endpoint','authentication','connectionName'].map(key=>[key,window.copy('ui.providers.'+key)])))
+  const protocol=page.getByLabel(labels.protocol,{exact:true});await protocol.waitFor({state:'visible'})
+  assert.equal(await page.getByLabel(labels.connectionName,{exact:true}).count(),0)
+  assert.equal(await protocol.evaluate((element,endpointLabel)=>{
+   const advanced=element.closest('details').querySelector('details')
+   const endpoint=[...element.closest('form').querySelectorAll('label')].find(label=>label.textContent.includes(endpointLabel))
+   return !advanced.open&&!advanced.contains(element)&&!!(element.compareDocumentPosition(endpoint)&Node.DOCUMENT_POSITION_FOLLOWING)
+  },labels.endpoint),true)
+ }
+ await page.getByLabel('API protocol',{exact:true}).selectOption('openai-responses')
+
  await page.getByPlaceholder('******3blr',{exact:true}).waitFor()
  const save=page.getByRole('button',{name:'Save',exact:true});await save.click();await held
  await save.evaluate(element=>element.click());assert.equal(writes,1)

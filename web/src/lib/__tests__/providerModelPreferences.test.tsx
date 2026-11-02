@@ -65,12 +65,12 @@ it('renders one provider model list without repeated provider headings or intern
 })
 
 it('retains separate connection headings and model order within the provider', () => {
-  const multiple = {...provider, connections: [{...provider.connections[0], name: 'First 接入'}, {...provider.connections[0], id: 'second', name: 'Second 接入'}]}
+  const multiple = {...provider, connections: [{...provider.connections[0], name: 'First 接口'}, {...provider.connections[0], id: 'second', name: 'Second 接口'}]}
   const html = renderToStaticMarkup(<ProviderModelPreferences provider={multiple} models={models} />)
   expect(html.match(/<h5 /g)).toHaveLength(2)
-  expect(html.indexOf('First 接入')).toBeLessThan(html.indexOf('Flash 原文'))
-  expect(html.indexOf('Flash 原文')).toBeLessThan(html.indexOf('Second 接入'))
-  expect(html.indexOf('Second 接入')).toBeLessThan(html.indexOf('Second connection'))
+  expect(html.indexOf('First 接口')).toBeLessThan(html.indexOf('Flash 原文'))
+  expect(html.indexOf('Flash 原文')).toBeLessThan(html.indexOf('Second 接口'))
+  expect(html.indexOf('Second 接口')).toBeLessThan(html.indexOf('Second connection'))
 })
 
 it('keeps hidden switches and their pending or failed feedback in the owning model list', () => {

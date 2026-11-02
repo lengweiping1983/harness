@@ -130,6 +130,23 @@ class ChineseTerminologyTests(unittest.TestCase):
                 with self.subTest(catalog=relative, key=key):
                     self.assertIsNone(re.search(r'(?<![A-Za-z_])Agents?(?![A-Za-z_])', visible))
 
+    def test_model_endpoints_use_interface_terminology(self):
+        """模型配置及本机模型资料统一使用接口术语，源与浏览器资源一致。"""
+        for relative in ('harness/i18n/locales', 'web/src/i18n/locales'):
+            catalog = json.loads((ROOT / relative / 'zh-CN.json').read_text(encoding='utf-8'))
+            for key, value in catalog.items():
+                if key.startswith(('ui.providers.', 'models.config.', 'llm.opencode_local.')):
+                    with self.subTest(catalog=relative, key=key):
+                        self.assertNotIn('接入', value)
+            for key, expected in {
+                'ui.providers.protocol': '接口协议',
+                'ui.providers.removeConnection': '删除接口',
+                'ui.providers.connectionEnabled': '启用接口',
+                'ui.providers.summary': '{state} · {connections} 个接口 · {models} 个模型',
+            }.items():
+                with self.subTest(catalog=relative, key=key):
+                    self.assertEqual(catalog[key], expected)
+
     def test_hook_source_names_use_chinese(self):
         """来源名称使用中文，保留单项 Hook 与集合 Hooks 的其他语境。"""
         expected = {

@@ -23,7 +23,7 @@ from .request_limits import normalize_request
 
 @asynccontextmanager
 async def credential_guard(store, connection_id):
-    """跨进程串行刷新同一接入；取消获取仍先回收已取得的锁。"""
+    """跨进程串行刷新同一接口；取消获取仍先回收已取得的锁。"""
     guard = state_lock(store.home / ('provider-auth-' + connection_id))
     acquiring = asyncio.create_task(asyncio.to_thread(guard.__enter__))
     entered = False

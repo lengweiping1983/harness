@@ -118,7 +118,7 @@ export function providerCatalogChanges(previous: readonly CatalogModel[], fresh:
   return {added: [...after].filter(id => !before.has(id)).length, retired: [...before].filter(id => !after.has(id)).length}
 }
 
-/** 按配置身份匹配可用模型，保持接入与模型顺序，不依据展示名称猜测归属。 */
+/** 按配置身份匹配可用模型，保持接口与模型顺序，不依据展示名称猜测归属。 */
 export function providerModelGroups(provider: ModelProvider, models: ModelInfo[]) {
   const catalog = new Map(models.map(model => [model.id, model]))
   return provider.connections.map(connection => ({

@@ -306,7 +306,7 @@ python scripts/evaluate_memory_archive.py --sizes 100 10000 --content-chars 1024
 
 ## 模型供应商配置
 
-`HARNESS_HOME/model-providers.json`（默认 `~/.harness/model-providers.json`）保存版本 2 的供应商、接入、模型与凭据。缺失时为空列表；损坏或版本不符时保留原文件并明确报错，不转换历史文件。保存使用独立临时文件、原子替换、旁路文件锁和完整内容的 SHA-256 修订比较。请求使用深复制快照，运行中的 Key 租约独立于编辑草稿。账号池在该运行目录下的 `codex-gateway` 保存当前账号及自动切换设置，显式 `HARNESS_CODEX_GATEWAY_HOME` 仍可覆盖账号目录。
+`HARNESS_HOME/model-providers.json`（默认 `~/.harness/model-providers.json`）保存版本 2 的供应商、接口、模型与凭据。缺失时为空列表；损坏或版本不符时保留原文件并明确报错，不转换历史文件。保存使用独立临时文件、原子替换、旁路文件锁和完整内容的 SHA-256 修订比较。请求使用深复制快照，运行中的 Key 租约独立于编辑草稿。账号池在该运行目录下的 `codex-gateway` 保存当前账号及自动切换设置，显式 `HARNESS_CODEX_GATEWAY_HOME` 仍可覆盖账号目录。
 
 ## 浏览器本地偏好
 
