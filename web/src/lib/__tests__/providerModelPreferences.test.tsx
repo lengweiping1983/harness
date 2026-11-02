@@ -71,6 +71,7 @@ it('retains separate connection headings and model order within the provider', (
   expect(html.indexOf('First 接口')).toBeLessThan(html.indexOf('Flash 原文'))
   expect(html.indexOf('Flash 原文')).toBeLessThan(html.indexOf('Second 接口'))
   expect(html.indexOf('Second 接口')).toBeLessThan(html.indexOf('Second connection'))
+  expect(html).toContain(t('ui.models.contextUnknown'))
 })
 
 it('keeps hidden switches and their pending or failed feedback in the owning model list', () => {

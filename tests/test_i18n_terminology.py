@@ -142,7 +142,7 @@ class ChineseTerminologyTests(unittest.TestCase):
                 'ui.providers.protocol': '接口协议',
                 'ui.providers.removeConnection': '删除接口',
                 'ui.providers.connectionEnabled': '启用接口',
-                'ui.providers.summary': '{state} · {connections} 个接口 · {models} 个模型',
+                'ui.providers.summary': '{state} · {models} 个模型',
             }.items():
                 with self.subTest(catalog=relative, key=key):
                     self.assertEqual(catalog[key], expected)

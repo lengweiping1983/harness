@@ -78,10 +78,8 @@ export function ModelPreferences({models, grouped = true, heading = true}: {mode
 
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-ink [overflow-wrap:anywhere] sm:truncate">{model.label}</p>
-                  {!model.id.startsWith('harness/') ? <p className="text-2xs text-faint [overflow-wrap:anywhere] sm:truncate">
-                    {model.id}
-                    {model.context_window ? t("ui.components.overlays.SettingsDialog.dbbab1bafe6b", {p0: (formatNumber(model.context_window))}) : ''}
-                  </p> : model.context_window ? <p className="text-2xs text-faint">{t('ui.models.contextSize', {count: formatNumber(model.context_window)})}</p> : null}
+                  {!model.id.startsWith('harness/') ? <p className="text-2xs text-faint [overflow-wrap:anywhere] sm:truncate">{model.id}</p> : null}
+                  <p className="text-2xs text-faint">{model.context_window ? t('ui.models.contextSize', {count: formatNumber(model.context_window)}) : t('ui.models.contextUnknown')}</p>
                   {visibilitySave?.pending ? <p role="status" aria-label={t("ui.components.overlays.SettingsDialog.dd9d81b48619")} className="mt-1 text-2xs text-muted">{t(visibilitySave.target ? 'ui.settings.models.showing' : 'ui.settings.models.hiding', {model: model.label})}</p> : null}
                   {!visibilitySave?.pending && visibilitySave?.error ? <div role="alert" aria-label={t("ui.components.overlays.SettingsDialog.cc6f6f1dda23")} className="mt-1 space-y-1 text-2xs text-danger [overflow-wrap:anywhere]">
                     <p>{visibilitySave.unconfirmed ? t("ui.components.overlays.SettingsDialog.3b189be96200") : t("ui.components.overlays.SettingsDialog.cbbbe96b2b34")}</p>
