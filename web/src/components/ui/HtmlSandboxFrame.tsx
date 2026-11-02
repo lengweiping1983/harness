@@ -62,7 +62,7 @@ export const HtmlSandboxFrame = memo(function HtmlSandboxFrame({ code, title, cl
   const srcDoc = useMemo(() => htmlDocument(code, identity, offline), [code, identity])
   const [readyTicket, setReadyTicket] = useState<string | null>(null)
   const [size, setSize] = useState({ id: identity, height: MIN_HEIGHT })
-  const [failure, setFailure] = useState<{id: string; message: string; timeout?: boolean} | null>(null)
+  const [failure, setFailure] = useState<{id: string; message: string; copy?: string; timeout?: boolean} | null>(null)
   const publishTheme = () => frame.current?.contentWindow?.postMessage({channel: CHANNEL, id: identity, kind: 'theme', active: renderActive, paint: renderActive ? paintTicket : null, trapFocus: Boolean(onFocusBoundary), ...themeSnapshot()}, '*')
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -74,7 +74,7 @@ export const HtmlSandboxFrame = memo(function HtmlSandboxFrame({ code, title, cl
         const height = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(data.height)))
         setSize(previous => previous.id === identity && previous.height === height ? previous : {id: identity, height})
       } else if (data.kind === 'error' && typeof data.message === 'string') {
-        setFailure({id: identity, message: data.message})
+        setFailure({id: identity, message: data.message, copy: data.copy === 'ui.chart.inlineData' ? data.copy : undefined})
       } else if (data.kind === 'ready' && renderActive && data.paint === paintTicket) {
         setReadyTicket(paintTicket)
         setFailure(previous => previous?.id === identity && previous.timeout ? null : previous)
@@ -96,7 +96,7 @@ export const HtmlSandboxFrame = memo(function HtmlSandboxFrame({ code, title, cl
   }, [identity, paintTicket, renderActive, ready])
   return <div className="relative min-w-0" aria-busy={renderActive && !ready && !currentFailure}>
     {!ready && !currentFailure ? <p role="status" className="absolute inset-0 z-10 m-0 grid place-items-center bg-surface/90 px-3 py-2 text-xs text-muted">{t('ui.widget.initializing')}</p> : null}
-    {failure?.id === identity ? <div role="alert" className="flex items-start gap-2 border-b border-line bg-warn/10 px-3 py-2 text-xs text-warn"><div className="min-w-0 flex-1"><p>{t(currentFailure?.timeout ? 'ui.widget.initializationFailed' : 'ui.widget.runtimeError')}</p>{!currentFailure?.timeout ? <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words">{failure?.message || t('ui.widget.resourceFailed')}</pre> : null}</div><IconButton label={t('ui.widget.restart')} size="xs" onClick={() => setRevision(value => value + 1)}><RotateCcw className="h-3.5 w-3.5" /></IconButton></div> : null}
+    {failure?.id === identity ? <div role="alert" className="flex items-start gap-2 border-b border-line bg-warn/10 px-3 py-2 text-xs text-warn"><div className="min-w-0 flex-1"><p>{t(currentFailure?.timeout ? 'ui.widget.initializationFailed' : 'ui.widget.runtimeError')}</p>{!currentFailure?.timeout ? <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words">{currentFailure?.copy ? t(currentFailure.copy) : failure?.message || t('ui.widget.resourceFailed')}</pre> : null}</div><IconButton label={t('ui.widget.restart')} size="xs" onClick={() => setRevision(value => value + 1)}><RotateCcw className="h-3.5 w-3.5" /></IconButton></div> : null}
     <iframe key={identity} ref={frame} title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={srcDoc} onLoad={publishTheme}
       tabIndex={ready ? 0 : -1} style={{height: size.id === identity ? size.height : MIN_HEIGHT}} className={className ?? 'block w-full border-0 bg-transparent'} />
   </div>

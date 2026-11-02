@@ -1,3 +1,6 @@
+import {SpecChart} from '@/components/markdown/SpecChart'
+import {DataTable} from '@/components/markdown/DataTable'
+import {isTableKind} from '@/lib/tableData'
 import {isChartKind} from '@/lib/chartSpec'
 import { usePageVisible } from '@/hooks/usePageVisible'
 import { useDialogFocus } from '@/hooks/useDialogFocus'
@@ -81,7 +84,7 @@ function downloadBlob(blob: Blob, name: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
-export const WidgetCard = memo(function WidgetCard({ payload, previewCode }: { payload: WidgetPayload; previewCode?: string }) {
+const WidgetContent = memo(function WidgetContent({ payload, previewCode, active = true }: { payload: WidgetPayload; previewCode?: string; active?: boolean }) {
   useLocale()
   const settingsOpen = useAppStore(state => state.settingsOpen)
   const scope = useId().replace(/[^a-zA-Z0-9_-]/g, '')
@@ -176,7 +179,7 @@ export const WidgetCard = memo(function WidgetCard({ payload, previewCode }: { p
       </div>
     )
   ) : (
-    <HtmlSandboxFrame code={previewCode ?? payload.code} offline={isChartKind(payload.kind)} title={payload.title} active={!showCode && !settingsOpen} viewKey={zoom ? 'expanded' : 'inline'} onEscape={zoom ? () => setZoom(false) : undefined} onFocusBoundary={zoom ? backward => { const buttons = Array.from(figureRef.current?.querySelectorAll<HTMLButtonElement>('figcaption button:not([disabled])') ?? []); (backward ? buttons.at(-1) : buttons[0])?.focus() } : undefined} />
+    <HtmlSandboxFrame code={previewCode ?? payload.code} offline={isChartKind(payload.kind)} title={payload.title} active={active && !showCode && !settingsOpen} viewKey={zoom ? 'expanded' : 'inline'} onEscape={zoom ? () => setZoom(false) : undefined} onFocusBoundary={zoom ? backward => { const buttons = Array.from(figureRef.current?.querySelectorAll<HTMLButtonElement>('figcaption button:not([disabled])') ?? []); (backward ? buttons.at(-1) : buttons[0])?.focus() } : undefined} />
   )
 
   return (
@@ -201,6 +204,15 @@ export const WidgetCard = memo(function WidgetCard({ payload, previewCode }: { p
       ) : null}
     </figure>
   )
+})
+
+/** 格式边界：分隔文本始终走表格，只有 HTML 与图表适配器进入沙箱。 */
+export const WidgetCard = memo(function WidgetCard(props: {payload: WidgetPayload; previewCode?: string; active?: boolean}) {
+  return isTableKind(props.payload.kind)
+    ? <DataTable source={props.payload.code} kind={props.payload.kind} title={props.payload.title} />
+    : isChartKind(props.payload.kind) && props.previewCode === undefined
+      ? <SpecChart source={props.payload.code} kind={props.payload.kind} payload={props.payload} active={props.active} />
+      : <WidgetContent {...props} />
 })
 
 /** 工具运行中的占位：骨架 + 轮播加载提示，与问题卡片的挂起态保持一致。 */

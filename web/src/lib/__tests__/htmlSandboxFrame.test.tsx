@@ -79,3 +79,19 @@ it('keeps source stable across theme, visibility and source switches, rejects ol
   expect(current.node.props.children.some((child: any) => child?.props?.role === 'alert')).toBe(false)
   expect(parses).toBe(2)
 })
+
+it('localizes explicit chart failures in place and refuses unregistered resource identities', () => {
+ render()
+ const theme=latestTheme()
+ message({...theme,kind:'error',message:'Original',copy:'ui.chart.inlineData'})
+ for(const locale of ['en','zh-CN','en'] as const){
+  setLocale(locale)
+  const {node}=render()
+  const alert=node.props.children.find((child:any)=>child?.props?.role==='alert')
+  expect(alert.props.children[0].props.children[1].props.children).toBe(t('ui.chart.inlineData'))
+ }
+ message({...theme,kind:'error',message:'External',copy:'constructor'})
+ const alert=render().node.props.children.find((child:any)=>child?.props?.role==='alert')
+ expect(alert.props.children[0].props.children[1].props.children).toBe('External')
+ expect(parses).toBe(1)
+})

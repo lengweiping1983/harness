@@ -69,3 +69,10 @@ it('preserves visualization deliveries through both disclosure layers and restor
     }
   }
 })
+
+it.each(['html','svg','mermaid','echarts','vega','vega-lite','chartjs','plotly','csv','tsv'])('keeps an earlier %s visualization visible after a separate final summary',kind=>{
+ const visual:Block={kind:'assistant',id:'visual',sourceSeq:4,turn:1,at:3000,text:'```'+kind+'\nOriginal\n```'}
+ const final:Block={kind:'assistant',id:'final',sourceSeq:9,turn:1,at:4000,text:'Final summary'}
+ const result=conversationRows(rows([user,thought,visual,final]),{1:{...start,reason:'completed',finalResponseSeq:9}},{1:false})
+ expect(result.map(row=>row.id)).toEqual(['user','activity-turn-1','visual','final'])
+})

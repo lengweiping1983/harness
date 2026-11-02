@@ -1,3 +1,4 @@
+import {hasUnpairedSurrogate} from './unicodeText'
 import {ResourceError} from './resourceError'
 
 export const CHART_KINDS = ['echarts', 'vega', 'vega-lite', 'chartjs', 'plotly'] as const
@@ -28,9 +29,11 @@ export function parseChartSpec(source: string, kind: ChartKind): Record<string, 
   }
   const visit = (value: unknown, depth: number): void => {
     if (depth > 48) fail('ui.chart.tooDeep')
+    if (typeof value === 'string' && hasUnpairedSurrogate(value)) fail('ui.chart.invalidJson')
     if (typeof value === 'number' && !Number.isFinite(value)) fail('ui.chart.invalidJson')
     if (!value || typeof value !== 'object') return
     for (const [key, child] of Object.entries(value)) {
+      if (hasUnpairedSurrogate(key)) fail('ui.chart.invalidJson')
       if (['__proto__', 'prototype', 'constructor'].includes(key)) fail('ui.chart.unsafeKey')
       if (['url', 'href', 'src'].includes(key) && typeof child === 'string') fail('ui.chart.inlineData')
       visit(child, depth + 1)
@@ -42,7 +45,7 @@ export function parseChartSpec(source: string, kind: ChartKind): Record<string, 
       (kind === 'echarts' && !(Array.isArray(spec.series) || object(spec.series))) ||
       (kind === 'chartjs' && !(typeof spec.type === 'string' && object(spec.data))) ||
       (kind === 'plotly' && !Array.isArray(spec.data))) fail('ui.chart.invalidSpec')
-  if (kind === 'plotly' && (spec.data as unknown[]).some(trace => !object(trace) || (trace.type !== undefined && !['scatter', 'bar', 'pie'].includes(String(trace.type))))) fail('ui.chart.plotlyTypes')
+  if (kind === 'plotly' && (spec.data as unknown[]).some(trace => !object(trace) || (trace.type !== undefined && (typeof trace.type !== 'string' || !['scatter', 'bar', 'pie'].includes(trace.type))))) fail('ui.chart.plotlyTypes')
   return spec
 }
 
@@ -70,7 +73,8 @@ window.__harnessWidgetReady=(async()=>{
   resize=()=>Plotly.Plots.resize(host);theme=()=>Plotly.relayout(host,{'font.color':spec.layout?.font?.color||ink()});
  }else{
   host.style.height='auto';
-  const loader={load:()=>Promise.reject(Error('Inline data required')),sanitize:()=>Promise.reject(Error('External resources are disabled'))};
+  const unavailable=()=>Promise.reject(Object.assign(new Error(),{harnessCopy:'ui.chart.inlineData'}));
+  const loader={load:unavailable,sanitize:unavailable};
   const result=await vegaEmbed(host,{background:'transparent',...spec},{mode:kind,renderer:'svg',actions:false,tooltip:false,defaultStyle:false,ast:true,loader});
   resize=()=>result.view.resize().runAsync();
  }

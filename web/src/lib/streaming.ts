@@ -85,6 +85,8 @@ export function isChartLang(lang: string): boolean {
     value === 'vega-lite' ||
     value === 'chart' ||
     value === 'echarts' ||
+    value === 'csv' ||
+    value === 'tsv' ||
     value === 'chartjs' ||
     value === 'plotly'
   )

@@ -2,11 +2,11 @@ import assert from 'node:assert/strict'
 import {browserScenario} from './browser-scenario.mjs'
 
 const specs={
- echarts:{xAxis:{type:'category',data:['A','B']},yAxis:{type:'value'},series:[{type:'bar',data:[3,8]}],tooltip:{}},
+ echarts:{xAxis:{type:'category',data:['A','B']},yAxis:{type:'value'},series:[{name:'Plan',type:'bar',data:[3,8]},{name:'Actual',type:'bar',data:[2,5]}],legend:{},tooltip:{}},
  chartjs:{type:'bar',data:{labels:['A','B'],datasets:[{label:'Count',data:[3,8]}]}},
- plotly:{data:[{x:['A','B'],y:[3,8],type:'bar'}]},
- 'vega-lite':{data:{values:[{label:'A',value:3},{label:'B',value:8}]},mark:'bar',encoding:{x:{field:'label',type:'nominal'},y:{field:'value',type:'quantitative'}}},
- vega:{width:300,height:200,data:[{name:'table',values:[{x:30,y:40},{x:150,y:80}]}],marks:[{type:'symbol',from:{data:'table'},encode:{enter:{x:{field:'x'},y:{field:'y'},size:{value:200},fill:{value:'teal'}}}}]},
+ plotly:{data:[{name:'Plan',x:['A','B'],y:[3,8],type:'bar'},{name:'Actual',x:['A','B'],y:[2,5],type:'bar'}]},
+ 'vega-lite':{params:[{name:'threshold',value:0,bind:{input:'range',min:0,max:10,step:1}}],transform:[{filter:'datum.value>=threshold'}],data:{values:[{label:'A',value:3},{label:'B',value:8}]},mark:'bar',encoding:{x:{field:'label',type:'nominal'},y:{field:'value',type:'quantitative'}}},
+ vega:{signals:[{name:'pointSize',value:20,bind:{input:'range',min:20,max:100,step:1}}],width:300,height:200,data:[{name:'table',values:[{x:30,y:40},{x:150,y:80}]}],marks:[{type:'symbol',from:{data:'table'},encode:{enter:{x:{field:'x'},y:{field:'y'},fill:{value:'teal'}},update:{size:{signal:'pointSize'}}}}]},
 }
 const entry=`
 import React,{useState} from 'react'
@@ -39,11 +39,35 @@ await browserScenario(async({server,browser})=>{
   timings.push({kind,readyMs:Math.round(performance.now()-started)})
   assert.ok(await frame.locator('svg,canvas').count()>0,kind+' must render actual chart geometry')
   await frame.locator('#chart').evaluate(node=>window.chartNode=node)
+  const child=page.frames().find(value=>value.parentFrame())
+  if(kind==='echarts'){
+   await frame.getByText('Plan',{exact:true}).click()
+   await child.waitForFunction(()=>echarts.getInstanceByDom(document.getElementById('chart')).getOption().legend[0].selected.Plan===false)
+  }else if(kind==='chartjs'){
+   const box=await frame.locator('canvas').evaluate(node=>Chart.getChart(node).legend.legendHitBoxes[0])
+   await frame.locator('canvas').click({position:{x:box.left+box.width/2,y:box.top+box.height/2}})
+   await child.waitForFunction(()=>!Chart.getChart(document.querySelector('canvas')).isDatasetVisible(0))
+  }else if(kind==='plotly'){
+   await frame.locator('.legendtoggle').first().click()
+   await child.waitForFunction(()=>document.getElementById('chart').data[0].visible==='legendonly')
+  }else{
+   const before=kind==='vega'?await frame.locator('.mark-symbol path').first().getAttribute('d'):null
+   await frame.locator('input[type=range]').focus()
+   await frame.locator('input[type=range]').press('End')
+   if(kind==='vega-lite')await child.waitForFunction(()=>document.querySelectorAll('.mark-rect path').length===0)
+   else await child.waitForFunction(value=>document.querySelector('.mark-symbol path').getAttribute('d')!==value,before)
+  }
+  console.log('Native control passed:',kind)
+
   for(const locale of ['en','zh-CN','en'])for(const [dark,width]of [[false,390],[true,1200]]){
    await page.setViewportSize({width,height:850})
    await page.evaluate(async({locale,dark})=>{await window.locale(locale);document.documentElement.classList.toggle('dark',dark)},{locale,dark})
    await page.locator('[aria-busy="false"] > iframe').waitFor()
    assert.equal(await frame.locator('#chart').evaluate(node=>node===window.chartNode),true)
+   if(kind==='echarts')assert.equal(await frame.locator('#chart').evaluate(node=>echarts.getInstanceByDom(node).getOption().legend[0].selected.Plan),false)
+   if(kind==='chartjs')assert.equal(await frame.locator('canvas').evaluate(node=>Chart.getChart(node).isDatasetVisible(0)),false)
+   if(kind==='plotly')assert.equal(await frame.locator('#chart').evaluate(node=>node.data[0].visible),'legendonly')
+   if(kind==='vega'||kind==='vega-lite')assert.equal(await frame.locator('input[type=range]').inputValue(),kind==='vega'?'100':'10')
   }
   await page.getByRole('button',{name:'View code',exact:true}).click()
   await page.getByRole('button',{name:'View rendering',exact:true}).click()

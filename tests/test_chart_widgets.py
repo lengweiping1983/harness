@@ -4,7 +4,7 @@ import unittest
 from harness.core.errors import ToolExecutionError
 from harness.core.language import current_language
 from harness.i18n import tr
-from harness.tools.builtin.widget_tools import CHART_KINDS, build_widget_tools, validate_widget
+from harness.tools.builtin.widget_tools import CHART_KINDS, TABLE_KINDS, build_widget_tools, validate_widget
 from harness.tools.registry import ToolRunContext
 
 SPECS = {
@@ -25,9 +25,9 @@ class ChartWidgetTests(unittest.IsolatedAsyncioTestCase):
             with current_language.set(language):
                 wire = show.schema.resolve_description(language)
                 self.assertEqual(wire.description, tr('python.widget_tools.show.description'))
-                self.assertEqual(set(wire.parameters['properties']['kind']['enum']), {'auto', 'svg', 'html', *CHART_KINDS})
+                self.assertEqual(set(wire.parameters['properties']['kind']['enum']), {'auto', 'svg', 'html', *CHART_KINDS, *TABLE_KINDS})
                 for kind, spec in SPECS.items():
-                    source = json.dumps(spec, ensure_ascii=False, indent=2)
+                    source = '  \n' + json.dumps(spec, ensure_ascii=False, indent=2) + '\n'
                     with self.subTest(language=language, kind=kind):
                         value = await show.execute({'title': 'Original 图表', 'widget_code': source, 'kind': kind}, ctx)
                         self.assertEqual(value['code'], source)
@@ -40,7 +40,9 @@ class ChartWidgetTests(unittest.IsolatedAsyncioTestCase):
             ('null', 'ui.chart.invalidSpec'),
             ('{"series":[],"series":[]}', 'ui.chart.invalidJson'),
             ('{"series":[],"x":NaN}', 'ui.chart.invalidJson'),
+            ('{"series":[],"x":"\\ud800"}', 'ui.chart.invalidJson'),
             ('{"series":[],"x":1e999}', 'ui.chart.invalidJson'),
+            ('{"series":[],"x":' + '9' * 400 + '}', 'ui.chart.invalidJson'),
             ('{"series":[],"x":{"constructor":{}}}', 'ui.chart.unsafeKey'),
             ('{"series":[],"data":{"url":"https://example.com/data.json"}}', 'ui.chart.inlineData'),
             ('{"series":[],"x":' + '[' * 50 + '0' + ']' * 50 + '}', 'ui.chart.tooDeep'),
@@ -54,3 +56,25 @@ class ChartWidgetTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ToolExecutionError) as error:
                     validate_widget('Original', '{"data":[{"type":"scatter3d"}]}', 'plotly', None)
                 self.assertEqual(error.exception.message, tr('ui.chart.plotlyTypes'))
+
+
+class TableWidgetTests(unittest.TestCase):
+    def test_original_whitespace_quotes_and_line_endings_are_preserved(self):
+        for kind, source in [('csv', 'name,value\r\n"A,B","a""b"\r\n x ,001\r\n'), ('tsv', 'name\tvalue\n"A\tB"\t"line\nnext"\n')]:
+            value = validate_widget('Original', source, kind, None)
+            self.assertEqual(value[1:3], (source, kind))
+
+    def test_rejects_malformed_quoting_ragged_records_and_limits(self):
+        cases = [('a,b\nx', 'ui.table.columns'), ('a,b\n"open', 'ui.table.invalid'), ('a,b\nx"y,z', 'ui.table.invalid'), ('a,b\n"x" q,z', 'ui.table.invalid'), ('x\n' * 10001, 'ui.table.tooLarge'), (','.join(['x'] * 101), 'ui.table.tooLarge')]
+        for language in ('en', 'zh-CN', 'en'):
+            with current_language.set(language):
+                for source, key in cases:
+                    with self.subTest(language=language, key=key), self.assertRaises(ToolExecutionError) as error:
+                        validate_widget('Original', source, 'csv', None)
+                    self.assertEqual(error.exception.message, tr(key))
+
+    def test_table_size_uses_the_same_unicode_units_as_the_browser(self):
+        for source, key in [('😀' * 100001, 'ui.table.tooLarge'), ('a\n\ud800', 'ui.table.invalid')]:
+            with self.subTest(key=key), self.assertRaises(ToolExecutionError) as error:
+                validate_widget('Original', source, 'csv', None)
+            self.assertEqual(error.exception.message, tr(key))

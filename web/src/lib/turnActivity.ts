@@ -1,5 +1,6 @@
 import type { SessionEvent } from '@/types'
 import type { ChangeRow } from './fileChanges'
+import {hasVisualization} from './visualizationContent'
 import {authoredPlugin} from './pluginReview'
 
 export interface TurnActivity {
@@ -57,7 +58,7 @@ export function conversationRows(rows: ChangeRow[], turns: Record<number, TurnAc
     if (block.kind === 'notice' && block.tone === 'warn') return false
     if (block.kind === 'subagent' && block.status !== 'completed') return false
     // 未收到最终回复关联时保留正文可见，避免运行中或不完整窗口隐藏回复。
-    if (block.kind === 'assistant' && (block.author || activity.finalResponseSeq === undefined || block.sourceSeq === activity.finalResponseSeq || block.partial)) return false
+    if (block.kind === 'assistant' && (block.author || activity.finalResponseSeq === undefined || block.sourceSeq === activity.finalResponseSeq || block.partial || hasVisualization(block))) return false
     return true
   }
   for (const [index, row] of rows.entries()) {

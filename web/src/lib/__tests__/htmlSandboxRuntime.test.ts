@@ -117,3 +117,11 @@ it('waits for asynchronous visualization readiness and discards hidden paint tic
  await Promise.resolve(); r.flush()
  expect(r.messages.at(-1)).toMatchObject({kind: 'ready', paint: 'current-chart'})
 })
+
+it('preserves explicit owned error resource identity through the early failure handshake', () => {
+ const r = runtime()
+ r.events.get('unhandledrejection')!({reason:{message:'Original',harnessCopy:'ui.chart.inlineData'}})
+ r.messages.length=0
+ r.send()
+ expect(r.messages.at(-1)).toMatchObject({kind:'error',message:'Original',copy:'ui.chart.inlineData'})
+})

@@ -10,8 +10,6 @@ import { toolArgsFailure, toolArgsNote, fileWriteRejected } from '@/lib/toolArgs
 import { toolActivity } from '@/lib/toolActivity'
 import { commandFailed, commandResult } from '@/lib/commandResults'
 import { toolImages, imageOutputSummary } from '@/lib/toolImages'
-import {SpecChart} from '@/components/markdown/SpecChart'
-import {isChartKind} from '@/lib/chartSpec'
 import { widgetPayload, widgetPreview } from '@/lib/widgetPayload'
 import { WidgetCard, WidgetLoading } from './WidgetCard'
 import { ImageGallery } from './ImageGallery'
@@ -104,7 +102,7 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
 
       {block.name === 'browser' && sessionId ? <button type="button" className="ml-5 mb-1 text-xs text-brand hover:underline focus-visible:underline" onClick={() => useAppStore.getState().setInspectorTab('browser')}>{t("ui.components.chat.blocks.ToolBlock.4d689adda874")}</button> : null}
       {images.length ? <ImageGallery images={images} /> : null}
-      {widget && isChartKind(widget.kind) ? <SpecChart key={`${sessionId ?? activeSessionId}:${block.callId}:${block.id}`} source={widget.code} kind={widget.kind} payload={widget} /> : widget ? <WidgetCard key={`${sessionId ?? activeSessionId}:${block.callId}:${block.id}`} payload={widget} /> : widgetPending ? <WidgetLoading preview={widgetPending} /> : null}
+      {widget ? <WidgetCard key={`${sessionId ?? activeSessionId}:${block.callId}:${block.id}`} payload={widget} /> : widgetPending ? <WidgetLoading preview={widgetPending} /> : null}
       {open && running && progressText ? <div className="ml-5 mt-1 border-l border-line pl-4">
         <pre ref={progressView} aria-label={t("ui.components.chat.blocks.ToolBlock.8f3ea71ba079")} tabIndex={0}
           onScroll={(event) => { const view = event.currentTarget; followOutput.current = view.scrollHeight - view.scrollTop - view.clientHeight < 24 }}

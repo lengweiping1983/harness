@@ -40,3 +40,8 @@ describe('declarative visualization inputs',()=>{
   expect(doc).toContain('<\\/script>')
  })
 })
+
+it('rejects escaped orphan Unicode and non-string Plotly trace types',()=>{
+ expect(()=>parseChartSpec('{"series":[],"label":"\\ud800"}','echarts')).toThrow()
+ expect(()=>parseChartSpec('{"data":[{"type":["bar"]}]}','plotly')).toThrow()
+})

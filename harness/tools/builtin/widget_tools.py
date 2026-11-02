@@ -34,6 +34,8 @@ MAX_TITLE_CHARS = 120
 #: 加载提示 1~4 条，与前端轮播一致。
 MAX_LOADING_MESSAGES = 4
 
+TABLE_KINDS = ("csv", "tsv")
+
 CHART_KINDS = ("echarts", "vega", "vega-lite", "chartjs", "plotly")
 
 _GUIDE_MODULES = ("diagram", "chart", "interactive", "mockup", "art")
@@ -52,6 +54,12 @@ def validate_chart(code: str, kind: str) -> None:
     """声明式图表只接受有界、字段唯一的内联 JSON，不解释函数或加载外部资源。"""
     def fail(key):
         raise ToolExecutionError(tr(key))
+    try:
+        units = len(code.encode('utf-16-le')) // 2
+    except UnicodeEncodeError as exc:
+        raise ToolExecutionError(tr('ui.chart.invalidJson')) from exc
+    if units > MAX_WIDGET_CHARS:
+        fail('ui.chart.tooLarge')
 
     def unique(pairs):
         value = {}
@@ -74,10 +82,21 @@ def validate_chart(code: str, kind: str) -> None:
     def visit(value, depth):
         if depth > 48:
             fail('ui.chart.tooDeep')
-        if isinstance(value, float) and not math.isfinite(value):
-            fail('ui.chart.invalidJson')
+        if isinstance(value, str):
+            try:
+                value.encode('utf-8')
+            except UnicodeEncodeError as exc:
+                raise ToolExecutionError(tr('ui.chart.invalidJson')) from exc
+        if isinstance(value, (int, float)):
+            try:
+                finite = math.isfinite(value)
+            except OverflowError:
+                finite = False
+            if not finite:
+                fail('ui.chart.invalidJson')
         if isinstance(value, dict):
             for key, item in value.items():
+                visit(key, depth + 1)
                 if key in ('__proto__', 'prototype', 'constructor'):
                     fail('ui.chart.unsafeKey')
                 if key in ('url', 'href', 'src') and isinstance(item, str):
@@ -100,6 +119,69 @@ def validate_chart(code: str, kind: str) -> None:
         fail('ui.chart.invalidSpec')
 
 
+def validate_table(code: str, kind: str) -> None:
+    """单遍校验 CSV／TSV 引号、记录和大小边界，保留原始分隔文本。"""
+    try:
+        units = len(code.encode('utf-16-le')) // 2
+    except UnicodeEncodeError as exc:
+        raise ToolExecutionError(tr('ui.table.invalid')) from exc
+    if units > MAX_WIDGET_CHARS:
+        raise ToolExecutionError(tr('ui.table.tooLarge'))
+    text = code.removeprefix('\ufeff')
+    delimiter = ',' if kind == 'csv' else '\t'
+    quoted = ended = occupied = False
+    fields = cells = records = 0
+    width = None
+
+    def field():
+        nonlocal fields, cells, occupied, ended
+        fields += 1
+        cells += 1
+        occupied = ended = False
+        if fields > 100 or cells > 50000:
+            raise ToolExecutionError(tr('ui.table.tooLarge'))
+
+    def record():
+        nonlocal fields, records, width
+        field()
+        if width is not None and fields != width:
+            raise ToolExecutionError(tr('ui.table.columns'))
+        width = fields
+        fields = 0
+        records += 1
+        if records > 10000:
+            raise ToolExecutionError(tr('ui.table.tooLarge'))
+
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quoted:
+            if char == '"':
+                if index + 1 < len(text) and text[index + 1] == '"':
+                    index += 1
+                else:
+                    quoted, ended = False, True
+        elif char == delimiter:
+            field()
+        elif char in ('\r', '\n'):
+            record()
+            if char == '\r' and index + 1 < len(text) and text[index + 1] == '\n':
+                index += 1
+        elif char == '"':
+            if occupied or ended:
+                raise ToolExecutionError(tr('ui.table.invalid'))
+            quoted = True
+        else:
+            if ended:
+                raise ToolExecutionError(tr('ui.table.invalid'))
+            occupied = True
+        index += 1
+    if quoted:
+        raise ToolExecutionError(tr('ui.table.invalid'))
+    if text and (occupied or fields or ended or text[-1] not in ('\r', '\n')):
+        record()
+
+
 def validate_widget(title: Any, code: Any, kind: Any, loading: Any) -> tuple[str, str, str, list[str]]:
     """校验并规范化一次小组件提交；任何不满足都以双语错误明确拒绝。"""
     if not isinstance(title, str) or not title.strip():
@@ -110,17 +192,19 @@ def validate_widget(title: Any, code: Any, kind: Any, loading: Any) -> tuple[str
     if not isinstance(code, str) or not code.strip():
         raise ToolExecutionError(tr("python.widget_tools.error.code"))
     clean_code = code.strip()
-    if len(clean_code) > MAX_WIDGET_CHARS:
+    if len(code) > MAX_WIDGET_CHARS:
         raise ToolExecutionError(tr("python.widget_tools.error.too_large", p0=f"{MAX_WIDGET_CHARS}"))
     if kind in (None, ""):
         resolved = "auto"
-    elif isinstance(kind, str) and kind in ("auto", "svg", "html", *CHART_KINDS):
+    elif isinstance(kind, str) and kind in ("auto", "svg", "html", *CHART_KINDS, *TABLE_KINDS):
         resolved = kind
     else:
         raise ToolExecutionError(tr("python.widget_tools.error.kind"))
     if resolved in CHART_KINDS:
-        validate_chart(clean_code, resolved)
-    actual = resolved if resolved in CHART_KINDS else detect_widget_kind(clean_code)
+        validate_chart(code, resolved)
+    if resolved in TABLE_KINDS:
+        validate_table(code, resolved)
+    actual = resolved if resolved in (*CHART_KINDS, *TABLE_KINDS) else detect_widget_kind(clean_code)
     if resolved in ("svg", "html") and resolved != actual:
         raise ToolExecutionError(tr("python.widget_tools.error.kind_mismatch", p0=resolved, p1=actual))
 
@@ -144,7 +228,7 @@ def validate_widget(title: Any, code: Any, kind: Any, loading: Any) -> tuple[str
                 or any(not isinstance(item, str) or not item.strip() for item in loading):
             raise ToolExecutionError(tr("python.widget_tools.error.loading_messages", p0=f"{MAX_LOADING_MESSAGES}"))
         messages = [item.strip() for item in loading]
-    return clean_title, clean_code, actual, messages
+    return clean_title, code if actual in (*TABLE_KINDS, *CHART_KINDS) else clean_code, actual, messages
 
 
 def build_widget_tools() -> list[ToolDefinition]:
@@ -205,7 +289,7 @@ def build_widget_tools() -> list[ToolDefinition]:
                         },
                         "kind": {
                             "type": "string",
-                            "enum": ["auto", "svg", "html", *CHART_KINDS],
+                            "enum": ["auto", "svg", "html", *CHART_KINDS, *TABLE_KINDS],
                             "description": tr("python.widget_tools.show.param.kind"),
                         },
                         "loading_messages": {

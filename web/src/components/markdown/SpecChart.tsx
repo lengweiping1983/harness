@@ -11,13 +11,13 @@ import type {WidgetPayload} from '@/lib/widgetPayload'
 import {CodeBlock} from './CodeBlock'
 
 /** 完整配置才加载库；并发共享下载，迟到结果归属原配置，失败可显式重试。 */
-export const SpecChart = memo(function SpecChart({source, kind, closed = true, className, payload}: {
-  source: string; kind: ChartKind; closed?: boolean; className?: string; payload?: WidgetPayload
+export const SpecChart = memo(function SpecChart({source, kind, closed = true, className, payload, active: enabled = true}: {
+  source: string; kind: ChartKind; closed?: boolean; className?: string; payload?: WidgetPayload; active?: boolean
 }) {
   useLocale()
   const visible = usePageVisible()
   const settingsOpen = useAppStore(state => state.settingsOpen)
-  const active = visible && !settingsOpen
+  const active = enabled && visible && !settingsOpen
   const [attempt, setAttempt] = useState(0)
   const [loaded, setLoaded] = useState<{kind: ChartKind; runtime: string} | null>(null)
   const [failed, setFailed] = useState<{kind: ChartKind; attempt: number} | null>(null)
@@ -42,5 +42,5 @@ export const SpecChart = memo(function SpecChart({source, kind, closed = true, c
     <p role="alert" className="text-xs text-warn">{failure ? noticeText(failure) : t('ui.chart.loadFailed')}{!failure ? <button type="button" className="ml-2 underline" onClick={() => setAttempt(value => value + 1)}>{t('ui.chart.retry')}</button> : null}</p>
     <CodeBlock code={source} language="json" />
   </div>
-  return <div className={className}>{document ? <WidgetCard payload={widget} previewCode={document} /> : <WidgetLoading preview={{title: kind, loadingMessages: [t(closed ? 'ui.chart.loading' : 'ui.chart.streaming')]}} />}</div>
+  return <div className={className}>{document ? <WidgetCard payload={widget} previewCode={document} active={active} /> : <WidgetLoading preview={{title: kind, loadingMessages: [t(closed ? 'ui.chart.loading' : 'ui.chart.streaming')]}} />}</div>
 })

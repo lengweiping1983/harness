@@ -1,6 +1,8 @@
 # 对话内可视化
 
-Harness 支持在消息流中展示 SVG、HTML、Mermaid、ECharts、Vega、Vega-Lite、Chart.js 和 Plotly 基础图表。正文数学公式通过 KaTeX 排版。无需先生成网站或切换项目；原始代码随所属对话保存，渲染和下载复用原消息。
+Harness 支持在消息流中展示 SVG、HTML、Mermaid、ECharts、Vega、Vega-Lite、Chart.js、Plotly 基础图表以及 CSV／TSV 数据表。正文数学公式通过 KaTeX 排版。无需先生成网站或切换项目；原始代码随所属对话保存，渲染和下载复用原消息。
+
+可视化正文及 `show_widget` 交付保持可见，不随轮次结束或后续的文字总结归入默认收起的执行过程。普通文字过程仍沿用原有折叠规则。
 
 ## 入口与载体
 
@@ -8,7 +10,7 @@ Harness 支持在消息流中展示 SVG、HTML、Mermaid、ECharts、Vega、Vega
 
 `harness/prompt/tool_policies.py` 在可用工具包含 `show_widget` 时装配双语 `policy.visualization`。模型请求明确优先交付小而可用的自包含预览，不为普通对话演示先写文件、启动服务器或反复截图；用户明确要求的文件、实现方式和测试仍优先。该指引进入实际模型请求，不保证每个在线模型都遵循。
 
-`show_widget` 接收一个 JSON 对象，必填 `title` 与 `widget_code`。可选 `kind` 为 `auto`、`svg`、`html`、`echarts`、`vega`、`vega-lite`、`chartjs` 或 `plotly`，`loading_messages` 提供加载提示。`widget_guidelines` 按 diagram、chart、interactive、mockup、art 返回当前语言的设计指导。
+`show_widget` 接收一个 JSON 对象，必填 `title` 与 `widget_code`。可选 `kind` 为 `auto`、`svg`、`html`、`echarts`、`vega`、`vega-lite`、`chartjs`、`plotly`、`csv` 或 `tsv`，`loading_messages` 提供加载提示。`widget_guidelines` 按 diagram、chart、interactive、mockup、art 返回当前语言的设计指导。
 
 ```json
 {"title":"流程图","kind":"svg","widget_code":"<svg viewBox='0 0 240 80'><text x='16' y='44'>Request → Canvas</text></svg>"}
@@ -44,6 +46,16 @@ HTML 支持片段与完整文档，包含内联 CSS、JavaScript、Canvas、SVG 
 
 图表沿用卡片的源码、复制、下载与放大；复制和下载取得原始配置，文件名为 `标题.格式.json`。源码切换、主题及语言变化保持同一沙箱实例；宽度变化合并到动画帧。不同图表的视觉主题细节由各运行库和用户配置控制，不覆盖原始配置或把所有图表色强行映射为产品状态色。
 
+## CSV／TSV 数据表与工作区文件
+
+`csv`／`tsv` 围栏以及同名 `show_widget.kind` 直接生成数据表，不需要 HTML 或图表运行库。CSV 采用双引号包围含分隔符／换行的单元格，单元格内双引号写为两个双引号；TSV 使用相同的引号规则、Tab 分隔符。支持 LF、CRLF、CR、BOM、空单元格和多行单元格。表头默认为首行，可取消“首行为列名”。
+
+数据表支持筛选、按列稳定排序和每页最多 50 行的分页。升序时明确的有限数字优先并按数值比较，其余值按当前语言排序；降序反转该顺序；显示和下载不改变单元格原文。源码切换、原文复制和下载共用同一输入，数值的前导零、空格及原始行尾均保留。单元格始终按文本显示，不解释 HTML、链接或公式。引号损坏、列数不一致或超限时显示明确错误和源码，不把部分数据伪装成完整表格。单表上限为 200,000 个 UTF-16 代码单元（工具端原文同样限制大小）、10,000 条记录、100 列及 50,000 个单元格；解析、筛选和排序在有界输入内完成，DOM 只挂载当前页。
+
+工作区的 `.csv`、`.tsv` 及 `.echarts.json`、`.vega.json`、`.vega-lite.json`、`.chartjs.json`、`.plotly.json` 文件默认提供相应预览，可切换源码。普通 `.json` 不根据内容猜测用途；带行号引用仍优先源码定位。文件预览复用对话中的数据表和图表组件，使用原文件读取权限与大小边界，不启动服务器或写入文件。
+
+文件切换按 URL／导航身份拒绝旧内容；隐藏时暂停读取与图表观察。文本读取采用严格增量 UTF-8 解码：完整文件中的非法字节或残缺码点明确失败；仅受大小限制截断的末尾码点可暂不输出。读取与清理同时失败时保留两个原因。截断文件只显示源码前缀和已有截断说明，不提供数据表或图表预览，也不宣称文件完整。
+
 ## 渲染块（type="renderer"）
 
 模型以 ` ```html type="renderer" ` 围栏输出时，内容作为**页面本身**展示：流式未闭合先显示“正在渲染”骨架，实际围栏闭合后直接在沙箱中渲染，提供源码切换、复制、下载和放大。停止或结束时仍未闭合的块保留源码和未完成提示，不执行半成品脚本；普通 `html` 围栏也必须实际闭合才能预览。
@@ -72,7 +84,8 @@ HTML 在 `sandbox="allow-scripts"` 的不透明来源 iframe 中执行，不授�
 
 - `tests/test_visualization_policy.py` 核对同一宿主英文→中文→英文的真实模型请求包含交付策略与当前工具说明；隔离工作区不产生文件。`toolRuns.test.ts` 与 `turnActivity.test.ts` 覆盖两层折叠、加载／成功／失败及 SVG／HTML 身份保持。
 - `tests/test_chart_widgets.py` 与 `chartSpec.test.ts` 核对五类配置、双语错误、字段唯一性、有限数、资源／原型拒绝、深度及原始配置下载身份。`chartRuntime.test.ts` 核对并发下载共享与 Vega/Lite 复用。
-- `chart-spec-smoke.mjs` 使用实际 Markdown 与工具卡片逐个绘制本地运行库，检查几何内容、无外部请求、真实点击事件中的动态求值拒绝、宿主隔离、语言／主题／宽度往返和 JSON 下载，并记录就绪耗时。
+- `tableData.test.ts`、`filePreviewText.test.ts` 与 `tests/test_chart_widgets.py` 覆盖表格引号／分隔符／行尾、原文、排序与边界，以及文件读取与清理错误；`table-preview-smoke.mjs` 覆盖实际 Markdown、工具和文件预览中的排序、分页、筛选、语言／主题／尺寸往返、下载、隐藏、文件身份、截断和编码拒绝。
+- `chart-spec-smoke.mjs` 使用实际 Markdown 与工具卡片逐个绘制本地运行库，检查几何内容、无外部请求、真实点击事件中的动态求值拒绝、宿主隔离、语言／主题／宽度往返和 JSON 下载，并记录就绪耗时；还验证图例切换和 Vega／Lite 滑块对真实图形与数据可见性的影响，以及状态在主题／语言／宽度变化后保留。
 - `tests/test_widget_tools.py` 核对双语工具说明、完整 HTML、SVG 结构与参数边界。
 - `tests/test_widget_flow.py` 经真实发行桥接、回环供应商流和工具注册入口，核对损坏参数未执行、模型纠正、SVG／HTML 展示事件及完整源码。
 - `svgScope.test.ts` 核对多图 ID 和引用隔离；`streaming.test.ts` 保留分段与渐进内容边界，并核对渲染块（`type="renderer"`）的识别、分段与闭合状态。

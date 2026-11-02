@@ -25,6 +25,9 @@ function App(){
  {kind:'thinking',id:'thought',turn:1,at:start,text:'Original thought'},
  {kind:'tool',id:'read',callId:'read-call',turn:1,at:start,name:'read',status:'ok',input:{path:'file'},output:'Original read'},
  ...deliveries.map(row=>({kind:'tool',id:row.call_id,callId:row.call_id,turn:1,at:start,name:'show_widget',status:phase==='pending'?'running':'ok',input:{title:row.display.widget.title},display:phase==='pending'?undefined:row.display,output:phase==='pending'?undefined:row.results[0].content})),
+ ...(phase==='pending'?[]:[
+ {kind:'assistant',id:'inline-html',turn:1,sourceSeq:15,at:start,text:${JSON.stringify('```html\n<button onclick="this.textContent=\'Inline clicked\'">Inline interactive</button>\n```')}},
+ {kind:'assistant',id:'inline-table',turn:1,sourceSeq:16,at:start,text:${JSON.stringify('```csv\nName,Value\nEarlier preview,10\n```')}}]),
  {kind:'assistant',id:'answer',turn:1,sourceSeq:19,at:start,text:'Use the controls above.'}]
  const activity={turn:1,startSeq:0,startedAt:start,...(phase==='complete'?{reason:'completed',endedAt:Date.now(),endSeq:20,finalResponseSeq:19}:{})}
  return React.createElement('div',{style:{height:1500,display:'flex'}},React.createElement(Conversation,{blocks,turns:{1:activity},running:phase!=='complete',streaming:phase!=='complete',connection:'open',readOnly:true}))
@@ -45,15 +48,22 @@ await browserScenario(async({server,browser})=>{
  await page.locator(ready).waitFor()
  await frame.getByRole('button',{name:'运行模拟 · 0',exact:true}).click()
  await frame.getByRole('button',{name:'运行模拟 · 1',exact:true}).waitFor()
+ const inline=page.frameLocator('[data-row-id="inline-html"] iframe')
+ await inline.getByRole('button',{name:'Inline interactive',exact:true}).click()
+ await page.locator('[data-row-id="inline-table"] tbody').getByText('Earlier preview',{exact:true}).waitFor()
  await page.evaluate(()=>window.phase('complete'))
  await page.locator('[data-row-id="activity-turn-1"] button[aria-expanded="false"]').waitFor()
  await page.locator(ready).waitFor()
  await frame.getByRole('button',{name:'运行模拟 · 1',exact:true}).waitFor()
+ await inline.getByRole('button',{name:'Inline clicked',exact:true}).waitFor()
+ await page.locator('[data-row-id="inline-table"] tbody').getByText('Earlier preview',{exact:true}).waitFor()
  for(const locale of ['en','zh-CN','en'])for(const [dark,width] of [[false,390],[true,1440]]){
   await page.setViewportSize({width,height:1800})
   await page.evaluate(async({locale,dark})=>{await window.locale(locale);document.documentElement.classList.toggle('dark',dark)},{locale,dark})
   await page.locator(ready).waitFor()
   await frame.getByRole('button',{name:'运行模拟 · 1',exact:true}).waitFor()
+  await inline.getByRole('button',{name:'Inline clicked',exact:true}).waitFor()
+  await page.locator('[data-row-id="inline-table"] tbody').getByText('Earlier preview',{exact:true}).waitFor()
   await frame.locator('#workers').evaluate(node=>{node.value='8';node.dispatchEvent(new Event('input',{bubbles:true}))})
   assert.equal(await frame.locator('#queued').textContent(),'16')
   await page.locator('.widget-host > svg').waitFor()

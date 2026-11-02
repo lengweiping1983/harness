@@ -6,18 +6,18 @@ export function sandboxBootstrap(identity: string): string {
     const id=${JSON.stringify(identity)},channel=${JSON.stringify(CHANNEL)};
     const post=parent.postMessage.bind(parent),raf=requestAnimationFrame.bind(window),Observer=ResizeObserver;
     const send=(kind,data={})=>post({channel,id,kind,...data},'*');
-    let lastFailure=null,queued=false,pendingPaint=null,trapFocus=false,active=false,lastHeight=null;
+    let lastFailure=null,lastCopy=null,queued=false,pendingPaint=null,trapFocus=false,active=false,lastHeight=null;
     const observer=new Observer(resize);
     const notify=()=>{
       if(!active||!document.body)return;
       const height=Math.min(2000,Math.max(40,Math.ceil(Math.max(document.body.scrollHeight,document.body.getBoundingClientRect().height))));
       if(height!==lastHeight){lastHeight=height;send('resize',{height})}
     };
-    const paintReady=ticket=>{const paint=()=>raf(()=>raf(()=>{if(active&&pendingPaint===ticket&&document.readyState!=='loading')send('ready',{paint:ticket})}));const content=window.__harnessWidgetReady;if(content&&typeof content.then==='function')content.then(paint,error=>fail(String(error?.message||error)));else paint()};
+    const paintReady=ticket=>{const paint=()=>raf(()=>raf(()=>{if(active&&pendingPaint===ticket&&document.readyState!=='loading')send('ready',{paint:ticket})}));const content=window.__harnessWidgetReady;if(content&&typeof content.then==='function')content.then(paint,error=>fail(String(error?.message||error),error?.harnessCopy));else paint()};
     function resize(){if(!active||queued)return;queued=true;raf(()=>{queued=false;notify()})};
-    const fail=message=>{if(message===lastFailure)return;lastFailure=message;send('error',{message})};
-    addEventListener('error',e=>fail(e.message||e.target?.src||''),true);
-    addEventListener('unhandledrejection',e=>fail(String(e.reason?.message||e.reason||'')));
+    const fail=(message,copy=null)=>{if(message===lastFailure&&copy===lastCopy)return;lastFailure=message;lastCopy=typeof copy==='string'?copy:null;send('error',{message,copy:lastCopy})};
+    addEventListener('error',e=>fail(e.message||e.target?.src||'',e.error?.harnessCopy),true);
+    addEventListener('unhandledrejection',e=>fail(String(e.reason?.message||e.reason||''),e.reason?.harnessCopy));
     addEventListener('message',e=>{
       const data=e.data;
       if(e.source!==parent||data?.channel!==channel||data?.id!==id||data?.kind!=='theme'||typeof data.css!=='string')return;
@@ -31,7 +31,7 @@ export function sandboxBootstrap(identity: string): string {
       trapFocus=!!data.trapFocus;
       pendingPaint=typeof data.paint==='string'?data.paint:null;
       if(pendingPaint&&document.readyState!=='loading')paintReady(pendingPaint);
-      if(lastFailure!==null)send('error',{message:lastFailure});
+      if(lastFailure!==null)send('error',{message:lastFailure,copy:lastCopy});
     });
     addEventListener('DOMContentLoaded',()=>{if(active)observer.observe(document.body);notify();if(pendingPaint)paintReady(pendingPaint)});
     addEventListener('load',notify);

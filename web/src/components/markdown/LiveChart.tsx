@@ -25,6 +25,8 @@ import { normalizeLang } from '@/lib/streaming'
 import { CopyButton, IconButton, Spinner, Tooltip } from '@/components/ui/primitives'
 import { CodeBlock } from './CodeBlock'
 import { Mermaid } from './Mermaid'
+import {DataTable} from './DataTable'
+import {isTableKind} from '@/lib/tableData'
 import { SpecChart } from './SpecChart'
 import { isChartKind } from '@/lib/chartSpec'
 
@@ -60,6 +62,7 @@ export const LiveChart = memo(function LiveChart({
 
   if (value === 'mermaid') return <Mermaid chart={code} live={!closed} className={className} />
   if (value === 'svg') return <ProgressiveSvgView source={code} live={!closed} className={className} />
+  if (isTableKind(value)) return <DataTable source={code} kind={value} closed={closed} className={className} />
   if (isChartKind(value)) return <SpecChart source={code} kind={value} closed={closed} className={className} />
   // 没标语言的围栏里如果塞了 SVG（模型很爱这么干），也照样画出来。
   if (!value && /<svg\b/i.test(code)) {

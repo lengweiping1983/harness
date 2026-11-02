@@ -8,6 +8,12 @@ import { highlightToHtml, isHighlightable } from '@/lib/highlight'
 import { markHighlightedSource } from '@/lib/fileSourceHighlight'
 import { useAppStore } from '@/store/app'
 import { Markdown } from '@/components/markdown/Markdown'
+import {SpecChart} from '@/components/markdown/SpecChart'
+import {DataTable} from '@/components/markdown/DataTable'
+import {isChartKind} from '@/lib/chartSpec'
+import {isTableKind} from '@/lib/tableData'
+import {readPreviewText} from '@/lib/filePreviewText'
+import {visualizationFile} from '@/lib/visualizationFile'
 import { FileOpenActions } from './FileOpenActions'
 
 const MAX_BYTES = 256 * 1024
@@ -38,7 +44,9 @@ export function FilePreview({ path, root, lineRange, navigationId, focusContent 
 
   const markdown = /\.(md|markdown)$/i.test(path)
   const html = isHtmlPath(path)
-  const [view, setView] = useState<'reading' | 'source'>((markdown || html) && !lineRange ? 'reading' : 'source')
+  const visualization = visualizationFile(path)
+  const previewable = markdown || html || Boolean(visualization)
+  const [view, setView] = useState<'reading' | 'source'>(previewable && !lineRange ? 'reading' : 'source')
   const reader = useRef<HTMLDivElement>(null)
   const readingScroll = useRef(0)
   const [text, setText] = useState<string | null>(null)
@@ -148,7 +156,7 @@ export function FilePreview({ path, root, lineRange, navigationId, focusContent 
     locate(lineRange, focusContent)
   }, [text, lineRange?.start, lineRange?.end, navigationId, starts.length, view])
   useEffect(() => { if (finding) findInput.current?.focus() }, [finding])
-  useEffect(() => { setFinding(false); setQuery(''); readingScroll.current = 0; setView((markdown || html) && !lineRange ? 'reading' : 'source') }, [navigationId, markdown, html, lineRange?.start, lineRange?.end])
+  useEffect(() => { setFinding(false); setQuery(''); readingScroll.current = 0; setView(previewable && !lineRange ? 'reading' : 'source') }, [navigationId, markdown, html, visualization, lineRange?.start, lineRange?.end])
   useEffect(() => {
     if (text === null || !focusContent) return
     if (view === 'reading' && reader.current) { reader.current.scrollTop = readingScroll.current; reader.current.focus({ preventScroll: true }) }
@@ -168,19 +176,8 @@ export function FilePreview({ path, root, lineRange, navigationId, focusContent 
       if (!response.ok) { if (alive) setError({ key: 'ui.components.inspector.FilePreview.d9f885d74720', values: { p0: response.status } }); return }
       const reader = response.body?.getReader()
       if (!reader) { if (alive) setError({ key: 'ui.components.inspector.FilePreview.c9e91b53401f' }); return }
-      const decoder = new TextDecoder('utf-8')
-      let value = '', used = 0, cut = Number(response.headers.get('Content-Range')?.split('/').pop() ?? response.headers.get('Content-Length') ?? 0) > MAX_BYTES
-      try {
-        for (;;) {
-          const chunk = await reader.read()
-          if (chunk.done) break
-          const available = MAX_BYTES - used
-          value += decoder.decode(chunk.value.subarray(0, available), { stream: true })
-          used += Math.min(available, chunk.value.length)
-          if (used >= MAX_BYTES) { cut ||= chunk.value.length > available; break }
-        }
-        value += decoder.decode()
-      } finally { await reader.cancel().catch(() => {}) }
+      const total=Number(response.headers.get('Content-Range')?.split('/').pop() ?? response.headers.get('Content-Length') ?? 0)
+      const {text:value,truncated:cut}=await readPreviewText(reader,MAX_BYTES,total)
       if (alive) { loadedScope.current = scope; setText(value); setTruncated(cut) }
     })().catch((failure) => { if (alive && !abort.signal.aborted) setError({ key: 'ui.filePreview.readFailure', values: { detail: String(failure instanceof Error ? failure.message : failure) } }) }).finally(() => { if (alive) setRefreshing(false) })
     return () => { alive = false; abort.abort() }
@@ -193,16 +190,16 @@ export function FilePreview({ path, root, lineRange, navigationId, focusContent 
   }}>
     <header className="file-preview-header flex items-center gap-2 border-b border-line px-3 py-2 text-xs">
       <span className="min-w-0 flex-1 truncate font-medium" title={path}>{path.split(/[\\/]/).pop()}</span>
-      {(markdown || html) && text !== null && !error ? <button type="button" className="file-view-toggle" onClick={() => {
+      {previewable && text !== null && !error && !(visualization && truncated) ? <button type="button" className="file-view-toggle" onClick={() => {
         setView(view === 'reading' ? 'source' : 'reading')
         if (view === 'source') { setFinding(false); setQuery('') }
-      }}>{view === 'reading' ? t("ui.components.inspector.FilePreview.035440298e53") : t("ui.components.inspector.FilePreview.13495f8f1914")}</button> : null}
+      }}>{view === 'reading' ? t("ui.components.inspector.FilePreview.035440298e53") : t(visualization ? 'ui.widget.viewWidget' : 'ui.components.inspector.FilePreview.13495f8f1914')}</button> : null}
       {readable && text !== null ? <button type="button" disabled={refreshing} aria-label={t("ui.components.inspector.FilePreview.bac6fbe5d699")} title={t("ui.components.inspector.FilePreview.5857e5b72d49")} onClick={() => setRetry((value) => value + 1)} className="text-muted hover:text-ink"><RefreshCw aria-hidden className={refreshing ? "h-3 w-3 animate-spin" : "h-3 w-3"} /></button> : null}
       <FileOpenActions path={path} root={root} />
     </header>
     {image ? <button type="button" aria-label={t("ui.components.inspector.FilePreview.ba742ac7dcaa")} onClick={() => openImage(url, path)} className="file-preview-image block w-full p-2"><img src={url} alt={path} className="max-h-80 w-full object-contain" onError={() => setError({ key: 'ui.components.inspector.FilePreview.effa0053fe92' })} /></button> : null}
     {error ? <div role="alert" className="space-y-2 p-3 text-xs text-danger"><p>{t(error.key, error.values)}</p>{readable && text === null ? <button type="button" onClick={() => setRetry((value) => value + 1)} className="text-ink underline">{t("ui.components.inspector.FilePreview.5857e5b72d49")}</button> : null}</div> : null}
-    {readable ? text === null ? !error ? <p className="p-3 text-xs text-muted">{t("ui.components.inspector.FilePreview.b75809afbe0c")}</p> : null : html && view === 'reading' ? <iframe key={url} src={previewUrl(path, { root })} title={t('ui.filePreview.htmlPreview')} sandbox="allow-scripts" className="h-file-reader w-full border-0 bg-white" /> : markdown && view === 'reading' ? <div ref={reader} tabIndex={0} role="region" aria-label={t("ui.components.inspector.FilePreview.96183d9557ac")} data-markdown-reader onScroll={(event) => { readingScroll.current = event.currentTarget.scrollTop }} className="max-h-file-reader overflow-auto px-4 py-3 focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand">
+    {readable ? text === null || loadedScope.current !== JSON.stringify([url,navigationId]) ? !error ? <p className="p-3 text-xs text-muted">{t("ui.components.inspector.FilePreview.b75809afbe0c")}</p> : null : visualization && view === 'reading' && !truncated ? <div className="p-3">{isTableKind(visualization) ? <DataTable key={url} source={text} kind={visualization} title={path.split(/[\\/]/).at(-1)} /> : isChartKind(visualization) ? <SpecChart key={url} source={text} kind={visualization} active={active} /> : null}</div> : html && view === 'reading' ? <iframe key={url} src={previewUrl(path, { root })} title={t('ui.filePreview.htmlPreview')} sandbox="allow-scripts" className="h-file-reader w-full border-0 bg-white" /> : markdown && view === 'reading' ? <div ref={reader} tabIndex={0} role="region" aria-label={t("ui.components.inspector.FilePreview.96183d9557ac")} data-markdown-reader onScroll={(event) => { readingScroll.current = event.currentTarget.scrollTop }} className="max-h-file-reader overflow-auto px-4 py-3 focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand">
       <Markdown fileSource={{ path, root }} className="w-full min-w-0 text-compact leading-7 [&>p]:break-words [&>h1:first-child]:mt-0">{text}</Markdown>
     </div> : <>
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-xs">

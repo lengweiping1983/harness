@@ -4826,5 +4826,17 @@
   "ui.chart.retry": "重新加载",
   "ui.chart.loading": "正在加载图表渲染器…",
   "ui.chart.streaming": "正在接收图表配置…",
-  "ui.chart.plotlyTypes": "当前 Plotly 构建支持 scatter、bar 和 pie。其它图表类型请使用 ECharts 或 HTML。"
+  "ui.chart.plotlyTypes": "当前 Plotly 构建支持 scatter、bar 和 pie。其它图表类型请使用 ECharts 或 HTML。",
+  "ui.table.tooLarge": "表格超过预览上限（200,000 字符、10,000 条记录、100 列或 50,000 个单元格）。",
+  "ui.table.columns": "表格各行的列数不一致，源码已保留。",
+  "ui.table.invalid": "表格分隔文本格式有误，源码已保留。",
+  "ui.table.column": "表格列 {index}",
+  "ui.table.filter": "筛选表格",
+  "ui.table.header": "首行为列名",
+  "ui.table.receiving": "正在接收表格数据…",
+  "ui.table.empty": "没有匹配的数据行。",
+  "ui.table.summary": "行：{start}–{end}／{total}；列：{columns}",
+  "ui.table.previous": "表格上一页",
+  "ui.table.next": "表格下一页",
+  "ui.table.sort": "排序表格列“{column}”"
 }

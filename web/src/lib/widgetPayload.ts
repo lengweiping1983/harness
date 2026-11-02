@@ -1,3 +1,4 @@
+import {isTableKind,type TableKind} from './tableData'
 import {isChartKind, type ChartKind} from './chartSpec'
 import type { ToolBlockState } from '@/types'
 
@@ -9,7 +10,7 @@ import type { ToolBlockState } from '@/types'
  * 由通用工具结果视图兜底，不猜、不补。
  */
 
-export type WidgetKind = 'svg' | 'html' | ChartKind
+export type WidgetKind = 'svg' | 'html' | ChartKind | TableKind
 
 export interface WidgetPayload {
   title: string
@@ -39,7 +40,7 @@ export function parseWidgetPayload(value: unknown): WidgetPayload | null {
   if (!record(value) || !record(value.widget)) return null
   const widget = value.widget
   if (!nonBlank(widget.title) || !nonBlank(widget.code)) return null
-  if (widget.kind !== 'svg' && widget.kind !== 'html' && !(typeof widget.kind === 'string' && isChartKind(widget.kind))) return null
+  if (widget.kind !== 'svg' && widget.kind !== 'html' && !(typeof widget.kind === 'string' && (isChartKind(widget.kind)||isTableKind(widget.kind)))) return null
   return {
     title: widget.title.trim(),
     code: widget.code,
