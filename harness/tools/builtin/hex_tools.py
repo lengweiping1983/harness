@@ -124,14 +124,23 @@ def hex_discovery_path() -> Path:
     override = os.environ.get("HEX_APPLICATION_SUPPORT_DIR")
     if override:
         return Path(override) / "local-api.json"
+    # Windows 测试与精简启动环境可能没有 APPDATA，也可能没有任何
+    # Python 可识别的 home 环境变量。此时仍返回稳定的用户数据候选路径，
+    # 不能让 Path.home() 的 RuntimeError 阻断 Harness 的基础启动。
+    def home() -> Path:
+        try:
+            return Path.home()
+        except RuntimeError:
+            return Path.cwd()
+
     if sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support" / "hex"
+        base = home() / "Library" / "Application Support" / "hex"
     elif sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
-        base = Path(appdata) / "hex" if appdata else Path.home() / "AppData" / "Roaming" / "hex"
+        base = Path(appdata) / "hex" if appdata else home() / "AppData" / "Roaming" / "hex"
     else:
         xdg = os.environ.get("XDG_DATA_HOME")
-        base = Path(xdg) / "hex" if xdg else Path.home() / ".local" / "share" / "hex"
+        base = Path(xdg) / "hex" if xdg else home() / ".local" / "share" / "hex"
     return base / "local-api.json"
 
 

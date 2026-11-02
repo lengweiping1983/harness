@@ -53,6 +53,22 @@ async function startDesktop() {
     applicationURL = (await backend.start()).url
     origin = new URL(applicationURL).origin
   } catch (error) {dialog.showErrorBox('Harness startup failed', String(error)); app.quit(); throw error}
+  // The application window uses the default Electron session, while website
+  // permissions are scoped to the separate browser session. Explicitly grant
+  // microphone access only to the local Harness origin so Chromium does not
+  // reject getUserMedia on Windows before the renderer can start recording.
+  const appSession = session.defaultSession
+  const allowsApplicationAudio = (webContents, permission, requestingOrigin, details = {}) => {
+    let requestOrigin = requestingOrigin
+    try {requestOrigin = new URL(requestingOrigin).origin} catch {}
+    if (webContents !== window?.webContents || permission !== 'media' || requestOrigin !== origin) return false
+    const mediaTypes = details.mediaTypes || (details.mediaType ? [details.mediaType] : [])
+    return mediaTypes.length === 1 && mediaTypes[0] === 'audio'
+  }
+  appSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) =>
+    allowsApplicationAudio(webContents, permission, requestingOrigin, details))
+  appSession.setPermissionRequestHandler((webContents, permission, callback, details) =>
+    callback(allowsApplicationAudio(webContents, permission, details?.requestingUrl || '', details)))
   downloads = new BrowserDownloads(() => path.join(app.getPath('downloads'), 'Harness'), () => browser.publish())
   window = new BrowserWindow({width: 1440, height: 960, minWidth: 800, minHeight: 600, title: 'Harness', icon: brandIcon, ...windowChrome(), webPreferences: {preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true}})
   instanceReady()
