@@ -21,6 +21,8 @@ it('uses weekday meanings in both locales, including repeated language switches'
     setLocale(language)
     expect(weekdayLabels()).toEqual(language === 'en' ? ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] : ['一','二','三','四','五','六','日'])
     expect(scheduleLabel({kind:'weekly',days:[0,2,6],time:'09:00'})).toBe(language === 'en' ? 'Every Mon, Wed, Sun 09:00' : '每周一、三、日 09:00')
+    expect(scheduleLabel({kind:'monthly',monthdays:[1,15],time:'09:00'})).toBe(language === 'en' ? 'Monthly on day 1, 15 at 09:00' : '每月 1、15 号 09:00')
+    expect(scheduleLabel({kind:'yearly',months:[1,7],monthdays:[1],time:'09:00'})).toBe(language === 'en' ? 'Yearly in month 1, 7 on day 1 at 09:00' : '每年 1、7 月 1 号 09:00')
   }
 })
 it.each(['en','zh-CN'] as const)('renders team assignments and recipient names with %s grammar', language => {

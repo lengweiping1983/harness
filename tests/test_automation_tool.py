@@ -101,6 +101,48 @@ class AutomationToolTests(unittest.TestCase):
             missing = asyncio.run(tools['delete_automation'].execute({'automation_id': current['id']}, context))
             self.assertTrue(missing.is_error)
 
+    def test_update_automation_changes_only_requested_fields_in_current_session(self):
+        with tempfile.TemporaryDirectory() as root:
+            service = AutomationService(Path(root) / 'automations.db', SimpleNamespace(get_session=Mock()))
+            tools = {tool.schema.name: tool for tool in build_automation_tools()}
+            context = ToolRunContext(call_id='update-call', session_id='current', cwd=None, turn=1, step=1, services={'automations': service})
+            body = {'name': '继续提醒', 'prompt': '继续', 'schedule': {'kind': 'weekly', 'time': '09:00', 'days': [0]}}
+            current = service.save({**body, 'session_id': 'current', 'creation_id': 'e'*32})
+            foreign = service.save({**body, 'session_id': 'other', 'creation_id': 'f'*32})
+
+            # 没有提供任何变更字段时拒绝写入。
+            empty = asyncio.run(tools['update_automation'].execute({'automation_id': current['id']}, context))
+            self.assertTrue(empty.is_error)
+
+            # 只改名称与启用状态，其余字段保持原值。
+            paused = asyncio.run(tools['update_automation'].execute(
+                {'automation_id': current['id'], 'name': '改名提醒', 'enabled': False}, context))
+            self.assertFalse(paused.is_error)
+            saved = next(row for row in service.list() if row['id'] == current['id'])
+            self.assertEqual(saved['name'], '改名提醒')
+            self.assertEqual(saved['prompt'], '继续')
+            self.assertEqual(saved['schedule'], {'kind': 'weekly', 'time': '09:00', 'days': [0]})
+            self.assertFalse(saved['enabled'])
+
+            # 改为每月计划后按新日程重新计算到期时间。
+            changed = asyncio.run(tools['update_automation'].execute(
+                {'automation_id': current['id'], 'schedule': {'kind': 'monthly', 'time': '08:30', 'monthdays': [1, 15]}, 'enabled': True}, context))
+            self.assertFalse(changed.is_error)
+            saved = next(row for row in service.list() if row['id'] == current['id'])
+            self.assertEqual(saved['schedule'], {'kind': 'monthly', 'time': '08:30', 'monthdays': [1, 15]})
+            self.assertTrue(saved['enabled'])
+
+            # 其他对话的任务不在当前对话的作用域内。
+            denied = asyncio.run(tools['update_automation'].execute({'automation_id': foreign['id'], 'name': '越权'}, context))
+            self.assertTrue(denied.is_error)
+            self.assertEqual(next(row for row in service.list() if row['id'] == foreign['id'])['name'], '继续提醒')
+
+            # 运行中的任务不能修改。
+            with service.db() as db:
+                db.execute('UPDATE automations SET running=1 WHERE id=?', (current['id'],))
+            running = asyncio.run(tools['update_automation'].execute({'automation_id': current['id'], 'name': '运行中'}, context))
+            self.assertTrue(running.is_error)
+
     def test_management_tools_report_disabled_service(self):
         context = ToolRunContext(call_id='disabled', session_id='current', cwd=None, turn=1, step=1, services={})
         for tool in build_automation_tools()[1:]:

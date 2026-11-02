@@ -33,6 +33,15 @@ def zone(name: str):
         raise invalid(tr('python.schedules.ed19113c71cb')) from None
 
 
+def _day_list(value: Any, lowest: int, highest: int, label: str, empty: str) -> list[int]:
+    """校验一批日历日或月份，去重后按日期顺序排列。"""
+    if not isinstance(value, list) or not value:
+        raise invalid(tr(empty))
+    if any(type(item) is not int or item not in range(lowest, highest + 1) for item in value):
+        raise invalid(tr(label))
+    return sorted(set(value))
+
+
 def validate_schedule(body: dict[str, Any]) -> tuple[dict[str, Any], str]:
     if not isinstance(body, dict):
         raise invalid(tr('python.schedules.33fa54e90879'))
@@ -56,17 +65,23 @@ def validate_schedule(body: dict[str, Any]) -> tuple[dict[str, Any], str]:
         if not 60 <= seconds <= 31536000:
             raise invalid(tr('python.schedules.d6fac8afcc79'))
         return {"kind": kind, "seconds": seconds}, name
-    if kind not in {"daily", "weekly"}:
+    if kind not in {"daily", "weekly", "monthly", "yearly"}:
         raise invalid(tr('python.schedules.78729967be6c'))
     clock = schedule.get("time")
     if not isinstance(clock, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", clock):
         raise invalid(tr('python.schedules.53f81fbad0c4'))
     result = {"kind": kind, "time": clock}
     if kind == "weekly":
-        days = schedule.get("days")
-        if not isinstance(days, list) or not days or any(type(day) is not int or day not in range(7) for day in days):
-            raise invalid(tr('python.schedules.27be9e12701c'))
-        result["days"] = sorted(set(days))
+        result["days"] = _day_list(schedule.get("days"), 0, 6,
+                                   'python.schedules.27be9e12701c', 'python.schedules.27be9e12701c')
+    if kind == "monthly":
+        result["monthdays"] = _day_list(schedule.get("monthdays"), 1, 31,
+                                        'python.schedules.monthdaysRange', 'python.schedules.monthdaysEmpty')
+    if kind == "yearly":
+        result["months"] = _day_list(schedule.get("months"), 1, 12,
+                                     'python.schedules.monthsRange', 'python.schedules.monthsEmpty')
+        result["monthdays"] = _day_list(schedule.get("monthdays"), 1, 31,
+                                        'python.schedules.monthdaysRange', 'python.schedules.monthdaysEmpty')
     return result, name
 
 
@@ -81,6 +96,8 @@ def next_due(schedule: dict[str, Any], tz: str, after: float, anchor: float | No
         return anchor + max(1, math.floor((after - anchor) / seconds) + 1) * seconds
     local = datetime.fromtimestamp(after, zone(tz))
     hour, minute = map(int, schedule["time"].split(":"))
+    if kind in {"monthly", "yearly"}:
+        return _next_calendar_due(local, schedule, hour, minute)
     for offset in range(9):
         day = local.date() + timedelta(days=offset)
         if kind == "weekly" and day.weekday() not in schedule["days"]:
@@ -92,4 +109,28 @@ def next_due(schedule: dict[str, Any], tz: str, after: float, anchor: float | No
             continue
         if stamp > after:
             return stamp
+    raise invalid(tr('python.schedules.2afde7b11a09'))
+
+
+def _next_calendar_due(local: datetime, schedule: dict[str, Any], hour: int, minute: int) -> float:
+    """按日历月推进每月与每年计划；该月不存在的日期直接跳过。"""
+    months = schedule["months"] if schedule["kind"] == "yearly" else list(range(1, 13))
+    after = local.timestamp()
+    for offset in range(48):
+        month = (local.month - 1 + offset) % 12 + 1
+        year = local.year + (local.month - 1 + offset) // 12
+        if month not in months:
+            continue
+        for day in schedule["monthdays"]:
+            try:
+                candidate = datetime(year, month, day, hour, minute, tzinfo=local.tzinfo)
+            except ValueError:
+                # 当月没有这一天（例如 2 月 31 日），保留到下个月同一天。
+                continue
+            stamp = candidate.timestamp()
+            # 跳过夏令时不存在的本地时刻，有歧义的时刻只触发一次。
+            if datetime.fromtimestamp(stamp, local.tzinfo).replace(tzinfo=None) != candidate.replace(tzinfo=None):
+                continue
+            if stamp > after:
+                return stamp
     raise invalid(tr('python.schedules.2afde7b11a09'))

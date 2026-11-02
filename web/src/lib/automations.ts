@@ -1,5 +1,5 @@
 import { t, getLocale } from '@/i18n'
-export type Schedule = { kind: 'once'; at: number } | { kind: 'interval'; seconds: number } | { kind: 'daily'; time: string } | { kind: 'weekly'; time: string; days: number[] }
+export type Schedule = { kind: 'once'; at: number } | { kind: 'interval'; seconds: number } | { kind: 'daily'; time: string } | { kind: 'weekly'; time: string; days: number[] } | { kind: 'monthly'; time: string; monthdays: number[] } | { kind: 'yearly'; time: string; months: number[]; monthdays: number[] }
 export type Automation = { id: string; name: string; prompt: string; session_id: string; mode: 'session' | 'fresh'; schedule: Schedule; timezone: string; due: number; enabled: number; running: number; failures: number; last_error: string | null }
 export type AutomationRun = { id: string; automation_id: string; name: string | null; session_id: string | null; started: number; finished: number | null; status: string; trigger: string; unread: number; result: string | null }
 export type AutomationPayload = { automations: Automation[]; runs: AutomationRun[]; scheduler: { running: boolean; owner: boolean; last_error: string | null; max_concurrent: number } }
@@ -23,6 +23,8 @@ export function scheduleLabel(schedule: Schedule) {
     return t(hours ? (count === 1 ? 'ui.automations.everyOneHour' : 'ui.automations.everyHours') : (count === 1 ? 'ui.automations.everyOneMinute' : 'ui.automations.everyMinutes'), {count})
   }
   if (schedule.kind === 'daily') return t("ui.lib.automations.1cd663150c88", {p0: (schedule.time)})
+  if (schedule.kind === 'monthly') return t("ui.lib.automations.monthlyLabel", {p0: (schedule.monthdays.join(t('ui.common.list_separator'))), p1: (schedule.time)})
+  if (schedule.kind === 'yearly') return t("ui.lib.automations.yearlyLabel", {p0: (schedule.months.join(t('ui.common.list_separator'))), p1: (schedule.monthdays.join(t('ui.common.list_separator'))), p2: (schedule.time)})
   const days = weekdayLabels()
   return t("ui.lib.automations.d47891fbea69", {p0: (schedule.days.map((day) => days[day]).join(t('ui.common.list_separator'))), p1: (schedule.time)})
 }

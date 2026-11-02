@@ -39,7 +39,7 @@ def build_tool_policies(names: set) -> list:
         ({'job_output', 'job_kill'}, 'jobs', 1600, 'policy.jobs'),
         ({'terminal_list'}, 'terminal', 1650, 'policy.terminal'),
         ({'create_goal', 'update_goal'}, 'goal', 2400, 'policy.goal'),
-        ({'schedule_automation', 'list_automations', 'delete_automation'}, 'automation', 2380, 'policy.automation'),
+        ({'schedule_automation', 'list_automations', 'update_automation', 'delete_automation'}, 'automation', 2380, 'policy.automation'),
         ({'todo_write', 'todo_update'}, 'todo', 2450, 'policy.todo'),
     ):
         if tools & names:
