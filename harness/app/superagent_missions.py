@@ -14,6 +14,7 @@ from ..session.tool_activity import confirmed_tool_result, tool_invocations
 from ..session.turn_scope import turn_events
 from .superagent_inbox import _error, _json, _page, _text
 from .superagent_mission_store import TERMINAL, digest, packed, validate_plan
+from .superagent_mission_status import dependencies, run_progress, waiting_reason
 from .superagent_router import SuperagentRouter
 from .worktree_delivery import snapshot_tree
 
@@ -112,9 +113,13 @@ class SuperagentMissions(SuperagentRouter):
         self.store.update(mission['id'], before=mission['state'], state=state, reason=reason)
 
     def _record(self, job):
+        self._check_job_resource(job)
+        return self._submission(job)
+
+    def _submission(self, job):
+        """只核对原提交事实，监督读取不触发资源创建、Git 探测或账本写入。"""
         host = self.harness if job['role'] == 'plan' else self.dispatcher.harness
         data = job['data']
-        self._check_job_resource(job)
         record = host.runtime.find_submission(data['session_id'], job['id'])
         if record is not None and (record.text != data['payload'] or record.request_id != job['id']
                 or record.session_id != data['session_id'] or record.prompt_input is not None
@@ -521,17 +526,20 @@ class SuperagentMissions(SuperagentRouter):
             else:
                 self.store.update(mission['id'], before='reviewing', state='integrating', round=mission['round'] + 1)
 
-    async def tick(self):
+    async def tick(self, *, include_status=True):
+        if type(include_status) is not bool:
+            raise _error('invalid', field='include_status')
         self._open()
         loop = asyncio.get_running_loop()
         owner = self.dispatcher.harness.runtime.claim_loop(loop)
         if owner is not loop:
-            return await join_cleanup(asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.tick(), owner)))
+            return await join_cleanup(asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.tick(include_status=include_status), owner)))
         if self.harness.runtime.claim_loop(loop) is not loop:
             raise _error('invalid', field='router_loop')
         if self._tick_task is None or self._tick_task.done():
             self._tick_task = asyncio.create_task(self._tick())
-        return await join_cleanup(self._tick_task)
+        await join_cleanup(self._tick_task)
+        return self.status() if include_status else None
 
     async def _tick(self):
         self._collect_missions()
@@ -565,35 +573,58 @@ class SuperagentMissions(SuperagentRouter):
         if rows:
             with self.store.db(write=True) as db:
                 db.execute('UPDATE coordinator SET scheduling_cursor=? WHERE instance=?', (rows[-1]['seq'], self.inbox.instance_id))
-        return self.status()
+
+    def _job_status(self, mission, job, jobs, *, events, background, at_capacity):
+        item = {**{key: job[key] for key in ('id', 'role', 'node', 'attempt', 'state', 'dependencies')},
+                **{key: job['data'][key] for key in ('run_id', 'session_id', 'workspace_id', 'delivery') if key in job['data']}}
+        host = self.harness if job['role'] == 'plan' else self.dispatcher.harness
+        sid = job['data'].get('session_id')
+        progress = None
+        if sid and 'payload' in job['data'] and job['state'] in ('submitting', 'accepted', 'capturing', 'done', 'blocked', 'unknown'):
+            record = self._submission(job)
+            if record is not None:
+                key = (id(host), sid)
+                if key not in events:
+                    events[key] = host.get_session(sid).events
+                progress = run_progress(record, events[key])
+                item['run'] = progress
+        unresolved = dependencies(mission, job, jobs)
+        active = host.runtime.active.get(sid)
+        reason = waiting_reason(mission, job, progress=progress, unresolved=unresolved,
+            background=sid in background, conversation_busy=active is not None and not active.done(), at_capacity=at_capacity)
+        if reason is not None:
+            item['waiting_for'] = reason
+        if unresolved:
+            item['unresolved_dependencies'] = unresolved
+        if mission['state'] in TERMINAL and job['state'] not in ('done', 'blocked'):
+            item['scheduling_halted'] = True
+        if 'verdict' in job['data']:
+            verdict = job['data']['verdict']
+            item['review'] = {'summary': verdict['summary'][:512], 'summary_truncated': len(verdict['summary']) > 512,
+                              'checks': [{'id': check['id'], 'passed': check['passed']} for check in verdict['checks']]}
+        return item
 
     def status(self):
         """状态与阻塞原因携明确运行引用；复核通过不表示已发布或已合并主分支。"""
-        with self.store.db() as db:
-            cursor = db.execute('SELECT cursor FROM coordinator WHERE instance=?', (self.inbox.instance_id,)).fetchone()[0]
-            counts = dict(db.execute('SELECT state,count(*) FROM missions WHERE instance=? GROUP BY state', (self.inbox.instance_id,)))
-            ids = [row[0] for row in db.execute('SELECT id FROM missions WHERE instance=? ORDER BY seq DESC LIMIT 16', (self.inbox.instance_id,))]
+        cursor, counts, snapshots = self.store.status_snapshots()
+        background = self.dispatcher.harness.jobs.active_owners()
+        at_capacity = len(self.dispatcher.harness.runtime.records.active) >= self.dispatcher.max_active
+        events = {}
         recent = []
-        for identity in ids:
-            mission = self.store.mission(identity)
-            jobs = []
-            for job in self.store.jobs(identity):
-                item = {**{key: job[key] for key in ('id', 'role', 'node', 'attempt', 'state', 'dependencies')},
-                        **{key: job['data'][key] for key in ('run_id', 'session_id', 'workspace_id', 'delivery') if key in job['data']}}
-                if 'verdict' in job['data']:
-                    verdict = job['data']['verdict']
-                    item['review'] = {'summary': verdict['summary'][:512], 'summary_truncated': len(verdict['summary']) > 512,
-                                      'checks': [{'id': check['id'], 'passed': check['passed']} for check in verdict['checks']]}
-                if job['data'].get('session_id') in self.dispatcher.harness.jobs.active_owners():
-                    item['waiting_for'] = 'background-jobs'
-                jobs.append(item)
+        for mission, jobs in snapshots:
             recent.append({**{key: mission[key] for key in ('id', 'state', 'reason', 'round', 'base_commit', 'source_id', 'event_id')},
+                'budget': {'attempt': mission['round'], 'max_attempts': self.store.limits['max_attempts'],
+                           'phase': 'planning' if mission['state'] == 'planning' else 'delivery'},
+                'work': {'total': len(mission['plan']['steps']) if mission['plan'] else None,
+                         'delivered': sum(job['role'] == 'work' and job['state'] == 'done' for job in jobs)},
                 'acceptance': [{**check, 'criterion': check['criterion'][:512],
                                 'criterion_truncated': len(check['criterion']) > 512}
-                               for check in mission['plan']['acceptance']] if mission['plan'] else [], 'jobs': jobs})
+                               for check in mission['plan']['acceptance']] if mission['plan'] else [],
+                'jobs': [self._job_status(mission, job, jobs, events=events, background=background, at_capacity=at_capacity) for job in jobs]})
         inputs = {'pending': sum(count for state, count in counts.items() if state not in TERMINAL),
                   'unknown': counts.get('unknown', 0),
                   'rejected': sum(counts.get(state, 0) for state in ('blocked', 'rejected', 'suppressed'))}
         return {'instance_id': self.inbox.instance_id, 'cursor': cursor, 'inputs': inputs, 'batches': [],
-                'workers': self.worker_factory.status(), 'results': self.results.status(),
-                'missions': {'states': counts, 'recent': recent}}
+                'workers': self.worker_factory.status(), 'results': {'draft': counts['completed']} if counts.get('completed') else {},
+                'missions': {'states': counts, 'recent': recent, 'total': sum(counts.values()),
+                             'shown': len(recent), 'has_more': sum(counts.values()) > len(recent)}}

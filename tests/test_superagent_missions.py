@@ -307,6 +307,13 @@ class SuperagentMissionTests(unittest.IsolatedAsyncioTestCase):
             jobs = service.router.store.jobs(slow_id)
             self.assertEqual(next(job for job in jobs if job['node'] == 'second')['state'], 'done')
             self.assertEqual(next(job for job in jobs if job['node'] == 'combine')['state'], 'pending')
+            slow_status = next(mission for mission in status['missions']['recent'] if mission['id'] == slow_id)
+            dependent = next(job for job in slow_status['jobs'] if job['node'] == 'combine')
+            self.assertEqual(dependent['waiting_for'], 'dependencies')
+            self.assertEqual([item['node'] for item in dependent['unresolved_dependencies']], ['first'])
+            active = next(job for job in slow_status['jobs'] if job['node'] == 'first')
+            self.assertEqual(active['run']['status'], 'running')
+            self.assertEqual(active['waiting_for'], 'run')
             self.assertEqual(status['inputs']['pending'], 1)
         finally:
             self.worker.work_gate.set()
@@ -381,6 +388,10 @@ class SuperagentMissionTests(unittest.IsolatedAsyncioTestCase):
                 await self.settle()
             jobs = status['missions']['recent'][0]['jobs']
             self.assertEqual(next(job for job in jobs if job['node'] == 'first')['state'], 'accepted')
+            first = next(job for job in jobs if job['node'] == 'first')
+            self.assertEqual(first['waiting_for'], 'background-jobs')
+            self.assertEqual(first['run']['status'], 'completed')
+            self.assertTrue(first['run']['settled'])
             self.assertEqual(next(job for job in jobs if job['node'] == 'combine')['state'], 'pending')
             self.assertFalse(any(job['role'] == 'integrate' for job in jobs))
         finally:
@@ -426,6 +437,18 @@ class SuperagentMissionTests(unittest.IsolatedAsyncioTestCase):
                 content = ''.join(part.get('text', '') for part in content)
             self.assertEqual(content, expected)
             self.assertFalse(request.get('tools'))
+
+    async def test_service_builds_one_fresh_snapshot_per_tick(self):
+        service = await self.open()
+        self.receive()
+        with patch.object(service.router, 'status', wraps=service.router.status) as status:
+            await service.tick()
+        self.assertEqual(status.call_count, 1)
+        with patch.object(service.router, 'status', side_effect=AssertionError('不需要的状态重建')):
+            self.assertIsNone(await service.router.tick(include_status=False))
+        await self.settle()
+        with self.assertRaises(HarnessError):
+            await service.router.tick(include_status='false')
 
     async def test_corrupt_ready_session_cannot_submit_to_another_conversation(self):
         service = await self.open()

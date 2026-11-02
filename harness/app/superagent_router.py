@@ -384,13 +384,15 @@ class SuperagentRouter:
             with self._db(write=True) as db:
                 db.execute("UPDATE inputs SET state=? WHERE seq=? AND state='pending'", (state, row['seq']))
 
-    async def tick(self) -> dict:
+    async def tick(self, *, include_status=True) -> dict | None:
         """有界推进一次；仅认领者提交，重复调用和重启只回查原提交键。"""
+        if type(include_status) is not bool:
+            raise _error('invalid', field='include_status')
         self._open()
         loop = asyncio.get_running_loop()
         owner = self.dispatcher.harness.runtime.claim_loop(loop)
         if owner is not loop:
-            future = asyncio.run_coroutine_threadsafe(self.tick(), owner)
+            future = asyncio.run_coroutine_threadsafe(self.tick(include_status=include_status), owner)
             return await join_cleanup(asyncio.wrap_future(future))
         if self.harness.runtime.claim_loop(loop) is not loop:
             raise _error('invalid', field='router_loop')
@@ -401,7 +403,7 @@ class SuperagentRouter:
         self._collect()
         await self._poll()
         await self._drain()
-        return self.status()
+        return self.status() if include_status else None
 
     def status(self) -> dict:
         """读取协调事实，不把运行受理或模型选择投影为业务完成。"""

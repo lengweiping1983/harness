@@ -338,7 +338,7 @@ class SuperagentService:
             channel.drain()
         self._scan()
         try:
-            await self.router.tick()
+            await self.router.tick(include_status=False)
         except HarnessError as exc:
             if not self.closed or exc.code != 'superagent/closed':
                 raise

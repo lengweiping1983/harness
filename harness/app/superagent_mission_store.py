@@ -142,6 +142,10 @@ class MissionStore:
     def mission(self, identity):
         with self.db() as db:
             row = db.execute('SELECT * FROM missions WHERE id=? AND instance=?', (identity, self.inbox.instance_id)).fetchone()
+        return self._decode_mission(row)
+
+    def _decode_mission(self, row):
+        """仅在本次读取内复用已验证目标；原事件仍沿收件箱完整校验。"""
         if row is None:
             raise _error('event-unavailable')
         result = dict(row)
@@ -195,15 +199,28 @@ class MissionStore:
                 raise _error('conflict')
         return self.job(identity)
 
-    def job(self, identity):
+    def _job_snapshot(self, identity):
         with self.db() as db:
+            db.execute('BEGIN')
             row = db.execute('SELECT * FROM jobs WHERE id=?', (identity,)).fetchone()
-        if row is None:
-            raise _error('event-unavailable')
+            if row is None:
+                raise _error('event-unavailable')
+            original = db.execute('SELECT * FROM missions WHERE id=? AND instance=?',
+                                  (row['mission'], self.inbox.instance_id)).fetchone()
+            if original is None:
+                raise _error('corrupt')
+            mission = self._decode_mission(original)
+            return mission, self._decode_job(row, mission)
+
+    def job(self, identity):
+        return self._job_snapshot(identity)[1]
+
+    def _decode_job(self, row, mission):
+        """保留逐项哈希、协议和资源归属校验，不将调用方快照当作授权。"""
         try:
             spec, data = _json(row['spec']), _json(row['data'])
-            mission = self.mission(row['mission'])
-            if (row['spec_hash'] != digest(row['spec']) or row['data_hash'] != digest(row['data']) or row['state'] not in JOB_STATES
+            if (row['mission'] != mission['id'] or row['spec_hash'] != digest(row['spec'])
+                    or row['data_hash'] != digest(row['data']) or row['state'] not in JOB_STATES
                     or not isinstance(spec, dict) or set(spec) != {'role', 'node', 'attempt', 'profile', 'dependencies', 'resource'}
                     or spec['role'] not in ('plan', 'work', 'integrate', 'review')
                     or type(spec['attempt']) is not int or not 1 <= spec['attempt'] <= self.limits['max_attempts']
@@ -248,7 +265,7 @@ class MissionStore:
                     raise ValueError
             if not isinstance(spec['resource'], str) or not spec['resource'].startswith(mission['id'] + '/'):
                 raise ValueError
-            expected_resource = mission['id'] + '/integrate:goal:1' if spec['role'] == 'integrate' else identity
+            expected_resource = mission['id'] + '/integrate:goal:1' if spec['role'] == 'integrate' else row['id']
             if spec['resource'] != expected_resource or spec['role'] in ('integrate', 'review') and (spec['node'] != 'goal' or spec['dependencies']):
                 raise ValueError
         except (ValueError, TypeError, KeyError, StopIteration, RecursionError, HarnessError) as exc:
@@ -267,13 +284,46 @@ class MissionStore:
         return self.job(job['id']) if changed else None
 
     def jobs(self, identity):
+        """一次事务读取目标及全部任务；合法空清单保留原语义。"""
         with self.db() as db:
-            ids = [row[0] for row in db.execute('SELECT id FROM jobs WHERE mission=? ORDER BY rowid', (identity,))]
-        return [self.job(item) for item in ids]
+            db.execute('BEGIN')
+            return self._read_snapshot(db, identity, missing_ok=True)[1]
+
+    def snapshot(self, identity):
+        """返回同一目标账本读快照内的独立对象，不缓存后续授权或状态。"""
+        with self.db() as db:
+            db.execute('BEGIN')
+            return self._read_snapshot(db, identity)
+
+    def _read_snapshot(self, db, identity, *, missing_ok=False):
+        row = db.execute('SELECT * FROM missions WHERE id=? AND instance=?', (identity, self.inbox.instance_id)).fetchone()
+        if row is None and missing_ok:
+            if db.execute('SELECT 1 FROM jobs WHERE mission=? LIMIT 1', (identity,)).fetchone():
+                raise _error('corrupt')
+            return None, []
+        mission = self._decode_mission(row)
+        jobs = [self._decode_job(item, mission) for item in db.execute('SELECT * FROM jobs WHERE mission=? ORDER BY rowid', (identity,))]
+        return mission, jobs
+
+    def status_snapshots(self, *, limit=16):
+        """活动目标优先，有界显示及统计来自同一只读事务。"""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise _error('invalid', field='limit')
+        with self.db() as db:
+            db.execute('BEGIN')
+            cursor = db.execute('SELECT cursor FROM coordinator WHERE instance=?', (self.inbox.instance_id,)).fetchone()[0]
+            counts = dict(db.execute('SELECT state,count(*) FROM missions WHERE instance=? GROUP BY state', (self.inbox.instance_id,)))
+            if type(cursor) is not int or not 0 <= cursor <= 9223372036854775807 or set(counts) - MISSION_STATES:
+                raise _error('corrupt')
+            ids = [row[0] for row in db.execute("""SELECT id FROM missions WHERE instance=? ORDER BY CASE
+                WHEN state IN ('planning','running','integrating','reviewing') THEN 0
+                WHEN state IN ('unknown','blocked','rejected') THEN 1 WHEN state='suppressed' THEN 2 ELSE 3 END,
+                seq DESC LIMIT ?""", (self.inbox.instance_id, limit))]
+            snapshots = [self._read_snapshot(db, identity) for identity in ids]
+        return cursor, counts, snapshots
 
     def scope(self, batch_id, profile):
-        job = self.job(batch_id)
-        mission = self.mission(job['mission'])
+        mission, job = self._job_snapshot(batch_id)
         if job['profile'] != profile or mission['plan'] is None:
             raise _error('conflict')
         return mission['id'], mission['base_commit']
