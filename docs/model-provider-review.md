@@ -64,6 +64,8 @@
 
 ## 已修正问题与回归
 
+- 手动模型配置曾在 `ConnectionEditor.addManualModel` 仅接收模型 ID，新增后才能展开下方列表补填参数；目录标题、数量与按钮也分散占行。当前由 `ProviderModelEditor.tsx` 提供添加前的完整草稿与共享编辑字段，`ModelConnections` 保留接口草稿归属、分页和重复准入；工具栏集中排列，已选模型默认收起参数。`provider-manual-model-smoke.mjs` 使用真实设置页核对添加前完整参数、容量拒绝、重复 ID／双击、输入法、连续添加重置与焦点、保存正文及重开读取，并在英中英、明暗与窄宽屏切换中保留同一份草稿。`provider-add-flow-smoke.mjs` 保留对应参数保存断言，既有目录／保存／布局场景同步限定已选模型作用域。本轮验证范围仅限此手动配置场景及必要的资源同步、类型和生产构建；其他业务、在线账号、桌面和完整浏览器套件不在范围内。
+
 - 没有已配置模型但进程带有单模型 Key 时，`web/models.py:model_catalog` 原先将 `config.model` 合成为 OpenRouter 条目；未装配提供商目录时还会把 `model_routes` 与当前模型合成为目录，导致设置空态下仍出现保底模型。现移除这两条合成路径、`ModelSpec`／`_synthetic` 及专用双语说明，目录继续投影已配置提供商和已登录订阅账号。`test_model_catalog.py` 经真实 `/api/v1/models` 路由验证环境变量、旧默认与可见性设置、无提供商目录、提供商移除及重开、账号准入和去重，并保留正常模型身份、容量、思考档位、默认选择与当前隐藏模型仍可见的行为；读取保持原配置和文件字节。`test_catalog_authoring_image_language.py` 的英中英回归改为核对空目录，图片与插件错误的语言断言继续保留。当前目录规则见 [模型提供商](model-providers.md)。
 
 - 本地语义 worker 在启动退出或响应 EOF 时，`memory_semantic_worker.SemanticWorker` 原先立即调用 `_failure()`，异步 `_drain` 可能尚未读到 stderr；随后 `search` 虽执行 `_dispose`，对外错误已冻结为空诊断。现先等待所属进程和日志收尾，再构造同一 `memory/semantic-worker` 错误。`test_crash_diagnostic_waits_for_owned_log_drain_before_reporting` 用日志释放屏障覆盖启动和请求阶段，核对原始中文诊断、错误码及进程释放；相同回归对修改前实现的两个阶段均失败。这说明诊断丢失已修复，不能据此将未复现的历史子进程退出归为某个环境原因。服务生命周期规则见 [扩展机制](extensions.md#可选本地语义记忆候选)。

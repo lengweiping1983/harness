@@ -1,7 +1,7 @@
 import {newIdentity} from '@/lib/ids'
 import {useEffect, useRef, useState} from 'react'
 import {DefaultModelFeedback, ModelPreferences} from './ModelPreferences'
-import {Plus, Eye, EyeOff, Trash2, ChevronUp, ChevronDown} from 'lucide-react'
+import {Plus, Eye, EyeOff, Trash2, ChevronUp, ChevronDown, ListPlus, RefreshCw} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import type {ModelInfo, ResourceText} from '@/types'
 import {runtimeRequest} from '@/lib/http'
@@ -16,8 +16,9 @@ import {CodexGatewayAccounts} from './CodexGatewayAccounts'
 import {Switch} from './ExtensionCatalogControls'
 import type {ProviderChoice} from './ProviderPickers'
 import {ModelPagination, ModelPicker, ProviderPicker} from './ProviderPickers'
+import {ManualModelEditor, ProviderModelFields} from './ProviderModelEditor'
 import type {CatalogModel, ModelProvider, ProviderConnection, ProviderSnapshot, ProviderTemplate} from '@/lib/providerConnections'
-import {providerModelGroups, providerCatalogChanges, reconcileProviderModels, providerConnectionIssue, sortProviderChoices, providerConfigurationState, validProviderEndpoint, validProviderModelId, maskProviderKey, moveProviderItem, newProviderConnection, newProviderKey, newProviderModel, providerPayload} from '@/lib/providerConnections'
+import {providerModelGroups, providerCatalogChanges, reconcileProviderModels, providerConnectionIssue, sortProviderChoices, providerConfigurationState, validProviderEndpoint, maskProviderKey, moveProviderItem, newProviderConnection, newProviderKey, providerPayload} from '@/lib/providerConnections'
 
 const field = 'w-full min-w-0 rounded-lg border border-line bg-canvas px-3 py-2 text-xs'
 
@@ -124,9 +125,6 @@ function ConnectionEditor({onProbeStateChange, validationIssue, onValidation, re
   const [selectedSearch, setSelectedSearch] = useState('')
   const [selectedPage, setSelectedPage] = useState(0)
   const available = connection.model_catalog ?? template.models
-  const [manual, setManual] = useState('')
-  const [justAdded, setJustAdded] = useState<string | null>(null)
-  const composing = useRef(false)
   const [error, setError] = useState<ResourceText>('')
   const [loading, setLoading] = useState(false)
   const [fallback, setFallback] = useState(false)
@@ -159,13 +157,10 @@ function ConnectionEditor({onProbeStateChange, validationIssue, onValidation, re
   const selected = connection.models.map((model, index) => ({model, index})).filter(({model}) => `${model.model} ${model.name}`.toLowerCase().includes(selectedSearch.trim().toLowerCase()))
   const currentSelectedPage = Math.min(selectedPage, Math.max(0, Math.ceil(selected.length / 10) - 1))
   const resetSelection = (models: ProviderConnection['models']) => {setSelectedPage(0); change({models})}
-  const addManualModel = () => {
-    const models = connectionRef.current.models
-    if (busy || !validProviderModelId(manual) || models.some(row => row.model === manual.trim())) return
-    const added = newProviderModel(manual.trim())
-    change({models: [...models, added]}); setManual(''); setSelectedSearch(''); setJustAdded(added.id); setSelectedPage(Math.floor(models.length / 10))
-  }
-  return <details data-connection-id={connection.id} open={expanded} onToggle={event => setExpanded(event.currentTarget.open)} className="relative rounded-lg border border-line bg-raised p-3"><summary className="cursor-pointer pr-10"><span className="ui-card-title">{connection.name}</span><span className="ml-2 text-xs text-muted">{t('ui.providers.modelCounts', {total: available.length, selected: connection.models.length})}</span></summary>{removable ? <Button size="xs" variant="ghost" className="absolute right-3 top-3" disabled={busy} aria-label={t('ui.providers.removeConnection')} onClick={onRemove}><Trash2 className="h-4 w-4" /></Button> : null}<div className="mt-3 space-y-3">
+  return <details data-connection-id={connection.id} open={expanded} onToggle={event => setExpanded(event.currentTarget.open)} className="relative rounded-lg border border-line bg-raised p-3">
+    <summary className="cursor-pointer pr-10"><span className="ui-card-title [overflow-wrap:anywhere]">{connection.name}</span>{!expanded ? <span className="ml-2 text-xs text-muted">{t('ui.providers.modelCounts', {total: available.length, selected: connection.models.length})}</span> : null}</summary>
+    {removable ? <Button size="xs" variant="ghost" className="absolute right-3 top-3" disabled={busy} aria-label={t('ui.providers.removeConnection')} onClick={onRemove}><Trash2 className="h-4 w-4" /></Button> : null}
+    <div className="mt-3 space-y-3">
     <label className="block space-y-1 text-xs"><span>{t('ui.providers.protocol')}</span><select className={field} value={connection.protocol} disabled={busy} onChange={event => change({protocol: event.target.value})}><option value="">{t('ui.providers.nativeProtocol')}</option><option value="openai-completions">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic Messages</option></select></label>
     <label className="block space-y-1 text-xs"><span>{t('ui.providers.endpoint')}</span><input className={field} value={connection.base_url} disabled={busy} required={template.id === 'custom' || !!connection.protocol} autoComplete="off" spellCheck={false} inputMode="url" aria-invalid={endpointInvalid} ref={element => element?.setCustomValidity(endpointInvalid ? t('ui.providers.invalidEndpoint') : '')} name={`provider-endpoint-${connection.id}`} placeholder={t('ui.providers.endpointAutomatic')} onChange={event => change({base_url: event.target.value})} /></label>
     {endpointInvalid ? <p role="alert" className="text-xs text-danger">{t('ui.providers.invalidEndpoint')}</p> : null}
@@ -179,19 +174,44 @@ function ConnectionEditor({onProbeStateChange, validationIssue, onValidation, re
     {connection.auth.type === 'opencode_local' ? <p className="text-xs text-muted">{t('ui.providers.localHint')}</p> : null}
     {connection.auth.type === 'oauth' ? <ProviderAuthorization providerId={providerId} connection={connection} stored={stored} active={active} onRefresh={onRefresh} providerType={template.id} onAuthorized={id => change({auth: {...connection.auth, configured: true, authorization_id: id}})} /> : null}
     <details><summary className="cursor-pointer text-xs text-muted">{t('ui.providers.advanced')}</summary><div className="mt-3 space-y-3"><Switch checked={connection.enabled} label={t('ui.providers.connectionEnabled')} disabled={busy} onChange={enabled => change({enabled})} /><JsonField label={t('ui.providers.headers')} value={connection.headers ?? {}} disabled={busy} onChange={value => change({headers: value as Record<string, string>})} /><JsonField label={t('ui.providers.compat')} value={connection.compat ?? {}} disabled={busy} onChange={value => change({compat: value as Record<string, unknown>})} />{(['timeout_ms', 'max_retries'] as const).map(name => <label key={name} className="block text-xs">{t(`ui.providers.${name}`)}<input className={field} type="number" min={name === 'max_retries' ? '0' : '1'} value={connection[name] ?? (name === 'max_retries' ? 2 : 300000)} disabled={busy} onChange={event => change({[name]: Number(event.target.value)})} /></label>)}</div></details>
-    <div className="space-y-2">{validationIssue || error ? <p role="alert" className="text-xs text-danger">{noticeText(validationIssue ? {key: validationIssue} : error)}</p> : null}{catalogChanges !== null ? <p role="status" className="text-xs text-muted">{t('ui.providers.catalogUpdated', catalogChanges)}</p> : null}{fallback && !error ? <p role="status" className="text-xs text-warn">{t('ui.providers.discoverFallback')}</p> : null}<div className="flex flex-wrap items-center justify-between gap-2"><h5 className="ui-group-title">{t('ui.providers.models')}</h5><Button size="xs" disabled={busy || loading || endpointInvalid} onClick={() => void probe()}>{t(loading ? 'ui.providers.probing' : 'ui.providers.discover')}</Button></div>
-      <p className="text-xs text-muted">{t('ui.providers.modelCounts', {total: available.length, selected: connection.models.length})}</p>
-      {available.length ? <Button size="sm" disabled={busy} onClick={() => setPicking(true)}>{t('ui.providers.chooseModels', {count: available.length})}</Button> : <p role="status" className="text-xs text-muted">{t('ui.providers.emptyCatalog')}</p>}
+    <section className="space-y-4 border-t border-line pt-4" aria-label={t('ui.providers.models')}>
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"><h5 className="ui-card-title">{t('ui.providers.models')}</h5><span className="text-xs text-muted">{t('ui.providers.modelCounts', {total: available.length, selected: connection.models.length})}</span></div>
+        <div className="flex flex-wrap items-center gap-2">
+          {available.length ? <Button size="sm" disabled={busy || loading} icon={<ListPlus aria-hidden className="h-4 w-4" />} onClick={() => setPicking(true)}>{t('ui.providers.chooseModels', {count: available.length})}</Button> : null}
+          <Button size="sm" variant="ghost" disabled={busy || loading || endpointInvalid} icon={<RefreshCw aria-hidden className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />} onClick={() => void probe()}>{t(loading ? 'ui.providers.probing' : 'ui.providers.discover')}</Button>
+        </div>
+      </header>
+      {validationIssue || error ? <p role="alert" className="text-xs text-danger">{noticeText(validationIssue ? {key: validationIssue} : error)}</p> : null}
+      {catalogChanges !== null ? <p role="status" className="text-xs text-muted">{t('ui.providers.catalogUpdated', catalogChanges)}</p> : null}
+      {fallback && !error ? <p role="status" className="text-xs text-warn">{t('ui.providers.discoverFallback')}</p> : null}
+      {!available.length ? <p role="status" className="text-xs text-muted">{t('ui.providers.emptyCatalog')}</p> : null}
       {picking ? <ModelPicker context={connection.name} available={available} catalog={template.models} selected={connection.models} onClose={() => setPicking(false)} onConfirm={models => {setPicking(false); setSelectedSearch(''); resetSelection(models)}} /> : null}
-      <div className="flex gap-2"><input className={field} aria-label={t('ui.providers.manualModel')} placeholder={t('ui.providers.manualModel')} autoComplete="off" name={`provider-model-${connection.id}`} spellCheck={false} autoCapitalize="none" data-lpignore="true" data-1p-ignore="true" aria-invalid={!!manual.trim() && !validProviderModelId(manual)} value={manual} onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}} onKeyDown={event => {if (event.key !== 'Enter') return; event.preventDefault(); if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229 || busy || !validProviderModelId(manual) || connection.models.some(row => row.model === manual.trim())) return; addManualModel()}} onChange={event => setManual(event.target.value)} /><Button size="sm" disabled={busy || !validProviderModelId(manual) || connection.models.some(row => row.model === manual.trim())} onClick={addManualModel}>{t('ui.providers.addModel')}</Button></div>
-      {!!manual.trim() && !validProviderModelId(manual) ? <p role="alert" className="text-xs text-danger">{t('ui.providers.invalidModelId')}</p> : null}
-      {connection.models.length > 10 || selectedSearch ? <input className={field} aria-label={t('ui.providers.searchSelectedModels')} placeholder={t('ui.providers.searchSelectedModels')} autoComplete="off" value={selectedSearch} onChange={event => {setSelectedSearch(event.target.value); setSelectedPage(0)}} /> : null}
-      <div role="group" aria-label={t('ui.providers.selectedModels', {count: connection.models.length})} className="space-y-2">
-      {selected.slice(currentSelectedPage * 10, (currentSelectedPage + 1) * 10).map(({model, index}) => <div key={model.id} className="space-y-2 border-t border-line pt-2"><div className="flex items-center gap-2"><span className="min-w-0 flex-1 break-all text-xs">{model.name || model.model}</span><Button size="xs" disabled={busy || index === 0} aria-label={t('ui.providers.moveUp')} onClick={() => change({models: moveProviderItem(connection.models, index, -1)})}><ChevronUp className="h-4 w-4" /></Button><Button size="xs" disabled={busy || index === connection.models.length - 1} aria-label={t('ui.providers.moveDown')} onClick={() => change({models: moveProviderItem(connection.models, index, 1)})}><ChevronDown className="h-4 w-4" /></Button><Button size="xs" disabled={busy} aria-label={t('ui.providers.removeModel')} onClick={() => change({models: connection.models.filter(row => row.id !== model.id)})}><Trash2 className="h-4 w-4" /></Button></div><details open={model.id === justAdded}><summary className="cursor-pointer text-xs text-muted">{t('ui.providers.modelOptions')}</summary><div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">{(['model', 'name', 'context_window', 'max_output_tokens'] as const).map(name => <label key={name} className="text-xs"><span>{t(name === 'name' ? 'ui.providers.modelName' : `ui.providers.${name}`)}</span><input className={field} value={model[name] ?? ''} placeholder={name === 'context_window' || name === 'max_output_tokens' ? t('ui.providers.metadataUnknown') : undefined} disabled={busy} type={name === 'model' || name === 'name' ? 'text' : 'number'} min="1" onChange={event => change({models: connection.models.map(row => row.id === model.id ? {...row, [name]: name === 'model' || name === 'name' ? event.target.value : event.target.value ? Number(event.target.value) : undefined} : row)})} /></label>)}</div><div className="mt-2 flex gap-3 text-xs">{['text', 'image', 'video'].map(modality => <label key={modality} className="flex gap-1"><input type="checkbox" checked={model.input.includes(modality)} disabled={busy || model.input.length === 1 && model.input.includes(modality)} onChange={event => change({models: connection.models.map(row => row.id === model.id ? {...row, input: event.target.checked ? [...row.input, modality] : row.input.filter(value => value !== modality)} : row)})} />{t(`ui.providers.${modality}`)}</label>)}</div><p className="mt-2 text-xs text-muted">{t('ui.providers.metadataHint')}</p><ReasoningEditor value={model.reasoning_efforts} disabled={busy} onChange={value => change({models: connection.models.map(row => row.id === model.id ? {...row, reasoning_efforts: value} : row)})} /></details></div>)}
-      </div>
-      {selectedSearch && !selected.length ? <p role="status" className="text-xs text-muted">{t('ui.providers.noSelectedModels')}</p> : null}
-      <ModelPagination label={t('ui.providers.selectedModels', {count: connection.models.length})} total={selected.length} page={currentSelectedPage} size={10} onPage={setSelectedPage} />
-    </div>
+      <ManualModelEditor models={connection.models} disabled={busy || loading} onAdd={model => {
+        const models = connectionRef.current.models
+        if (busy || loading || models.some(row => row.model === model.model)) return false
+        change({models: [...models, model]})
+        setSelectedSearch('')
+        setSelectedPage(Math.floor(models.length / 10))
+        return true
+      }} />
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h5 className="ui-group-title">{t('ui.providers.selectedModels', {count: connection.models.length})}</h5>
+          {connection.models.length > 10 || selectedSearch ? <input className={field + ' sm:w-64'} aria-label={t('ui.providers.searchSelectedModels')} placeholder={t('ui.providers.searchSelectedModels')} autoComplete="off" value={selectedSearch} onChange={event => {setSelectedSearch(event.target.value); setSelectedPage(0)}} /> : null}
+        </div>
+        <div role="group" aria-label={t('ui.providers.selectedModels', {count: connection.models.length})} className="space-y-2">
+          {selected.slice(currentSelectedPage * 10, (currentSelectedPage + 1) * 10).map(({model, index}) => <div key={model.id} className="space-y-3 rounded-lg border border-line bg-surface p-3">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1 [overflow-wrap:anywhere]"><p className="text-compact font-medium text-ink">{model.name || model.model}</p>{model.name && model.name !== model.model ? <p className="mt-0.5 text-xs text-muted">{model.model}</p> : null}</div>
+              <div className="flex shrink-0 items-center gap-1"><Button size="xs" variant="ghost" disabled={busy || index === 0} aria-label={t('ui.providers.moveUp')} onClick={() => change({models: moveProviderItem(connection.models, index, -1)})}><ChevronUp aria-hidden className="h-4 w-4" /></Button><Button size="xs" variant="ghost" disabled={busy || index === connection.models.length - 1} aria-label={t('ui.providers.moveDown')} onClick={() => change({models: moveProviderItem(connection.models, index, 1)})}><ChevronDown aria-hidden className="h-4 w-4" /></Button><Button size="xs" variant="ghost" disabled={busy} aria-label={t('ui.providers.removeModel')} onClick={() => change({models: connection.models.filter(row => row.id !== model.id)})}><Trash2 aria-hidden className="h-4 w-4" /></Button></div>
+            </div>
+            <details><summary className="cursor-pointer text-xs text-muted">{t('ui.providers.modelOptions')}</summary><div className="mt-3 space-y-3 border-t border-line pt-3"><ProviderModelFields value={model} disabled={busy} onChange={value => change({models: connection.models.map(row => row.id === model.id ? value : row)})} /><p className="text-xs text-muted">{t('ui.providers.metadataHint')}</p></div></details>
+          </div>)}
+        </div>
+        {!connection.models.length ? <p className="text-xs text-muted">{t('ui.providers.selectionEmpty')}</p> : selectedSearch && !selected.length ? <p role="status" className="text-xs text-muted">{t('ui.providers.noSelectedModels')}</p> : null}
+        <ModelPagination label={t('ui.providers.selectedModels', {count: connection.models.length})} total={selected.length} page={currentSelectedPage} size={10} onPage={setSelectedPage} />
+      </section>
+    </section>
   </div></details>
 }
 
@@ -200,11 +220,6 @@ function ProviderKeyInput({identity, value, mask, disabled, onChange}: {identity
   const [revealed, setRevealed] = useState(false)
   const masked = maskProviderKey(value)
   return <div className="relative"><input className={field + ' pr-10'} type={editing && !revealed ? 'password' : 'text'} autoComplete="new-password" name={`provider-credential-${identity}`} data-lpignore="true" data-1p-ignore="true" spellCheck={false} autoCapitalize="none" value={editing || revealed ? value : masked} placeholder={mask} required={!mask} disabled={disabled} onFocus={() => setEditing(true)} onBlur={() => {setEditing(false); setRevealed(false)}} onChange={event => {if (editing || revealed) onChange(event.target.value)}} />{value ? <button type="button" aria-label={t(revealed ? 'ui.providers.hideKey' : 'ui.providers.showKey')} className="absolute right-2 top-2 text-muted" onMouseDown={event => event.preventDefault()} onClick={() => setRevealed(!revealed)}>{revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button> : null}</div>
-}
-
-function ReasoningEditor({value, disabled, onChange}: {value: Record<string, string | null> | false | undefined; disabled: boolean; onChange: (value: Record<string, string | null> | false | undefined) => void}) {
-  const enabled = value !== false && value !== undefined
-  return <div className="mt-3 space-y-2"><label className="block text-xs">{t('ui.providers.reasoningMode')}<select className={field} aria-label={t('ui.providers.reasoningMode')} disabled={disabled} value={value === undefined ? 'inherit' : value === false ? 'disabled' : 'custom'} onChange={event => onChange(event.target.value === 'inherit' ? undefined : event.target.value === 'disabled' ? false : {off: null, low: 'low', medium: 'medium', high: 'high'})}><option value="inherit">{t('ui.providers.inherit')}</option><option value="disabled">{t('ui.providers.disableReasoning')}</option><option value="custom">{t('ui.providers.customReasoning')}</option></select></label>{enabled ? Object.entries(value).map(([level, parameter]) => <label key={level} className="flex items-center gap-2 text-xs"><span className="w-16">{level}</span><input className={field} disabled={disabled} aria-label={t('ui.providers.reasoningParameter', {level})} value={parameter ?? ''} onChange={event => onChange({...value, [level]: event.target.value || null})} /><Button size="xs" disabled={disabled} aria-label={t('ui.providers.removeReasoning', {level})} onClick={() => {const next = {...value}; delete next[level]; onChange(next)}}><Trash2 className="h-4 w-4" /></Button></label>) : null}{enabled ? <select className={field} disabled={disabled} value="" aria-label={t('ui.providers.addReasoning')} onChange={event => onChange({...value, [event.target.value]: event.target.value})}><option value="">{t('ui.providers.addReasoning')}</option>{['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].filter(level => !(level in value)).map(level => <option key={level} value={level}>{level}</option>)}</select> : null}</div>
 }
 
 function JsonField({label, value, disabled, onChange}: {label: string; value: unknown; disabled: boolean; onChange: (value: unknown) => void}) {

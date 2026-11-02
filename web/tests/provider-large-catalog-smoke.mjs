@@ -53,7 +53,7 @@ await browserScenario(async({server,browser})=>{
  const selectedSearch=page.getByRole('textbox',{name:'Search selected models',exact:true})
  await selectedSearch.fill('group-a-0089');assert.equal(await selected().locator(':scope > div').count(),1)
  await selected().getByText('Model options',{exact:true}).click()
- await page.getByRole('textbox',{name:'Model name',exact:true}).fill('Edited page model')
+ await selected().getByRole('textbox',{name:'Model name',exact:true}).fill('Edited page model')
  await selected().getByRole('button',{name:'Move up',exact:true}).click()
  await selectedSearch.fill('');await selectedNavigation.getByText('Showing 1–10 of 243',{exact:true}).waitFor()
  // 模型列表弹层：每页 50 条，批量操作按当前筛选结果执行且按钮带数量

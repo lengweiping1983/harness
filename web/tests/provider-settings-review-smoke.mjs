@@ -27,8 +27,9 @@ await browserScenario(async({server,browser})=>{
  for(const language of ['en','zh-CN','en'])for(const theme of ['light','dark'])for(const width of [390,1440]){
   await page.setViewportSize({width,height:1000});await page.evaluate(({language,theme})=>{window.locale(language);document.documentElement.className=theme;document.documentElement.dataset.theme=theme},{language,theme})
   const copy=await page.evaluate(()=>({supplier:window.copy('ui.providers.supplierName'),model:window.copy('ui.providers.modelName'),save:window.copy('ui.providers.save'),description:window.copy('ui.providers.description')}))
-  await page.getByLabel(copy.supplier,{exact:true}).waitFor();await page.getByLabel(copy.model,{exact:true}).waitFor()
-  assert.equal(await page.getByLabel(copy.supplier,{exact:true}).inputValue(),'DeepSeek');assert.equal(await page.getByLabel(copy.model,{exact:true}).inputValue(),'DeepSeek V4 Pro')
+  const selectedModels=page.getByRole('group',{name:/models selected|已选择.*个模型/})
+  await page.getByLabel(copy.supplier,{exact:true}).waitFor();await selectedModels.getByLabel(copy.model,{exact:true}).waitFor()
+  assert.equal(await page.getByLabel(copy.supplier,{exact:true}).inputValue(),'DeepSeek');assert.equal(await selectedModels.getByLabel(copy.model,{exact:true}).inputValue(),'DeepSeek V4 Pro')
   if(language==='zh-CN')assert.equal(copy.description.includes('再'),false)
   const save=page.getByRole('button',{name:copy.save,exact:true});await save.scrollIntoViewIfNeeded()
   const geometry=await save.evaluate(button=>{
