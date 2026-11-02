@@ -8,6 +8,7 @@ import {desktopQuit} from './quit.mjs'
 import updaterPackage from 'electron-updater'
 import {DesktopUpdates} from './updates.mjs'
 import {applicationMenu} from './application-menu.mjs'
+import {configureAboutPanel} from './about-panel.mjs'
 import {app, BrowserWindow, WebContentsView, ipcMain, session, shell, clipboard, dialog, Menu, screen, desktopCapturer, protocol, Notification} from 'electron'
 import {ScreenshotSession} from './screenshot.mjs'
 import {FastScreenCapture} from './fast-screen-capture.mjs'
@@ -86,7 +87,7 @@ async function startDesktop() {
       window.webContents.send('desktop-command', action)
     }})))
   }
-  app.setAboutPanelOptions({applicationName:'Harness', applicationVersion:app.getVersion(), applicationIcon:brandIcon})
+  configureAboutPanel(app, {iconPath: brandIcon})
   ipcMain.handle('desktop-menu', (event, labels) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) throw Error('Untrusted menu request')
     const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','close','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect']
