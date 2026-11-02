@@ -1001,6 +1001,54 @@ body {
   .academy-assistant-jump { display: none; }
 }
 
+/* Windows 菜单首行与系统按钮共用高度，现有工作区完整置于首行之下。 */
+:root[data-desktop-platform='win32'] { --desktop-titlebar-height: 32px; }
+:root[data-desktop-platform='win32'] #root { padding-top: var(--desktop-titlebar-height); }
+:root[data-desktop-platform='win32'] #root > :is(.h-dvh, .min-h-dvh) {
+  height: 100%;
+  min-height: 0;
+}
+.windows-titlebar {
+  @apply z-tooltip;
+  position: fixed;
+  inset: 0 0 auto;
+  display: flex;
+  align-items: center;
+  height: var(--desktop-titlebar-height, 32px);
+  padding: 0 max(138px, calc(100% - env(titlebar-area-width, 100%))) 0 8px;
+  gap: 8px;
+  background: rgb(var(--c-rail));
+  color: rgb(var(--c-muted));
+  border-bottom: 1px solid rgb(var(--c-line) / .6);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.windows-titlebar-brand { display: flex; flex-shrink: 0; align-items: center; }
+.windows-titlebar-brand img { width: 16px; height: 16px; }
+.windows-titlebar nav { display: flex; align-items: center; height: 100%; flex-shrink: 0; -webkit-app-region: no-drag; }
+.windows-titlebar button {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+.windows-titlebar button:hover, .windows-titlebar button[aria-expanded='true'] { color: rgb(var(--c-ink)); background: rgb(var(--c-line) / .6); }
+.windows-titlebar button:focus-visible { outline: 2px solid rgb(var(--c-brand)); outline-offset: -2px; }
+.windows-titlebar button:disabled { opacity: .45; }
+.windows-titlebar-name { margin-left: auto; padding: 0 12px; font-size: var(--text-caption); }
+:root[data-desktop-platform='win32'] .app-shell { --workspace-header-height: 44px; }
+:root[data-desktop-platform='win32'] .app-shell[data-mode='overlay'] > .panel { top: calc(var(--desktop-titlebar-height) + var(--workspace-header-height)); }
+:root[data-desktop-platform='win32'] .app-shell[data-mode='overlay'][data-panels='1'] > .panel-scrim { top: calc(var(--desktop-titlebar-height) + var(--workspace-header-height)); }
+:root[data-desktop-platform='win32'] #root::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto;
+  height: var(--desktop-titlebar-height);
+  background: rgb(var(--c-rail));
+  -webkit-app-region: drag;
+}
+
 /* macOS 原生窗口按钮与现有三栏页头共用顶栏，仅可信桌面 preload 启用。 */
 :root[data-desktop-platform='darwin'] .app-shell {
   --workspace-header-height: 44px;

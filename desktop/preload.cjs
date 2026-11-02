@@ -1,11 +1,14 @@
 const {contextBridge, ipcRenderer} = require('electron')
-// 由可信宿主标记平台，网页与 Windows 不启用 macOS 窗口装饰。
-if (process.platform === 'darwin') {
+// 由可信宿主标记平台，普通网页不启用桌面窗口装饰。
+if (['darwin', 'win32'].includes(process.platform)) {
   window.addEventListener('DOMContentLoaded', () => {
-    document.documentElement.dataset.desktopPlatform = 'darwin'
+    document.documentElement.dataset.desktopPlatform = process.platform
   }, {once: true})
 }
 contextBridge.exposeInMainWorld('harnessDesktop', {
+  platform: process.platform,
+  popupMenu: request => ipcRenderer.invoke('desktop-menu-popup', request),
+  setTitleBarAppearance: value => ipcRenderer.invoke('desktop-titlebar-appearance', value),
   notifyTask: payload => ipcRenderer.invoke('task-notification', payload),
   clearTaskNotification: sessionId => ipcRenderer.invoke('task-notification-clear', sessionId),
   onTaskNotificationOpen: listener => {

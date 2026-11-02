@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import {takeSharedToken} from './lib/sharedAccess'
 import {readInvitationRecovery} from './lib/invitationRecovery'
 import {loadApp} from './lib/appLoader'
+import {WindowsTitleBar} from './components/desktop/WindowsTitleBar'
 
 /**
  * 入口。
@@ -34,4 +35,4 @@ function Page() {
     : <DeferredPanel load={loadApp} panelProps={{}} label={label} fallbackClassName={fallbackClassName} />
 }
 
-createRoot(container).render(<StrictMode><Page /></StrictMode>)
+createRoot(container).render(<StrictMode><WindowsTitleBar /><Page /></StrictMode>)
