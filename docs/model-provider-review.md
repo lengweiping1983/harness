@@ -64,6 +64,8 @@
 
 ## 已修正问题与回归
 
+- 没有已配置模型但进程带有单模型 Key 时，`web/models.py:model_catalog` 原先将 `config.model` 合成为 OpenRouter 条目；未装配提供商目录时还会把 `model_routes` 与当前模型合成为目录，导致设置空态下仍出现保底模型。现移除这两条合成路径、`ModelSpec`／`_synthetic` 及专用双语说明，目录继续投影已配置提供商和已登录订阅账号。`test_model_catalog.py` 经真实 `/api/v1/models` 路由验证环境变量、旧默认与可见性设置、无提供商目录、提供商移除及重开、账号准入和去重，并保留正常模型身份、容量、思考档位、默认选择与当前隐藏模型仍可见的行为；读取保持原配置和文件字节。`test_catalog_authoring_image_language.py` 的英中英回归改为核对空目录，图片与插件错误的语言断言继续保留。当前目录规则见 [模型提供商](model-providers.md)。
+
 - 本地语义 worker 在启动退出或响应 EOF 时，`memory_semantic_worker.SemanticWorker` 原先立即调用 `_failure()`，异步 `_drain` 可能尚未读到 stderr；随后 `search` 虽执行 `_dispose`，对外错误已冻结为空诊断。现先等待所属进程和日志收尾，再构造同一 `memory/semantic-worker` 错误。`test_crash_diagnostic_waits_for_owned_log_drain_before_reporting` 用日志释放屏障覆盖启动和请求阶段，核对原始中文诊断、错误码及进程释放；相同回归对修改前实现的两个阶段均失败。这说明诊断丢失已修复，不能据此将未复现的历史子进程退出归为某个环境原因。服务生命周期规则见 [扩展机制](extensions.md#可选本地语义记忆候选)。
 - Key 池构造原先直接调用 `_load()`，后续入口才由 `_transaction` 取得旁路锁，首次读取可能与另一实例的 `Path.replace` 发布竞争。构造现使用同一 `state_lock`；`test_key_pool_transactions.py` 以发布与读取屏障验证构造不能提前读取，并保留跨进程失败标记合并和保存失败后的重试。原先各处 Windows 锁适配在加锁前为初始空文件写占位字节，多个首次调用可在未取得锁时争用该字节；当前统一由 `core/file_lock.py` 直接锁定空区域，`test_file_lock_resources.py` 核对空文件互斥、跨进程竞争、原字节保持及释放后重入。产品规则见 [存储](storage.md)。
 - 目录 HTTP 夹具只捕获断管和连接重置，Windows 写入抛出 `ConnectionAbortedError [WinError 10053]` 时不会设置断开事件，导致 `closed.wait(2)` 失败。当前响应头与正文共用 `ConnectionError` 边界，受控 10053 回归核对断开事件和单次请求。另一独立缺陷是 `catalog_fetch.read_catalog` 使用 `subprocess.run(timeout=...)` 仅终止首进程，读取器后代继续持有匿名输出与 HTTP 连接，Windows 的超时收尾仍等待管道 EOF。当前复用所属进程组／Job Object 和匿名输入，整个组退出并排空输出后才返回；凭据不进入参数，输出仍有界，回收未确认保留原异常并通过 `ProcessCleanupError` 阻止工具降级。`test_catalog_total_deadline.py` 覆盖启动预算、持续响应、真实派生读取器、取消、读取上限和停止失败；原先数百毫秒启动假设不再作为 HTTP 业务前提。

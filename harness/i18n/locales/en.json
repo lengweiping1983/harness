@@ -1738,7 +1738,6 @@
   "python.desktop_files.2a9f8c4ac3d8": "The system could not open the file; check the default application association.",
   "python.evidence_reader.abd2306c4445": "Invalid source location.",
   "python.evidence_reader.354de65fab4f": "The source location is outside the range.",
-  "python.models.8006c3f670ae": "A custom model from the current configuration.",
   "python.prompt.d337f80516bb": "{p0}{p1}  Saved to: `{p2}` (large content was not inlined; use the read tool with this path)",
   "python.prompt.625262e909d6": "\n\n---\nThis message includes {p0} files:\n\n{p1}\n",
   "python.prompt.d24c10d37db0": "Image",

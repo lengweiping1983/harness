@@ -26,10 +26,9 @@ class CatalogAuthoringImageLanguageTests(unittest.IsolatedAsyncioTestCase):
             for language in ('en', 'zh-CN', 'en'):
                 with current_language.set(language):
                     payload = model_catalog(config)
-                    self.assertEqual(payload['active'], config.model)
-                    self.assertEqual(len(payload['models']), 1)
-                    self.assertEqual(payload['models'][0]['id'], config.model)
-                    self.assertEqual(payload['models'][0]['description'], tr('python.models.8006c3f670ae'))
+                    self.assertEqual(payload['active'], '')
+                    self.assertEqual(payload['models'], [])
+                    self.assertEqual(payload['providers'], [])
                     expected = tr('python.image_tools.e02a74d6198a', p0='.bad', p1=tr('ui.common.list_separator').join(sorted(MIME_BY_SUFFIX)))
                     with self.assertRaises(ToolExecutionError) as failure:
                         read_image_file(path)
