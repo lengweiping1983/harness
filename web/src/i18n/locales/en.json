@@ -4728,6 +4728,8 @@
   "ui.widget.restart": "Run again",
   "ui.widget.resourceFailed": "A script or resource could not be loaded.",
   "ui.widget.initializing": "Initializing interactive preview",
+  "ui.renderer.title": "Page render",
+  "ui.renderer.rendering": "Rendering page…",
   "ui.llm.opencodeLocalRuntimeFailed": "The local OpenCode runtime returned an invalid or incomplete response. The request has ended; completed tool actions are preserved. Check the runtime diagnostics before continuing.",
   "ui.llm.opencodeLocalIdleTimeout": "The local OpenCode model connection received no response data for {seconds} seconds. The request has ended; completed tool actions are preserved.",
   "ui.llm.opencodeLocalNetworkFailed": "The local OpenCode model connection was interrupted. The request has ended; completed tool actions are preserved.",
@@ -4781,5 +4783,7 @@
   "ui.voice.binaryMissing": "Hex is not installed or built: {path}. Install Hex or run make hex-build to prepare the local engine.",
   "ui.voice.diagnostic": "Technical details",
   "ui.voice.installationInvalid": "The Hex installation pointer is invalid or its executable is missing: {path}. Reinstall Hex; the original installation files have been preserved.",
-  "ui.voice.pidProbeFailed": "Could not query the Hex process: {operation} returned Windows error {code}."
+  "ui.voice.pidProbeFailed": "Could not query the Hex process: {operation} returned Windows error {code}.",
+  "ui.renderer.incomplete": "The HTML block is incomplete. Its source is preserved; preview will be available after the fence is closed.",
+  "ui.widget.initializationFailed": "The preview did not finish initializing. View the preserved source or explicitly run it again."
 }

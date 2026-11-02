@@ -1,3 +1,4 @@
+import { usePageVisible } from '@/hooks/usePageVisible'
 import { t, useLocale } from '@/i18n'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Copy, Eye, WrapText } from 'lucide-react'
@@ -38,6 +39,7 @@ export const CodeBlock = memo(function CodeBlock({
   previewReady = true,
 }: CodeBlockProps) {
   useLocale()
+  const visible = usePageVisible()
 
   const lang = language ? normalizeLang(language) : ''
   const isMermaid = lang === 'mermaid'
@@ -56,19 +58,19 @@ export const CodeBlock = memo(function CodeBlock({
   useEffect(() => () => timer.current && clearTimeout(timer.current), [])
 
   useEffect(() => {
-    if (inline || isMermaid) return
+    if (!visible || inline || isMermaid || (isHtml && previewReady && preview)) return
     return scheduleCodeHighlight(code, lang, html => setHighlighted({code, lang, html}))
-  }, [code, lang, inline, isMermaid])
+  }, [code, lang, inline, isMermaid, visible, isHtml, previewReady, preview])
 
   useEffect(() => {
     const node = preRef.current
-    if (!node) return
+    if (!visible || !node || (isHtml && previewReady && preview)) return
     const check = () => setOverflowing(node.scrollWidth > node.clientWidth + 2)
     check()
     const observer = new ResizeObserver(check)
     observer.observe(node)
     return () => observer.disconnect()
-  }, [html, code, wrap, inline, isMermaid])
+  }, [html, code, wrap, inline, isMermaid, visible, isHtml, previewReady, preview])
 
   const copy = async () => {
     if (timer.current) clearTimeout(timer.current)

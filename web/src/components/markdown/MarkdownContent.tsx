@@ -18,13 +18,17 @@ import { headingSlug, remarkDocumentHeadings } from '@/lib/documentHeadings'
 import { useAppStore } from '@/store/app'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { LiveChart } from './LiveChart'
+import { CodeBlock } from './CodeBlock'
+import { RendererFrame } from './RendererFrame'
 import { segmentStream, stabilizeMarkdown, type StreamSegment } from '@/lib/streaming'
 import { normalizeMediaTags } from '@/lib/mediaTags'
 import { remarkOutputReferences } from '@/lib/outputReferences'
+import { remarkRenderer } from '@/lib/rendererRemark'
 import { currentMathRenderer, loadMathRenderer } from '@/lib/mathRenderer'
 
 export interface MarkdownFileSource { path: string; root: string | null }
 const WorkspaceLinks = createContext(true)
+const Streaming = createContext(false)
 const DocumentSource = createContext<{ file: MarkdownFileSource; links: FileLinkSource; prefix: string } | undefined>(undefined)
 
 /**
@@ -89,6 +93,7 @@ const SCHEMA = {
       'ariaLabel',
       'encoding',
     ],
+    code: [...(defaultSchema.attributes?.code ?? []), ['data-harness-renderer', 'true'], ['data-harness-closed', 'true', 'false']],
     math: ['xmlns', 'display'],
     annotation: ['encoding'],
     svg: ['xmlns', 'viewBox', 'width', 'height', 'preserveAspectRatio', 'style', 'className'],
@@ -279,7 +284,7 @@ function MarkdownLink({
 
 /* ============================ 根组件 ============================ */
 
-const makeComponents = (streaming: boolean) => ({
+const makeComponents = () => ({
   h1: heading(1),
   h2: heading(2),
   h3: heading(3),
@@ -289,22 +294,29 @@ const makeComponents = (streaming: boolean) => ({
   a: MarkdownLink,
   img: MarkdownImage,
   pre: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  code: ({ className, children, ...rest }: { className?: string; children?: ReactNode }) => {
+  code: ({ node, className, children }: { node?: { properties?: Record<string, unknown> }; className?: string; children?: ReactNode }) => {
+    const streaming = useContext(Streaming)
     const match = /language-([\w+-]+)/.exec(className ?? '')
     const text = String(children ?? '').replace(/\n$/, '')
+    const closed = node?.properties?.['data-harness-closed'] === 'true'
+    if (node?.properties?.['data-harness-renderer'] === 'true') {
+      return <RendererFrame code={text} closed={closed} streaming={streaming} className="my-3" />
+    }
+    if (match?.[1]?.toLowerCase() === 'html') {
+      return <CodeBlock code={text} language="html" previewReady={closed} className="my-3" />
+    }
     const isBlock = text.includes('\n') || Boolean(match)
     if (!isBlock) {
       return <code className={className}>{children}</code>
     }
     // 缩进围栏（列表项 / 引用里的图）切段时不会被提出来，只能在这里兜底。
-    // 这种场景拿不到精确的闭合状态，只能保守地按「整条消息是否还在写」给。
+    // 已闭合的图不再跟随后续正文保持流式状态。
     return (
       <LiveChart
         code={text}
         lang={match?.[1]}
-        closed={!streaming}
+        closed={closed || !streaming}
         className="my-3"
-        {...rest}
       />
     )
   },
@@ -361,7 +373,10 @@ export interface MarkdownProps {
   workspaceLinks?: boolean
 }
 
-const REMARK = [remarkGfm, remarkMath, remarkOutputReferences] as never
+// 组件类型保持稳定，语言切换和流式收尾不能卸载已运行的嵌套 iframe。
+const COMPONENTS = makeComponents()
+
+const REMARK = [remarkGfm, remarkMath, remarkOutputReferences, remarkRenderer] as never
 
 type Components = ReturnType<typeof makeComponents>
 
@@ -401,12 +416,12 @@ const MarkdownSegment = memo(function MarkdownSegment({
   ] as never, [math])
   const documentSource = useContext(DocumentSource)
   const workspaceLinks = useContext(WorkspaceLinks)
-  const remark = useMemo(() => !workspaceLinks ? [remarkGfm, remarkMath] as never : documentSource ? [remarkGfm, remarkMath, remarkOutputReferences, [remarkDocumentHeadings, { prefix: documentSource.prefix }]] as never : REMARK, [documentSource, locale, workspaceLinks])
+  const remark = useMemo(() => !workspaceLinks ? [remarkGfm, remarkMath, remarkRenderer] as never : documentSource ? [remarkGfm, remarkMath, remarkOutputReferences, remarkRenderer, [remarkDocumentHeadings, { prefix: documentSource.prefix }]] as never : REMARK, [documentSource, locale, workspaceLinks])
   if (!body.trim()) return null
   return (
     <>
     {needsMath && mathFailed && !math ? <p role="alert" className="text-xs text-warn">{t('ui.deferred.math.failed')} <button type="button" className="inline-flex items-center gap-1 underline" onClick={() => window.location.reload()}><RotateCw aria-hidden className="h-3 w-3" />{t('ui.deferred.reload')}</button></p> : null}
-    <ReactMarkdown
+    <Streaming.Provider value={streaming}><ReactMarkdown
       urlTransform={(url) => /^[A-Za-z]:(?:[\\/]|%5c|%2f)/i.test(url) ? url.replace(/%5c/gi, '/') : defaultUrlTransform(url)}
       remarkPlugins={remark}
       rehypePlugins={rehype}
@@ -414,7 +429,7 @@ const MarkdownSegment = memo(function MarkdownSegment({
       skipHtml
     >
       {body}
-    </ReactMarkdown>
+    </ReactMarkdown></Streaming.Provider>
     </>
   )
 })
@@ -445,7 +460,7 @@ export const Markdown = memo(function Markdown({
     [children, locale],
   )
   const segments = useMemo<StreamSegment[]>(() => fileSource ? [{ kind: 'markdown', text: raw, key: 'document', last: true }] : segmentStream(raw), [raw, Boolean(fileSource), locale])
-  const components = useMemo(() => makeComponents(streaming), [streaming, locale])
+  const components = COMPONENTS
 
   if (!raw) return null
 
@@ -453,7 +468,17 @@ export const Markdown = memo(function Markdown({
     <WorkspaceLinks.Provider value={workspaceLinks}><DocumentSource.Provider value={documentSource}>
     <div className={cn('md', dense && 'text-compact leading-reading', className)}>
       {segments.map((segment: StreamSegment) =>
-        segment.kind === 'chart' ? (
+        segment.kind === 'renderer' ? (
+          <RendererFrame
+            key={segment.key}
+            code={segment.code}
+            closed={segment.closed}
+            streaming={streaming}
+            className="my-3"
+          />
+        ) : segment.kind === 'chart' && segment.lang === 'html' ? (
+          <CodeBlock key={segment.key} code={segment.code} language="html" previewReady={segment.closed} className="my-3" />
+        ) : segment.kind === 'chart' ? (
           <LiveChart
             key={segment.key}
             code={segment.code}

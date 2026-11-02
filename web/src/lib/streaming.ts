@@ -26,6 +26,8 @@ export interface FenceBlock {
   lang: string
   /** 原始语言串（可能带 `{.python}` 之类的属性）。 */
   rawLang: string
+  /** 是否为渲染块（```html type="renderer"），交给沙箱直接渲染而非代码展示。 */
+  renderer: boolean
   /** 代码正文。 */
   code: string
   /** 围栏行之后的正文行数（含开栏行）。 */
@@ -47,11 +49,11 @@ interface FenceMarker {
   length: number
 }
 
-const FENCE_OPEN = /^(\s{0,3})(`{3,}|~{3,})[ \t]*([^\n]*)$/
+const FENCE_OPEN = /^( {0,3}(?:>[ \t]? {0,3})*)(`{3,}|~{3,})[ \t]*([^\n]*)$/
 
 function markerOf(line: string): FenceMarker | null {
   const match = FENCE_OPEN.exec(line)
-  if (!match) return null
+  if (!match || (match[2]!.startsWith('`') && match[3]!.includes('`'))) return null
   return { char: match[2]!.charAt(0) as FenceChar, length: match[2]!.length }
 }
 
@@ -85,6 +87,29 @@ export function isChartLang(lang: string): boolean {
     value === 'echarts' ||
     value === 'plotly'
   )
+}
+
+/** 渲染块判定：`html type="renderer"`（引号可有可无）。首 token 必须为 html。 */
+export function isRendererInfo(rawLang: string | null | undefined): boolean {
+  if (!rawLang) return false
+  const info = /^html(?:\s+|$)/i.exec(rawLang.trim())
+  if (!info) return false
+  const meta = rawLang.trim().slice(info[0].length)
+  const attribute = /\s*([^\s='"]+)(?:[ \t]*=[ \t]*(?:"([^"]*)"|'([^']*)'|([^\s'"=]+)))?(?=\s|$)/y
+  let renderer = false
+  let seenType = false
+  let offset = 0
+  while (offset < meta.length) {
+    attribute.lastIndex = offset
+    const match = attribute.exec(meta)
+    if (!match) return !meta.slice(offset).trim() && renderer
+    offset = attribute.lastIndex
+    if (match[1].toLowerCase() !== 'type') continue
+    if (seenType) return false
+    seenType = true
+    renderer = (match[2] ?? match[3] ?? match[4] ?? '').toLowerCase() === 'renderer'
+  }
+  return renderer
 }
 
 /**
@@ -123,16 +148,20 @@ export function scanFences(text: string): FenceBlock[] {
       }
     } else {
       const marker = markerOf(line)
+      const closingInfo = FENCE_OPEN.exec(line)
+      // 围栏正文里的引用标记是代码，不能拿来闭合外层围栏。
+      const sameContainer = (closingInfo?.[1]?.match(/>/g)?.length ?? 0) === (open.indent.match(/>/g)?.length ?? 0)
       const closes =
-        marker &&
+        marker && sameContainer &&
         marker.char === open.marker.char &&
         marker.length >= open.marker.length &&
-        line.trim() === marker.char.repeat(marker.length)
+        !(closingInfo?.[3] ?? '').trim()
       if (closes) {
         const bodyEnd = lineStart
         blocks.push({
           lang: normalizeLang(open.rawLang),
           rawLang: open.rawLang,
+          renderer: isRendererInfo(open.rawLang),
           code: text.slice(open.bodyStart, bodyEnd).replace(/\n$/, ''),
           startLine: open.line,
           closed: true,
@@ -154,6 +183,7 @@ export function scanFences(text: string): FenceBlock[] {
     blocks.push({
       lang: normalizeLang(open.rawLang),
       rawLang: open.rawLang,
+      renderer: isRendererInfo(open.rawLang),
       // An open SVG attribute may end at this newline. It is a received
       // coordinate delimiter, not presentation whitespace to remove.
       code: text.slice(open.bodyStart, bodyEnd),
@@ -284,6 +314,13 @@ export type StreamSegment =
       key: string
       last: boolean
     }
+  | {
+      kind: 'renderer'
+      code: string
+      closed: boolean
+      key: string
+      last: boolean
+    }
 
 /** 正文里的 `<svg>` 只有独占一行时才提升为图，避免误伤句子里的行内标签。 */
 const INLINE_SVG_AT_LINE_START = /(^|\n)[ \t]{0,3}(?=<svg\b)/i
@@ -320,6 +357,10 @@ export function segmentStream(text: string): StreamSegment[] {
     flush()
     out.push({ kind: 'chart', code, lang, closed, key: `c${out.length}`, last: false })
   }
+  const addRenderer = (code: string, closed: boolean) => {
+    flush()
+    out.push({ kind: 'renderer', code, closed, key: `r${out.length}`, last: false })
+  }
 
   /** gap = 围栏之间的正文；里面可能藏着独占一行的裸 `<svg>`。 */
   const emitGap = (gap: string) => {
@@ -348,7 +389,10 @@ export function segmentStream(text: string): StreamSegment[] {
     emitGap(text.slice(cursor, fence.start))
     // 只把「顶格」的围栏提出来。缩进过的围栏（列表项、引用里的图）切段会
     // 把一个列表劈成两个，那种结构交给 Markdown 自己的 code 组件兜底。
-    if (fence.indent === '' && isChartBody(fence.lang, fence.code)) {
+    if (fence.indent === '' && fence.renderer) {
+      // 渲染块优先于图表判定：它也是 html，但语义是「整页交给沙箱」。
+      addRenderer(fence.code, fence.closed)
+    } else if (fence.indent === '' && isChartBody(fence.lang, fence.code)) {
       addChart(fence.code, fence.lang || 'svg', fence.closed)
     } else {
       // 非图表围栏原样保留在正文中。
