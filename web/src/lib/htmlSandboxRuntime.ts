@@ -13,7 +13,7 @@ export function sandboxBootstrap(identity: string): string {
       const height=Math.min(2000,Math.max(40,Math.ceil(Math.max(document.body.scrollHeight,document.body.getBoundingClientRect().height))));
       if(height!==lastHeight){lastHeight=height;send('resize',{height})}
     };
-    const paintReady=ticket=>raf(()=>raf(()=>{if(active&&pendingPaint===ticket&&document.readyState!=='loading')send('ready',{paint:ticket})}));
+    const paintReady=ticket=>{const paint=()=>raf(()=>raf(()=>{if(active&&pendingPaint===ticket&&document.readyState!=='loading')send('ready',{paint:ticket})}));const content=window.__harnessWidgetReady;if(content&&typeof content.then==='function')content.then(paint,error=>fail(String(error?.message||error)));else paint()};
     function resize(){if(!active||queued)return;queued=true;raf(()=>{queued=false;notify()})};
     const fail=message=>{if(message===lastFailure)return;lastFailure=message;send('error',{message})};
     addEventListener('error',e=>fail(e.message||e.target?.src||''),true);

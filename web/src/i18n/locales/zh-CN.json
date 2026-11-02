@@ -4815,5 +4815,16 @@
   "ui.voice.installationInvalid": "Hex 安装指针无效或对应程序缺失：{path}。请重新安装 Hex；原安装文件已保留。",
   "ui.voice.pidProbeFailed": "无法查询 Hex 进程：{operation} 返回 Windows 错误 {code}。",
   "ui.renderer.incomplete": "HTML 块尚未闭合。源码已保留，围栏闭合后才能预览。",
-  "ui.widget.initializationFailed": "预览未能在等待时间内完成初始化。可以查看保留的源码，或手动重新运行。"
+  "ui.widget.initializationFailed": "预览未能在等待时间内完成初始化。可以查看保留的源码，或手动重新运行。",
+  "ui.chart.invalidJson": "图表配置必须是字段不重复的合法 JSON。",
+  "ui.chart.invalidSpec": "图表配置与所选格式不符，源码已保留。",
+  "ui.chart.tooLarge": "图表配置超过大小上限。",
+  "ui.chart.tooDeep": "图表配置嵌套过深。",
+  "ui.chart.unsafeKey": "图表配置含保留的对象字段。",
+  "ui.chart.inlineData": "请使用内联图表数据。声明式图表不加载外部数据、链接或图片。",
+  "ui.chart.loadFailed": "图表渲染器加载失败，源码已保留。",
+  "ui.chart.retry": "重新加载",
+  "ui.chart.loading": "正在加载图表渲染器…",
+  "ui.chart.streaming": "正在接收图表配置…",
+  "ui.chart.plotlyTypes": "当前 Plotly 构建支持 scatter、bar 和 pie。其它图表类型请使用 ECharts 或 HTML。"
 }

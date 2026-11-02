@@ -2,7 +2,7 @@ import {useDialogFocus} from '@/hooks/useDialogFocus'
 import {usePageVisible} from '@/hooks/usePageVisible'
 import {useAppStore} from '@/store/app'
 import { t, useLocale } from '@/i18n'
-import { memo, useDeferredValue, useId, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useId, useEffect, useRef, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -10,10 +10,9 @@ import {
   Download,
   Maximize2,
   Minimize2,
-  PencilRuler,
   RotateCcw,
 } from 'lucide-react'
-import { cn, download, formatNumber } from '@/lib/utils'
+import { cn, download } from '@/lib/utils'
 import {
   parseProgressiveSvg,
   scopeSvg,
@@ -26,6 +25,8 @@ import { normalizeLang } from '@/lib/streaming'
 import { CopyButton, IconButton, Spinner, Tooltip } from '@/components/ui/primitives'
 import { CodeBlock } from './CodeBlock'
 import { Mermaid } from './Mermaid'
+import { SpecChart } from './SpecChart'
+import { isChartKind } from '@/lib/chartSpec'
 
 /**
  * 图表统一入口（"边画边展示"的核心）。
@@ -36,9 +37,7 @@ import { Mermaid } from './Mermaid'
  *   - ```svg      —— 逐字符画。走 `progressiveSvg` 的补齐管线，模型画到哪就显示到哪，
  *                    接收到的线段直接填入画布，完成时保留已有图形。
  *
- * 其余（vega / vega-lite / echarts / plotly）不引额外运行时依赖，
- * 解析成功就给结构摘要卡片 + 源码，明确告诉用户"这是一份图表规范"。
- * 引 1MB+ 的图表库换一个"能看但不能画"，不划算。
+ * 声明式 JSON 图表按需加载本地运行库，在隔离沙箱中绘制。
  */
 
 export interface LiveChartProps {
@@ -48,8 +47,6 @@ export interface LiveChartProps {
   closed?: boolean
   className?: string
 }
-
-const SPEC_LANGS = new Set(['vega', 'vega-lite', 'echarts', 'chart', 'plotly'])
 
 export const LiveChart = memo(function LiveChart({
   code,
@@ -63,7 +60,7 @@ export const LiveChart = memo(function LiveChart({
 
   if (value === 'mermaid') return <Mermaid chart={code} live={!closed} className={className} />
   if (value === 'svg') return <ProgressiveSvgView source={code} live={!closed} className={className} />
-  if (SPEC_LANGS.has(value)) return <SpecChart source={code} kind={value} live={!closed} className={className} />
+  if (isChartKind(value)) return <SpecChart source={code} kind={value} closed={closed} className={className} />
   // 没标语言的围栏里如果塞了 SVG（模型很爱这么干），也照样画出来。
   if (!value && /<svg\b/i.test(code)) {
     return <ProgressiveSvgView source={code} live={!closed} className={className} />
@@ -234,129 +231,5 @@ function ProgressiveSvgView({ source, live, className }: ProgressiveSvgViewProps
         />
       ) : null}
     </figure>
-  )
-}
-
-/* ============================ 图表规范（vega / echarts） ============================ */
-
-interface SpecSummary {
-  mark?: string
-  encoding?: string[]
-  dataRows?: number
-  series?: number
-  charts?: string[]
-  json: boolean
-}
-
-function summarizeSpec(source: string): SpecSummary {
-  const out: SpecSummary = { encoding: [], charts: [], json: false }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(source)
-    out.json = true
-  } catch {
-    // 半截 JSON 很正常，流式期就靠这个判断"还没写完"。
-    return out
-  }
-  if (Array.isArray(parsed)) {
-    // echarts option 数组
-    for (const item of parsed as Array<Record<string, unknown>>) {
-      const series = item?.series
-      if (Array.isArray(series)) {
-        out.series = (out.series ?? 0) + series.length
-        for (const s of series as Array<Record<string, unknown>>) {
-          const type = String(s?.type ?? '')
-          if (type && !out.charts!.includes(type)) out.charts!.push(type)
-        }
-      }
-    }
-    return out
-  }
-  if (!parsed || typeof parsed !== 'object') return out
-  const root = parsed as Record<string, unknown>
-  const mark = root.mark
-  if (typeof mark === 'string') out.mark = mark
-  else if (mark && typeof mark === 'object') out.mark = String((mark as Record<string, unknown>).type ?? '')
-  const encoding = root?.encoding
-  if (encoding && typeof encoding === 'object') out.encoding = Object.keys(encoding as object)
-  const data = root?.data
-  if (data && typeof data === 'object') {
-    const values = (data as Record<string, unknown>).values
-    if (Array.isArray(values)) out.dataRows = values.length
-    else if (typeof (data as Record<string, unknown>).url === 'string') out.dataRows = -1
-  }
-  const series = root?.series
-  if (Array.isArray(series)) {
-    out.series = series.length
-    for (const s of series as Array<Record<string, unknown>>) {
-      const type = String(s?.type ?? '')
-      if (type && !out.charts!.includes(type)) out.charts!.push(type)
-    }
-  }
-  return out
-}
-
-function SpecChart({
-  source,
-  kind,
-  live,
-  className,
-}: {
-  source: string
-  kind: string
-  live: boolean
-  className?: string
-}) {
-  const locale = useLocale()
-
-  const deferred = useDeferredValue(source)
-  const summary = useMemo(() => summarizeSpec(deferred), [deferred, locale])
-
-  return (
-    <div className={cn('space-y-2', className)}>
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-line bg-raised/40 px-2.5 py-2">
-        <PencilRuler className="h-3.5 w-3.5 text-brand" />
-        <span className="font-mono text-2xs font-medium uppercase tracking-wide text-faint">
-          {kind}
-        </span>
-        {live ? (
-          <span className="inline-flex items-center gap-1 rounded-md bg-brand/[0.12] px-1.5 py-0.5 text-2xs font-medium text-brand">
-            <Activity className="h-3 w-3" />{t("ui.components.markdown.LiveChart.a12c13825bf3")}</span>
-        ) : summary.json ? (
-          <span className="inline-flex items-center gap-1 rounded-md bg-ok/[0.12] px-1.5 py-0.5 text-2xs font-medium text-ok">
-            <Check className="h-3 w-3" />{t("ui.components.markdown.LiveChart.ea768086965d")}</span>
-        ) : (
-          <span className="inline-flex items-center gap-1 rounded-md bg-warn/[0.12] px-1.5 py-0.5 text-2xs font-medium text-warn">
-            <AlertTriangle className="h-3 w-3" />{t("ui.components.markdown.LiveChart.ccecaa77c8b3")}</span>
-        )}
-        <div className="ml-auto flex flex-wrap items-center gap-1.5 text-2xs text-faint">
-          {summary.mark ? <Chip label={t('ui.chart.summary.mark')} value={summary.mark} /> : null}
-          {summary.encoding?.length ? (
-            <Chip label={t('ui.chart.summary.encoding')} value={t("ui.components.markdown.LiveChart.5edd92b6a548", {p0: (summary.encoding.length)})} />
-          ) : null}
-          {summary.dataRows === -1 ? (
-            <Chip label={t('ui.chart.summary.data')} value={t('ui.chart.summary.url')} />
-          ) : summary.dataRows ? (
-            <Chip label={t('ui.chart.summary.data')} value={t("ui.components.markdown.LiveChart.d4a79ad79ced", {p0: (formatNumber(summary.dataRows))})} />
-          ) : null}
-          {summary.series ? <Chip label={t('ui.chart.summary.series')} value={formatNumber(summary.series)} /> : null}
-          {summary.charts?.length ? (
-            <Chip label={t('ui.chart.summary.type')} value={summary.charts.join(' / ')} />
-          ) : null}
-        </div>
-      </div>
-      <CodeBlock code={source} language={kind} />
-    </div>
-  )
-}
-
-function Chip({ label, value }: { label: string; value: string }) {
-  useLocale()
-
-  return (
-    <span className="inline-flex items-center gap-1 rounded-md border border-line bg-surface px-1.5 py-0.5">
-      <span className="text-faint">{label}</span>
-      <span className="font-medium text-muted">{value}</span>
-    </span>
   )
 }

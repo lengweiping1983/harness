@@ -1,6 +1,6 @@
 # 对话内可视化
 
-Harness 支持在消息流中展示 SVG、HTML 和 Mermaid。无需先生成网站或切换项目；原始代码随所属对话保存，渲染和下载复用原消息。
+Harness 支持在消息流中展示 SVG、HTML、Mermaid、ECharts、Vega、Vega-Lite、Chart.js 和 Plotly 基础图表。正文数学公式通过 KaTeX 排版。无需先生成网站或切换项目；原始代码随所属对话保存，渲染和下载复用原消息。
 
 ## 入口与载体
 
@@ -8,7 +8,7 @@ Harness 支持在消息流中展示 SVG、HTML 和 Mermaid。无需先生成网�
 
 `harness/prompt/tool_policies.py` 在可用工具包含 `show_widget` 时装配双语 `policy.visualization`。模型请求明确优先交付小而可用的自包含预览，不为普通对话演示先写文件、启动服务器或反复截图；用户明确要求的文件、实现方式和测试仍优先。该指引进入实际模型请求，不保证每个在线模型都遵循。
 
-`show_widget` 接收一个 JSON 对象，必填 `title` 与 `widget_code`。可选 `kind` 为 `auto`、`svg` 或 `html`，`loading_messages` 提供加载提示。`widget_guidelines` 按 diagram、chart、interactive、mockup、art 返回当前语言的设计指导。
+`show_widget` 接收一个 JSON 对象，必填 `title` 与 `widget_code`。可选 `kind` 为 `auto`、`svg`、`html`、`echarts`、`vega`、`vega-lite`、`chartjs` 或 `plotly`，`loading_messages` 提供加载提示。`widget_guidelines` 按 diagram、chart、interactive、mockup、art 返回当前语言的设计指导。
 
 ```json
 {"title":"流程图","kind":"svg","widget_code":"<svg viewBox='0 0 240 80'><text x='16' y='44'>Request → Canvas</text></svg>"}
@@ -17,6 +17,32 @@ Harness 支持在消息流中展示 SVG、HTML 和 Mermaid。无需先生成网�
 SVG 需要完整 XML 结构及根元素的 viewBox 或宽高；支持前置注释、XML 声明及嵌套 SVG，拒绝损坏 XML、脚本、DOCTYPE 与实体声明。前端继续清洗事件属性、危险链接、foreignObject 等内容；同名 gradient、marker 与引用按图形实例隔离。正文中的 SVG 围栏与独占一行的裸 SVG 保留渐进绘制，已经画出的节点随增量更新，不整块重建。
 
 HTML 支持片段与完整文档，包含内联 CSS、JavaScript、Canvas、SVG 和普通控件。明确标记为 `html` 的围栏闭合后默认显示沙箱预览，也可切换源码；普通 `xml` 围栏只显示源码。完整工具调用通过校验后，`ToolBlock` 从 `display.widget` 显示卡片。模型工具结果只包含简短确认，代码仍保存在调用参数与界面展示数据中，不再复制到结果正文。
+
+## 声明式图表
+
+标准图表可直接输出对应格式的 JSON 围栏，或以同名 `kind` 调用 `show_widget`。模型不必写 HTML、引入 CDN 或安装依赖。`auto` 只识别 SVG／HTML；JSON 必须明确选择格式，不猜测普通 JSON 代码块的用途。
+
+| 围栏／kind | 输入 | 呈现 |
+|---|---|---|
+| `echarts` | ECharts option 对象，含 `series` | SVG 图表，支持原生图例、提示和数据缩放配置 |
+| `vega` | Vega spec，含 `marks` | SVG 与数据流／信号交互 |
+| `vega-lite` | Vega-Lite spec，含 mark、layer、concat、facet 或 repeat | 编译为 Vega，以 SVG 呈现 |
+| `chartjs` | Chart.js 配置，含 `type`、`data` | Canvas 图表与原生交互 |
+| `plotly` | 含 `data` 数组，可选 `layout`、`config` | Plotly basic：scatter、bar、pie；不包含 3D／地图等扩展 trace |
+
+例如以下 `echarts` 围栏会直接绘图：
+
+````markdown
+```echarts
+{"xAxis":{"type":"category","data":["A","B"]},"yAxis":{"type":"value"},"series":[{"type":"bar","data":[3,8]}]}
+```
+````
+
+完整配置才校验和加载运行库，流式半成品只显示接收状态。运行库以文本分片随本地构建分发，按格式首次使用时加载；并发共享一次下载，Vega 和 Vega-Lite 共享同一运行库。下载失败或超过 10 秒显示源码和“重新加载”入口，迟到成功只更新仍所属的实例。成功加载不证明配置正确；真正绘图失败仍由沙箱报告，源码始终可取。
+
+配置仅接受字段唯一、有限数字、大小有界、最大嵌套 48 层的 JSON 对象。保留原始 JSON，不接受 JavaScript 函数或原型保留字段。数据必须内联；`url`／`href`／`src` 外部资源入口明确拒绝。声明式图表采用独立的离线 CSP，不允许外部脚本、样式、图片、字体、fetch、WebSocket 或动态求值；Vega 使用表达式解释器而非放开 `unsafe-eval`。代码与运行库均不在宿主页面执行。库加载完成与异步图表绘制分别确认，图表未就绪时不移除初始化等待。
+
+图表沿用卡片的源码、复制、下载与放大；复制和下载取得原始配置，文件名为 `标题.格式.json`。源码切换、主题及语言变化保持同一沙箱实例；宽度变化合并到动画帧。不同图表的视觉主题细节由各运行库和用户配置控制，不覆盖原始配置或把所有图表色强行映射为产品状态色。
 
 ## 渲染块（type="renderer"）
 
@@ -45,6 +71,8 @@ HTML 在 `sandbox="allow-scripts"` 的不透明来源 iframe 中执行，不授�
 参数为空或缺少字段时继续明确拒绝执行，不补造可视化代码。原生供应商库在 JSON 解析失败时可能同时返回空参数对象和 `argumentsError`；桥接保留该诊断及收到的原文，工具校验拒绝它，避免误报为只有必填字段缺失。截断的可视化调用必须由模型按错误重新提交，不能自动执行部分脚本。
 
 - `tests/test_visualization_policy.py` 核对同一宿主英文→中文→英文的真实模型请求包含交付策略与当前工具说明；隔离工作区不产生文件。`toolRuns.test.ts` 与 `turnActivity.test.ts` 覆盖两层折叠、加载／成功／失败及 SVG／HTML 身份保持。
+- `tests/test_chart_widgets.py` 与 `chartSpec.test.ts` 核对五类配置、双语错误、字段唯一性、有限数、资源／原型拒绝、深度及原始配置下载身份。`chartRuntime.test.ts` 核对并发下载共享与 Vega/Lite 复用。
+- `chart-spec-smoke.mjs` 使用实际 Markdown 与工具卡片逐个绘制本地运行库，检查几何内容、无外部请求、真实点击事件中的动态求值拒绝、宿主隔离、语言／主题／宽度往返和 JSON 下载，并记录就绪耗时。
 - `tests/test_widget_tools.py` 核对双语工具说明、完整 HTML、SVG 结构与参数边界。
 - `tests/test_widget_flow.py` 经真实发行桥接、回环供应商流和工具注册入口，核对损坏参数未执行、模型纠正、SVG／HTML 展示事件及完整源码。
 - `svgScope.test.ts` 核对多图 ID 和引用隔离；`streaming.test.ts` 保留分段与渐进内容边界，并核对渲染块（`type="renderer"`）的识别、分段与闭合状态。

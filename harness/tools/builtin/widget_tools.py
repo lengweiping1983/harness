@@ -1,7 +1,7 @@
 """对话内可视化小组件工具：show_widget 与 widget_guidelines。
 
 把「画一张图 / 做一个可视化」从生成文件降级为零副作用的对话内渲染：
-模型提交 SVG 或 HTML 片段，宿主前端在消息流中原地渲染，用户不离开对话。
+模型提交 SVG、HTML 或声明式图表 JSON，宿主前端在消息流中原地渲染，用户不离开对话。
 
 关键设计：
 * 工具自身不读写工作区、不触网，副作用声明为 ``read``，只读任务中同样可用；
@@ -18,6 +18,8 @@ from __future__ import annotations
 from harness.i18n import tr
 
 import re
+import json
+import math
 import xml.etree.ElementTree as ET
 from typing import Any
 
@@ -32,6 +34,8 @@ MAX_TITLE_CHARS = 120
 #: 加载提示 1~4 条，与前端轮播一致。
 MAX_LOADING_MESSAGES = 4
 
+CHART_KINDS = ("echarts", "vega", "vega-lite", "chartjs", "plotly")
+
 _GUIDE_MODULES = ("diagram", "chart", "interactive", "mockup", "art")
 
 #: 仅用于结构探测的宽松匹配；安全性由前端渲染边界最终保证。
@@ -42,6 +46,58 @@ def detect_widget_kind(code: str) -> str:
     """按首个标签判断载体类型：``<svg`` 开头为 SVG，其余按 HTML 片段处理。"""
     prefix = re.sub(r"^(?:\s|\ufeff|<\?xml[^>]*\?>|<!--[\s\S]*?-->)*", "", code)
     return "svg" if _SVG_OPEN.match(prefix) or re.match(r"<!doctype\s+svg(?:\s|>)", prefix, re.IGNORECASE) else "html"
+
+
+def validate_chart(code: str, kind: str) -> None:
+    """声明式图表只接受有界、字段唯一的内联 JSON，不解释函数或加载外部资源。"""
+    def fail(key):
+        raise ToolExecutionError(tr(key))
+
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                fail('ui.chart.invalidJson')
+            value[key] = item
+        return value
+
+    def constant(_):
+        fail('ui.chart.invalidJson')
+
+    try:
+        spec = json.loads(code, object_pairs_hook=unique, parse_constant=constant)
+    except (ValueError, RecursionError) as exc:
+        raise ToolExecutionError(tr('ui.chart.invalidJson')) from exc
+    if not isinstance(spec, dict):
+        fail('ui.chart.invalidSpec')
+
+    def visit(value, depth):
+        if depth > 48:
+            fail('ui.chart.tooDeep')
+        if isinstance(value, float) and not math.isfinite(value):
+            fail('ui.chart.invalidJson')
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in ('__proto__', 'prototype', 'constructor'):
+                    fail('ui.chart.unsafeKey')
+                if key in ('url', 'href', 'src') and isinstance(item, str):
+                    fail('ui.chart.inlineData')
+                visit(item, depth + 1)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item, depth + 1)
+    visit(spec, 0)
+    valid = {
+        'echarts': isinstance(spec.get('series'), (dict, list)),
+        'vega': isinstance(spec.get('marks'), list),
+        'vega-lite': any(spec.get(key) for key in ('mark', 'layer', 'hconcat', 'vconcat', 'concat', 'facet', 'repeat')),
+        'chartjs': isinstance(spec.get('type'), str) and isinstance(spec.get('data'), dict),
+        'plotly': isinstance(spec.get('data'), list),
+    }
+    if kind == 'plotly' and isinstance(spec.get('data'), list) and any(not isinstance(item, dict) or item.get('type', 'scatter') not in ('scatter', 'bar', 'pie') for item in spec['data']):
+        fail('ui.chart.plotlyTypes')
+    if not valid[kind]:
+        fail('ui.chart.invalidSpec')
 
 
 def validate_widget(title: Any, code: Any, kind: Any, loading: Any) -> tuple[str, str, str, list[str]]:
@@ -58,11 +114,13 @@ def validate_widget(title: Any, code: Any, kind: Any, loading: Any) -> tuple[str
         raise ToolExecutionError(tr("python.widget_tools.error.too_large", p0=f"{MAX_WIDGET_CHARS}"))
     if kind in (None, ""):
         resolved = "auto"
-    elif isinstance(kind, str) and kind in ("auto", "svg", "html"):
+    elif isinstance(kind, str) and kind in ("auto", "svg", "html", *CHART_KINDS):
         resolved = kind
     else:
         raise ToolExecutionError(tr("python.widget_tools.error.kind"))
-    actual = detect_widget_kind(clean_code)
+    if resolved in CHART_KINDS:
+        validate_chart(clean_code, resolved)
+    actual = resolved if resolved in CHART_KINDS else detect_widget_kind(clean_code)
     if resolved in ("svg", "html") and resolved != actual:
         raise ToolExecutionError(tr("python.widget_tools.error.kind_mismatch", p0=resolved, p1=actual))
 
@@ -147,7 +205,7 @@ def build_widget_tools() -> list[ToolDefinition]:
                         },
                         "kind": {
                             "type": "string",
-                            "enum": ["auto", "svg", "html"],
+                            "enum": ["auto", "svg", "html", *CHART_KINDS],
                             "description": tr("python.widget_tools.show.param.kind"),
                         },
                         "loading_messages": {

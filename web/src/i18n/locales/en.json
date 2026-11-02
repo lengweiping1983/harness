@@ -4815,5 +4815,16 @@
   "ui.voice.installationInvalid": "The Hex installation pointer is invalid or its executable is missing: {path}. Reinstall Hex; the original installation files have been preserved.",
   "ui.voice.pidProbeFailed": "Could not query the Hex process: {operation} returned Windows error {code}.",
   "ui.renderer.incomplete": "The HTML block is incomplete. Its source is preserved; preview will be available after the fence is closed.",
-  "ui.widget.initializationFailed": "The preview did not finish initializing. View the preserved source or explicitly run it again."
+  "ui.widget.initializationFailed": "The preview did not finish initializing. View the preserved source or explicitly run it again.",
+  "ui.chart.invalidJson": "Chart configuration must be valid JSON with unique object keys.",
+  "ui.chart.invalidSpec": "The chart configuration does not match the selected format. Its source is preserved.",
+  "ui.chart.tooLarge": "The chart configuration exceeds the size limit.",
+  "ui.chart.tooDeep": "The chart configuration is nested too deeply.",
+  "ui.chart.unsafeKey": "The chart configuration contains a reserved object key.",
+  "ui.chart.inlineData": "Use inline chart data. External data, links and images are disabled for declarative charts.",
+  "ui.chart.loadFailed": "The chart renderer could not be loaded. Its source is preserved.",
+  "ui.chart.retry": "Reload",
+  "ui.chart.loading": "Loading chart renderer…",
+  "ui.chart.streaming": "Receiving chart configuration…",
+  "ui.chart.plotlyTypes": "This Plotly build supports scatter, bar and pie traces. Use ECharts or HTML for other chart types."
 }

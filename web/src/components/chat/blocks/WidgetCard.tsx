@@ -1,3 +1,4 @@
+import {isChartKind} from '@/lib/chartSpec'
 import { usePageVisible } from '@/hooks/usePageVisible'
 import { useDialogFocus } from '@/hooks/useDialogFocus'
 import { t, useLocale } from '@/i18n'
@@ -80,8 +81,9 @@ function downloadBlob(blob: Blob, name: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
-export const WidgetCard = memo(function WidgetCard({ payload }: { payload: WidgetPayload }) {
+export const WidgetCard = memo(function WidgetCard({ payload, previewCode }: { payload: WidgetPayload; previewCode?: string }) {
   useLocale()
+  const settingsOpen = useAppStore(state => state.settingsOpen)
   const scope = useId().replace(/[^a-zA-Z0-9_-]/g, '')
   const [showCode, setShowCode] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -109,7 +111,7 @@ export const WidgetCard = memo(function WidgetCard({ payload }: { payload: Widge
     setCopied(ok)
     if (ok) copyTimer.current = setTimeout(() => setCopied(false), 1600)
   }
-  const downloadCode = () => downloadBlob(new Blob([payload.kind === 'svg' ? svgText ?? payload.code : payload.code], { type: payload.kind === 'svg' ? 'image/svg+xml;charset=utf-8' : 'text/html;charset=utf-8' }), widgetFileName(payload))
+  const downloadCode = () => downloadBlob(new Blob([payload.kind === 'svg' ? svgText ?? payload.code : payload.code], { type: payload.kind === 'svg' ? 'image/svg+xml;charset=utf-8' : isChartKind(payload.kind) ? 'application/json;charset=utf-8' : 'text/html;charset=utf-8' }), widgetFileName(payload))
   const exportPng = async (target: 'clipboard' | 'file') => {
     if (!svgText) return
     try {
@@ -174,7 +176,7 @@ export const WidgetCard = memo(function WidgetCard({ payload }: { payload: Widge
       </div>
     )
   ) : (
-    <HtmlSandboxFrame code={payload.code} title={payload.title} active={!showCode} viewKey={zoom ? 'expanded' : 'inline'} onEscape={zoom ? () => setZoom(false) : undefined} onFocusBoundary={zoom ? backward => { const buttons = Array.from(figureRef.current?.querySelectorAll<HTMLButtonElement>('figcaption button:not([disabled])') ?? []); (backward ? buttons.at(-1) : buttons[0])?.focus() } : undefined} />
+    <HtmlSandboxFrame code={previewCode ?? payload.code} offline={isChartKind(payload.kind)} title={payload.title} active={!showCode && !settingsOpen} viewKey={zoom ? 'expanded' : 'inline'} onEscape={zoom ? () => setZoom(false) : undefined} onFocusBoundary={zoom ? backward => { const buttons = Array.from(figureRef.current?.querySelectorAll<HTMLButtonElement>('figcaption button:not([disabled])') ?? []); (backward ? buttons.at(-1) : buttons[0])?.focus() } : undefined} />
   )
 
   return (

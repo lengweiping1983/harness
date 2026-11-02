@@ -1,3 +1,4 @@
+import {isChartKind, type ChartKind} from './chartSpec'
 import type { ToolBlockState } from '@/types'
 
 /**
@@ -8,7 +9,7 @@ import type { ToolBlockState } from '@/types'
  * 由通用工具结果视图兜底，不猜、不补。
  */
 
-export type WidgetKind = 'svg' | 'html'
+export type WidgetKind = 'svg' | 'html' | ChartKind
 
 export interface WidgetPayload {
   title: string
@@ -38,7 +39,7 @@ export function parseWidgetPayload(value: unknown): WidgetPayload | null {
   if (!record(value) || !record(value.widget)) return null
   const widget = value.widget
   if (!nonBlank(widget.title) || !nonBlank(widget.code)) return null
-  if (widget.kind !== 'svg' && widget.kind !== 'html') return null
+  if (widget.kind !== 'svg' && widget.kind !== 'html' && !(typeof widget.kind === 'string' && isChartKind(widget.kind))) return null
   return {
     title: widget.title.trim(),
     code: widget.code,
@@ -64,5 +65,5 @@ export function widgetPreview(block: ToolBlockState): WidgetPreview | null {
 /** 下载文件名：标题转下划线并限制长度，扩展名按载体类型。 */
 export function widgetFileName(payload: WidgetPayload): string {
   const base = payload.title.replace(/\s+/g, '_').replace(/[\\/:*?"<>|]/g, '').slice(0, 60) || 'widget'
-  return `${base}.${payload.kind === 'svg' ? 'svg' : 'html'}`
+  return `${base}.${isChartKind(payload.kind) ? payload.kind + '.json' : payload.kind}`
 }

@@ -19,14 +19,14 @@ function themeSnapshot() {
 }
 
 /** 完整文档与片段走同一沙箱，CSP 和消息引导在模型脚本前安装。 */
-export function htmlDocument(code: string, identity: string): string {
+export function htmlDocument(code: string, identity: string, offline = false): string {
   const doc = new DOMParser().parseFromString(code, 'text/html')
   doc.querySelectorAll('base,meta[http-equiv]').forEach(node => node.remove())
   const theme = themeSnapshot()
   doc.documentElement.classList.toggle('dark', theme.dark)
   const policy = doc.createElement('meta')
   policy.httpEquiv = 'Content-Security-Policy'
-  policy.content = CSP
+  policy.content = offline ? "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'" : CSP
   const charset = doc.createElement('meta')
   charset.setAttribute('charset', 'utf-8')
   const viewport = doc.createElement('meta')
@@ -42,8 +42,9 @@ export function htmlDocument(code: string, identity: string): string {
 }
 
 /** 脚本在 opaque origin 中运行；消息绑定所属窗口、代码代次及实例。主题更新不重放脚本。 */
-export const HtmlSandboxFrame = memo(function HtmlSandboxFrame({ code, title, className, active = true, viewKey = 'inline', onEscape, onFocusBoundary }: {
+export const HtmlSandboxFrame = memo(function HtmlSandboxFrame({ code, title, className, active = true, viewKey = 'inline', onEscape, onFocusBoundary, offline = false }: {
   code: string
+  offline?: boolean
   title: string
   className?: string
   active?: boolean
@@ -56,9 +57,9 @@ export const HtmlSandboxFrame = memo(function HtmlSandboxFrame({ code, title, cl
   const renderActive = active && pageVisible
   const frame = useRef<HTMLIFrameElement>(null)
   const [revision, setRevision] = useState(0)
-  const identity = useMemo(() => crypto.randomUUID(), [code, revision])
+  const identity = useMemo(() => crypto.randomUUID(), [code, revision, offline])
   const paintTicket = useMemo(() => crypto.randomUUID(), [identity, renderActive, viewKey])
-  const srcDoc = useMemo(() => htmlDocument(code, identity), [code, identity])
+  const srcDoc = useMemo(() => htmlDocument(code, identity, offline), [code, identity])
   const [readyTicket, setReadyTicket] = useState<string | null>(null)
   const [size, setSize] = useState({ id: identity, height: MIN_HEIGHT })
   const [failure, setFailure] = useState<{id: string; message: string; timeout?: boolean} | null>(null)

@@ -8,12 +8,13 @@ function runtime() {
   const frames: (() => void)[] = []
   const observe = vi.fn(), disconnect = vi.fn()
   let resize!: () => void
+  const window: Record<string, unknown> = {}
   const parent = {postMessage: (message: Record<string, unknown>) => messages.push(message)}
   const document = {body: {scrollHeight: 120, getBoundingClientRect: () => ({height: 120})}, readyState: 'loading',
     documentElement: {classList: {toggle: vi.fn()}, style: {setProperty: vi.fn(), colorScheme: ''}},
     querySelectorAll: () => [], activeElement: null}
   runInNewContext(sandboxBootstrap('document-a'), {
-    parent, document, window: {},
+    parent, document, window,
     requestAnimationFrame: (callback: () => void) => frames.push(callback),
     ResizeObserver: class { constructor(callback: () => void) {resize = callback} observe = observe; disconnect = disconnect },
     addEventListener: (name: string, listener: (event?: any) => void) => events.set(name, listener),
@@ -22,7 +23,7 @@ function runtime() {
     channel: 'harness-widget', id: 'document-a', kind: 'theme', css: '--c-ink:1 2 3', active: true, paint: 'paint-a', ...data,
   }})
   const flush = () => {while (frames.length) frames.shift()!()}
-  return {messages, events, frames, observe, disconnect, document, send, flush, resize: () => resize()}
+  return {window, messages, events, frames, observe, disconnect, document, send, flush, resize: () => resize()}
 }
 
 describe('emitted sandbox bootstrap', () => {
@@ -100,4 +101,19 @@ describe('emitted sandbox bootstrap', () => {
     expect(preventDefault).toHaveBeenCalledOnce()
     expect(r.messages.at(-1)).toMatchObject({kind: 'focus-boundary', backward: true})
   })
+})
+
+it('waits for asynchronous visualization readiness and discards hidden paint tickets', async () => {
+ const r = runtime()
+ r.document.readyState = 'complete'
+ let finish!: () => void
+ r.window.__harnessWidgetReady = new Promise<void>(resolve => {finish = resolve})
+ r.send()
+ expect(r.frames).toHaveLength(0)
+ r.send({active: false, paint: null})
+ finish(); await Promise.resolve(); r.flush()
+ expect(r.messages.some(message => message.kind === 'ready')).toBe(false)
+ r.send({paint: 'current-chart'})
+ await Promise.resolve(); r.flush()
+ expect(r.messages.at(-1)).toMatchObject({kind: 'ready', paint: 'current-chart'})
 })
