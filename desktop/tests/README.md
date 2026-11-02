@@ -10,4 +10,6 @@
 
 `browser-runtime.test.mjs` 使用注入的原生替身检查 IPC 来源、会话控制权和无标签权限拒绝。`dialogs.test.mjs` 检查受支持事件接管、作答与取消隔离，以及零个／多个私有事件监听器时保留原处理器；这些用例不能替代 Electron 升级后的真实窗口验收。
 
+`browser-error-bridge.test.mjs` 在 `node:vm` 沙箱中执行 `preload.cjs`，只声明 Electron 隔离 preload 实际开放的受限全局：受限 `require`、只读 `process.platform`、受限 `window` 与 `document.documentElement.dataset`，不注入宿主 `process`、`console` 等全局。覆盖三个平台的顶栏平台标记、`linux` 不注册监听、Windows 原生菜单与顶栏外观 IPC，以及浏览器错误订阅的原样转发、取消后释放监听和 `browser` 通道参数。沙箱漏声明全局时用例直接报出缺少的全局名，属测试上下文问题，不是产品行为。该用例不启动 Electron，不能代替实机 preload 验收。
+
 `release-language.test.mjs` 在隔离目录调用实际发行准备及打包前校验，覆盖中英提示、暂存保护、运行时身份、资源复制与外部命令失败不重试。安装命令使用替身，不代表平台实机或安装包验收。
