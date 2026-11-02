@@ -79,10 +79,11 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-once
 ```sh
 python -m harness.cli --superagent /path/to/superagent.json
 python -m harness.cli --superagent /path/to/superagent.json --superagent-submit "修复解析器的空输入问题，补充回归并验证结果"
+python -m harness.cli --superagent /path/to/superagent.json --superagent-submit "修复解析器的空输入问题，补充回归并验证结果" --superagent-once
 python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 ```
 
-提交与状态命令不构造模型宿主、不要求模型密钥，也不启动运行器。提交返回 `queued` 只表示输入文件已原子公开，实际采用和处理由运行器负责；状态是最后一次快照，不表示进程此刻存活。尚未启动时，提交仍可排队，状态明确报尚无快照。两种命令互斥，均不与 `--superagent-once` 混用；需要批量处理时先提交，再运行单批入口。
+单独提交与状态命令不构造模型宿主、不要求模型密钥，也不启动运行器。提交返回 `queued` 只表示输入文件已原子公开，实际采用和处理由运行器负责；状态是最后一次快照，不表示进程此刻存活。尚未启动时，提交仍可排队，状态明确报尚无快照。提交和 `--superagent-once` 可以组合为一条命令：先原子公开目标，再启动一次运行并等待结果；此组合需要模型密钥，失败时仍保留已公开的输入，不能自动重放。状态查询仍不能与 `--superagent-once` 组合。
 
 本机来源必须已经配置、未忽略且至少被一个模板接收，并且不能是 GitHub／飞书绑定的远端来源。只有一个合法本机来源、操作者和 Thread 时自动选择；多项时分别传 `--superagent-source`、`--superagent-actor`、`--superagent-thread`。选择参数只允许随提交使用，不扩大原白名单。正文保留原文，`/goal` 等字面内容不会变成宿主命令。
 

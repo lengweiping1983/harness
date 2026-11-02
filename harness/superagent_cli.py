@@ -29,7 +29,7 @@ def handle(args, parser):
         if args.superagent_once or local or any(value is not None for value in selectors.values()):
             parser.error(tr('superagent.cli.config_required'))
         return None
-    if ((local and args.superagent_once)
+    if ((args.superagent_status and args.superagent_once)
             or args.superagent_submit is None and any(value is not None for value in selectors.values())):
         parser.error(tr('superagent.cli.conflict'))
     if (args.prompt or args.ui or args.share or args.status or args.list_sessions or args.cwd or args.model
@@ -41,10 +41,14 @@ def handle(args, parser):
     try:
         if local:
             from .app.superagent_local import read_status, submit_local
-            result = (read_status(Path(args.superagent)) if args.superagent_status else
-                      submit_local(Path(args.superagent), args.superagent_submit, source_id=selectors['source'],
-                                   actor_id=selectors['actor'], thread_id=selectors['thread'], request_id=selectors['request-id']))
+            if args.superagent_status:
+                result = read_status(Path(args.superagent))
+            else:
+                result = submit_local(Path(args.superagent), args.superagent_submit, source_id=selectors['source'],
+                                      actor_id=selectors['actor'], thread_id=selectors['thread'], request_id=selectors['request-id'])
             print(json.dumps(result, ensure_ascii=False, indent=2))
+            if args.superagent_submit is not None and args.superagent_once:
+                return asyncio.run(run(Path(args.superagent), once=True))
             return 0
         return asyncio.run(run(Path(args.superagent), once=args.superagent_once))
     except KeyboardInterrupt:

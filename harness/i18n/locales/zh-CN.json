@@ -1,6 +1,6 @@
 {
   "superagent.status-unavailable": "尚无 Superagent 状态快照。请启动配置的运行器以处理已入队请求。",
-  "superagent.cli.submit": "提交一个可信本机目标，不启动模型宿主。",
+  "superagent.cli.submit": "提交一个可信本机目标；加上 --superagent-once 可立即处理。",
   "superagent.cli.status": "读取最后一次状态快照，不启动运行器。",
   "superagent.cli.source": "选择已授权的本机来源；只有一项时可省略。",
   "superagent.cli.actor": "选择已授权的操作者；只有一项时可省略。",

@@ -100,6 +100,26 @@ class SuperagentLocalTests(unittest.TestCase):
                                    '--superagent-request-id', 'cli']), 0)
         self.assertTrue(json.loads(output.getvalue())['queued'])
 
+    def test_cli_submission_can_run_one_batch_without_a_second_command(self):
+        from unittest.mock import AsyncMock
+        with patch('harness.app.superagent_service.Harness', side_effect=AssertionError('提交阶段不应构造宿主')), \
+                patch('harness.superagent_cli.run', new=AsyncMock(return_value=0)), \
+                redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(['--superagent', str(self.path), '--superagent-submit', 'Inspect the project',
+                                   '--superagent-request-id', 'one-shot', '--superagent-once']), 0)
+        self.assertTrue(json.loads(output.getvalue())['queued'])
+
+    def test_status_cannot_start_a_model_run(self):
+        from unittest.mock import AsyncMock
+        directory = self.root / 'state'
+        directory.mkdir()
+        (directory / 'status.json').write_text(json.dumps({'instance_id': 'local-instance', 'runtime_state': 'stopped'}), encoding='utf-8')
+        with redirect_stderr(io.StringIO()), redirect_stdout(io.StringIO()), patch('harness.superagent_cli.run', new=AsyncMock()) as run:
+            with self.assertRaises(SystemExit) as caught:
+                main(['--superagent', str(self.path), '--superagent-status', '--superagent-once'])
+        self.assertEqual(caught.exception.code, 2)
+        run.assert_not_awaited()
+
     def test_auxiliary_modes_reject_missing_config_and_conflicting_actions(self):
         cases = [ ['--superagent-submit', 'goal'], ['--superagent-status'], ['--superagent-source', 'local'],
                   ['--superagent', str(self.path), '--superagent-status', '--superagent-once'],

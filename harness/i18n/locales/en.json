@@ -1,6 +1,6 @@
 {
   "superagent.status-unavailable": "No Superagent status snapshot exists yet. Start the configured runtime to process queued requests.",
-  "superagent.cli.submit": "Queue one trusted local objective without starting a model host.",
+  "superagent.cli.submit": "Queue one trusted local objective; add --superagent-once to process it immediately.",
   "superagent.cli.status": "Read the last status snapshot without starting the runtime.",
   "superagent.cli.source": "Choose an authorized local source; omitted when exactly one is available.",
   "superagent.cli.actor": "Choose an authorized actor; omitted when exactly one is available.",
