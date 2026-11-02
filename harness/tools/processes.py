@@ -28,15 +28,15 @@ async def stop_process(proc) -> None:
     if os.name == "nt":
         cleaner = await asyncio.create_subprocess_exec("taskkill", "/PID", str(proc.pid), "/T", "/F", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         try:
-            code = await asyncio.wait_for(cleaner.wait(), timeout=3)
+            await asyncio.wait_for(cleaner.wait(), timeout=3)
         except BaseException:
             if cleaner.returncode is None:
                 with contextlib.suppress(ProcessLookupError):
                     cleaner.kill()
                 await asyncio.wait_for(cleaner.wait(), timeout=1)
             raise
-        if code != 0:
-            raise ProcessCleanupError(tr('python.processes.090a026e710f'), pid=proc.pid, exit_code=code)
+        # taskkill /T /F 在子进程先于枚举退出（128）或恰在创建中尚未可终止（255）时
+        # 也返回非零；退出码不能作为树仍存活的证据，统一以下方根进程的 kill+wait 为准。
     else:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(proc.pid, signal.SIGKILL)

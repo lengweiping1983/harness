@@ -149,7 +149,10 @@ class WindowsShellRouteTests(unittest.IsolatedAsyncioTestCase):
                         self.assertFalse((root / 'unexpected.txt').exists())
 
     async def test_fallback_timeout_cleans_command_tree(self):
-        with tempfile.TemporaryDirectory(prefix='harness timeout ') as folder:
+        # 手动清理代替 with：命令树已确认终止后，被杀进程的工作目录句柄仍可能有
+        # 毫秒级释放滞后；限时重试避免与操作系统收尾竞态误报失败。
+        folder = tempfile.mkdtemp(prefix='harness timeout ')
+        try:
             script = Path(folder) / 'wait.py'
             script.write_text('import time; time.sleep(30)', encoding='utf-8')
             for route in ('bash', 'hook'):
@@ -157,3 +160,13 @@ class WindowsShellRouteTests(unittest.IsolatedAsyncioTestCase):
                     result = await self.invoke(route, False, folder,
                                                f'"{sys.executable}" "{script}"', timeout=.5)
                     self.assertTrue(result['timed_out'], result)
+        finally:
+            import shutil
+            for attempt in range(6):
+                try:
+                    shutil.rmtree(folder)
+                    break
+                except PermissionError:
+                    if attempt == 5:
+                        raise
+                    await asyncio.sleep(.25 * (attempt + 1))

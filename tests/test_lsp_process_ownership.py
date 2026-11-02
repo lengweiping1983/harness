@@ -1,5 +1,6 @@
 """LSP启动与关闭共用进程归属，取消不遗留所属子进程。"""
 import asyncio
+import contextlib
 import sys
 import unittest
 from types import SimpleNamespace
@@ -102,5 +103,8 @@ class LspProcessOwnershipTests(unittest.IsolatedAsyncioTestCase):
         finally:
             if client._proc.returncode is None:
                 client._proc.kill()
-            await client._proc.communicate()
+            # 冻结在启动阶段的子进程可能对 kill 无响应，管道 read 永不 EOF；
+            # 有界等待把这类环境级冻结转成快速失败，而不是无限挂死测试套件。
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(client._proc.communicate(), 10)
             client._proc._transport.close()

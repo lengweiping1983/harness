@@ -19,7 +19,9 @@ class RalphReportBoundsTests(unittest.TestCase):
 
     def test_incomplete_nested_report_finishes_within_external_deadline(self):
         script = "from harness.tools.builtin.ralph_tools import _extract_json_object; assert _extract_json_object('{' * 60000) is None"
-        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=3)
+        # 外部期限只需约束解析本身（本机实测约 0.15s）；解释器启动 + harness 导入在慢机器
+        # 上可达 2~3s，并行测试负载下更久，因此预算必须覆盖导入开销才不误报。
+        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_excessive_json_nesting_is_a_rejected_report_not_a_recursion_error(self):

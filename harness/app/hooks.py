@@ -818,6 +818,22 @@ class ProjectHooks:
         # Shell 可能已经退出。过早回收首进程会丢失取消边界，
         # 并可能导致其 PID 被复用。
         supervisor = "import os,pathlib,subprocess,sys,time,json\n" + WINDOWS_UTF8_SETUP + """
+if sys.platform == 'win32':
+    # 先把本监督进程放进 KILL_ON_JOB_CLOSE 的 Job，再启动命令：后代自创建起即属于
+    # 该 Job，避免“先启动后挂靠”与中间壳层提前退出的竞态；监督进程被回收时 Job
+    # 句柄关闭，后代（即使已在进程树上被重新挂靠）也一并终止，不遗留持有标准输入
+    # 文件与工作目录的孤儿子进程。
+    import ctypes
+    from ctypes import wintypes as wt
+    kernel = ctypes.windll.kernel32
+    job = kernel.CreateJobObjectW(None, None)
+    # JOBOBJECT_EXTENDED_LIMIT_INFORMATION；LimitFlags 位于偏移 16
+    limits = ctypes.create_string_buffer(144)
+    ctypes.cast(ctypes.byref(limits, 16), ctypes.POINTER(wt.DWORD)).contents.value = 0x2000  # KILL_ON_JOB_CLOSE
+    if not (job and kernel.SetInformationJobObject(job, 9, limits, 144)
+            and kernel.AssignProcessToJobObject(job, kernel.GetCurrentProcess())):
+        kernel.CloseHandle(job)
+        job = None
 with open(sys.argv[2], 'rb') as source:
     child = subprocess.Popen(sys.argv[1], shell=sys.platform != 'win32',
                              executable=sys.argv[4] or None, stdin=source)

@@ -56,6 +56,20 @@ with socket.create_connection(('127.0.0.1', int(sys.argv[1]))) as channel:
 '''
 
 
+def minimal_environment():
+    """清空宿主环境以验证工作进程的最小环境构造。
+
+    宿主审计沙箱在进程创建时注入 ``LSBOX_*`` / ``SANDBOX_*`` 变量，其进程创建钩子
+    要求这些变量存在于**父进程的真实环境**中；若连它们一并清空，任何子进程都会在
+    执行任何代码之前被钩子终止（退出码 1、无 stderr），工作进程自身无法防御。
+    因此只保留沙箱注入的审计变量，PATH/PYTHONPATH/USERPROFILE 等仍被清空；
+    在无注入的平台上等价于 ``patch.dict(os.environ, {}, clear=True)``。
+    """
+    preserved = {key: value for key, value in os.environ.items()
+                 if key.startswith(('LSBOX_', 'SANDBOX_'))}
+    return patch.dict(os.environ, preserved, clear=True)
+
+
 class FixtureWorker(SemanticWorker):
     def __init__(self, root, *, slow=False):
         super().__init__(root / 'models')
@@ -237,7 +251,7 @@ class SemanticWorkerTests(unittest.IsolatedAsyncioTestCase):
         worker = FixtureWorker(root)
         self.addAsyncCleanup(worker.aclose)
         relative = os.path.relpath(root, Path.cwd())
-        with patch.dict(os.environ, {}, clear=True):
+        with minimal_environment():
             result = await worker.search(self.store, relative, 'natural question')
         self.assertEqual(Path(result['cwd']), root.resolve())
         self.assertEqual(Path(result['path']), self.store.path(root))
@@ -248,8 +262,7 @@ class SemanticWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(worker.aclose)
         worker._argv = lambda port: [sys.executable, '-c', 'import os;os._exit(23)']
         for language in ('en', 'zh-CN', 'en'):
-            with self.subTest(language=language), current_language.set(language), \
-                 patch.dict(os.environ, {}, clear=True):
+            with self.subTest(language=language), current_language.set(language), minimal_environment():
                 with self.assertRaises(HarnessError) as error:
                     await asyncio.wait_for(worker.search(self.store, self.root, 'natural question'), 10)
                 self.assertEqual(error.exception.code, 'memory/semantic-worker')
