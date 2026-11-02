@@ -34,11 +34,16 @@ class DiagnosticTestResult(unittest.TextTestResult):
         super().startTest(test)
         faulthandler.dump_traceback_later(self.traceback_timeout, repeat=True, file=self.stream)
 
-    def stopTest(self, test):
+    def stopTestRun(self):
         try:
             faulthandler.cancel_dump_traceback_later()
         finally:
-            super().stopTest(test)
+            super().stopTestRun()
+
+    def addSkip(self, test, reason):
+        super().addSkip(test, reason)
+        self.stream.writeln(f'\nPython 跳过：{test.id()}：{reason}')
+        self.stream.flush()
 
 
 def positive_seconds(value: str) -> float:

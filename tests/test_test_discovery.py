@@ -51,9 +51,36 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(len(result.failures), 1)
         self.assertIn('original failure', result.failures[0][1])
         self.assertEqual(diagnostic.dump_traceback_later.call_count, 2)
-        self.assertEqual(diagnostic.cancel_dump_traceback_later.call_count, 2)
+        self.assertEqual(diagnostic.cancel_dump_traceback_later.call_count, 1)
         self.assertEqual(diagnostic.dump_traceback_later.call_args.args, (.5,))
         self.assertTrue(diagnostic.dump_traceback_later.call_args.kwargs['repeat'])
+
+    def test_diagnostic_timer_covers_async_runner_executor_shutdown(self):
+        """stopTest 后的异步运行器关闭仍受诊断监督，不能留下观察盲区。"""
+        script = textwrap.dedent('''
+            import asyncio, threading, time, unittest
+            from functools import partial
+            from scripts.run_python_tests import DiagnosticTestResult
+            class Fixture(unittest.IsolatedAsyncioTestCase):
+                async def test_executor(self):
+                    entered = threading.Event()
+                    def owned_thread():
+                        entered.set()
+                        time.sleep(.3)
+                    asyncio.get_running_loop().run_in_executor(None, owned_thread)
+                    assert await asyncio.to_thread(entered.wait, 1)
+            result = unittest.TextTestRunner(resultclass=partial(
+                DiagnosticTestResult, traceback_timeout=.05)).run(
+                unittest.defaultTestLoader.loadTestsFromTestCase(Fixture))
+            raise SystemExit(0 if result.wasSuccessful() else 1)
+        ''')
+        result = subprocess.run([sys.executable, '-X', 'utf8', '-c', script],
+                                capture_output=True, timeout=10)
+        diagnostic = result.stderr.decode('utf-8')
+        self.assertEqual(result.returncode, 0, diagnostic)
+        self.assertIn('Timeout (', diagnostic)
+        self.assertIn('in owned_thread', diagnostic)
+        self.assertIn('Ran 1 test', diagnostic)
 
     def test_diagnostic_interval_rejects_nonpositive_and_nonfinite_values(self):
         import argparse

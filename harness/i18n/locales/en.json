@@ -8237,6 +8237,8 @@
   "ui.newConversation.projectSettings": "Project and checkout",
   "ui.newConversation.suggestions": "Task ideas",
   "ui.newConversation.registeredProjects": "Added projects",
+  "process.stdin.unavailable": "The owned process has no input pipe.",
+  "process.stdin.closed": "The owned process input pipe closed before the input was complete.",
   "ui.newConversation.useProject": "Use this project",
   "ui.newConversation.refresh": "Refresh project options",
   "ui.newConversation.gitDisabled": "Git features are disabled. The conversation can use this local directory.",

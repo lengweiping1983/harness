@@ -1,5 +1,7 @@
 """验证所属进程等待的退避、超时和整组退出边界。"""
 import asyncio
+import hashlib
+import io
 import os
 import sys
 import threading
@@ -7,7 +9,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from harness.tools.owned_process import PosixGroupProcess, spawn_owned
+from harness.core.language import current_language
+from harness.i18n import tr
+from harness.tools.owned_process import OwnedProcess, PosixGroupProcess, spawn_owned
 from harness.tools.windows_job import WindowsJobProcess
 from harness.tools.processes import ProcessCleanupError
 
@@ -103,9 +107,52 @@ class PollingTests(unittest.TestCase):
             thread.join(3)
 
 
+class OwnedInputLanguageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_input_errors_follow_runtime_language_including_the_writer_thread(self):
+        """同一实例切换语言，分别核对未提供管道和写入线程的提前关闭。"""
+        class ClosedWriter(io.BytesIO):
+            def write(self, value):
+                return 0
+        native = SimpleNamespace(pid=42, stdin=None, stdout=io.BytesIO(), stderr=io.BytesIO(),
+                                 active_count=lambda: 0, root_code=lambda: 0)
+        native.close = lambda: [stream.close() for stream in (native.stdin, native.stdout, native.stderr)
+                               if stream is not None]
+        process = OwnedProcess(native)
+        try:
+            for language in ('en', 'zh-CN', 'en'):
+                with self.subTest(language=language), current_language.set(language):
+                    native.stdin = None
+                    with self.assertRaises(RuntimeError) as missing:
+                        await process.write_input(b'fixture')
+                    self.assertEqual(str(missing.exception), tr('process.stdin.unavailable'))
+                    native.stdin = ClosedWriter()
+                    with self.assertRaises(BrokenPipeError) as closed:
+                        await process.write_input(b'fixture')
+                    self.assertEqual(str(closed.exception), tr('process.stdin.closed'))
+                    self.assertTrue(native.stdin.closed)
+        finally:
+            process.close()
+
+
 @unittest.skipUnless(os.name == 'nt' or sys.platform == 'darwin' or sys.platform.startswith('linux'),
                      '需要支持的所属进程平台')
 class NativePollingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_anonymous_input_is_fully_written_drained_and_closed(self):
+        """超过系统管道缓冲区的输入并发排空，不能阻塞所属停止执行器。"""
+        payload = ('输入原文\n' * 32768).encode('utf-8')
+        script = 'import hashlib,sys;sys.stdout.buffer.write(hashlib.sha256(sys.stdin.buffer.read()).digest())'
+        process = await spawn_owned([sys.executable, '-X', 'utf8', '-c', script],
+                                    cwd=os.getcwd(), env=dict(os.environ), stdin=True)
+        try:
+            result = await asyncio.wait_for(asyncio.gather(process.write_input(payload),
+                process.stdout.read(4096), process.stderr.read(4096), process.wait()), 10)
+            self.assertEqual(result, [None, hashlib.sha256(payload).digest(), b'', 0])
+            self.assertTrue(process.cleanup_confirmed)
+            self.assertTrue(process.native.stdin.closed)
+        finally:
+            await process.stop_owned()
+            process.close()
+
     async def test_pending_native_wait_yields_and_stop_reclaims_process(self):
         process = await spawn_owned([sys.executable, '-c', 'import time; time.sleep(30)'],
                                     cwd=os.getcwd(), env=dict(os.environ))

@@ -8,7 +8,7 @@ import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 
-from .owned_process import AsyncPipe, dispose
+from .owned_process import AsyncPipe, create_owned, dispose
 from .windows_conpty import WindowsConPTYProcess
 from ..core.cleanup import join_cleanup
 
@@ -100,19 +100,4 @@ class ConPTYProcess:
 
 async def spawn_conpty(argv: list[str], *, cwd: str, env: dict[str, str]):
     """取消创建时也等待归属建立并清理，不留下未交付的终端。"""
-    future = asyncio.create_task(asyncio.to_thread(
-        lambda: ConPTYProcess(WindowsConPTYProcess(argv, cwd=cwd, env=env))))
-    cancelled = False
-    while True:
-        try:
-            process = await asyncio.shield(future)
-            break
-        except asyncio.CancelledError:
-            cancelled = True
-    if cancelled:
-        async def finish():
-            await process.stop_owned()
-            process.close()
-        await join_cleanup(asyncio.create_task(finish()))
-        raise asyncio.CancelledError
-    return process
+    return await create_owned(lambda: ConPTYProcess(WindowsConPTYProcess(argv, cwd=cwd, env=env)))

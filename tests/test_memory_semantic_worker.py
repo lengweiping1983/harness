@@ -242,6 +242,23 @@ class SemanticWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Path(result['cwd']), root.resolve())
         self.assertEqual(Path(result['path']), self.store.path(root))
 
+    async def test_exit_without_stderr_keeps_native_status_and_interpreter_identity(self):
+        """原生启动失败没有 stderr 时，仍保留停止前的真实退出码和解释器。"""
+        worker = FixtureWorker(self.root)
+        self.addAsyncCleanup(worker.aclose)
+        worker._argv = lambda port: [sys.executable, '-c', 'import os;os._exit(23)']
+        for language in ('en', 'zh-CN', 'en'):
+            with self.subTest(language=language), current_language.set(language), \
+                 patch.dict(os.environ, {}, clear=True):
+                with self.assertRaises(HarnessError) as error:
+                    await asyncio.wait_for(worker.search(self.store, self.root, 'natural question'), 10)
+                self.assertEqual(error.exception.code, 'memory/semantic-worker')
+                self.assertEqual(error.exception.details['exit_code'], 23)
+                self.assertEqual(error.exception.details['exit_code_hex'], '0x00000017')
+                self.assertEqual(error.exception.details['executable'], sys.executable)
+                self.assertGreater(error.exception.details['pid'], 0)
+                self.assertIsNone(worker._process)
+
     async def test_invalid_authentication_and_oversized_response_are_reaped(self):
         worker = FixtureWorker(self.root)
         self.addAsyncCleanup(worker.aclose)

@@ -79,11 +79,12 @@ def kernel_api():
 
 class WindowsJobProcess:
     """二进制管道进程；整个 Job 为空才确认结束，根进程退出不释放归属。"""
-    def __init__(self, argv: list[str], *, cwd: str, env: dict[str, str], shell: bool = False):
+    def __init__(self, argv: list[str], *, cwd: str, env: dict[str, str], shell: bool = False,
+                 stdin: bool = False):
         import msvcrt
         self.kernel = kernel_api()
         self.job = self.process = None
-        self.stdout = self.stderr = None
+        self.stdin = self.stdout = self.stderr = None
         self._code = None
         self._closed = False
         self._confirmed = False
@@ -137,15 +138,24 @@ class WindowsJobProcess:
                         True, 0x08000000 | 0x80000 | 0x400, environment, cwd, ctypes.byref(info), ctypes.byref(process_info)))
             self.process, self.pid = process_info.process, process_info.pid
             self.kernel.CloseHandle(process_info.thread)
-            for child in (in_read, out_write, err_write, in_write):
+            for child in (in_read, out_write, err_write):
                 self.kernel.CloseHandle(child)
                 handles.remove(child)
-            # 没有交互输入：关闭 stdin 写端让命令读到 EOF，与旧 shell 工具一致。
-            def file(handle):
-                fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+            def file(handle, *, writable=False):
+                fd = msvcrt.open_osfhandle(handle, (os.O_WRONLY if writable else os.O_RDONLY) | os.O_BINARY)
                 handles.remove(handle)
-                return os.fdopen(fd, 'rb', buffering=0)
+                try:
+                    return os.fdopen(fd, 'wb' if writable else 'rb', buffering=0)
+                except BaseException:
+                    os.close(fd)
+                    raise
             self.stdout, self.stderr = file(out_read), file(err_read)
+            if stdin:
+                self.stdin = file(in_write, writable=True)
+            else:
+                # 普通命令没有输入；显式读取目录时才保留匿名管道写端。
+                self.kernel.CloseHandle(in_write)
+                handles.remove(in_write)
         except BaseException:
             for handle in handles:
                 self.kernel.CloseHandle(handle)
@@ -226,7 +236,7 @@ class WindowsJobProcess:
                 self.kernel.CloseHandle(self.job)
             if self.process:
                 self.kernel.CloseHandle(self.process)
-            for stream in (self.stdout, self.stderr):
+            for stream in (self.stdin, self.stdout, self.stderr):
                 if stream is not None:
                     stream.close()
             self._closed = True

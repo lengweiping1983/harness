@@ -21,6 +21,7 @@ from ...core.cleanup import join_cleanup, raise_cleanup_errors
 from ...llm.types import TextBlock
 from ...llm.catalog_fetch import read_catalog
 from ..registry import ToolDefinition, ToolRunContext, ToolResult
+from ..processes import ProcessCleanupError
 
 #: 本 harness 唯一注册的 provider id（与 OpenRouter 端点一致）
 PROVIDER_ID = "openrouter"
@@ -160,6 +161,8 @@ def build_list_subagent_models_tool(
                     raise_cleanup_errors([cancelled, failure])
                 raise
             catalog_error = ""
+        except ProcessCleanupError:
+            raise
         except Exception as exc:  # 网络/鉴权/解析问题都降级为提示
             catalog = []
             catalog_error = f"{type(exc).__name__}: {exc}"

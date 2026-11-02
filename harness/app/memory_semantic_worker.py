@@ -57,6 +57,7 @@ class SemanticWorker:
         self._tail = bytearray()
         self._closed = False
         self._active = None
+        self._executable = None
 
     async def _drain(self, stream):
         while data := await stream.read(4096):
@@ -66,10 +67,14 @@ class SemanticWorker:
     def _argv(self, port):
         return [sys.executable, '-m', __name__, str(port), str(self.cache_dir)]
 
-    def _failure(self):
+    def _failure(self, *, exit_code=None, pid=None):
         detail = diagnostic_text(self._tail)[-2000:]
+        diagnostic = {}
+        if self._executable is not None:
+            diagnostic.update(executable=self._executable, pid=pid, exit_code=exit_code,
+                              exit_code_hex=f'0x{exit_code & 0xffffffff:08X}' if exit_code is not None else None)
         return HarnessError(tr('python.memory.semantic.exited', detail=detail),
-                            code='memory/semantic-worker')
+                            code='memory/semantic-worker', **diagnostic)
 
     async def _start(self):
         token = secrets.token_hex(32)
@@ -94,7 +99,9 @@ class SemanticWorker:
             listener.bind(('127.0.0.1', 0))
             listener.listen(1)
             listener.setblocking(False)
-            self._process = await spawn_owned(self._argv(listener.getsockname()[1]), cwd=root, env=env)
+            argv = self._argv(listener.getsockname()[1])
+            self._executable = argv[0]
+            self._process = await spawn_owned(argv, cwd=root, env=env)
             if self._closed:
                 raise RuntimeError(tr('python.memory.semantic.closed'))
             self._drains = [asyncio.create_task(self._drain(stream))
@@ -179,8 +186,13 @@ class SemanticWorker:
                     raise ValueError(tr('python.memory.semantic.result'))
             except (_WorkerExited, asyncio.IncompleteReadError, ConnectionError):
                 # EOF 和进程退出可能先于管道读取完成，不能提前冻结空白诊断。
-                await join_cleanup(asyncio.create_task(self._dispose()))
-                raise self._failure() from None
+                process = self._process
+                try:
+                    # 停止前查询原根进程，不能把主动回收的退出码冒充崩溃原因。
+                    exit_code = process.native.root_code() if process is not None else None
+                finally:
+                    await join_cleanup(asyncio.create_task(self._dispose()))
+                raise self._failure(exit_code=exit_code, pid=process.pid if process is not None else None) from None
             except BaseException:
                 await join_cleanup(asyncio.create_task(self._dispose()))
                 raise

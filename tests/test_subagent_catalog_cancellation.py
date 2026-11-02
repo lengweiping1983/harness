@@ -6,9 +6,20 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from harness.tools.builtin.subagent_model_tools import build_list_subagent_models_tool
+from harness.tools.processes import ProcessCleanupError
 
 
 class CatalogCancellationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unconfirmed_process_cleanup_is_not_a_normal_catalog_fallback(self):
+        """回收未确认须阻止继续执行，不能返回本地模型降级结果。"""
+        failure = ProcessCleanupError('fixture process still owned')
+        tool = build_list_subagent_models_tool(base_url='https://fixture.invalid', model='fixture/model')
+        with patch('harness.tools.builtin.subagent_model_tools.read_catalog', side_effect=failure) as read:
+            with self.assertRaises(ProcessCleanupError) as caught:
+                await tool.execute({'provider': 'openrouter'}, SimpleNamespace())
+        self.assertIs(caught.exception, failure)
+        read.assert_called_once()
+
     async def test_repeated_cancellation_waits_for_original_response_close(self):
         entered, release, closed = threading.Event(), threading.Event(), threading.Event()
         class Response:

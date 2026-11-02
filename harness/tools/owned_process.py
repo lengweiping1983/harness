@@ -5,6 +5,7 @@ from harness.i18n import tr
 
 import asyncio
 import contextlib
+import contextvars
 import os
 import signal
 import subprocess
@@ -22,11 +23,13 @@ from ..core.cleanup import join_cleanup
 
 class PosixGroupProcess:
     """在 waitid(WNOWAIT) 后保留组长，防止子进程存活期间复用进程组 ID。"""
-    def __init__(self, argv: list[str], *, cwd: str, env: dict[str, str], shell: bool = False):
+    def __init__(self, argv: list[str], *, cwd: str, env: dict[str, str], shell: bool = False,
+                 stdin: bool = False):
         self._proc = subprocess.Popen(argv[0] if shell else argv, cwd=cwd, env=env, shell=shell,
-                                      stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                      stdin=subprocess.PIPE if stdin else subprocess.DEVNULL, stdout=subprocess.PIPE,
                                       stderr=subprocess.PIPE, start_new_session=True, bufsize=0)
         self.pid, self.stdout, self.stderr = self._proc.pid, self._proc.stdout, self._proc.stderr
+        self.stdin = self._proc.stdin
         self._code = None
         self._closed = False
         self._finished = False
@@ -84,8 +87,9 @@ class PosixGroupProcess:
             self.stop()
         if self._proc.returncode is None:
             self.wait(5)
-        for stream in (self.stdout, self.stderr):
-            stream.close()
+        for stream in (self.stdin, self.stdout, self.stderr):
+            if stream is not None:
+                stream.close()
         self._closed = True
 
 
@@ -175,6 +179,22 @@ class OwnedProcess:
                 return
             await join_cleanup(asyncio.wrap_future(self.executor.submit(self.native.stop)))
 
+    async def write_input(self, value: bytes) -> None:
+        """写完一次匿名输入后关闭；调用方须持有等待直到所属进程收尾。"""
+        stream = getattr(self.native, 'stdin', None)
+        if stream is None:
+            raise RuntimeError(tr('process.stdin.unavailable'))
+        def write():
+            with stream:
+                pending = memoryview(value)
+                while pending:
+                    size = stream.write(pending)
+                    if not size:
+                        raise BrokenPipeError(tr('process.stdin.closed'))
+                    pending = pending[size:]
+        # 输入可能等待子进程读取，不能占满负责停止和输出的专属执行器。
+        await asyncio.to_thread(write)
+
     def close(self) -> None:
         if not self._finalizer.alive:
             return
@@ -183,7 +203,32 @@ class OwnedProcess:
         self._finalizer()
 
 
-async def spawn_owned(argv: list[str], *, cwd: str, env: dict[str, str], shell: bool = False) -> OwnedProcess:
+async def create_owned(factory):
+    """创建等待不注册为可被循环整体取消的子任务，保留迟到句柄归属。"""
+    context = contextvars.copy_context()
+    future = asyncio.get_running_loop().run_in_executor(None, context.run, factory)
+    cancelled = False
+    while True:
+        try:
+            process = await asyncio.shield(future)
+            break
+        except asyncio.CancelledError:
+            cancelled = True
+            if future.done():
+                # 创建本身取消时传播原取消，不能在已取消结果上无限重试。
+                process = future.result()
+                break
+    if cancelled:
+        async def finish():
+            await process.stop_owned()
+            process.close()
+        await join_cleanup(asyncio.create_task(finish()))
+        raise asyncio.CancelledError
+    return process
+
+
+async def spawn_owned(argv: list[str], *, cwd: str, env: dict[str, str], shell: bool = False,
+                      stdin: bool = False) -> OwnedProcess:
     if os.name == 'nt':
         from .windows_job import WindowsJobProcess
         factory = WindowsJobProcess
@@ -196,19 +241,6 @@ async def spawn_owned(argv: list[str], *, cwd: str, env: dict[str, str], shell: 
         raise ProcessCleanupError(tr('python.owned_process.32be47cfe23e'), platform=sys.platform)
     # 归属和子进程创建均在一个不可中断的同步段；取消时等创建收敛再清理。
     def create():
-        return OwnedProcess(factory(argv, cwd=cwd, env=env, shell=shell))
-    future = asyncio.create_task(asyncio.to_thread(create))
-    cancelled = False
-    while True:
-        try:
-            process = await asyncio.shield(future)
-            break
-        except asyncio.CancelledError:
-            cancelled = True
-    if cancelled:
-        async def finish():
-            await process.stop_owned()
-            process.close()
-        await join_cleanup(asyncio.create_task(finish()))
-        raise asyncio.CancelledError
-    return process
+        options = {'stdin': True} if stdin else {}
+        return OwnedProcess(factory(argv, cwd=cwd, env=env, shell=shell, **options))
+    return await create_owned(create)

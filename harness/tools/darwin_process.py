@@ -26,7 +26,7 @@ class _SigInfo(ctypes.Structure):
 class DarwinGroupProcess(PosixGroupProcess):
     """检查进程组成员；只在活动成员全部退出后回收组长。"""
 
-    def __init__(self, argv, *, cwd, env, shell=False):
+    def __init__(self, argv, *, cwd, env, shell=False, stdin=False):
         try:
             self._lib = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
             self._lib.proc_listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_int]
@@ -40,7 +40,7 @@ class DarwinGroupProcess(PosixGroupProcess):
         ctypes.set_errno(0)
         if self._lib.proc_listpids(2, os.getpgrp(), None, 0) <= 0:
             raise ProcessCleanupError(tr('process.darwin.unavailable'), native_errno=ctypes.get_errno())
-        super().__init__(argv, cwd=cwd, env=env, shell=shell)
+        super().__init__(argv, cwd=cwd, env=env, shell=shell, stdin=stdin)
 
     def root_code(self):
         with self._lock:
