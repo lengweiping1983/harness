@@ -354,6 +354,8 @@ MCP 服务及隧道准备的自有错误用 `McpServiceError` 保存资源键和
 
 独立执行器配置支持 `language: auto | zh-CN | en`（默认 auto），MCP 初始化说明、目录与调用处理在服务创建时绑定解析后的配置语言，异步任务继承该上下文，处理结束恢复外层上下文。`tests/test_executor_language_binding.py` 验证配置读写边界、初始化与两个协议入口。
 
+`tests/test_mcp_workspace_dependencies.py` 通过真实 HTTP MCP 初始化、工具目录和调用检查 `load_workspace_dependencies` 的只读声明、结构化回执及配置语言的英文→中文→英文消费；stdio 分支通过正式 CLI 子进程和官方客户端核对真实服务解释器与所选工作区。同一运行时覆盖唯一授权项目的无参数发现、多项目显式选择、对话身份与项目根变化、等待期间授权复核、OAuth `project.read`、技能启停、探测失败和取消后关闭等待。所有写入使用隔离目录，不启动项目命令。`tests/test_workspace_dependency_discovery.py` 核对内部同名工具按调用目录发现入口、包名与完整路径进入模型正文、服务解释器与项目依赖来源分别报告、非法参数和读取失败明确拒绝、链接只标记及 PATH 缓存隔离。原有探测缓存快照、包排序和线程取消回归继续保留；`tests/test_runtime_probe_ownership.py` 另核对版本探测使用临时目录、禁用 Corepack 下载及自动固定项目版本，并在进程树回收后释放目录。目录存在不作为依赖可用性验收。
+
 `tests/test_executor_file_language.py` 使用隔离项目验证执行器文件预检的双语错误及原件边界，覆盖重复路径、版本变化、旧/新文件超限、缺失删除目标和指纹文件超限。预检失败不得修改项目文件或提前创建备份，原错误码保持稳定。
 
 `tests/test_executor_storage_image_language.py` 在隔离数据库与图片字节上验证存储归属、检查点冲突、request_id 冲突和未知结果不重放；核对原记录不变及明确完成后的幂等回执。图片路径覆盖无效 URL、无效文件、扩展名/MIME 不符与有效 PNG 元信息，双语拒绝保持机器错误码，不启动下载连接。

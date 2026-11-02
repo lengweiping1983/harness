@@ -160,6 +160,32 @@ stdio 不接受 `--public-url`。服务按本机登记的 principal 和项目权
 
 工具副作用采用 `unknown`、`read`、`workspace_write`、`external_write`、`execute`。远程工具未声明时保持未知，不能按工具名称推断只读。
 
+### 工作区能力发现
+
+`load_workspace_dependencies` 通过 MCP 的工具目录公开，stdio 与 HTTP 共用同一执行入口；OAuth 调用要求 `project.read`。它不需要模型凭据，也不要求项目具有写入或命令权限。可在创建对话前调用：
+
+```json
+{"project_id": "app", "include_packages": true}
+```
+
+已有对话时可改传 `session_id`，不能同时传入两个选择参数。两者均省略时，仅自动选择当前身份唯一可访问的项目；无可访问项目或存在多个项目时返回 `execution/workspace-selection-required`，先用 `harness_context` 查看可访问目录。不能用工具参数指定任意 `cwd`，也不沿用上一次调用选择。对话选择继续核对所属身份、项目授权及原项目根。
+
+结果沿执行器统一回执放在 `data` 中，MCP 同时返回 JSON 正文及等价的 `structuredContent`：
+
+| 字段 | 含义 |
+|---|---|
+| `cwd` / `process_cwd` | 所选项目根／Harness 服务进程目录，二者分别报告，不修改进程工作目录 |
+| `python` | 服务解释器的路径、版本、实现、搜索路径；`source` 为 `harness_process` |
+| `node` / `executables` | 服务 PATH 中 Node 侧运行时的路径与版本／其他工具链、文档和媒体工具的已发现可执行文件路径 |
+| `workspace` | 项目根中已存在的常见依赖目录和依赖清单路径；链接以 `linked` 标记，不跟随链接或读取清单正文 |
+| `project` | 当前项目身份、名称、根、写入／命令／提交权限、验证项名称及已启用技能目录，与 `harness_context` 使用同一能力来源 |
+| `tools` / `execution_environment` | 当前注册的工具名／宿主执行环境声明；目录可见不代表获准执行所有操作 |
+| `runtime_scope` | 按服务语言说明探测来源和使用边界 |
+
+`include_packages` 只接受布尔值，默认 `true`，枚举服务解释器安装的 Python 包，稳定排序并有数量上限；`package_count` 表示总数，`packages_truncated` 表示清单是否截断。传入 `false` 不枚举包。项目中的 `.venv`、`venv`、`node_modules` 和依赖清单仅报告存在性，不自动激活环境、安装依赖、执行项目脚本，也不将服务包清单冒称项目环境的包清单。目录或可执行文件存在不能证明依赖可用，宿主执行环境声明不代替平台验收。
+
+运行时及包枚举复用短期缓存，每次返回隔离快照；PATH 或 Python 搜索路径变化后使用对应的新探测结果。工作区入口每次重新检查，不共享另一项目的目录结果。版本命令在所属临时目录中运行，并禁用 Corepack 下载和自动固定项目版本；原进程树回收后才释放该目录。探测在线程中执行；客户端中断不撤销已接受的探测，服务关闭仍等待原线程完成，不重新探测。读取失败返回明确错误，不把部分清单当作完整成功。
+
 ### 服务语言
 
 独立 MCP 执行器的 `language` 配置决定服务初始化及工具请求使用的语言，支持 auto、zh-CN、en；auto 按本机系统地区解析。该设置由本机配置提供，不能用模型工具参数改变。修改配置后需重新创建服务。授权、执行文案及托管入口使用同一配置语言；用户输入和第三方诊断保持原文。
