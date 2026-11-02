@@ -3,13 +3,18 @@ import asyncio
 import json
 
 from harness.i18n import tr
-from tests.web_fixture import FixtureTransport, main
+from tests.web_fixture import FixtureTransport, is_title_request, main
 
 
 class GoalModeTransport(FixtureTransport):
     async def post_stream(self, url, *, headers, body, timeout):
         """按当前用户请求运行等待、阻塞或带证据完成的目标。"""
         messages = json.loads(body)['messages']
+        # 标题请求复用原始用户消息，不能触发目标工具链。
+        if is_title_request(messages):
+            async for chunk in super().post_stream(url, headers=headers, body=body, timeout=timeout):
+                yield chunk
+            return
         user_index = max(index for index, message in enumerate(messages) if message['role'] == 'user')
         user = str(messages[user_index]['content'])
         if tr('python.goal_runtime.48cf5c7b3b57') in user:

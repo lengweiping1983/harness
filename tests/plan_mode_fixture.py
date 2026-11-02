@@ -3,13 +3,18 @@ import asyncio
 import json
 
 from harness.i18n import tr
-from tests.web_fixture import FixtureTransport, main
+from tests.web_fixture import FixtureTransport, is_title_request, main
 
 
 class PlanModeTransport(FixtureTransport):
     async def post_stream(self, url, *, headers, body, timeout):
         """普通消息直接应答；计划任务先澄清，再审阅，批准后应答。"""
         messages = json.loads(body)['messages']
+        # 标题请求复用原始用户消息，不能按计划任务处理，否则标题会带上计划工具调用。
+        if is_title_request(messages):
+            async for chunk in super().post_stream(url, headers=headers, body=body, timeout=timeout):
+                yield chunk
+            return
         user_index = max(index for index, message in enumerate(messages) if message['role'] == 'user')
         if 'plan fixture request' not in str(messages[user_index]['content']):
             async for chunk in super().post_stream(url, headers=headers, body=body, timeout=timeout):

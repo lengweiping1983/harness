@@ -2,13 +2,18 @@
 import asyncio
 import json
 
-from tests.web_fixture import FixtureTransport, main
+from tests.web_fixture import FixtureTransport, is_title_request, main
 
 
 class FileReviewTransport(FixtureTransport):
     async def post_stream(self, url, *, headers, body, timeout):
         """首步写入临时文件，随后结束回合供浏览器审阅。"""
         messages = json.loads(body)['messages']
+        # 标题请求不带工具上下文，交给基类回一个独立标题。
+        if is_title_request(messages):
+            async for chunk in super().post_stream(url, headers=headers, body=body, timeout=timeout):
+                yield chunk
+            return
         user_index = max(index for index, message in enumerate(messages) if message['role'] == 'user')
         calls = [call for message in messages[user_index + 1:] for call in message.get('tool_calls', [])]
         if calls:
