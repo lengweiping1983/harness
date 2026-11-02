@@ -21,6 +21,27 @@ from .translate import messages_to_wire
 from .request_limits import normalize_request
 
 
+# 原生供应商有时在 HTTP 200 的流中发送失败事件；这些短语表示上游线路
+# 的瞬时故障，不能因为外层状态码是 200 就把当前轮次判为永久失败。
+_TRANSIENT_FAILURE_HINTS = (
+    'idle timeout',
+    'temporarily unavailable',
+    'service unavailable',
+    'gateway timeout',
+    'overloaded',
+    'connection reset',
+    'connection aborted',
+)
+
+
+def _is_transient_failure(status: int, message: str) -> bool:
+    """按状态码及受控供应商短语判断流式失败是否可以重试。"""
+    if status in {408, 429} or status >= 500:
+        return True
+    lowered = message.casefold()
+    return any(hint in lowered for hint in _TRANSIENT_FAILURE_HINTS)
+
+
 @asynccontextmanager
 async def credential_guard(store, connection_id):
     """跨进程串行刷新同一接口；取消获取仍先回收已取得的锁。"""
@@ -114,7 +135,7 @@ async def bridge(request, *, commit=None, interact=None):
                     if secret:
                         message = message.replace(secret, '[redacted]')
                 raise LlmError(tr('models.request.failed', reason=message), code='llm/provider', status=status,
-                               transient=status == 429 or status >= 500)
+                               transient=_is_transient_failure(status, message))
             else:
                 yield value
         if await process.wait() != 0:

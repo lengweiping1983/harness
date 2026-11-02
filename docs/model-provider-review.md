@@ -87,6 +87,7 @@
 - OAuth 与 Bedrock 的变量动态导入在独立包内不可用；构建器将这些入口改为静态可打包导入。发行资源通过生成同步检查，wheel／sdist 回归核对桥接资源字节。
 - Responses 的空 session ID 不能作为 null 传给供应商库；桥接转换为缺省值。真实回环 HTTP 回归覆盖 Messages／Responses 文本、工具调用、用量及结束原因。
 - 部分输出后的认证错误不能自动重放；隔离错误注入核对只尝试一次，以及未输出时仅在当前接口轮换并明确报告耗尽。
+- 原生供应商桥接曾只按 HTTP 状态码判断瞬时故障，流已建立后以 200 返回 `Upstream idle timeout exceeded` 时会被标为永久失败，智能体因此以 `attempts=1` 结束本轮。`provider_runtime.bridge` 现在对有界的上游空闲超时、暂时不可用、过载和连接中断语义保留瞬时分类，再由接口 Key 池轮换；已交付内容仍不重放。`RuntimeBridgeTests.test_http_200_failure_event_classifies_idle_timeout_as_transient` 核对桥接错误分类，`RuntimeBridgeTests.test_http_200_upstream_idle_timeout_rotates_key` 核对第二把 Key 成功收尾。
 
 - 模型批量操作原先替换整个列表；现在仅追加缺少项，保留手工编辑和稳定身份。`providerConnections.test.ts` 核对去重、次序与容量，浏览器添加流程核对搜索空态、批量选择和删除取消。
 - 云环境认证模板原先包含空 Key；模板现在按实际认证类型创建 Key 列表，避免环境认证被无用字段拒绝。对应单测同时核对 API Key 模板仍为空值。

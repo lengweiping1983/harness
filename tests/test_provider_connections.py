@@ -169,6 +169,55 @@ class RuntimeBridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(attempts), 2)
             self.assertEqual(store.leases, {})
 
+    async def test_http_200_upstream_idle_timeout_rotates_key(self):
+        """HTTP 200 流内的上游空闲超时仍按瞬时故障切换接口 Key。"""
+        from unittest.mock import patch
+        from harness.core.errors import LlmError
+
+        attempts = []
+
+        async def responding(request, **kwargs):
+            attempts.append(request['credential']['key'])
+            if len(attempts) == 1:
+                raise LlmError('模型请求失败：Upstream idle timeout exceeded', code='llm/provider', status=200,
+                               transient=True)
+            yield {'type': 'event', 'event': {'kind': 'text', 'text': '完成'}}
+            yield {'type': 'event', 'event': {'kind': 'done', 'stop_reason': 'stop'}}
+
+        with tempfile.TemporaryDirectory() as root:
+            store = ProviderConnections(root)
+            store.save([provider_fixture()], store.revision)
+            adapter = OpenRouterAdapter('unused')
+            adapter.provider_connections = store
+            config = LlmCallConfig(model='harness/supplier/endpoint/model-a')
+            with patch('harness.llm.provider_runtime.bridge', responding):
+                events = [event async for event in adapter.stream([UserMessage('test')], config=config)]
+            self.assertEqual(attempts, ['fixture-first', 'fixture-second'])
+            self.assertEqual(''.join(event.text for event in events if event.kind == 'text'), '完成')
+            self.assertEqual(events[-1].kind, 'done')
+            self.assertEqual(store.leases, {})
+
+    async def test_http_200_failure_event_classifies_idle_timeout_as_transient(self):
+        """桥接收到 HTTP 200 失败事件时仍保留瞬时错误分类。"""
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, Mock, patch
+        from harness.core.errors import LlmError
+        from harness.llm.provider_runtime import bridge
+
+        failure = (json.dumps({'type': 'failure', 'status': 200,
+                               'message': 'Upstream idle timeout exceeded'}) + '\n').encode()
+        process = SimpleNamespace(
+            stdin=SimpleNamespace(write=Mock(), drain=AsyncMock()),
+            stdout=SimpleNamespace(readline=AsyncMock(side_effect=[failure, b''])),
+            wait=AsyncMock(return_value=0),
+        )
+        with patch('harness.llm.provider_runtime._start_process', AsyncMock(return_value=process)), \
+                patch('harness.llm.provider_runtime._stop_stream_process', AsyncMock()):
+            with self.assertRaises(LlmError) as caught:
+                _ = [value async for value in bridge({'operation': 'stream'})]
+        self.assertTrue(caught.exception.transient)
+        self.assertEqual(caught.exception.details['status'], 200)
+
     async def test_default_model_uses_provider_dispatch_without_explicit_call_config(self):
         from unittest.mock import patch
         requests = []
