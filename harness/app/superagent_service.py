@@ -27,6 +27,8 @@ from .superagent_workers import SuperagentWorkerProfile, SuperagentWorkers
 from .superagent_results import SuperagentResults
 from .superagent_mission_store import MissionStore, validate_autonomy
 from .superagent_missions import SuperagentMissions
+from .superagent_guidance import SuperagentGuidance
+from .superagent_guidance_files import GuidanceFiles
 from .superagent_github import SuperagentGitHub, github_credentials, validate_github
 from .superagent_feishu import SuperagentFeishu, feishu_credentials, validate_feishu
 
@@ -136,6 +138,7 @@ class SuperagentService:
         service.github = None
         service.feishu = None
         service.channels = []
+        service.guidance_files = None
         service.owner = asyncio.get_running_loop()
         try:
             try:
@@ -200,6 +203,9 @@ class SuperagentService:
                 service.router = SuperagentMissions(service.dispatcher, service.router_host,
                     session_id=session_id, worker_factory=service.factory, store=mission_store, reply_limits=reply_limits)
                 service.results = service.router.results
+                remote_sources = {spec[name]['source_id'] for name in ('github', 'feishu') if name in spec}
+                service.router.guidance = SuperagentGuidance(service.router, sources=set(spec['sources']) - remote_sources)
+                service.guidance_files = GuidanceFiles(service.root / 'guidance', service.router.guidance)
             else:
                 service.router = SuperagentRouter(service.dispatcher, service.router_host,
                     session_id=session_id, workers={}, worker_factory=service.factory)
@@ -338,6 +344,8 @@ class SuperagentService:
             channel.drain()
         self._scan()
         try:
+            if not self.closed and self.guidance_files is not None:
+                self.guidance_files.scan()
             await self.router.tick(include_status=False)
         except HarnessError as exc:
             if not self.closed or exc.code != 'superagent/closed':
@@ -347,15 +355,20 @@ class SuperagentService:
             self._draft_cursor = draft['seq']
         for _, channel in self.channels:
             await channel.tick()
+        if self.guidance_files is not None:
+            self.guidance_files.publish()
         status = {**self.router.status(), 'input_errors': self.file_errors,
                   'runtime_state': 'stopping' if self.closed else 'running',
-                  **{name:channel.status() for name, channel in self.channels}}
+                  **{name:channel.status() for name, channel in self.channels},
+                  **({'guidance_files': self.guidance_files.status()} if self.guidance_files is not None else {})}
         _atomic_write(self.root / 'status.json', json.dumps(status, ensure_ascii=False, indent=2))
         return status
 
     async def serve(self, stop: asyncio.Event, *, once=False):
         started = time.monotonic()
         scans = 0
+        if once and self.guidance_files is not None:
+            self.guidance_files.seen.clear()
         while not stop.is_set() and not self.closed:
             status = await self.tick()
             scans += 1
@@ -365,6 +378,8 @@ class SuperagentService:
             pending |= self.results.uncollected()
             pending |= bool(self.results.drafts(after=self._draft_cursor, limit=1))
             pending |= bool(self.inbox.events(after=status['cursor'], limit=1)['events'])
+            if self.guidance_files is not None:
+                pending |= self.guidance_files.unscanned or any(status['guidance']['states'].get(key, 0) for key in ('pending', 'submitting'))
             outgoing = [status[name]['outbound'] for name, _ in self.channels]
             pending |= any(status[name]['queued'] for name, _ in self.channels)
             pending |= any(counts.get(key,0) for counts in outgoing for key in ('pending','sending'))
@@ -373,7 +388,11 @@ class SuperagentService:
             if once and not active and any(batch['state'] == 'unknown' for batch in status['batches']):
                 return 2
             if once and covered and not active and not pending:
+                if self.guidance_files is not None:
+                    self.guidance_files.publish(final=True)
                 return 2 if (status['input_errors'] or status['inputs'].get('unknown') or status['inputs'].get('rejected')
+                    or self.guidance_files is not None and (status['guidance_files']['input_errors'] or
+                        any(status['guidance']['states'].get(key, 0) for key in ('unknown', 'rejected')))
                     or any(counts.get('unknown') for counts in outgoing)
                     or any(status['results'].get(key) for key in ('unknown','rejected'))
                     or any(batch['state'] in ('unknown','rejected') for batch in status['batches'])) else 0
@@ -393,6 +412,8 @@ class SuperagentService:
             return
         self.closed = True
         self.router.close()
+        if self.guidance_files is not None:
+            self.router.guidance.close()
         self.dispatcher.close()
         self.factory.stop()
         for _, channel in self.channels:
@@ -419,16 +440,25 @@ class SuperagentService:
                 await self._tick_task
             except BaseException as exc:
                 errors.append(exc)
+        if self.guidance_files is not None:
+            try:
+                await self.router.guidance.aclose()
+            except BaseException as exc:
+                if not any(exc is error for error in errors):
+                    errors.append(exc)
         for host in reversed(self.hosts):
             try:
                 await host.close()
             except BaseException as exc:
                 errors.append(exc)
         try:
+            if self.guidance_files is not None:
+                self.guidance_files.publish(final=True)
             failure = errors[0] if errors else self._serve_error
             status = {**self.router.status(), 'input_errors': self.file_errors,
                       'runtime_state': 'failed' if failure is not None else 'stopped',
-                      **{name:channel.status() for name, channel in self.channels}}
+                      **{name:channel.status() for name, channel in self.channels},
+                      **({'guidance_files': self.guidance_files.status()} if self.guidance_files is not None else {})}
             if failure is not None:
                 status['last_error_code'] = getattr(failure,'code','runtime/failure')
             _atomic_write(self.root / 'status.json', json.dumps(status, ensure_ascii=False, indent=2))

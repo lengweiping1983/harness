@@ -17,6 +17,9 @@ def add_arguments(parser):
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument('--superagent-submit', metavar='TEXT', help=tr('superagent.cli.submit'))
     actions.add_argument('--superagent-status', action='store_true', help=tr('superagent.cli.status'))
+    actions.add_argument('--superagent-steer', metavar='TEXT', help=tr('superagent.cli.steer'))
+    actions.add_argument('--superagent-receipt', metavar='REQUEST_ID', help=tr('superagent.cli.receipt'))
+    parser.add_argument('--superagent-job', metavar='JOB_ID', help=tr('superagent.cli.job'))
     for name in ('source', 'actor', 'thread', 'request-id'):
         parser.add_argument('--superagent-' + name, help=tr('superagent.cli.' + name))
 
@@ -24,13 +27,14 @@ def add_arguments(parser):
 def handle(args, parser):
     selectors = {key: getattr(args, 'superagent_' + key.replace('-', '_'))
                  for key in ('source', 'actor', 'thread', 'request-id')}
-    local = args.superagent_submit is not None or args.superagent_status
+    local = args.superagent_submit is not None or args.superagent_status or args.superagent_steer is not None or args.superagent_receipt is not None
     if args.superagent is None:
-        if args.superagent_once or local or any(value is not None for value in selectors.values()):
+        if args.superagent_once or local or args.superagent_job is not None or any(value is not None for value in selectors.values()):
             parser.error(tr('superagent.cli.config_required'))
         return None
-    if ((args.superagent_status and args.superagent_once)
-            or args.superagent_submit is None and any(value is not None for value in selectors.values())):
+    if ((local and args.superagent_submit is None and args.superagent_once)
+            or args.superagent_submit is None and args.superagent_steer is None and any(value is not None for value in selectors.values())
+            or args.superagent_job is not None and args.superagent_steer is None):
         parser.error(tr('superagent.cli.conflict'))
     if (args.prompt or args.ui or args.share or args.status or args.list_sessions or args.cwd or args.model
             or args.reasoning or args.no_shell or args.no_fs or args.dist or args.host != '127.0.0.1' or args.port != 8765
@@ -40,9 +44,14 @@ def handle(args, parser):
         parser.error(tr('superagent.cli.conflict'))
     try:
         if local:
-            from .app.superagent_local import read_status, submit_local
+            from .app.superagent_local import read_guidance_receipt, read_status, steer_local, submit_local
             if args.superagent_status:
                 result = read_status(Path(args.superagent))
+            elif args.superagent_receipt is not None:
+                result = read_guidance_receipt(Path(args.superagent), args.superagent_receipt)
+            elif args.superagent_steer is not None:
+                result = steer_local(Path(args.superagent), args.superagent_steer, job_id=args.superagent_job,
+                    source_id=selectors['source'], actor_id=selectors['actor'], thread_id=selectors['thread'], request_id=selectors['request-id'])
             else:
                 result = submit_local(Path(args.superagent), args.superagent_submit, source_id=selectors['source'],
                                       actor_id=selectors['actor'], thread_id=selectors['thread'], request_id=selectors['request-id'])

@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
 from ..core.cleanup import join_cleanup
 from .process_env import stdio_env
@@ -41,10 +42,19 @@ while True: time.sleep(3600)
 
 async def probe_version(argv: list[str], timeout: float) -> str:
     """只返回完整且合法的第一行，超时或输出超限不能伪造版本。"""
+    # 包管理器版本查询不应读取项目配置、自动固定版本或下载运行时。
+    with tempfile.TemporaryDirectory(prefix='harness-runtime-probe-') as directory:
+        return await _probe_version(argv, timeout, directory)
+
+
+async def _probe_version(argv: list[str], timeout: float, directory: str) -> str:
+    """临时目录在所属进程树回收后才释放，保留原有输出与取消边界。"""
     process = await start_process(lambda: asyncio.create_subprocess_exec(
         sys.executable, '-I', '-X', 'utf8', '-c', _SUPERVISOR, str(OUTPUT_LIMIT), json.dumps(argv),
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-        env=stdio_env({}), limit=65536, start_new_session=os.name != 'nt',
+        cwd=directory, env=stdio_env({'COREPACK_ENABLE_NETWORK': '0', 'COREPACK_ENABLE_AUTO_PIN': '0',
+                                    'COREPACK_ENABLE_PROJECT_SPEC': '0'}),
+        limit=65536, start_new_session=os.name != 'nt',
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0), stop=stop_process)
     try:
         try:

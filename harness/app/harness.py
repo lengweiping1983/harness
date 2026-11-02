@@ -29,6 +29,7 @@ from __future__ import annotations
 from harness.i18n import tr
 
 import asyncio
+import inspect
 import os
 import uuid
 import contextlib
@@ -37,7 +38,7 @@ from collections import deque
 from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 from ..core.agent import AgentLoop
 from ..core.turn import TurnResult
@@ -2162,11 +2163,13 @@ class Harness:
         session = self.get_session(session_id)
         return session.steering.receipt(request_id, active_turn=session.open_turn if session_id in self.runtime.active else None, summary=summary)
 
-    async def steer(self, session_id: str, text: str, *, expected_turn: int, request_id: str | None = None, attachments: list[dict[str, Any]] | None = None, original_text: str | None = None) -> dict[str, Any]:
+    async def steer(self, session_id: str, text: str, *, expected_turn: int, request_id: str | None = None, attachments: list[dict[str, Any]] | None = None, original_text: str | None = None, before_accept: Callable[[], None] | None = None) -> dict[str, Any]:
         """提交一次引导，模型正文与用户原文分开保存。"""
         owner = self.runtime.loop
         if owner is not None and owner.is_running() and owner is not asyncio.get_running_loop():
-            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.steer(session_id, text, expected_turn=expected_turn, request_id=request_id, attachments=attachments, original_text=original_text), owner))
+            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.steer(session_id, text, expected_turn=expected_turn, request_id=request_id, attachments=attachments, original_text=original_text, before_accept=before_accept), owner))
+        if before_accept is not None and (not callable(before_accept) or inspect.iscoroutinefunction(before_accept)):
+            raise HarnessError(tr('web.input.invalid_text'), code='run/invalid')
         if original_text is not None and not isinstance(original_text, str):
             raise HarnessError(tr('web.input.invalid_text'), code='run/invalid')
         agent = self._agents.get(session_id)
@@ -2200,6 +2203,13 @@ class Harness:
                 pending = session.steering.pending(expected_turn)
                 if len(pending) >= 32 or sum(len(item['text']) for item in pending) + len(text) > 1048576:
                     raise HarnessError(tr('python.harness.260af227ba70'), code='run/steering-capacity')
+                # 可信宿主在锁等待后重新核验归属与授权；既有回执只回查，不重新准入。
+                if before_accept is not None:
+                    checked = before_accept()
+                    if checked is not None:
+                        if inspect.iscoroutine(checked) or inspect.isgenerator(checked):
+                            checked.close()
+                        raise HarnessError(tr('web.input.invalid_text'), code='run/invalid')
                 await session.append('note', {'kind': 'steering/accepted', 'request_id': request_id,
                     'turn': expected_turn, 'text': text, **({'original_text': original_text} if original_text is not None else {}), **({'attachments': attachments} if attachments else {}), 'run_id': getattr(agent, 'run_id', None)}, ignorable=True)
             receipt = self.steering_receipt(session_id, request_id, summary=False)

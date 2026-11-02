@@ -47,6 +47,9 @@ def definitions():
         ("harness_image_get", tr('execution.catalog.harness_image_get'), obj({**SESSION, "image_id": IMAGE_ID}, ("session_id",)), "read", "image_get"),
         ("harness_image_deliver", tr('execution.catalog.harness_image_deliver'), obj({**SESSION, "request_id": RID, "image_id": IMAGE_ID, "file": IMAGE_FILE}, ("session_id", "request_id", "image_id", "file")), "workspace_write", "image_deliver"),
         ("harness_context", tr('execution.catalog.harness_context'), obj({}), "read", "context"),
+        ("load_workspace_dependencies", tr('execution.catalog.load_workspace_dependencies'), obj({
+            **SESSION, "project_id": TEXT, "include_packages": {"type": "boolean", "default": True}}),
+            "read", "workspace_dependencies"),
         ("harness_session_open", tr('execution.catalog.harness_session_open'), obj({"project_id": TEXT, "title": TEXT, "request_id": RID}, ("project_id", "request_id")), "workspace_write", "session_open"),
         ("harness_session_resume", tr('execution.catalog.harness_session_resume'), obj({**SESSION, "cursor": {"type": "integer", "minimum": 0}}, ("session_id",)), "read", "session_resume"),
         ("harness_read", tr('execution.catalog.harness_read'), obj({**SESSION, "path": TEXT, "offset": {"type": "integer", "minimum": 1}, "limit": {"type": "integer", "minimum": 1, "maximum": 2000}}, ("session_id", "path")), "read", "read"),
