@@ -19,6 +19,7 @@ files:
   - '!launch.mjs'
   - capture-screen.ps1
   - assets/harness.png
+  - assets/harness-macos.png
 extraResources:
   - from: ../.run/desktop-release/resources
     to: runtime

@@ -43,7 +43,7 @@ async function startDesktop() {
   let downloads
   const browser = createBrowserRuntime({app, WebContentsView, ipcMain, session, shell, Menu, clipboard, getWindow:() => window, getDownloads:() => downloads, getBackend:() => backend, getOrigin:() => origin, getMenuText:() => menuText})
   await app.whenReady()
-  const brandIcon = fileURLToPath(new URL('./assets/harness.png', import.meta.url))
+  const brandIcon = fileURLToPath(new URL(process.platform === 'darwin' ? './assets/harness-macos.png' : './assets/harness.png', import.meta.url))
   if (process.platform === 'darwin') app.dock?.setIcon(brandIcon)
   fastCapture = ['win32','darwin'].includes(process.platform) ? new FastScreenCapture() : null
   app.on('will-quit', () => fastCapture?.close())

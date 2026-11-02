@@ -54,17 +54,21 @@ def generate():
     png = image.resize((1024, 1024), Image.Resampling.LANCZOS)
     png.save(desktop / 'harness.png')
     png.save(desktop / 'harness.ico', sizes=[(n, n) for n in (16, 24, 32, 48, 64, 128, 256)])
+    # macOS 位图图标在 1024 画布中居中放置 824 图案，四周各留 100 透明边距。
+    macos = Image.new('RGBA', image.size)
+    macos.alpha_composite(image.resize((1648, 1648), Image.Resampling.LANCZOS), (200, 200))
+    macos.resize((1024, 1024), Image.Resampling.LANCZOS).save(desktop / 'harness-macos.png')
     chunks = []
     for size, kind in ((128, b'ic07'), (256, b'ic08'), (512, b'ic09'), (1024, b'ic10')):
         buffer = io.BytesIO()
-        image.resize((size, size), Image.Resampling.LANCZOS).save(buffer, format='PNG')
+        macos.resize((size, size), Image.Resampling.LANCZOS).save(buffer, format='PNG')
         data = buffer.getvalue()
         chunks.append(kind + struct.pack('>I', len(data) + 8) + data)
     payload = b''.join(chunks)
     (desktop / 'harness.icns').write_bytes(b'icns' + struct.pack('>I', len(payload) + 8) + payload)
     for size in (180, 192, 512):
         image.resize((size, size), Image.Resampling.LANCZOS).save(public / f'harness-{size}.png')
-    files = [SOURCE, *sorted(public.iterdir()), *sorted(desktop.glob('harness.*'))]
+    files = [SOURCE, *sorted(public.iterdir()), desktop / 'harness-macos.png', *sorted(desktop.glob('harness.*'))]
     MANIFEST.write_text(json.dumps({file.relative_to(ROOT).as_posix(): digest(file) for file in files}, indent=2) + '\n', encoding='utf-8')
 
 

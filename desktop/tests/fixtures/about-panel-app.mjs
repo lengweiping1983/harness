@@ -10,7 +10,7 @@ import {applicationMenu} from '../../application-menu.mjs'
 app.setPath('userData', process.argv[2])
 app.whenReady().then(async () => {
 app.setName('Harness')
-const iconPath = fileURLToPath(new URL('../../assets/harness.png', import.meta.url))
+const iconPath = fileURLToPath(new URL('../../assets/harness-macos.png', import.meta.url))
 app.dock.setIcon(iconPath)
 configureAboutPanel(app, {iconPath})
 for (const label of ['About Harness', '关于 Harness', 'About Harness']) {
