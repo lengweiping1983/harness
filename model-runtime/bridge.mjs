@@ -7,6 +7,7 @@ import {createProvider} from '@earendil-works/pi-ai/models';
 import {openAICompletionsApi} from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import {openAIResponsesApi} from '@earendil-works/pi-ai/api/openai-responses.lazy';
 import {anthropicMessagesApi} from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
+import {failure, observeFetch, streamActivity} from './stream-observation.mjs';
 
 const cancellation = new AbortController();
 const credentialTasks = new Set();
@@ -146,21 +147,28 @@ async function main() {
   const outputCapacity = raw.max_output_tokens ?? original?.maxTokens;
   const maxTokens = Math.min(config.max_tokens ?? outputCapacity ?? model.maxTokens, outputCapacity ?? Infinity);
   let status = 0;
+  const activity = streamActivity(send, connection.timeout_ms ?? 300000);
+  // Google 等原生适配器直接使用全局 fetch；作用域限于本次所属子进程。
+  globalThis.fetch = observeFetch(globalThis.fetch, activity);
   const stream = models.streamSimple(model, context, {
     signal: cancellation.signal,
+    fetch: globalThis.fetch,
     env: environment, temperature: config.temperature ?? undefined, maxTokens, reasoning: config.reasoning_effort ?? undefined,
     sessionId: request.session_id ?? undefined, headers: {...connection.headers, ...Object.fromEntries(Object.entries(config.extra_headers ?? {}).filter(([name]) => !['authorization', 'x-api-key', 'host', 'x-dsh-auth-token'].includes(name.toLowerCase())))},
     timeoutMs: connection.timeout_ms ?? 300000, maxRetries: connection.max_retries ?? 2,
     onPayload: payload => { const body = {...payload, ...config.extra_body, model: payload.model ?? model.id}; if (api === 'openai-completions' && outputCapacity == null && config.max_tokens == null && config.extra_body?.max_tokens == null && config.extra_body?.max_completion_tokens == null) {delete body.max_tokens; delete body.max_completion_tokens;} if (deepSeek) {const effort = config.reasoning_effort || 'high'; if (!['off', 'low', 'high', 'max'].includes(effort)) throw Error('Unsupported DeepSeek reasoning level'); body.thinking = {type: effort === 'off' ? 'disabled' : 'enabled'}; delete body.output_config; if (effort !== 'off') body.output_config = {effort};} send({type: 'request', body, model: model.id, protocol: model.api, base_url: model.baseUrl}); return body; },
-    onResponse: response => { status = response.status; },
+    onResponse: response => { status = response.status; activity(); },
+    onProviderStreamEvent: () => activity(),
   });
   for await (const event of stream) {
+    // 非 fetch 的原生传输仍可按真实参数片段报告活动，完整调用前不交付工具。
+    if (event.type === 'toolcall_delta') activity();
     if (event.type === 'start') send({type: 'event', event: {kind: 'start'}});
     if (event.type === 'text_delta') send({type: 'event', event: {kind: 'text', text: event.delta}});
     if (event.type === 'thinking_delta') send({type: 'event', event: {kind: 'thinking', thinking: event.delta}});
     if (event.type === 'thinking_end') { const value = event.partial.content[event.contentIndex]; if (value?.thinkingSignature) send({type: 'event', event: {kind: 'signature', signature: value.thinkingSignature}}); }
     if (event.type === 'toolcall_end') send({type: 'event', event: {kind: 'tool_use', tool_use: {id: event.toolCall.id, name: event.toolCall.name, input: event.toolCall.arguments, ...(event.toolCall.argumentsError ? {arguments_error: event.toolCall.argumentsError} : {})}}});
-    if (event.type === 'error') { send({type: 'failure', status: event.error.harnessStatus || status, message: event.error.errorMessage ?? 'Provider request failed'}); return; }
+    if (event.type === 'error') { send(failure(event.error, status)); return; }
     if (event.type === 'done') {
       const replay = event.message.content.filter(block => block.thoughtSignature || block.thinkingSignature || block.textSignature);
       if (replay.length) send({type: 'event', event: {kind: 'reasoning_details', reasoning_details: [{type: 'harness_provider_replay', api: model.api, model: model.id, scope: model.harnessIdentity, blocks: replay}]}});
@@ -173,5 +181,5 @@ async function main() {
 
 if (process.env.HARNESS_BRIDGE_TEST === '1') lines.close();
 else {
-  main().catch(error => { send({type: 'failure', message: String(error.message ?? error), status: Number(error.status ?? 0)}); process.exitCode = 1; }).finally(async () => {await Promise.allSettled([...credentialTasks]); lines.close();});
+  main().catch(error => { send(failure(error)); process.exitCode = 1; }).finally(async () => {await Promise.allSettled([...credentialTasks]); lines.close();});
 }

@@ -10,7 +10,7 @@ import time
 
 from harness.i18n import tr
 from ..core.cleanup import join_cleanup
-from ..core.errors import LlmError
+from ..core.errors import LlmError, LlmTimeoutError
 from ..core.jsonutil import to_jsonable
 from ..tools.process_env import stdio_env
 from .opencode_local import _start_process, _stop_stream_process
@@ -38,8 +38,52 @@ def _is_transient_failure(status: int, message: str) -> bool:
     """按状态码及受控供应商短语判断流式失败是否可以重试。"""
     if status in {408, 429} or status >= 500:
         return True
+    if status >= 400:
+        return False
     lowered = message.casefold()
     return any(hint in lowered for hint in _TRANSIENT_FAILURE_HINTS)
+
+
+_NETWORK_CODES = {'ECONNRESET', 'ECONNABORTED', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT',
+                  'ENETUNREACH', 'EHOSTUNREACH', 'EAI_AGAIN', 'UND_ERR_SOCKET',
+                  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'}
+_TIMEOUT_TYPES = {'APIConnectionTimeoutError', 'TimeoutError'}
+_TIMEOUT_CODES = {'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'}
+
+
+def _provider_failure(value, request):
+    """仅用明确的传输身份恢复；供应商拒绝、协议损坏和凭据刷新保持原边界。"""
+    status = value.get('status', 0)
+    message = value.get('message', '')
+    if type(status) is not int or not isinstance(message, str):
+        raise ValueError
+    details = {'status': status, 'phase': 'provider'}
+    for name in ('error_type', 'error_code'):
+        field = value.get(name)
+        if field is not None:
+            if not isinstance(field, str):
+                raise ValueError
+            details[name] = field
+    secrets = [request.get('credential', {}).get(k) for k in ('key', 'access', 'refresh')]
+    secrets.extend(request.get('connection', {}).get('auth', {}).get('env', {}).values())
+    for secret in secrets:
+        if secret:
+            message = message.replace(secret, '[redacted]')
+            for name in ('error_type', 'error_code'):
+                if name in details:
+                    details[name] = details[name].replace(secret, '[redacted]')
+    for name in ('error_type', 'error_code'):
+        if name in details:
+            details[name] = details[name][:128]
+    transport_failure = status < 400 and (details.get('error_code') in _NETWORK_CODES
+        or not details.get('error_code') and details.get('error_type') in {'APIConnectionError', *_TIMEOUT_TYPES})
+    if transport_failure and (details.get('error_code') in _TIMEOUT_CODES or details.get('error_type') in _TIMEOUT_TYPES):
+        return LlmTimeoutError(tr('python.adapter.9432086171d5'), provider_message=message, **details)
+    if status < 400 and details.get('error_code') == 'HARNESS_INCOMPLETE_STREAM':
+        return LlmError(tr('models.request.failed', reason=message), code='llm/incomplete-response', transient=True, **details)
+    classified_connection = details.get('error_type') in {'APIConnectionError', *_TIMEOUT_TYPES} and details.get('error_code')
+    return LlmError(tr('models.request.failed', reason=message), code='llm/request' if transport_failure else 'llm/provider',
+        transient=transport_failure or not classified_connection and _is_transient_failure(status, message), **details)
 
 
 @asynccontextmanager
@@ -97,15 +141,22 @@ async def bridge(request, *, commit=None, interact=None):
         await process.stdin.drain()
     pending_credential = False
     latest_credential = request.get('credential')
+    request_started = False
     try:
         await send({'version': 1, **request})
         timeout = request.get('connection', {}).get('timeout_ms', 300000) / 1000
         while True:
-            raw = await asyncio.wait_for(process.stdout.readline(), timeout=max(timeout, 900 if request['operation'] == 'login' else 15))
+            # 启动和授权有自己的等待边界；请求发送后严格监控网络无活动时间。
+            read_timeout = timeout if request_started else max(timeout, 900 if request['operation'] == 'login' else 15)
+            raw = await asyncio.wait_for(process.stdout.readline(), timeout=read_timeout)
             if not raw:
                 break
             value = decode(raw)
-            if not isinstance(value, dict) or value.get('type') not in {'credential', 'credential_pending', 'credential_unchanged', 'result', 'auth', 'prompt', 'event', 'failure', 'request'}:
+            if not isinstance(value, dict) or value.get('type') not in {'credential', 'credential_pending', 'credential_unchanged', 'result', 'auth', 'prompt', 'event', 'failure', 'request', 'activity'}:
+                raise ValueError
+            if value['type'] == 'request':
+                request_started = True
+            if value['type'] == 'activity' and (type(value.get('network_bytes')) is not int or value['network_bytes'] < 0):
                 raise ValueError
             if value['type'] == 'credential_pending':
                 pending_credential = True
@@ -126,22 +177,24 @@ async def bridge(request, *, commit=None, interact=None):
                 answer = await interact(value)
                 await send({'type': 'answer', 'value': answer})
             elif value['type'] == 'failure':
-                status = value.get('status', 0)
-                if type(status) is not int:
-                    raise ValueError
-                message = value.get('message', '')
-                secrets = [request.get('credential', {}).get(k) for k in ('key', 'access', 'refresh')] + list(request.get('connection', {}).get('auth', {}).get('env', {}).values())
-                for secret in secrets:
-                    if secret:
-                        message = message.replace(secret, '[redacted]')
-                raise LlmError(tr('models.request.failed', reason=message), code='llm/provider', status=status,
-                               transient=_is_transient_failure(status, message))
+                failure = _provider_failure(value, request)
+                if pending_credential or request['operation'] != 'stream':
+                    failure.transient = False
+                raise failure
             else:
                 yield value
-        if await process.wait() != 0:
-            raise ValueError
-    except (OSError, ValueError, KeyError, TypeError, TimeoutError):
-        raise LlmError(tr('models.runtime.failed'), code='llm/provider-runtime') from None
+        returncode = await process.wait()
+        if returncode != 0:
+            raise LlmError(tr('models.runtime.failed'), code='llm/provider-runtime', phase='process', returncode=returncode)
+    except TimeoutError as exc:
+        if request['operation'] == 'stream' and request_started and not pending_credential:
+            raise LlmTimeoutError(tr('python.adapter.9432086171d5'), seconds=timeout,
+                                  phase='network', error_type=type(exc).__name__) from exc
+        raise LlmError(tr('models.runtime.failed'), code='llm/provider-runtime', phase='bridge',
+                       error_type=type(exc).__name__) from exc
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise LlmError(tr('models.runtime.failed'), code='llm/provider-runtime', phase='bridge',
+                       error_type=type(exc).__name__) from exc
     finally:
         async def finish():
             nonlocal pending_credential, latest_credential
@@ -215,6 +268,8 @@ async def provider_stream(adapter, messages, *, config, tools=None, on_attempt=N
         completed = False
         usage = None
         count = 0
+        first_event_ms = None
+        failure = None
         try:
             if on_attempt:
                 await on_attempt({'phase': 'waiting', 'model': model['model'], 'attempt': index + 1, 'max_attempts': len(available), 'api_key_slot': f'{index + 1}/{len(available)}'})
@@ -252,6 +307,8 @@ async def provider_stream(adapter, messages, *, config, tools=None, on_attempt=N
                     if value['type'] == 'request' and on_request:
                         trace_id = await on_request({'phase': 'started', 'body': json.dumps(value['body'], ensure_ascii=False),
                             'url': value['base_url'], 'estimated_input_tokens': None})
+                    if value['type'] == 'activity' and on_attempt:
+                        await on_attempt({'network_bytes': value['network_bytes'], 'network_idle_ms': 0})
                     if value['type'] != 'event':
                         continue
                     raw = value['event']
@@ -269,6 +326,8 @@ async def provider_stream(adapter, messages, *, config, tools=None, on_attempt=N
                             raw['tool_use']['input'] = arguments_error
                         raw['tool_use'] = ToolUseBlock(**raw['tool_use'])
                     event = StreamEvent(**raw)
+                    if first_event_ms is None:
+                        first_event_ms = round((time.monotonic() - started) * 1000)
                     count += 1
                     delivered = delivered or event.kind in {'text', 'thinking', 'tool_use', 'signature', 'reasoning_details'}
                     if event.kind == 'done':
@@ -278,6 +337,7 @@ async def provider_stream(adapter, messages, *, config, tools=None, on_attempt=N
                 raise LlmError(tr('models.runtime.failed'), code='llm/provider-stream')
             return
         except LlmError as exc:
+            failure = exc
             status = exc.details.get('status', 0)
             if key and status in {401, 402, 403}:
                 await asyncio.to_thread(store.fail_key, connection, key, operation_revision)
@@ -286,6 +346,11 @@ async def provider_stream(adapter, messages, *, config, tools=None, on_attempt=N
                 raise LlmError(tr('models.keys.exhausted'), code='llm/key-exhausted') from exc
             if delivered or not key or status not in {401, 402, 403, 429} and not exc.transient or index == len(available) - 1:
                 raise
+        except GeneratorExit:
+            raise
+        except BaseException as exc:
+            failure = exc
+            raise
         finally:
             with store.lock:
                 store.leases[lease] -= 1
@@ -294,8 +359,11 @@ async def provider_stream(adapter, messages, *, config, tools=None, on_attempt=N
             if trace_id is not None:
                 await on_request({'phase': 'completed' if completed else 'interrupted', 'trace_id': trace_id, 'usage': usage,
                     'observation': {'duration_ms': round((time.monotonic() - started) * 1000), 'event_count': count,
-                        'first_event_ms': None, 'terminal_reason': 'done' if completed else 'provider_error', 'error_type': None,
-                        'error_code': None, 'error_details': {}, 'text_diagnostic': None}})
+                        'first_event_ms': first_event_ms, 'terminal_reason': 'done' if completed else
+                            'cancelled' if isinstance(failure, asyncio.CancelledError) else 'provider_error',
+                        'error_type': type(failure).__name__ if failure else None,
+                        'error_code': getattr(failure, 'code', None),
+                        'error_details': dict(getattr(failure, 'details', {})), 'text_diagnostic': None}})
 
 
 async def subscription_stream(adapter, messages, *, config, tools, on_attempt, on_request, cache_session_id):

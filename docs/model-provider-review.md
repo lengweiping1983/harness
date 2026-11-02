@@ -1,5 +1,13 @@
 # 模型供应商实现审查
 
+## 流活动、超时与恢复诊断
+
+`provider_runtime.bridge` 原先把读取超时与进程退出、NDJSON 解析错误一起改写为不可恢复的 `llm/provider-runtime`，丢弃原异常；`provider_stream` 又将归档中的错误类型、代码与首事件时间固定为空。已核对的失败记录在请求发出约 180.9 秒后结束，解析事件为零、恢复次数为零；旧记录没有底层错误证据，不能证明当时是本机网络中断还是上游等待。
+
+另一可复现触发条件是上游持续发送 SSE 心跳或工具参数片段：`model-runtime/bridge.mjs` 原先只转发正文、思考和完整调用，后端会把尚无这些事件误判为无活动。现由 `stream-observation.mjs` 观察真实响应字节及原生供应商事件，通过桥接传递节流后的活动；只在完整调用时交付工具。读取超时独立分类为 `llm/timeout`，SDK 传输错误保留结构化身份；明确缺少终止帧与任意协议损坏分别分类。认证与证书拒绝、刷新结果未知及进程故障保持非恢复边界，归档保存实际错误及首事件时间。
+
+`test_provider_stream_resilience.py` 经发行桥接与隔离回环接口验证 Completions／Messages／Responses 心跳及分片参数超过无活动阈值仍完成、无响应超时、断流后正文续接且已完成工具只执行一次、取消后的连接释放，以及英中英错误呈现、脱敏、协议／进程错误和未知刷新保护。`model-runtime/tests/stream-observation.test.mjs` 核对活动节流、字节与响应元数据、取消等待和 SDK 原始原因；其中活动回归在旧发行桥接上失败后再验证修复。取消回归也固定了 TransformStream 取消返回早于底层释放的问题，现使用显式读取器等待原流取消。这些证据不代表在线接口或跨平台安装包验收；产品行为统一见 [模型提供商](model-providers.md#执行预算与流监控)。
+
 ## 缓存用量报告
 
 触发条件是供应商桥接返回正 `cacheRead`：`model-runtime/bridge.mjs` 的完成事件原先只传 `cache_read_tokens`，遗漏 `cache_reported_input_tokens`；`provider_runtime.provider_stream` 经 `TokenUsage.to_dict` 将缺失覆盖保留为缺失，而 `request_traces._usage_totals` 把它当作零，造成有读取量却被判不一致，前端随后隐藏比例。桥接现在同步传递覆盖输入，归档和单请求展示按正读取证据逐请求确定缺失分母，保留显式矛盾和未知零报告。回归为 `test_cache_usage_reporting.py`、`RuntimeBridgeTests.test_messages_and_responses_streams_map_text_tools_and_usage`、`model-runtime/tests/transcript.test.mjs`、`promptCache.test.ts` 和 `context-statistics-language-smoke.mjs`；产品规则统一见 [架构与模块](architecture.md)。这些回归使用隔离数据与回环接口，不代表在线供应商验收。

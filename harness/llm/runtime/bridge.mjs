@@ -2007,6 +2007,89 @@ var init_github_copilot_models = __esm({
   }
 });
 
+// stream-observation.mjs
+function streamActivity(send2, timeoutMs, clock = () => performance.now()) {
+  const interval = Math.min(1e3, timeoutMs / 4);
+  let last = -Infinity;
+  let bytes = 0;
+  return (size = 0) => {
+    bytes += size;
+    const now = clock();
+    if (now - last < interval) return;
+    last = now;
+    send2({ type: "activity", network_bytes: bytes });
+  };
+}
+function observeFetch(fetch3, activity) {
+  return async (...args) => {
+    const response = await fetch3(...args);
+    activity();
+    if (!response.body) return response;
+    const reader = response.body.getReader();
+    let cancelled = false;
+    const body = new ReadableStream({
+      async pull(controller) {
+        try {
+          const { value, done } = await reader.read();
+          if (cancelled) return;
+          if (done) {
+            reader.releaseLock();
+            controller.close();
+            return;
+          }
+          activity(value.byteLength);
+          controller.enqueue(value);
+        } catch (error2) {
+          reader.releaseLock();
+          throw error2;
+        }
+      },
+      async cancel(reason) {
+        cancelled = true;
+        try {
+          await reader.cancel(reason);
+        } finally {
+          reader.releaseLock();
+        }
+      }
+    }, { highWaterMark: 0 });
+    const observed = new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+    for (const key of ["url", "redirected", "type"]) Object.defineProperty(observed, key, { value: response[key] });
+    return observed;
+  };
+}
+function errorIdentity(error2) {
+  const constructor = error2?.constructor?.name ?? "";
+  const sdkType = /^(APIConnection(?:Timeout)?Error)\d*$/.exec(constructor)?.[1];
+  let code;
+  for (let cause = error2, depth = 0; cause && depth < 8; cause = cause.cause, depth++) {
+    if (typeof cause.code === "string") code = cause.code;
+  }
+  if ((/* @__PURE__ */ new Set([
+    "Stream ended without finish_reason",
+    "OpenAI Responses stream ended before a terminal response event",
+    "OpenAI Responses stream ended without a stop reason",
+    "Anthropic stream ended before message_stop",
+    "Anthropic stream ended without a stop reason"
+  ])).has(error2?.message)) code = "HARNESS_INCOMPLETE_STREAM";
+  return { name: sdkType ?? error2?.name, code };
+}
+function failure(error2, status = 0) {
+  const source = error2.harnessError ?? errorIdentity(error2);
+  const code = source.code;
+  return {
+    type: "failure",
+    status: Number(error2.harnessStatus || error2.status || status),
+    message: String(error2.errorMessage ?? error2.message ?? error2),
+    ...typeof source.name === "string" ? { error_type: source.name } : {},
+    ...typeof code === "string" ? { error_code: code } : {}
+  };
+}
+var init_stream_observation = __esm({
+  "stream-observation.mjs"() {
+  }
+});
+
 // node_modules/@earendil-works/pi-ai/dist/utils/event-stream.js
 var FifoQueue, EventStream, AssistantMessageEventStream;
 var init_event_stream = __esm({
@@ -2185,6 +2268,7 @@ function lazyApi(load, capabilities) {
 }
 var init_lazy = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/lazy.js"() {
+    init_stream_observation();
     init_event_stream();
   }
 });
@@ -39704,6 +39788,7 @@ function createGrammarToolInputProperties(tools, supportsOpenAIGrammarTools) {
 var UnsupportedStrictJsonSchemaError, UNSUPPORTED_STRICT_SCHEMA_KEYS;
 var init_constrained_sampling = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/constrained-sampling.js"() {
+    init_stream_observation();
     UnsupportedStrictJsonSchemaError = class extends Error {
     };
     UNSUPPORTED_STRICT_SCHEMA_KEYS = [
@@ -39877,6 +39962,7 @@ function adjustMaxTokensForThinking(baseMaxTokens, modelMaxTokens, reasoningLeve
 var CONTEXT_SAFETY_TOKENS, MIN_MAX_TOKENS, MIN_ANSWER_TOKENS, DEFAULT_THINKING_BUDGETS;
 var init_simple_options = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/simple-options.js"() {
+    init_stream_observation();
     init_models();
     init_estimate();
     CONTEXT_SAFETY_TOKENS = 4096;
@@ -40061,6 +40147,7 @@ function transformMessages(messages, model, normalizeToolCallId3) {
 var NON_VISION_USER_IMAGE_PLACEHOLDER, NON_VISION_TOOL_IMAGE_PLACEHOLDER, ERROR_TOOL_IMAGE_PLACEHOLDER;
 var init_transform_messages = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/transform-messages.js"() {
+    init_stream_observation();
     NON_VISION_USER_IMAGE_PLACEHOLDER = "(image omitted: model does not support images)";
     NON_VISION_TOOL_IMAGE_PLACEHOLDER = "(tool image omitted: model does not support images)";
     ERROR_TOOL_IMAGE_PLACEHOLDER = "(image attached after the tool results)";
@@ -40721,6 +40808,7 @@ function bytesToBase64(chunks) {
 var import_client_bedrock_runtime, import_node_http_handler5, EMPTY_TEXT_PLACEHOLDER, THINKING_BINDING_CONTROLS_BETA, REDACTED_THINKING_PLACEHOLDER, stream, BEDROCK_ERROR_PREFIXES, BEDROCK_DATA_RETENTION_DOCS_URL, MAX_BEDROCK_DIAGNOSTIC_VALUE_CHARS, RESERVED_HEADER_EXACT, streamSimple, OPENAI_GPT_EFFORT, OPENAI_GPT_OSS_EFFORT;
 var init_bedrock_converse_stream = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/bedrock-converse-stream.js"() {
+    init_stream_observation();
     import_client_bedrock_runtime = __toESM(require_dist_cjs23(), 1);
     import_node_http_handler5 = __toESM(require_dist_cjs22(), 1);
     init_dist3();
@@ -40911,6 +40999,7 @@ var init_bedrock_converse_stream = __esm({
             finalizeStreamingBlock(block);
           }
           output.stopReason = options.signal?.aborted ? "aborted" : "error";
+          output.harnessError = errorIdentity(error2);
           output.harnessStatus = Number(error2?.status ?? error2?.$metadata?.httpStatusCode ?? 0);
           output.errorMessage = formatBedrockError(error2);
           if (output.stopReason === "error") {
@@ -46409,7 +46498,7 @@ var init_EventStream = __esm({
         const readQueue = createEventQueue();
         const bufferedLedger = createBufferedEventLedger();
         let ended = this.ended;
-        let failure;
+        let failure2;
         let failureDelivered = false;
         let detach = () => void 0;
         const doneResult = () => ({ value: void 0, done: true });
@@ -46419,11 +46508,11 @@ var init_EventStream = __esm({
           }
         };
         const rejectReader = () => {
-          if (!failure || failureDelivered || !readQueue.length) {
+          if (!failure2 || failureDelivered || !readQueue.length) {
             return;
           }
           failureDelivered = true;
-          readQueue.dequeue().reject(failure);
+          readQueue.dequeue().reject(failure2);
         };
         const cleanup = () => {
           detach();
@@ -46506,13 +46595,13 @@ var init_EventStream = __esm({
           }
         };
         const onFailure = (error2) => {
-          failure = error2;
+          failure2 = error2;
           if (!pushQueue.length) {
             rejectReader();
           }
         };
         const adoptTerminalFailure = () => {
-          if (failure) {
+          if (failure2) {
             return;
           }
           const terminal = __classPrivateFieldGet(this, _EventStream_terminalFailure, "f");
@@ -46520,7 +46609,7 @@ var init_EventStream = __esm({
             return;
           }
           if (terminal.kind === "error" ? rejectOnError : rejectOnAbort) {
-            failure = terminal.error;
+            failure2 = terminal.error;
           }
         };
         const onEnd = () => {
@@ -46560,9 +46649,9 @@ var init_EventStream = __esm({
             if (ended || this.ended) {
               adoptTerminalFailure();
             }
-            if (failure && !failureDelivered) {
+            if (failure2 && !failureDelivered) {
               failureDelivered = true;
-              return Promise.reject(failure);
+              return Promise.reject(failure2);
             }
             if (ended) {
               return Promise.resolve(doneResult());
@@ -61363,6 +61452,7 @@ function buildCopilotDynamicHeaders(params) {
 }
 var init_github_copilot_headers = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/github-copilot-headers.js"() {
+    init_stream_observation();
   }
 });
 
@@ -61378,6 +61468,7 @@ function clampOpenAIPromptCacheKey(key) {
 var OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH;
 var init_openai_prompt_cache = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/openai-prompt-cache.js"() {
+    init_stream_observation();
     OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH = 64;
   }
 });
@@ -62172,6 +62263,7 @@ function getCompat(model) {
 var OPENAI_COMPLETIONS_REASONING_FIELDS, stream2, streamSimple2;
 var init_openai_completions = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js"() {
+    init_stream_observation();
     init_openai();
     init_models();
     init_error_body();
@@ -62516,6 +62608,7 @@ var init_openai_completions = __esm({
             delete block.streamIndex;
           }
           output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+          output.harnessError = errorIdentity(error2);
           output.harnessStatus = Number(error2?.status ?? error2?.$metadata?.httpStatusCode ?? 0);
           output.errorMessage = formatProviderError(normalizeProviderError(error2));
           const rawMetadata = error2?.error?.metadata?.raw;
@@ -80432,6 +80525,7 @@ function mapStopReason3(reason, stopDetails) {
 var claudeCodeVersion, claudeCodeTools, ccToolLookup, toClaudeCodeName, fromClaudeCodeName, FINE_GRAINED_TOOL_STREAMING_BETA, INTERLEAVED_THINKING_BETA, SERVER_SIDE_FALLBACK_BETA, MID_CONVERSATION_OUTPUT_CONFIG_BETA, THINKING_BINDING_CONTROLS_BETA2, INLINE_TOOLS_BETA, DEFERRED_TOOL_PLACEHOLDER, PiAnthropic, federationClient, ANTHROPIC_MESSAGE_EVENTS, stream4, streamSimple3, ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS, ANTHROPIC_STRICT_STRING_FORMATS, isAnthropicStrictUnsupportedKeyword;
 var init_anthropic_messages = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js"() {
+    init_stream_observation();
     init_sdk();
     init_env_api_keys();
     init_models();
@@ -80807,6 +80901,7 @@ var init_anthropic_messages = __esm({
             delete block.partialJson;
           }
           output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+          output.harnessError = errorIdentity(error2);
           output.harnessStatus = Number(error2?.status ?? error2?.$metadata?.httpStatusCode ?? 0);
           output.errorMessage = error2 instanceof Error ? error2.message : JSON.stringify(error2);
           stream12.push({ type: "error", reason: output.stopReason, error: output });
@@ -81057,9 +81152,9 @@ async function startOAuthCallbackServer(options) {
         sendPage(response, 200, oauthSuccessHtml(`Signed in to ${providerName}. You may now close this page.`));
         finish({ value });
       } catch (error3) {
-        const failure = error3 instanceof Error ? error3 : new Error(String(error3));
-        sendPage(response, 502, oauthErrorHtml(`${providerName} sign-in failed.`, failure.message));
-        finish({ error: failure });
+        const failure2 = error3 instanceof Error ? error3 : new Error(String(error3));
+        sendPage(response, 502, oauthErrorHtml(`${providerName} sign-in failed.`, failure2.message));
+        finish({ error: failure2 });
       }
     })();
   });
@@ -83528,6 +83623,7 @@ function resolveAzureConfig(model, options) {
 var DEFAULT_AZURE_API_VERSION;
 var init_azure_openai_config = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/azure-openai-config.js"() {
+    init_stream_observation();
     init_provider_env();
     DEFAULT_AZURE_API_VERSION = "v1";
   }
@@ -84173,6 +84269,7 @@ function mapStopReason4(status, incompleteReason) {
 }
 var init_openai_responses_shared = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js"() {
+    init_stream_observation();
     init_models();
     init_hash();
     init_json_parse();
@@ -84268,6 +84365,7 @@ function buildParams3(model, context, options, deploymentName, grammarToolInputP
 var AZURE_TOOL_CALL_PROVIDERS, OPENAI_RESPONSES_MIN_OUTPUT_TOKENS, stream5, streamSimple4;
 var init_azure_openai_responses = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/azure-openai-responses.js"() {
+    init_stream_observation();
     init_openai();
     init_models();
     init_error_body();
@@ -84571,6 +84669,7 @@ function applyServiceTierPricing(usage, serviceTier, model) {
 var OPENAI_TOOL_CALL_PROVIDERS, OPENAI_RESPONSES_MIN_OUTPUT_TOKENS2, CHATGPT_USAGE_URL, CONFIGURATION_UPDATE_REQUEST_EFFORT, stream6, streamSimple5;
 var init_openai_responses = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js"() {
+    init_stream_observation();
     init_openai();
     init_models();
     init_error_body();
@@ -84660,6 +84759,7 @@ var init_openai_responses = __esm({
             delete block.customInput;
           }
           output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+          output.harnessError = errorIdentity(error2);
           output.harnessStatus = Number(error2?.status ?? error2?.$metadata?.httpStatusCode ?? 0);
           const errorMessage2 = formatProviderError(normalizeProviderError(error2), `${model.provider === "openai" ? "OpenAI" : model.provider} API error`);
           output.errorMessage = errorMessage2.includes("subscription_sharing_usage_limit_exceeded") ? `${errorMessage2}
@@ -84771,6 +84871,7 @@ function parseClassifierUsage(value, model) {
 }
 var init_classifier_shared = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/classifier-shared.js"() {
+    init_stream_observation();
     init_models();
     init_headers();
     init_provider_retry();
@@ -84864,6 +84965,7 @@ async function classifySystemOne(transport3, model, context, options) {
     return output;
   } catch (error2) {
     output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+    output.harnessError = errorIdentity(error2);
     output.harnessStatus = Number(error2?.status ?? error2?.$metadata?.httpStatusCode ?? 0);
     output.errorMessage = formatProviderError(normalizeProviderError(error2), `${transport3.label} error`);
     return output;
@@ -84871,6 +84973,7 @@ async function classifySystemOne(transport3, model, context, options) {
 }
 var init_system_one_shared = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/system-one-shared.js"() {
+    init_stream_observation();
     init_error_body();
     init_classifier_shared();
   }
@@ -84892,6 +84995,7 @@ function cloudflareErrorMessage(errors) {
 var LABEL, transport, classify;
 var init_cloudflare_workers_ai_system_one = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/cloudflare-workers-ai-system-one.js"() {
+    init_stream_observation();
     init_classifier_shared();
     init_system_one_shared();
     LABEL = "Cloudflare Workers AI";
@@ -129078,6 +129182,7 @@ function retryGoogleRequest(request, options) {
 var GOOGLE_SDK_THINKING_LEVEL_MAP, base64SignaturePattern, JSON_SCHEMA_META_DECLARATIONS;
 var init_google_shared = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/google-shared.js"() {
+    init_stream_observation();
     init_node3();
     init_models();
     init_provider_retry();
@@ -129212,6 +129317,7 @@ function getGoogleBudget(model, level, customBudgets) {
 var toolCallCounter, stream7, streamSimple6;
 var init_google_generative_ai = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/google-generative-ai.js"() {
+    init_stream_observation();
     init_node3();
     init_models();
     init_error_body();
@@ -129423,6 +129529,7 @@ var init_google_generative_ai = __esm({
             }
           }
           output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+          output.harnessError = errorIdentity(error2);
           output.harnessStatus = Number(error2?.status ?? error2?.$metadata?.httpStatusCode ?? 0);
           output.errorMessage = formatProviderError(normalizeProviderError(error2));
           stream12.push({ type: "error", reason: output.stopReason, error: output });
@@ -129627,6 +129734,7 @@ function getGoogleBudget2(model, level, customBudgets) {
 var API_VERSION, GCP_VERTEX_CREDENTIALS_MARKER, toolCallCounter2, stream8, streamSimple7;
 var init_google_vertex = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/google-vertex.js"() {
+    init_stream_observation();
     init_node3();
     init_models();
     init_error_body();
@@ -129838,6 +129946,7 @@ var init_google_vertex = __esm({
             }
           }
           output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+          output.harnessError = errorIdentity(error2);
           output.harnessStatus = Number(error2?.status ?? error2?.$metadata?.httpStatusCode ?? 0);
           output.errorMessage = formatProviderError(normalizeProviderError(error2));
           stream12.push({ type: "error", reason: output.stopReason, error: output });
@@ -130558,6 +130667,7 @@ function mapChatStopReason(reason) {
 var MISTRAL_TOOL_CALL_ID_LENGTH, MAX_MISTRAL_ERROR_BODY_CHARS, stream9, streamSimple8, MistralHttpError, MISTRAL_STREAM_DONE;
 var init_mistral_conversations = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/mistral-conversations.js"() {
+    init_stream_observation();
     init_models();
     init_abort_signals();
     init_event_stream();
@@ -130764,6 +130874,7 @@ function errorMessage(error2) {
 var LABEL2, MAX_IMAGES, NO_RETRY_STATUSES, classify2;
 var init_openai_decisions = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/openai-decisions.js"() {
+    init_stream_observation();
     init_error_body();
     init_classifier_shared();
     LABEL2 = "OpenAI Decisions";
@@ -131806,6 +131917,7 @@ function buildWebSocketHeaders(initHeaders, additionalHeaders, accountId, token,
 var DEFAULT_CODEX_BASE_URL, JWT_CLAIM_PATH2, DEFAULT_MAX_RETRIES, BASE_DELAY_MS, DEFAULT_MAX_RETRY_DELAY_MS2, DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS, REQUEST_COMPRESSION_ZSTD_LEVEL, CODEX_TOOL_CALL_PROVIDERS, WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE, WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE, PREVIOUS_RESPONSE_NOT_FOUND_CODE, CODEX_RESPONSE_STATUSES, RetryDelayExceededError, stream10, streamSimple9, CodexApiError, CodexProtocolError, ProviderStreamEventCallbackError, OPENAI_BETA_RESPONSES_WEBSOCKETS, SESSION_WEBSOCKET_CACHE_TTL_MS, SESSION_WEBSOCKET_MAX_AGE_MS, websocketSessionCache, websocketDebugStats, websocketSseFallbackSessions, _cachedWebsocket, WebSocketCloseError;
 var init_openai_codex_responses = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js"() {
+    init_stream_observation();
     init_models();
     init_session_resources();
     init_abort_signals();
@@ -132031,6 +132143,7 @@ var init_openai_codex_responses = __esm({
             delete block.customInput;
           }
           output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+          output.harnessError = errorIdentity(error2);
           output.harnessStatus = Number(error2?.status ?? error2?.$metadata?.httpStatusCode ?? 0);
           output.errorMessage = formatProviderError(normalizeProviderError(error2));
           stream12.push({ type: "error", reason: output.stopReason, error: output });
@@ -132113,6 +132226,7 @@ __export(typesafe_system_one_exports, {
 var transport2, classify3;
 var init_typesafe_system_one = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/typesafe-system-one.js"() {
+    init_stream_observation();
     init_classifier_shared();
     init_system_one_shared();
     transport2 = {
@@ -132198,6 +132312,7 @@ function parseUsage(rawUsage, model) {
 var generateImages;
 var init_openrouter_images = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/openrouter-images.js"() {
+    init_stream_observation();
     init_openai();
     init_error_body();
     init_headers();
@@ -132262,6 +132377,7 @@ var init_openrouter_images = __esm({
         return output;
       } catch (error2) {
         output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+        output.harnessError = errorIdentity(error2);
         output.harnessStatus = Number(error2?.status ?? error2?.$metadata?.httpStatusCode ?? 0);
         output.errorMessage = formatProviderError(normalizeProviderError(error2));
         return output;
@@ -132487,6 +132603,7 @@ function resolveCacheRetention5(cacheRetention, env3) {
 var PiMessagesResponseError, stream11, streamSimple10;
 var init_pi_messages = __esm({
   "node_modules/@earendil-works/pi-ai/dist/api/pi-messages.js"() {
+    init_stream_observation();
     init_diagnostics();
     init_event_stream();
     init_headers();
@@ -133061,6 +133178,7 @@ var ZAI_CODING_CN_CLASSIFIER_MODELS = flattenClassifierModelCatalog("zai-coding-
 init_models();
 
 // node_modules/@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js
+init_stream_observation();
 init_lazy();
 var bedrockModuleOverride;
 var bedrockConverseStreamApi = () => lazyApi(async () => bedrockModuleOverride ?? await Promise.resolve().then(() => (init_bedrock_converse_stream(), bedrock_converse_stream_exports)));
@@ -133153,6 +133271,7 @@ function amazonBedrockProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/openai-completions.lazy.js
+init_stream_observation();
 init_lazy();
 var openAICompletionsApi = () => lazyApi(() => Promise.resolve().then(() => (init_openai_completions(), openai_completions_exports)));
 
@@ -133211,10 +133330,12 @@ function antLingProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.lazy.js
+init_stream_observation();
 init_lazy();
 var anthropicMessagesApi = () => lazyApi(() => Promise.resolve().then(() => (init_anthropic_messages(), anthropic_messages_exports)));
 
 // node_modules/@earendil-works/pi-ai/dist/auth/oauth/load.js
+init_stream_observation();
 var bundledLoaders;
 var loadAnthropicOAuth = async () => {
   if (bundledLoaders)
@@ -133337,6 +133458,7 @@ function anthropicProvider() {
 init_azure_openai_config();
 
 // node_modules/@earendil-works/pi-ai/dist/api/azure-openai-responses.lazy.js
+init_stream_observation();
 init_lazy();
 var azureOpenAIResponsesApi = () => lazyApi(() => Promise.resolve().then(() => (init_azure_openai_responses(), azure_openai_responses_exports)));
 
@@ -133404,6 +133526,7 @@ function cerebrasProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/openai-responses.lazy.js
+init_stream_observation();
 init_lazy();
 var openAIResponsesApi = () => lazyApi(() => Promise.resolve().then(() => (init_openai_responses(), openai_responses_exports)));
 
@@ -133527,6 +133650,7 @@ function cloudflareAIGatewayProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/cloudflare-workers-ai-system-one.lazy.js
+init_stream_observation();
 var cloudflareWorkersAISystemOneApi = () => ({
   classify: async (model, context, options) => (await Promise.resolve().then(() => (init_cloudflare_workers_ai_system_one(), cloudflare_workers_ai_system_one_exports))).classify(model, context, options)
 });
@@ -133610,6 +133734,7 @@ function githubCopilotProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/google-generative-ai.lazy.js
+init_stream_observation();
 init_lazy();
 var googleGenerativeAIApi = () => lazyApi(() => Promise.resolve().then(() => (init_google_generative_ai(), google_generative_ai_exports)));
 
@@ -133627,6 +133752,7 @@ function googleProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/google-vertex.lazy.js
+init_stream_observation();
 init_lazy();
 var googleVertexApi = () => lazyApi(() => Promise.resolve().then(() => (init_google_vertex(), google_vertex_exports)));
 
@@ -133809,6 +133935,7 @@ function minimaxCnProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/mistral-conversations.lazy.js
+init_stream_observation();
 init_lazy();
 var mistralConversationsApi = () => lazyApi(() => Promise.resolve().then(() => (init_mistral_conversations(), mistral_conversations_exports)));
 
@@ -133865,6 +133992,7 @@ function nvidiaProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/openai-decisions.lazy.js
+init_stream_observation();
 var openAIDecisionsApi = () => ({
   classify: async (model, context, options) => (await Promise.resolve().then(() => (init_openai_decisions(), openai_decisions_exports))).classify(model, context, options)
 });
@@ -133899,6 +134027,7 @@ function openaiProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.lazy.js
+init_stream_observation();
 init_lazy();
 var openAICodexResponsesApi = () => lazyApi(() => Promise.resolve().then(() => (init_openai_codex_responses(), openai_codex_responses_exports)));
 
@@ -133922,6 +134051,7 @@ function openaiCodexProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/typesafe-system-one.lazy.js
+init_stream_observation();
 var typesafeSystemOneApi = () => ({
   classify: async (model, context, options) => (await Promise.resolve().then(() => (init_typesafe_system_one(), typesafe_system_one_exports))).classify(model, context, options)
 });
@@ -133987,6 +134117,7 @@ function opencodeGoProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/openrouter-images.lazy.js
+init_stream_observation();
 var openrouterImagesApi = () => ({
   generateImages: async (model, context, options) => (await Promise.resolve().then(() => (init_openrouter_images(), openrouter_images_exports))).generateImages(model, context, options)
 });
@@ -134062,6 +134193,7 @@ function qwenTokenPlanIndividualProvider() {
 }
 
 // node_modules/@earendil-works/pi-ai/dist/api/pi-messages.lazy.js
+init_stream_observation();
 init_lazy();
 var piMessagesApi = () => lazyApi(() => Promise.resolve().then(() => (init_pi_messages(), pi_messages_exports)));
 
@@ -134326,6 +134458,7 @@ function builtinModels(options) {
 
 // bridge.mjs
 init_models();
+init_stream_observation();
 var cancellation = new AbortController();
 var credentialTasks = /* @__PURE__ */ new Set();
 var lines = createInterface2({ input: process.stdin });
@@ -134549,8 +134682,11 @@ async function main() {
   const outputCapacity = raw.max_output_tokens ?? original?.maxTokens;
   const maxTokens = Math.min(config.max_tokens ?? outputCapacity ?? model.maxTokens, outputCapacity ?? Infinity);
   let status = 0;
+  const activity = streamActivity(send, connection.timeout_ms ?? 3e5);
+  globalThis.fetch = observeFetch(globalThis.fetch, activity);
   const stream12 = models.streamSimple(model, context, {
     signal: cancellation.signal,
+    fetch: globalThis.fetch,
     env: environment,
     temperature: config.temperature ?? void 0,
     maxTokens,
@@ -134577,9 +134713,12 @@ async function main() {
     },
     onResponse: (response) => {
       status = response.status;
-    }
+      activity();
+    },
+    onProviderStreamEvent: () => activity()
   });
   for await (const event of stream12) {
+    if (event.type === "toolcall_delta") activity();
     if (event.type === "start") send({ type: "event", event: { kind: "start" } });
     if (event.type === "text_delta") send({ type: "event", event: { kind: "text", text: event.delta } });
     if (event.type === "thinking_delta") send({ type: "event", event: { kind: "thinking", thinking: event.delta } });
@@ -134589,7 +134728,7 @@ async function main() {
     }
     if (event.type === "toolcall_end") send({ type: "event", event: { kind: "tool_use", tool_use: { id: event.toolCall.id, name: event.toolCall.name, input: event.toolCall.arguments, ...event.toolCall.argumentsError ? { arguments_error: event.toolCall.argumentsError } : {} } } });
     if (event.type === "error") {
-      send({ type: "failure", status: event.error.harnessStatus || status, message: event.error.errorMessage ?? "Provider request failed" });
+      send(failure(event.error, status));
       return;
     }
     if (event.type === "done") {
@@ -134604,7 +134743,7 @@ async function main() {
 if (process.env.HARNESS_BRIDGE_TEST === "1") lines.close();
 else {
   main().catch((error2) => {
-    send({ type: "failure", message: String(error2.message ?? error2), status: Number(error2.status ?? 0) });
+    send(failure(error2));
     process.exitCode = 1;
   }).finally(async () => {
     await Promise.allSettled([...credentialTasks]);
