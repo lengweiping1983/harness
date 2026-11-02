@@ -70,7 +70,7 @@ await browserScenario(async({server,browser})=>{
  await openPicker()
  assert.equal(await picker().getByRole('button',{name:await label('selectAllCount',{count:396}),exact:true}).isDisabled(),true)
  await closePicker(false)
- // 手工填写模型 ID 在接入卡上直接可见
+ // 手工填写模型 ID 在接口卡上直接可见
  await page.getByRole('textbox',{name:'Enter a model ID',exact:true}).fill('manual-outside-catalog');await (await button('addModel')).click();await counts(397)
  await openPicker();await pickerSearch('group-b')
  await picker().getByRole('button',{name:await label('clearCount',{count:306}),exact:true}).click();await closePicker(true);await counts(91)

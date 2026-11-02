@@ -31,7 +31,7 @@ export function ProviderPicker({choices, onPick, onClose}: {choices: ProviderCho
   </Overlay>
 }
 
-/** 模型列表弹层：候选模型多，独立成屏；勾选只在弹层内生效，确定后才写回接入草稿。 */
+/** 模型列表弹层：候选模型多，独立成屏；勾选只在弹层内生效，确定后才写回接口草稿。 */
 export function ModelPicker({context, available, catalog, selected, onConfirm, onClose}: {
   context: string
   available: CatalogModel[]
