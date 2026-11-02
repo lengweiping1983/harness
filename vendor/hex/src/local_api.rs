@@ -1,0 +1,2315 @@
+use std::fs;
+use std::io::{Cursor, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
+
+use color_eyre::eyre::{Result, WrapErr, bail, eyre};
+use serde::Serialize;
+
+use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
+
+mod dictation;
+mod discovery;
+mod http;
+mod streams;
+
+#[cfg(debug_assertions)]
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+pub use discovery::call_developer;
+use discovery::*;
+pub use discovery::{call_control, running_pid};
+use http::*;
+const API_VERSION: &str = "2";
+const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
+const ACCEPT_INTERVAL: Duration = Duration::from_millis(10);
+const CONNECTION_TIMEOUT: Duration = Duration::from_millis(500);
+const HEADER_DEADLINE: Duration = Duration::from_secs(2);
+const UPLOAD_DEADLINE: Duration = Duration::from_secs(30);
+const TRANSCRIPTION_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const AUTH_OBSERVATION_INTERVAL: Duration = Duration::from_secs(5);
+const HTTP_WORKERS: usize = 4;
+const CONNECTION_QUEUE_CAPACITY: usize = 16;
+const MAX_HEADER_BYTES: usize = 16 * 1024;
+const MAX_HEADERS: usize = 64;
+const MAX_PATH_BYTES: usize = 2 * 1024;
+const MAX_AUDIO_BYTES: usize = 64 * 1024 * 1024;
+const MAX_DEVELOPER_CONTROL_BYTES: usize = 16 * 1024;
+const DEVELOPER_CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_CONTROL_BYTES: usize = 64 * 1024;
+const MAX_DICTATION_SOURCE_BYTES: usize = 128;
+
+type HealthProvider = Arc<dyn Fn() -> HealthResponse + Send + Sync>;
+type ModelPreparer =
+    Box<dyn FnOnce(Arc<AtomicBool>, Arc<AtomicU64>, Arc<AtomicU8>) -> Result<()> + Send + 'static>;
+
+pub struct LocalApi {
+    shutdown: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+    discovery: Option<DiscoveryLease>,
+    document: DiscoveryDocument,
+    events: EventLog,
+    stop_observed: Arc<AtomicBool>,
+    transcription_service: Option<crate::transcription::service::TranscriptionService>,
+    _instance: Option<crate::desktop::instance::InstanceLock>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddedEndpoint {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub url: String,
+    pub token: String,
+    pub api_version: String,
+    pub pid: u32,
+}
+
+#[derive(Default)]
+struct AuthObservationLimiter {
+    last: Mutex<Option<Instant>>,
+}
+
+struct HttpContext {
+    token: Arc<str>,
+    health: HealthProvider,
+    events: EventLog,
+    auth_limiter: AuthObservationLimiter,
+    model_preparing: Arc<AtomicBool>,
+    shutdown: Arc<AtomicBool>,
+    transcription: crate::transcription::service::TranscriptionServiceHandle,
+    developer_control: Option<SyncSender<crate::control::developer_control::DeveloperCall>>,
+    control: Option<SyncSender<crate::control::ControlCall>>,
+    dictations: dictation::Dictations,
+    streams: Arc<crate::transcription::stream::Streams>,
+    stream_engine: crate::transcription::stream::EngineSource,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthResponse {
+    version: &'static str,
+    api_version: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CapabilitiesResponse {
+    audio_formats: [&'static str; 1],
+    partial_transcripts: bool,
+    service_capture: bool,
+    /// `/streams` (`docs/streams.md`).
+    streams: bool,
+    developer_control: bool,
+    control: bool,
+}
+
+/// Optional control channels the running app exposes through its local API.
+#[derive(Default)]
+pub struct LocalApiOptions {
+    pub developer_control: Option<SyncSender<crate::control::developer_control::DeveloperCall>>,
+    /// The `hex` control commands (`POST /control`).
+    pub control: Option<SyncSender<crate::control::ControlCall>>,
+    /// Running-app dictation (`/dictations`), which only the macOS
+    /// recognition loop drives so far.
+    pub dictation_control: Option<dictation::Control>,
+    /// Where `/streams` finds its engine; the running app's shared engine
+    /// when unset.
+    pub(crate) stream_engine: Option<crate::transcription::stream::EngineSource>,
+}
+
+impl LocalApi {
+    /// Start the one app-owned local API and publish its discovery document.
+    pub fn start(events: EventLog, options: LocalApiOptions) -> Result<Self> {
+        let instance = crate::desktop::instance::acquire("local-api")?;
+        Self::start_bound(
+            Some(crate::app_paths::local_api_discovery_file()?),
+            Arc::new(current_health),
+            events,
+            options,
+            Some(instance),
+        )
+    }
+
+    /// Start the running Linux or Windows app's local API. Hex runs on
+    /// without it, so a failure is only logged.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn start_for_app(
+        event_path: &Path,
+        control: SyncSender<crate::control::ControlCall>,
+    ) -> Option<Self> {
+        let started = EventLog::create(event_path)
+            .map_err(Into::into)
+            .and_then(|events| {
+                Self::start(
+                    events,
+                    LocalApiOptions {
+                        control: Some(control),
+                        ..Default::default()
+                    },
+                )
+            });
+        started
+            .inspect_err(
+                |error| tracing::warn!(error = %format!("{error:#}"), "local API is unavailable"),
+            )
+            .ok()
+    }
+
+    /// Start an unpublished API whose endpoint is handed directly to one host.
+    pub fn start_embedded(events: EventLog) -> Result<Self> {
+        Self::start_bound(
+            None,
+            Arc::new(current_health),
+            events,
+            LocalApiOptions::default(),
+            None,
+        )
+    }
+
+    fn start_bound(
+        discovery_path: Option<PathBuf>,
+        health: HealthProvider,
+        events: EventLog,
+        options: LocalApiOptions,
+        instance: Option<crate::desktop::instance::InstanceLock>,
+    ) -> Result<Self> {
+        if let Some(path) = &discovery_path {
+            prepare_discovery_path(path)?;
+        }
+        let (transcription_service, transcription) =
+            crate::transcription::service::TranscriptionService::start()?;
+        let listener = TcpListener::bind("127.0.0.1:0").wrap_err("could not bind the local API")?;
+        listener.set_nonblocking(true)?;
+        let address = listener.local_addr()?;
+        let document = DiscoveryDocument {
+            port: address.port(),
+            token: generate_token()?,
+            api_version: API_VERSION.into(),
+            pid: std::process::id(),
+        };
+        let discovery = if let Some(path) = discovery_path {
+            write_discovery(&path, &document)?;
+            Some(DiscoveryLease {
+                path,
+                document: document.clone(),
+            })
+        } else {
+            None
+        };
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = shutdown.clone();
+        let worker_events = events.clone();
+        let token = document.token.clone();
+        let worker_discovery = discovery
+            .as_ref()
+            .map(|lease| (lease.path.clone(), lease.document.clone()));
+        let stop_observed = Arc::new(AtomicBool::new(false));
+        let worker_stop_observed = stop_observed.clone();
+        let unexpected_shutdown = worker_shutdown.clone();
+        let http_context = HttpContext {
+            token: token.into(),
+            health,
+            events: worker_events.clone(),
+            auth_limiter: AuthObservationLimiter::default(),
+            model_preparing: Arc::new(AtomicBool::new(false)),
+            shutdown: worker_shutdown,
+            transcription,
+            developer_control: options.developer_control,
+            control: options.control,
+            dictations: dictation::Dictations::new(options.dictation_control),
+            streams: Arc::default(),
+            stream_engine: options
+                .stream_engine
+                .unwrap_or_else(|| Arc::new(crate::transcription::stream::shared_engine)),
+        };
+        let (ready, readiness) = mpsc::sync_channel(1);
+        let worker = thread::Builder::new()
+            .name("local-api".into())
+            .spawn(move || {
+                serve(listener, http_context, ready);
+                if !unexpected_shutdown.load(Ordering::Acquire) {
+                    if let Some((path, document)) = worker_discovery {
+                        remove_discovery_if_owned(&path, &document);
+                    }
+                    observe_stopped(&worker_events, &worker_stop_observed);
+                    tracing::error!("local API stopped unexpectedly");
+                }
+            })
+            .wrap_err("could not start the local API thread")?;
+        match readiness.recv_timeout(Duration::from_secs(1)) {
+            Ok(true) => {}
+            Ok(false) | Err(_) => {
+                shutdown.store(true, Ordering::Release);
+                let _ = worker.join();
+                bail!("local API HTTP workers could not start");
+            }
+        }
+        if let Err(error) = events.emit(&VoiceEvent::ApiServerStarted {
+            timestamp_ms: now_ms(),
+            port: document.port,
+        }) {
+            tracing::error!(%error, "could not record local API startup");
+        }
+        tracing::info!(port = document.port, "local API started");
+        Ok(Self {
+            shutdown,
+            worker: Some(worker),
+            discovery,
+            document,
+            events,
+            stop_observed,
+            transcription_service: Some(transcription_service),
+            _instance: instance,
+        })
+    }
+
+    pub fn embedded_endpoint(&self) -> EmbeddedEndpoint {
+        EmbeddedEndpoint {
+            kind: "ready",
+            url: format!("http://127.0.0.1:{}", self.document.port),
+            token: self.document.token.clone(),
+            api_version: self.document.api_version.clone(),
+            pid: self.document.pid,
+        }
+    }
+
+    pub fn shutdown(&mut self) {
+        let Some(worker) = self.worker.take() else {
+            return;
+        };
+        // Retract discovery before draining so a replacement Hex can publish
+        // while this listener is still bound and finishing in-flight requests.
+        if let Some(discovery) = &self.discovery {
+            discovery.remove_if_owned();
+        }
+        self.shutdown.store(true, Ordering::Release);
+        if worker.join().is_err() {
+            tracing::error!("local API thread panicked during shutdown");
+        }
+        if let Some(mut service) = self.transcription_service.take() {
+            service.shutdown();
+        }
+        observe_stopped(&self.events, &self.stop_observed);
+        tracing::info!("local API stopped");
+    }
+}
+
+/// Runs `hex service`: the local API without the app, until `shutdown`.
+/// Published, it is the one discoverable service. Embedded (`--embedded`,
+/// the TypeScript SDK's direct child), it prints its endpoint as one JSON line
+/// on stdout instead and exits when its host closes stdin.
+pub fn run_service(
+    log_dir: &Path,
+    event_path: PathBuf,
+    embedded: bool,
+    shutdown: &'static AtomicBool,
+) -> Result<()> {
+    let service_event_path = if embedded {
+        log_dir.join(format!("embedded-{}.ndjson", std::process::id()))
+    } else {
+        event_path
+    };
+    let events = EventLog::create(&service_event_path)?;
+    let local_api = if embedded {
+        let api = LocalApi::start_embedded(events)?;
+        thread::Builder::new()
+            .name("embedded-host-lease".into())
+            .spawn(move || {
+                let mut stdin = std::io::stdin().lock();
+                let mut buffer = [0_u8; 1];
+                loop {
+                    match stdin.read(&mut buffer) {
+                        Ok(0) => {
+                            shutdown.store(true, Ordering::Release);
+                            thread::sleep(Duration::from_secs(5));
+                            tracing::warn!(
+                                "forcing embedded service shutdown after host lease closed"
+                            );
+                            std::process::exit(0);
+                        }
+                        Ok(_) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                        Err(error) => {
+                            tracing::warn!(%error, "embedded host lease failed");
+                            shutdown.store(true, Ordering::Release);
+                            break;
+                        }
+                    }
+                }
+            })?;
+        let mut stdout = std::io::stdout().lock();
+        serde_json::to_writer(&mut stdout, &api.embedded_endpoint())?;
+        stdout.write_all(b"\n")?;
+        stdout.flush()?;
+        drop(stdout);
+        api
+    } else {
+        LocalApi::start(events, LocalApiOptions::default())?
+    };
+    while !shutdown.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_millis(100));
+    }
+    drop(local_api);
+    if embedded
+        && let Err(error) = fs::remove_file(&service_event_path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(%error, "could not remove embedded service event log");
+    }
+    Ok(())
+}
+
+impl Drop for LocalApi {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+fn observe_stopped(events: &EventLog, observed: &AtomicBool) {
+    if observed.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    if let Err(error) = events
+        .emit(&VoiceEvent::ApiServerStopped {
+            timestamp_ms: now_ms(),
+        })
+        .and_then(|()| events.flush())
+    {
+        tracing::error!(%error, "could not record local API shutdown");
+    }
+}
+
+fn serve(listener: TcpListener, context: HttpContext, ready: mpsc::SyncSender<bool>) {
+    let (connections, pending) = mpsc::sync_channel(CONNECTION_QUEUE_CAPACITY);
+    let pending = Arc::new(Mutex::new(pending));
+    let shutdown = context.shutdown.clone();
+    let context = Arc::new(context);
+    let workers = (0..HTTP_WORKERS)
+        .filter_map(|index| {
+            let pending = pending.clone();
+            let context = context.clone();
+            thread::Builder::new()
+                .name(format!("local-api-http-{index}"))
+                .spawn(move || http_worker(pending, context))
+                .map_err(|error| {
+                    tracing::error!(%error, "could not start local API HTTP worker");
+                })
+                .ok()
+        })
+        .collect::<Vec<_>>();
+    if workers.is_empty() {
+        let _ = ready.send(false);
+        tracing::error!("local API has no HTTP workers");
+        return;
+    }
+    if ready.send(true).is_err() {
+        return;
+    }
+
+    while !shutdown.load(Ordering::Acquire) {
+        match listener.accept() {
+            Ok((stream, _)) => match connections.try_send(stream) {
+                Ok(()) => {}
+                Err(TrySendError::Full(mut stream)) => {
+                    let _ = write_response(&mut stream, HttpResponse::empty(503));
+                }
+                Err(TrySendError::Disconnected(_)) => break,
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                #[cfg(unix)]
+                {
+                    use std::os::fd::AsRawFd;
+                    let mut pfd = libc::pollfd {
+                        fd: listener.as_raw_fd(),
+                        events: libc::POLLIN,
+                        revents: 0,
+                    };
+                    // Waking on the next connection instead of sleeping took
+                    // a loopback request from 12.5 ms to 0.12 ms.
+                    // SAFETY: `pfd` is one valid pollfd for the listener's fd.
+                    unsafe {
+                        libc::poll(&raw mut pfd, 1, ACCEPT_INTERVAL.as_millis() as libc::c_int);
+                    }
+                }
+                #[cfg(not(unix))]
+                thread::sleep(ACCEPT_INTERVAL);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => {
+                tracing::error!(%error, "local API accept failed");
+                thread::sleep(ACCEPT_INTERVAL);
+            }
+        }
+    }
+    drop(connections);
+    for worker in workers {
+        if worker.join().is_err() {
+            tracing::error!("local API HTTP worker panicked during shutdown");
+        }
+    }
+}
+
+fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContext>) {
+    loop {
+        let stream = pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .recv();
+        let Ok(mut stream) = stream else {
+            return;
+        };
+        let _ = stream.set_nodelay(true);
+        if let Err(error) = stream.set_read_timeout(Some(CONNECTION_TIMEOUT)) {
+            tracing::debug!(%error, "could not set local API read timeout");
+            continue;
+        }
+        if let Err(error) = stream.set_write_timeout(Some(CONNECTION_TIMEOUT)) {
+            tracing::debug!(%error, "could not set local API write timeout");
+            continue;
+        }
+        let action = match read_request(&mut stream, &context.shutdown) {
+            Ok(request) => handle_request(request, &context),
+            Err(RequestReadError::TooLarge) => RequestAction::Respond(HttpResponse::empty(431)),
+            Err(RequestReadError::Invalid) => RequestAction::Respond(HttpResponse::empty(400)),
+            Err(RequestReadError::Deadline) => RequestAction::Respond(HttpResponse::empty(408)),
+            Err(RequestReadError::Shutdown) => return,
+            Err(RequestReadError::Io(error)) => {
+                tracing::debug!(%error, "local API client disconnected while sending a request");
+                continue;
+            }
+        };
+        match action {
+            RequestAction::Respond(response) => {
+                if let Err(error) = write_response(&mut stream, response) {
+                    tracing::debug!(%error, "local API client disconnected");
+                }
+            }
+            RequestAction::Prepare { model, selection } => {
+                stream_model_prepare(
+                    &mut stream,
+                    model,
+                    selection,
+                    context.model_preparing.clone(),
+                    &context.shutdown,
+                    context.transcription.clone(),
+                );
+            }
+            RequestAction::Transcribe {
+                selection,
+                content_length,
+                body_prefix,
+                admission,
+            } => {
+                let response = transcribe_audio(
+                    &mut stream,
+                    selection,
+                    content_length,
+                    body_prefix,
+                    &context.transcription,
+                    &context.shutdown,
+                    admission,
+                );
+                if let Some(response) = response
+                    && let Err(error) = write_response(&mut stream, response)
+                {
+                    tracing::debug!(%error, "transcription client disconnected");
+                }
+            }
+            RequestAction::DeveloperControl {
+                content_length,
+                body_prefix,
+            } => {
+                let response = developer_control(
+                    &mut stream,
+                    content_length,
+                    body_prefix,
+                    context.developer_control.as_ref(),
+                    &context.shutdown,
+                );
+                if let Err(error) = write_response(&mut stream, response) {
+                    tracing::debug!(%error, "developer control client disconnected");
+                }
+            }
+            RequestAction::Control {
+                content_length,
+                body_prefix,
+            } => {
+                let response = control(
+                    &mut stream,
+                    content_length,
+                    body_prefix,
+                    context.control.as_ref(),
+                    &context.shutdown,
+                );
+                if let Err(error) = write_response(&mut stream, response) {
+                    tracing::debug!(%error, "control client disconnected");
+                }
+            }
+            RequestAction::DictationStart {
+                content_length,
+                body_prefix,
+            } => {
+                let response = dictation::start(&mut stream, content_length, body_prefix, &context);
+                if let Err(error) = write_response(&mut stream, response) {
+                    tracing::debug!(%error, "dictation client disconnected");
+                }
+            }
+            RequestAction::Dictation {
+                id,
+                owner_token,
+                action,
+            } => {
+                dictation::handle(&mut stream, id, owner_token, action, &context);
+            }
+            RequestAction::Stream(action) => streams::handle(&mut stream, action, &context),
+        }
+    }
+}
+
+fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction {
+    let path = request.path.split('?').next().unwrap_or("/");
+    if request.authorization.as_deref() != Some(&format!("Bearer {}", context.token)) {
+        context
+            .auth_limiter
+            .observe(&context.events, &request.method, path);
+        return RequestAction::Respond(HttpResponse::empty(401));
+    }
+    if request.method == "POST" && path == "/transcriptions" {
+        return transcription_action(request, &context.transcription);
+    }
+    if request.method == "POST" && path == "/dev/control" {
+        return developer_control_action(request, context.developer_control.is_some());
+    }
+    if request.method == "POST" && path == "/control" {
+        return json_post_action(
+            request,
+            context.control.is_some(),
+            "control-unavailable",
+            MAX_CONTROL_BYTES,
+            "control-too-large",
+            |content_length, body_prefix| RequestAction::Control {
+                content_length,
+                body_prefix,
+            },
+        );
+    }
+    if request.method == "POST" && path == "/streams" {
+        return streams::create_action(request);
+    }
+    if let Some((id, action)) = streams::stream_path(path) {
+        let action = action.to_owned();
+        return streams::route(request, id, &action, context);
+    }
+    if request.method == "POST" && path == "/dictations" {
+        return dictation_start_action(request, context.dictations.available());
+    }
+    if let Some((id, action)) = dictation_path(path) {
+        let Some(owner_token) = request.dictation_token else {
+            return RequestAction::Respond(HttpResponse::code(404, "dictation-not-found"));
+        };
+        let action = match (request.method.as_str(), action) {
+            ("POST", "finish") => Some(DictationAction::Finish),
+            ("POST", "cancel") => Some(DictationAction::Cancel),
+            ("GET", "levels") => Some(DictationAction::Levels),
+            ("GET", "audio") => Some(DictationAction::Audio),
+            ("POST", "heartbeat") => Some(DictationAction::Heartbeat),
+            _ => None,
+        };
+        return match action {
+            Some(action) if context.dictations.available() => RequestAction::Dictation {
+                id,
+                owner_token,
+                action,
+            },
+            _ => RequestAction::Respond(HttpResponse::code(404, "service-capture-unavailable")),
+        };
+    }
+
+    let response = match (request.method.as_str(), path) {
+        ("GET", "/health") => HttpResponse::json(200, &(context.health)()),
+        ("GET", "/capabilities") => HttpResponse::json(
+            200,
+            &CapabilitiesResponse {
+                audio_formats: ["audio/wav"],
+                partial_transcripts: false,
+                service_capture: context.dictations.available(),
+                streams: true,
+                developer_control: context.developer_control.is_some(),
+                control: context.control.is_some(),
+            },
+        ),
+        ("GET", "/profile/vitals") => match procwatch::snapshot() {
+            Some(snapshot) => HttpResponse {
+                status: 200,
+                reason: reason(200),
+                content_type: Some("application/json"),
+                body: snapshot.to_json().into_bytes(),
+            },
+            None => HttpResponse::code(503, "vitals-unavailable"),
+        },
+        ("GET", "/models") => match model_infos(&request.path) {
+            Ok(models) => HttpResponse::json(200, &models),
+            Err(code) => HttpResponse::code(400, code),
+        },
+        ("POST", path) => {
+            let Some(id) = model_prepare_path(path) else {
+                return RequestAction::Respond(HttpResponse::code(404, "not_found"));
+            };
+            let Ok(id) = id.parse::<crate::transcription::models::TranscriptionModelId>() else {
+                return RequestAction::Respond(HttpResponse::code(404, "unknown-model"));
+            };
+            let model = crate::transcription::models::definition(id);
+            if !model.available() {
+                return RequestAction::Respond(HttpResponse::code(404, "unknown-model"));
+            }
+            let Ok(selection) = installation_selection(model, &request.path) else {
+                return RequestAction::Respond(HttpResponse::code(400, "unsupported-model"));
+            };
+            if context
+                .model_preparing
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
+                return RequestAction::Respond(HttpResponse::code(409, "prepare-busy"));
+            }
+            return RequestAction::Prepare { model, selection };
+        }
+        _ => HttpResponse::code(404, "not_found"),
+    };
+    RequestAction::Respond(response)
+}
+
+fn transcription_action(
+    request: HttpRequest,
+    transcription: &crate::transcription::service::TranscriptionServiceHandle,
+) -> RequestAction {
+    if !request.has_content_type("audio/wav") {
+        return RequestAction::Respond(HttpResponse::code(415, "unsupported-audio"));
+    }
+    let Some(content_length) = request.content_length else {
+        return RequestAction::Respond(HttpResponse::code(411, "length-required"));
+    };
+    if content_length > MAX_AUDIO_BYTES {
+        return RequestAction::Respond(HttpResponse::code(413, "resource-exhausted"));
+    }
+    let selection = match transcription_selection(&request.path) {
+        Ok(selection) => selection,
+        Err(code) => {
+            return RequestAction::Respond(HttpResponse::code(400, code));
+        }
+    };
+    let model = crate::transcription::models::definition(selection.model);
+    let prepared = match model.runtime {
+        crate::transcription::models::ModelRuntime::Gguf(_) => {
+            crate::transcription::models::is_verified(model)
+        }
+        crate::transcription::models::ModelRuntime::AppleSpeech => {
+            crate::transcription::models::is_installed(model, &selection.language)
+        }
+    };
+    if !prepared {
+        return RequestAction::Respond(HttpResponse::code(409, "model-not-ready"));
+    }
+    let Some(admission) = transcription.admit_audio() else {
+        return RequestAction::Respond(HttpResponse::code(429, "queue-full"));
+    };
+    RequestAction::Transcribe {
+        selection,
+        content_length,
+        body_prefix: request.body_prefix,
+        admission,
+    }
+}
+
+fn developer_control_action(request: HttpRequest, available: bool) -> RequestAction {
+    json_post_action(
+        request,
+        available,
+        "developer-control-unavailable",
+        MAX_DEVELOPER_CONTROL_BYTES,
+        "developer-control-too-large",
+        |content_length, body_prefix| RequestAction::DeveloperControl {
+            content_length,
+            body_prefix,
+        },
+    )
+}
+
+fn dictation_start_action(request: HttpRequest, available: bool) -> RequestAction {
+    json_post_action(
+        request,
+        available,
+        "service-capture-unavailable",
+        MAX_DICTATION_SOURCE_BYTES + 32,
+        "source-too-large",
+        |content_length, body_prefix| RequestAction::DictationStart {
+            content_length,
+            body_prefix,
+        },
+    )
+}
+
+fn json_post_action(
+    request: HttpRequest,
+    available: bool,
+    unavailable_code: &'static str,
+    max_bytes: usize,
+    too_large_code: &'static str,
+    build: impl FnOnce(usize, Vec<u8>) -> RequestAction,
+) -> RequestAction {
+    if !available {
+        return RequestAction::Respond(HttpResponse::code(404, unavailable_code));
+    }
+    if !request.has_content_type("application/json") {
+        return RequestAction::Respond(HttpResponse::code(415, "unsupported-content-type"));
+    }
+    let Some(content_length) = request.content_length else {
+        return RequestAction::Respond(HttpResponse::code(411, "length-required"));
+    };
+    if content_length > max_bytes {
+        return RequestAction::Respond(HttpResponse::code(413, too_large_code));
+    }
+    build(content_length, request.body_prefix)
+}
+
+fn dictation_path(path: &str) -> Option<(u64, &str)> {
+    let mut parts = path.strip_prefix("/dictations/")?.split('/');
+    let id = parts.next()?.parse().ok()?;
+    let action = parts.next()?;
+    (parts.next().is_none()).then_some((id, action))
+}
+
+fn developer_control(
+    stream: &mut TcpStream,
+    content_length: usize,
+    mut body: Vec<u8>,
+    controls: Option<&SyncSender<crate::control::developer_control::DeveloperCall>>,
+    shutdown: &AtomicBool,
+) -> HttpResponse {
+    if let Err(error) = read_body_bounded(
+        stream,
+        content_length,
+        &mut body,
+        shutdown,
+        MAX_DEVELOPER_CONTROL_BYTES,
+        DEVELOPER_CONTROL_TIMEOUT,
+    ) {
+        return body_read_response(error);
+    }
+    let Ok(command) = serde_json::from_slice(&body) else {
+        return HttpResponse::code(400, "invalid-developer-command");
+    };
+    let Some(controls) = controls else {
+        return HttpResponse::code(404, "developer-control-unavailable");
+    };
+    let (reply, response) = mpsc::sync_channel(1);
+    match controls.try_send(crate::control::developer_control::DeveloperCall { command, reply }) {
+        Ok(()) => {}
+        Err(TrySendError::Full(_)) => {
+            return HttpResponse::code(503, "developer-control-busy");
+        }
+        Err(TrySendError::Disconnected(_)) => {
+            return HttpResponse::code(503, "developer-control-unavailable");
+        }
+    }
+    match response.recv_timeout(DEVELOPER_CONTROL_TIMEOUT) {
+        Ok(reply) => HttpResponse::json(200, &reply),
+        Err(RecvTimeoutError::Timeout) => HttpResponse::code(504, "developer-ui-timeout"),
+        Err(RecvTimeoutError::Disconnected) => {
+            HttpResponse::code(503, "developer-control-unavailable")
+        }
+    }
+}
+
+/// Hands one `hex` control request to the app and waits for its reply.
+/// Refusals travel as a 200 `ControlReply::Error`; an HTTP error means the
+/// request never reached the app.
+fn control(
+    stream: &mut TcpStream,
+    content_length: usize,
+    mut body: Vec<u8>,
+    controls: Option<&SyncSender<crate::control::ControlCall>>,
+    shutdown: &AtomicBool,
+) -> HttpResponse {
+    use crate::control::{ControlCall, ControlReply, ControlRequest, ControlResponse};
+
+    if let Err(error) = read_body_bounded(
+        stream,
+        content_length,
+        &mut body,
+        shutdown,
+        MAX_CONTROL_BYTES,
+        DEVELOPER_CONTROL_TIMEOUT,
+    ) {
+        return body_read_response(error);
+    }
+    let request = match serde_json::from_slice::<ControlRequest>(&body) {
+        Ok(request) => request,
+        // A newer `hex` may name a command this app doesn't know.
+        Err(_) => match serde_json::from_slice::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|value| value.get("version")?.as_u64())
+        {
+            Some(version) if version != u64::from(crate::control::CONTROL_VERSION) => {
+                let error = crate::control::version_mismatch(version);
+                return HttpResponse::json(200, &ControlResponse::from(ControlReply::from(error)));
+            }
+            _ => return HttpResponse::code(400, "invalid-control-command"),
+        },
+    };
+    if let Err(error) = crate::control::check_version(&request) {
+        return HttpResponse::json(200, &ControlResponse::from(ControlReply::from(error)));
+    }
+    let Some(controls) = controls else {
+        return HttpResponse::code(404, "control-unavailable");
+    };
+    let deadline = request.command.deadline();
+    let (reply, response) = mpsc::sync_channel(1);
+    match controls.try_send(ControlCall { request, reply }) {
+        Ok(()) => {}
+        Err(TrySendError::Full(_)) => return HttpResponse::code(503, "control-busy"),
+        Err(TrySendError::Disconnected(_)) => {
+            return HttpResponse::code(503, "control-unavailable");
+        }
+    }
+    match response.recv_timeout(deadline) {
+        Ok(reply) => HttpResponse::json(200, &reply),
+        Err(RecvTimeoutError::Timeout) => HttpResponse::code(504, "control-timeout"),
+        Err(RecvTimeoutError::Disconnected) => HttpResponse::code(503, "control-unavailable"),
+    }
+}
+
+fn transcription_selection(
+    path: &str,
+) -> std::result::Result<crate::transcription::models::TranscriptionSelection, &'static str> {
+    let query = selection_query(path)?;
+    let model = query.model.ok_or("unknown-model")?;
+    validate_selection(model, query.into_language())
+}
+
+fn validate_selection(
+    model: crate::transcription::models::TranscriptionModelId,
+    language: String,
+) -> std::result::Result<crate::transcription::models::TranscriptionSelection, &'static str> {
+    let selection = crate::transcription::models::TranscriptionSelection { model, language };
+    crate::transcription::models::validate(&selection).map_err(|_| "unsupported-model")?;
+    Ok(selection)
+}
+
+#[derive(Default)]
+struct SelectionQuery {
+    model: Option<crate::transcription::models::TranscriptionModelId>,
+    language: Option<String>,
+}
+
+impl SelectionQuery {
+    fn into_language(self) -> String {
+        self.language.unwrap_or_else(|| {
+            crate::transcription::models::TranscriptionSelection::default().language
+        })
+    }
+}
+
+fn selection_query(path: &str) -> std::result::Result<SelectionQuery, &'static str> {
+    let query = path
+        .split_once('?')
+        .map(|(_, query)| query)
+        .unwrap_or_default();
+    let mut selection = SelectionQuery::default();
+    for (name, value) in url::form_urlencoded::parse(query.as_bytes()) {
+        match name.as_ref() {
+            "model" if selection.model.is_none() => selection.model = value.parse().ok(),
+            "language" if selection.language.is_none() => {
+                selection.language = Some(value.into_owned());
+            }
+            "model" | "language" => return Err("invalid-request"),
+            _ => {}
+        }
+    }
+    Ok(selection)
+}
+
+fn transcribe_audio(
+    stream: &mut TcpStream,
+    selection: crate::transcription::models::TranscriptionSelection,
+    content_length: usize,
+    mut body: Vec<u8>,
+    transcription: &crate::transcription::service::TranscriptionServiceHandle,
+    shutdown: &AtomicBool,
+    admission: crate::transcription::service::AudioAdmission,
+) -> Option<HttpResponse> {
+    if let Err(error) = read_body_bounded(
+        stream,
+        content_length,
+        &mut body,
+        shutdown,
+        MAX_AUDIO_BYTES,
+        UPLOAD_DEADLINE,
+    ) {
+        return Some(match error {
+            BodyReadError::ResourceExhausted => HttpResponse::code(413, "resource-exhausted"),
+            BodyReadError::Invalid => HttpResponse::code(400, "invalid-audio"),
+            BodyReadError::Io(error) => {
+                tracing::debug!(%error, "audio upload stopped before completion");
+                HttpResponse::code(400, "invalid-audio")
+            }
+            BodyReadError::Deadline => HttpResponse::code(408, "upload-timeout"),
+            BodyReadError::Shutdown => return None,
+        });
+    }
+    let clip = match crate::transcription::service::AudioClip::decode_wav(Cursor::new(body)) {
+        Ok(clip) => clip,
+        Err(crate::transcription::service::AudioError::ResourceExhausted) => {
+            return Some(HttpResponse::code(413, "resource-exhausted"));
+        }
+        Err(crate::transcription::service::AudioError::Unsupported) => {
+            return Some(HttpResponse::code(415, "unsupported-audio"));
+        }
+        Err(crate::transcription::service::AudioError::Invalid) => {
+            return Some(HttpResponse::code(400, "invalid-audio"));
+        }
+    };
+    let duration_ms = clip.duration_ms;
+    let job = match transcription.transcribe(selection, clip, admission) {
+        Ok(job) => job,
+        Err(error) => return Some(transcription_error(error)),
+    };
+    loop {
+        match job.wait_timeout(TRANSCRIPTION_POLL_INTERVAL) {
+            Ok(Some(Ok(transcript))) => {
+                return Some(HttpResponse::json(
+                    200,
+                    &serde_json::json!({
+                        "transcript": transcript,
+                        "durationMs": duration_ms,
+                    }),
+                ));
+            }
+            Ok(Some(Err(error))) | Err(error) => return Some(transcription_error(error)),
+            Ok(None) => {
+                if shutdown.load(Ordering::Acquire) || client_aborted(stream) {
+                    job.cancel();
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+fn transcription_error(
+    error: crate::transcription::service::TranscriptionServiceError,
+) -> HttpResponse {
+    match error {
+        crate::transcription::service::TranscriptionServiceError::QueueFull => {
+            HttpResponse::code(429, "queue-full")
+        }
+        crate::transcription::service::TranscriptionServiceError::Unavailable => {
+            HttpResponse::code(503, "service-gone")
+        }
+        crate::transcription::service::TranscriptionServiceError::Cancelled => {
+            HttpResponse::code(409, "cancelled")
+        }
+        crate::transcription::service::TranscriptionServiceError::Model(error) => {
+            tracing::error!(%error, "prepared transcription model could not load");
+            HttpResponse::code(500, "model-load-failed")
+        }
+        crate::transcription::service::TranscriptionServiceError::Inference(error) => {
+            tracing::error!(%error, "local transcription failed");
+            HttpResponse::code(500, "transcription-failed")
+        }
+    }
+}
+
+fn client_aborted(stream: &TcpStream) -> bool {
+    let mut byte = [0_u8; 1];
+    match stream.peek(&mut byte) {
+        // A read-side EOF can be a valid HTTP client half-close; only a socket
+        // error proves the client cannot receive the response.
+        Ok(_) => false,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            false
+        }
+        Err(_) => true,
+    }
+}
+
+fn model_prepare_path(path: &str) -> Option<&str> {
+    let id = path.strip_prefix("/models/")?.strip_suffix("/prepare")?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
+fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> {
+    let language = selection_query(path)?.into_language();
+    if !crate::transcription::models::is_known_language(&language) {
+        return Err("unsupported-language");
+    }
+    Ok(crate::transcription::models::all_models()
+        .into_iter()
+        .filter(|model| model.available())
+        .map(|model| {
+            let managed = matches!(
+                model.runtime,
+                crate::transcription::models::ModelRuntime::AppleSpeech
+            );
+            let installed = crate::transcription::models::is_installed(model, &language);
+            ModelInfo {
+                id: model.id.as_str(),
+                name: model.name,
+                installed,
+                verified: managed && installed || crate::transcription::models::is_verified(model),
+                managed,
+                download_bytes: model.download_bytes(),
+                languages: model.presentation_languages(),
+                supports_language_detection: model.supports_language_detection,
+                source: crate::control::model_source(model, &language),
+            }
+        })
+        .collect())
+}
+
+fn installation_selection(
+    model: &crate::transcription::models::ModelDefinition,
+    path: &str,
+) -> std::result::Result<crate::transcription::models::TranscriptionSelection, &'static str> {
+    let query = selection_query(path)?;
+    validate_selection(model.id, query.into_language())
+}
+
+fn stream_model_prepare(
+    stream: &mut TcpStream,
+    model: &'static crate::transcription::models::ModelDefinition,
+    selection: crate::transcription::models::TranscriptionSelection,
+    preparing: Arc<AtomicBool>,
+    shutdown: &AtomicBool,
+    transcription: crate::transcription::service::TranscriptionServiceHandle,
+) {
+    let preparer: ModelPreparer = Box::new(move |canceled, downloaded, stage| {
+        if matches!(
+            model.runtime,
+            crate::transcription::models::ModelRuntime::Gguf(_)
+        ) {
+            crate::transcription::models::download_with_stage_progress(
+                model,
+                &canceled,
+                &downloaded,
+                &stage,
+            )?;
+        }
+        if canceled.load(Ordering::Acquire) {
+            bail!("model preparation canceled");
+        }
+        crate::transcription::models::ModelPreparationStage::Loading.store(&stage);
+        transcription
+            .prepare(selection, canceled)
+            .map_err(|error| eyre!("model preparation failed: {error:?}"))
+    });
+    stream_model_prepare_with(stream, model, preparing, shutdown, preparer);
+}
+
+fn stream_model_prepare_with(
+    stream: &mut TcpStream,
+    model: &'static crate::transcription::models::ModelDefinition,
+    preparing: Arc<AtomicBool>,
+    shutdown: &AtomicBool,
+    preparer: ModelPreparer,
+) {
+    if let Err(error) = write_sse_headers(stream) {
+        preparing.store(false, Ordering::Release);
+        tracing::debug!(%error, "model preparation client disconnected before streaming");
+        return;
+    }
+    let canceled = Arc::new(AtomicBool::new(false));
+    let downloaded = Arc::new(AtomicU64::new(0));
+    let initial_stage = if matches!(
+        model.runtime,
+        crate::transcription::models::ModelRuntime::AppleSpeech
+    ) {
+        crate::transcription::models::ModelPreparationStage::Loading as u8
+    } else {
+        crate::transcription::models::ModelPreparationStage::Downloading as u8
+    };
+    let stage = Arc::new(AtomicU8::new(initial_stage));
+    let (result_sender, result_receiver) = mpsc::sync_channel(1);
+    let guard = PrepareGuard(preparing);
+    let worker = thread::spawn({
+        let canceled = canceled.clone();
+        let downloaded = downloaded.clone();
+        let stage = stage.clone();
+        move || {
+            let _guard = guard;
+            let result = preparer(canceled, downloaded, stage);
+            let _ = result_sender.send(result);
+        }
+    });
+
+    let mut last_stage = None;
+    let mut last_downloaded = u64::MAX;
+    let mut last_heartbeat = Instant::now();
+    let total_bytes = model.download_bytes().unwrap_or(0);
+    let mut connected = true;
+    let mut finished = None;
+    let result = loop {
+        if shutdown.load(Ordering::Acquire) {
+            canceled.store(true, Ordering::Release);
+            connected = false;
+            break None;
+        }
+        let current_stage = crate::transcription::models::ModelPreparationStage::load(&stage);
+        let current_downloaded = downloaded.load(Ordering::Relaxed);
+        let progress = match current_stage {
+            crate::transcription::models::ModelPreparationStage::Downloading
+                if last_stage != Some(current_stage) || last_downloaded != current_downloaded =>
+            {
+                Some(serde_json::json!({
+                    "type": "downloading",
+                    "downloadedBytes": current_downloaded,
+                    "totalBytes": total_bytes,
+                }))
+            }
+            crate::transcription::models::ModelPreparationStage::Verifying
+                if last_stage != Some(current_stage) =>
+            {
+                Some(serde_json::json!({ "type": "verifying" }))
+            }
+            crate::transcription::models::ModelPreparationStage::Loading
+                if last_stage != Some(current_stage) =>
+            {
+                Some(serde_json::json!({ "type": "loading" }))
+            }
+            _ => None,
+        };
+        if let Some(progress) = progress
+            && let Err(error) = write_sse(stream, &progress)
+        {
+            tracing::debug!(%error, "model preparation client disconnected");
+            canceled.store(true, Ordering::Release);
+            connected = false;
+            break None;
+        }
+        last_stage = Some(current_stage);
+        last_downloaded = current_downloaded;
+        // The last stage has been reported, so a finished result ends here.
+        if let Some(result) = finished.take() {
+            break Some(result);
+        }
+        if last_heartbeat.elapsed() >= Duration::from_secs(5) {
+            if stream.write_all(b": keep-alive\n\n").is_err() || stream.flush().is_err() {
+                canceled.store(true, Ordering::Release);
+                connected = false;
+                break None;
+            }
+            last_heartbeat = Instant::now();
+        }
+        match result_receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(result) => finished = Some(result),
+            Err(RecvTimeoutError::Disconnected) => {
+                finished = Some(Err(eyre!("model preparer stopped unexpectedly")));
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+    };
+    if worker.join().is_err() {
+        tracing::error!(model = model.id.as_str(), "model preparer panicked");
+        if connected {
+            let _ = write_sse(
+                stream,
+                &model_prepare_error("internal", "Model preparation stopped unexpectedly."),
+            );
+        }
+        return;
+    }
+    let Some(result) = result else {
+        return;
+    };
+    match result {
+        Ok(()) => {
+            let _ = write_sse(stream, &serde_json::json!({ "type": "ok" }));
+        }
+        Err(error) if canceled.load(Ordering::Acquire) => {
+            tracing::debug!(%error, model = model.id.as_str(), "model preparation canceled");
+            let _ = write_sse(
+                stream,
+                &model_prepare_error("cancelled", "Model preparation was cancelled."),
+            );
+        }
+        Err(error) => {
+            let failed_stage = crate::transcription::models::ModelPreparationStage::load(&stage);
+            let code = match failed_stage {
+                crate::transcription::models::ModelPreparationStage::Downloading => {
+                    "download-failed"
+                }
+                crate::transcription::models::ModelPreparationStage::Verifying => {
+                    "verification-failed"
+                }
+                crate::transcription::models::ModelPreparationStage::Loading => "load-failed",
+            };
+            tracing::error!(%error, model = model.id.as_str(), code, "model preparation failed");
+            let _ = write_sse(
+                stream,
+                &model_prepare_error(code, "The model could not be prepared."),
+            );
+        }
+    }
+}
+
+fn model_prepare_error(code: &str, message: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "error",
+        "error": { "code": code, "message": message },
+    })
+}
+
+impl AuthObservationLimiter {
+    fn observe(&self, events: &EventLog, method: &str, path: &str) {
+        let now = Instant::now();
+        let mut last = self.last.lock().unwrap_or_else(|error| error.into_inner());
+        if last.is_some_and(|last| now.duration_since(last) < AUTH_OBSERVATION_INTERVAL) {
+            return;
+        }
+        *last = Some(now);
+        drop(last);
+        if let Err(error) = events.emit(&VoiceEvent::ApiAuthFailed {
+            timestamp_ms: now_ms(),
+            method: method.into(),
+            path: path.into(),
+        }) {
+            tracing::error!(%error, "could not record local API authentication failure");
+        }
+    }
+}
+
+enum RequestAction {
+    Respond(HttpResponse),
+    Prepare {
+        model: &'static crate::transcription::models::ModelDefinition,
+        selection: crate::transcription::models::TranscriptionSelection,
+    },
+    Transcribe {
+        selection: crate::transcription::models::TranscriptionSelection,
+        content_length: usize,
+        body_prefix: Vec<u8>,
+        admission: crate::transcription::service::AudioAdmission,
+    },
+    DeveloperControl {
+        content_length: usize,
+        body_prefix: Vec<u8>,
+    },
+    Control {
+        content_length: usize,
+        body_prefix: Vec<u8>,
+    },
+    DictationStart {
+        content_length: usize,
+        body_prefix: Vec<u8>,
+    },
+    Dictation {
+        id: u64,
+        owner_token: String,
+        action: DictationAction,
+    },
+    Stream(streams::StreamAction),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum DictationAction {
+    Finish,
+    Cancel,
+    Levels,
+    Audio,
+    Heartbeat,
+}
+
+struct PrepareGuard(Arc<AtomicBool>);
+
+impl Drop for PrepareGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelInfo {
+    id: &'static str,
+    name: &'static str,
+    installed: bool,
+    verified: bool,
+    managed: bool,
+    download_bytes: Option<u64>,
+    languages: Vec<&'static str>,
+    supports_language_detection: bool,
+    /// `found: owner/name@abcdef1` (another app's download, used where it
+    /// is), `imported`, `hex`, or `download`.
+    source: String,
+}
+
+fn current_health() -> HealthResponse {
+    HealthResponse {
+        version: crate::VERSION,
+        api_version: API_VERSION,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
+
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    /// How long a test waits on another thread before failing instead of hanging.
+    #[cfg(target_os = "macos")]
+    const TEST_WAIT: Duration = Duration::from_secs(5);
+
+    #[test]
+    fn authenticated_server_reports_live_health_and_cleans_up_discovery() {
+        let directory = temp_directory();
+        let discovery_path = directory.join("local-api.json");
+        let event_path = directory.join("events.ndjson");
+        let events = EventLog::create(&event_path).unwrap();
+        let mut api = start_published(discovery_path.clone(), events).unwrap();
+        let document: DiscoveryDocument =
+            serde_json::from_slice(&fs::read(&discovery_path).unwrap()).unwrap();
+
+        let unauthorized = request(document.port, None, "/health");
+        assert!(unauthorized.starts_with("HTTP/1.1 401"));
+        assert_eq!(response_body(&unauthorized), "");
+        let wrong_token = request(document.port, Some("hex_wrong"), "/health");
+        assert!(wrong_token.starts_with("HTTP/1.1 401"));
+        let preflight = raw_request(
+            document.port,
+            "OPTIONS /health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        );
+        assert!(preflight.starts_with("HTTP/1.1 401"));
+
+        let first = request(document.port, Some(&document.token), "/health");
+        assert!(first.starts_with("HTTP/1.1 200"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&first)).unwrap()["apiVersion"],
+            "2"
+        );
+        let capabilities = request(document.port, Some(&document.token), "/capabilities");
+        let capabilities: serde_json::Value =
+            serde_json::from_str(response_body(&capabilities)).unwrap();
+        assert_eq!(capabilities["partialTranscripts"], false);
+        assert_eq!(capabilities["serviceCapture"], false);
+        assert_eq!(capabilities["developerControl"], false);
+        assert_eq!(capabilities["control"], false);
+        assert_eq!(capabilities["audioFormats"][0], "audio/wav");
+        let vitals = request(document.port, Some(&document.token), "/profile/vitals");
+        #[cfg(target_os = "macos")]
+        {
+            assert!(vitals.starts_with("HTTP/1.1 200"));
+            let vitals: serde_json::Value = serde_json::from_str(response_body(&vitals)).unwrap();
+            assert!(vitals["footprint"].as_u64().unwrap() > 0);
+            assert!(vitals["heap"]["live"].as_u64().unwrap() > 0);
+        }
+        // procwatch reads a process's footprint only on macOS.
+        #[cfg(not(target_os = "macos"))]
+        assert!(vitals.starts_with("HTTP/1.1 503"));
+        let models = request(document.port, Some(&document.token), "/models");
+        let models: Vec<serde_json::Value> = serde_json::from_str(response_body(&models)).unwrap();
+        assert_eq!(
+            models.len(),
+            crate::transcription::models::MODELS
+                .iter()
+                .filter(|model| model.available())
+                .count()
+        );
+        assert_eq!(models[0]["id"], "parakeet_unified_en");
+        assert!(models[0]["downloadBytes"].is_number());
+        assert_eq!(models[0]["supportsLanguageDetection"], false);
+        let whisper = models
+            .iter()
+            .find(|model| model["id"] == "whisper_large_v3_turbo")
+            .unwrap();
+        assert_eq!(whisper["supportsLanguageDetection"], true);
+        assert!(
+            whisper["languages"]
+                .as_array()
+                .unwrap()
+                .contains(&"auto".into())
+        );
+        assert!(models.iter().all(|model| model["id"] != "apple_speech"));
+        let unknown_model = request_with_method(
+            document.port,
+            Some(&document.token),
+            "POST",
+            "/models/unknown/prepare",
+        );
+        assert!(unknown_model.starts_with("HTTP/1.1 404"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&unknown_model)).unwrap()["code"],
+            "unknown-model"
+        );
+        let disabled_model = request_with_method(
+            document.port,
+            Some(&document.token),
+            "POST",
+            "/models/apple_speech/prepare?language=en",
+        );
+        assert!(disabled_model.starts_with("HTTP/1.1 404"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&disabled_model)).unwrap()["code"],
+            "unknown-model"
+        );
+
+        api.shutdown();
+        assert!(!discovery_path.exists());
+        let observations = fs::read_to_string(event_path).unwrap();
+        assert!(observations.contains("api_server_started"));
+        assert!(observations.contains("api_auth_failed"));
+        assert_eq!(observations.matches("api_auth_failed").count(), 1);
+        assert!(observations.contains("api_server_stopped"));
+        assert!(!observations.contains(&document.token));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn authenticated_developer_control_is_bounded_and_typed() {
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let (sender, controls) = mpsc::sync_channel(1);
+        let mut api = start_unpublished(
+            events,
+            LocalApiOptions {
+                developer_control: Some(sender),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let port = api.document.port;
+        let token = api.document.token.clone();
+        let client = thread::spawn(move || {
+            let body = r#"{"command":"hud","state":"recording"}"#;
+            raw_request(
+                port,
+                &format!(
+                    "POST /dev/control HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                ),
+            )
+        });
+
+        let call = controls.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(matches!(
+            call.command,
+            crate::control::developer_control::DeveloperCommand::Hud {
+                state: crate::control::developer_control::DeveloperHudState::Recording
+            }
+        ));
+        call.reply
+            .send(crate::control::developer_control::DeveloperReply::Ok)
+            .unwrap();
+        let response = client.join().unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert_eq!(response_body(&response), r#"{"status":"ok"}"#);
+
+        api.shutdown();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn control_requests_are_authenticated_versioned_and_typed() {
+        use crate::control::{ControlCommand, ControlReply, ControlResponse};
+
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let (sender, controls) = mpsc::sync_channel(1);
+        let mut api = start_unpublished(
+            events,
+            LocalApiOptions {
+                control: Some(sender),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let port = api.document.port;
+        let token = api.document.token.clone();
+        fn post_to(port: u16, token: &str, body: &str) -> String {
+            raw_request(
+                port,
+                &format!(
+                    "POST /control HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                ),
+            )
+        }
+        let post = |token: &str, body: &str| post_to(port, token, body);
+
+        let client_token = token.clone();
+        let client = thread::spawn(move || {
+            post_to(
+                port,
+                &client_token,
+                r#"{"version":4,"command":"meeting-record","title":"Standup"}"#,
+            )
+        });
+        let call = controls.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            call.request.command,
+            ControlCommand::MeetingRecord {
+                title: Some("Standup".into())
+            }
+        );
+        call.reply
+            .send(ControlReply::done("Started recording").into())
+            .unwrap();
+        let response = client.join().unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert_eq!(
+            serde_json::from_str::<ControlResponse>(response_body(&response))
+                .unwrap()
+                .reply,
+            ControlReply::done("Started recording")
+        );
+
+        let unauthorized = post("hex_wrong", r#"{"version":4,"command":"status"}"#);
+        assert!(unauthorized.starts_with("HTTP/1.1 401"));
+        let unknown = post(&token, r#"{"version":4,"command":"explode"}"#);
+        assert!(unknown.starts_with("HTTP/1.1 400"));
+        // Another protocol version is answered without reaching the app.
+        for body in [
+            r#"{"version":1,"command":"status"}"#,
+            r#"{"version":1,"command":"explode"}"#,
+        ] {
+            let mismatch = post(&token, body);
+            let reply = serde_json::from_str::<ControlResponse>(response_body(&mismatch))
+                .unwrap()
+                .reply;
+            assert!(
+                matches!(&reply, ControlReply::Error { code, .. } if code == "version-mismatch"),
+                "{reply:?}"
+            );
+        }
+        let too_large = raw_request(
+            port,
+            &format!(
+                "POST /control HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                MAX_CONTROL_BYTES + 1
+            ),
+        );
+        assert!(too_large.starts_with("HTTP/1.1 413"));
+        assert!(controls.try_recv().is_err());
+
+        api.shutdown();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn authenticated_running_app_dictation_streams_observations_and_returns_raw_text() {
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let (sender, controls) = mpsc::sync_channel(4);
+        let mut api = start_unpublished(
+            events,
+            LocalApiOptions {
+                dictation_control: Some(sender),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let port = api.document.port;
+        let token = api.document.token.clone();
+        let (attached, audio_attached) = mpsc::channel();
+        let controller = thread::spawn(move || {
+            let crate::recognition::RecognitionControl::StartDictation {
+                source,
+                owner_token,
+                levels,
+                reply,
+            } = controls.recv_timeout(TEST_WAIT).unwrap()
+            else {
+                panic!("expected dictation start")
+            };
+            assert_eq!(source, "tp7");
+            assert!(owner_token.starts_with("hex_"));
+            reply
+                .send(Ok(crate::recognition::ProgrammaticDictationStart {
+                    id: 7,
+                    sample_rate: 48_000,
+                }))
+                .unwrap();
+            levels
+                .send(crate::recognition::DictationLevel {
+                    rms_db: -24.5,
+                    peak_db: -8.0,
+                })
+                .unwrap();
+
+            let crate::recognition::RecognitionControl::HeartbeatDictation {
+                id,
+                owner_token: heartbeat_token,
+                reply,
+            } = controls.recv_timeout(TEST_WAIT).unwrap()
+            else {
+                panic!("expected dictation heartbeat")
+            };
+            assert_eq!(id, 7);
+            assert_eq!(heartbeat_token, owner_token);
+            reply.send(Ok(())).unwrap();
+
+            let crate::recognition::RecognitionControl::AttachDictationAudio {
+                id,
+                owner_token: audio_token,
+                audio,
+                reply,
+            } = controls.recv_timeout(TEST_WAIT).unwrap()
+            else {
+                panic!("expected dictation audio subscription")
+            };
+            assert_eq!(id, 7);
+            assert_eq!(audio_token, owner_token);
+            reply.send(Ok(())).unwrap();
+            audio
+                .send(crate::recognition::DictationAudioChunk {
+                    samples: vec![0.25, -0.5],
+                })
+                .unwrap();
+            attached.send(()).unwrap();
+
+            let crate::recognition::RecognitionControl::FinishDictation {
+                id,
+                owner_token: finish_token,
+                reply,
+            } = controls.recv_timeout(TEST_WAIT).unwrap()
+            else {
+                panic!("expected dictation finish")
+            };
+            assert_eq!(id, 7);
+            assert_eq!(finish_token, owner_token);
+            reply
+                .send(Ok(crate::recognition::ProgrammaticDictationResult {
+                    transcript: "raw words".into(),
+                    duration_ms: 875,
+                }))
+                .unwrap();
+            drop(levels);
+            drop(audio);
+        });
+
+        let body = r#"{"source":"tp7"}"#;
+        let start = raw_request(
+            port,
+            &format!(
+                "POST /dictations HTTP/1.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        assert!(start.starts_with("HTTP/1.1 201"));
+        let started = serde_json::from_str::<serde_json::Value>(response_body(&start)).unwrap();
+        assert_eq!(started["id"], 7);
+        assert_eq!(started["sampleRate"], 48_000);
+        let owner_token = started["ownerToken"].as_str().unwrap().to_owned();
+        assert!(owner_token.starts_with("hex_"));
+
+        let missing_owner = request_with_method(port, Some(&token), "POST", "/dictations/7/finish");
+        assert!(missing_owner.starts_with("HTTP/1.1 404"));
+
+        let heartbeat = request_with_dictation_token(
+            port,
+            &token,
+            &owner_token,
+            "POST",
+            "/dictations/7/heartbeat",
+        );
+        assert!(heartbeat.starts_with("HTTP/1.1 204"));
+
+        let wrong_levels =
+            request_with_dictation_token(port, &token, "hex_wrong", "GET", "/dictations/7/levels");
+        assert!(wrong_levels.starts_with("HTTP/1.1 404"));
+
+        let level_token = token.clone();
+        let level_owner = owner_token.clone();
+        let (subscribed, levels_subscribed) = mpsc::channel();
+        let levels = thread::spawn(move || {
+            // The level sent at start arrives once the stream has subscribed.
+            raw_request_signalling(
+                port,
+                &format!(
+                    "GET /dictations/7/levels HTTP/1.1\r\nAuthorization: Bearer {level_token}\r\nX-Hex-Dictation-Token: {level_owner}\r\nConnection: close\r\n\r\n"
+                ),
+                b"rmsDb",
+                subscribed,
+            )
+        });
+        let audio_token = token.clone();
+        let audio_owner = owner_token.clone();
+        let audio = thread::spawn(move || {
+            request_bytes(port, &audio_token, &audio_owner, "/dictations/7/audio")
+        });
+        levels_subscribed.recv_timeout(TEST_WAIT).unwrap();
+        audio_attached.recv_timeout(TEST_WAIT).unwrap();
+        let finish = request_with_dictation_token(
+            port,
+            &token,
+            &owner_token,
+            "POST",
+            "/dictations/7/finish",
+        );
+        assert!(finish.starts_with("HTTP/1.1 200"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&finish)).unwrap(),
+            serde_json::json!({ "transcript": "raw words", "durationMs": 875 })
+        );
+        let levels = String::from_utf8(levels.join().unwrap()).unwrap();
+        assert!(levels.starts_with("HTTP/1.1 200"));
+        assert!(levels.contains(r#""rmsDb":-24.5"#));
+        assert!(levels.contains(r#""peakDb":-8.0"#));
+        let audio = audio.join().unwrap();
+        let body = audio
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .map(|index| &audio[index + 4..])
+            .unwrap();
+        assert_eq!(
+            body,
+            [0.25_f32.to_le_bytes(), (-0.5_f32).to_le_bytes()].concat()
+        );
+
+        controller.join().unwrap();
+        api.shutdown();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn embedded_server_returns_its_endpoint_without_publishing_discovery() {
+        let directory = temp_directory();
+        let event_path = directory.join("events.ndjson");
+        let discovery_path = directory.join("local-api.json");
+        let events = EventLog::create(&event_path).unwrap();
+        let mut api = start_unpublished(events, LocalApiOptions::default()).unwrap();
+        let endpoint = api.embedded_endpoint();
+
+        assert_eq!(endpoint.kind, "ready");
+        assert_eq!(
+            endpoint.url,
+            format!("http://127.0.0.1:{}", api.document.port)
+        );
+        assert_eq!(endpoint.token, api.document.token);
+        assert_eq!(endpoint.api_version, API_VERSION);
+        assert_eq!(endpoint.pid, std::process::id());
+        assert!(!discovery_path.exists());
+
+        let health = request(api.document.port, Some(&endpoint.token), "/health");
+        assert!(health.starts_with("HTTP/1.1 200"));
+        api.shutdown();
+        assert!(!discovery_path.exists());
+        assert!(
+            !fs::read_to_string(event_path)
+                .unwrap()
+                .contains(&endpoint.token)
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn model_preparation_rejects_disabled_apple_speech() {
+        let apple = crate::transcription::models::definition(
+            crate::transcription::models::TranscriptionModelId::AppleSpeech,
+        );
+        assert!(installation_selection(apple, "/models/apple_speech/prepare?language=de").is_err());
+    }
+
+    #[test]
+    fn model_selection_accepts_auto_only_for_detection_models() {
+        assert!(
+            transcription_selection("/transcriptions?model=whisper_large_v3_turbo&language=auto")
+                .is_ok()
+        );
+        assert!(
+            transcription_selection("/transcriptions?model=parakeet_v2&language=auto").is_err()
+        );
+    }
+
+    #[test]
+    fn embedded_hosts_have_independent_authenticated_endpoints() {
+        let directory = temp_directory();
+        let first_events = EventLog::create(&directory.join("first.ndjson")).unwrap();
+        let second_events = EventLog::create(&directory.join("second.ndjson")).unwrap();
+        let first = start_unpublished(first_events, LocalApiOptions::default()).unwrap();
+        let second = start_unpublished(second_events, LocalApiOptions::default()).unwrap();
+        let first_endpoint = first.embedded_endpoint();
+        let second_endpoint = second.embedded_endpoint();
+
+        assert_ne!(first.document.port, second.document.port);
+        assert_ne!(first_endpoint.token, second_endpoint.token);
+        assert!(
+            request(first.document.port, Some(&first_endpoint.token), "/health")
+                .starts_with("HTTP/1.1 200")
+        );
+        assert!(
+            request(
+                second.document.port,
+                Some(&second_endpoint.token),
+                "/health"
+            )
+            .starts_with("HTTP/1.1 200")
+        );
+        assert!(
+            request(first.document.port, Some(&second_endpoint.token), "/health")
+                .starts_with("HTTP/1.1 401")
+        );
+
+        drop(first);
+        drop(second);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn discovery_is_owner_only_and_stale_files_are_replaced() {
+        let directory = temp_directory();
+        let discovery_path = directory.join("local-api.json");
+        fs::write(&discovery_path, b"not json").unwrap();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let api = start_published(discovery_path.clone(), events).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&discovery_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        drop(api);
+        assert!(!discovery_path.exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn current_pid_with_a_closed_port_is_stale() {
+        let directory = temp_directory();
+        let discovery_path = directory.join("local-api.json");
+        let stale = DiscoveryDocument {
+            port: unused_port(),
+            token: "hex_0000000000000000000000000000000000000000000000000000000000000000".into(),
+            api_version: API_VERSION.into(),
+            pid: std::process::id(),
+        };
+        write_discovery(&discovery_path, &stale).unwrap();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let api = start_published(discovery_path.clone(), events).unwrap();
+        let current: DiscoveryDocument =
+            serde_json::from_slice(&fs::read(&discovery_path).unwrap()).unwrap();
+        assert_ne!(current.token, stale.token);
+        drop(api);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn old_server_does_not_remove_newer_discovery_generation() {
+        let directory = temp_directory();
+        let discovery_path = directory.join("local-api.json");
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let api = start_published(discovery_path.clone(), events).unwrap();
+        let replacement = DiscoveryDocument {
+            port: 1234,
+            token: "hex_replacement".into(),
+            api_version: API_VERSION.into(),
+            pid: std::process::id(),
+        };
+        write_discovery(&discovery_path, &replacement).unwrap();
+        drop(api);
+        assert_eq!(
+            serde_json::from_slice::<DiscoveryDocument>(&fs::read(&discovery_path).unwrap())
+                .unwrap(),
+            replacement
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn live_discovery_cannot_be_replaced() {
+        let directory = temp_directory();
+        let discovery_path = directory.join("local-api.json");
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let api = start_published(discovery_path.clone(), events.clone()).unwrap();
+        assert!(start_published(discovery_path.clone(), events).is_err());
+        drop(api);
+        assert!(!discovery_path.exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn oversized_headers_are_rejected_without_reaching_auth() {
+        let directory = temp_directory();
+        let discovery_path = directory.join("local-api.json");
+        let event_path = directory.join("events.ndjson");
+        let events = EventLog::create(&event_path).unwrap();
+        let api = start_published(discovery_path.clone(), events).unwrap();
+        let document: DiscoveryDocument =
+            serde_json::from_slice(&fs::read(&discovery_path).unwrap()).unwrap();
+        let response = raw_request(
+            document.port,
+            &format!(
+                "GET /health HTTP/1.1\r\nX-Oversized: {}\r\n\r\n",
+                "a".repeat(MAX_HEADER_BYTES)
+            ),
+        );
+        assert!(response.starts_with("HTTP/1.1 431"));
+        assert!(
+            !fs::read_to_string(&event_path)
+                .unwrap()
+                .contains("api_auth_failed")
+        );
+        drop(api);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn request_parser_preserves_bounded_body_bytes_and_metadata() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream
+                .write_all(
+                    b"POST /transcriptions?model=parakeet_v2 HTTP/1.1\r\nContent-Type: audio/wav\r\nContent-Length: 3\r\n\r\nabc",
+                )
+                .unwrap();
+        });
+        let (mut stream, _) = listener.accept().unwrap();
+
+        let request = read_request(&mut stream, &AtomicBool::new(false)).unwrap();
+
+        client.join().unwrap();
+        assert_eq!(request.content_type.as_deref(), Some("audio/wav"));
+        assert_eq!(request.content_length, Some(3));
+        assert_eq!(request.body_prefix, b"abc");
+    }
+
+    #[test]
+    fn request_parser_observes_absolute_deadline_and_shutdown() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let first_client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut first, _) = listener.accept().unwrap();
+        assert!(matches!(
+            read_request_until(&mut first, &AtomicBool::new(false), Instant::now()),
+            Err(RequestReadError::Deadline)
+        ));
+        drop(first_client);
+
+        let second_client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut second, _) = listener.accept().unwrap();
+        assert!(matches!(
+            read_request(&mut second, &AtomicBool::new(true)),
+            Err(RequestReadError::Shutdown)
+        ));
+        drop(second_client);
+    }
+
+    #[test]
+    fn transcription_route_requires_wav_and_a_safe_declared_length() {
+        let (_service, transcription) =
+            crate::transcription::service::TranscriptionService::start().unwrap();
+        let action = transcription_action(
+            HttpRequest {
+                method: "POST".into(),
+                path: "/transcriptions?model=parakeet_v2".into(),
+                authorization: None,
+                dictation_token: None,
+                stream_token: None,
+                content_type: Some("audio/webm".into()),
+                content_length: Some(10),
+                body_prefix: Vec::new(),
+            },
+            &transcription,
+        );
+        let RequestAction::Respond(response) = action else {
+            panic!("unsupported audio must be rejected before upload");
+        };
+        assert_eq!(response.status, 415);
+
+        let action = transcription_action(
+            HttpRequest {
+                method: "POST".into(),
+                path: "/transcriptions?model=parakeet_v2".into(),
+                authorization: None,
+                dictation_token: None,
+                stream_token: None,
+                content_type: Some("audio/wav".into()),
+                content_length: Some(MAX_AUDIO_BYTES + 1),
+                body_prefix: Vec::new(),
+            },
+            &transcription,
+        );
+        let RequestAction::Respond(response) = action else {
+            panic!("unsafe body size must be rejected before upload");
+        };
+        assert_eq!(response.status, 413);
+    }
+
+    #[test]
+    fn concurrent_model_preparation_is_rejected_before_streaming() {
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let preparing = Arc::new(AtomicBool::new(true));
+        let health: HealthProvider = Arc::new(test_health);
+        let (_service, transcription) =
+            crate::transcription::service::TranscriptionService::start().unwrap();
+        let context = HttpContext {
+            token: "test-token".into(),
+            health,
+            events,
+            auth_limiter: AuthObservationLimiter::default(),
+            model_preparing: preparing,
+            shutdown: Arc::new(AtomicBool::new(false)),
+            transcription,
+            developer_control: None,
+            control: None,
+            dictations: dictation::Dictations::new(None),
+            streams: Arc::default(),
+            stream_engine: Arc::new(crate::transcription::stream::shared_engine),
+        };
+        let action = handle_request(
+            HttpRequest {
+                method: "POST".into(),
+                path: "/models/parakeet_v2/prepare".into(),
+                authorization: Some("Bearer test-token".into()),
+                dictation_token: None,
+                stream_token: None,
+                content_type: None,
+                content_length: None,
+                body_prefix: Vec::new(),
+            },
+            &context,
+        );
+        let RequestAction::Respond(response) = action else {
+            panic!("busy preparation must return a buffered conflict");
+        };
+        assert_eq!(response.status, 409);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&response.body).unwrap()["code"],
+            "prepare-busy"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn model_prepare_stream_orders_progress_and_terminal_success() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            response
+        });
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let preparing = Arc::new(AtomicBool::new(true));
+        // Each stage outlasts several 100 ms progress polls, so a busy machine
+        // can't skip one.
+        let preparer: ModelPreparer = Box::new(|_, downloaded, stage| {
+            downloaded.store(123, Ordering::Relaxed);
+            thread::sleep(Duration::from_millis(400));
+            crate::transcription::models::ModelPreparationStage::Verifying.store(&stage);
+            thread::sleep(Duration::from_millis(400));
+            crate::transcription::models::ModelPreparationStage::Loading.store(&stage);
+            thread::sleep(Duration::from_millis(400));
+            Ok(())
+        });
+        stream_model_prepare_with(
+            &mut stream,
+            crate::transcription::models::definition(
+                crate::transcription::models::TranscriptionModelId::ParakeetV2,
+            ),
+            preparing.clone(),
+            &AtomicBool::new(false),
+            preparer,
+        );
+        drop(stream);
+        let response = client.join().unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        let downloading = response.find("\"type\":\"downloading\"").unwrap();
+        let verifying = response.find("\"type\":\"verifying\"").unwrap();
+        let loading = response.find("\"type\":\"loading\"").unwrap();
+        let ok = response.find("\"type\":\"ok\"").unwrap();
+        assert!(downloading < verifying && verifying < loading && loading < ok);
+        assert!(!preparing.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_prepare_that_finishes_at_once_still_reports_its_last_stage() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            response
+        });
+        let (mut stream, _) = listener.accept().unwrap();
+        let preparer: ModelPreparer = Box::new(|_, _, stage| {
+            crate::transcription::models::ModelPreparationStage::Loading.store(&stage);
+            Ok(())
+        });
+        stream_model_prepare_with(
+            &mut stream,
+            crate::transcription::models::definition(
+                crate::transcription::models::TranscriptionModelId::ParakeetV2,
+            ),
+            Arc::new(AtomicBool::new(true)),
+            &AtomicBool::new(false),
+            preparer,
+        );
+        drop(stream);
+        let response = client.join().unwrap();
+        let loading = response.find("\"type\":\"loading\"").unwrap();
+        let ok = response.find("\"type\":\"ok\"").unwrap();
+        assert!(loading < ok);
+    }
+
+    #[test]
+    fn tokens_have_256_bits_of_random_lowercase_hex() {
+        let first = generate_token().unwrap();
+        let second = generate_token().unwrap();
+        assert!(valid_token(&first));
+        assert_ne!(first, second);
+    }
+
+    fn start_published(discovery_path: PathBuf, events: EventLog) -> Result<LocalApi> {
+        LocalApi::start_bound(
+            Some(discovery_path),
+            Arc::new(test_health),
+            events,
+            LocalApiOptions::default(),
+            None,
+        )
+    }
+
+    fn start_unpublished(events: EventLog, options: LocalApiOptions) -> Result<LocalApi> {
+        LocalApi::start_bound(None, Arc::new(test_health), events, options, None)
+    }
+
+    fn test_health() -> HealthResponse {
+        HealthResponse {
+            version: "test",
+            api_version: API_VERSION,
+        }
+    }
+
+    fn request(port: u16, token: Option<&str>, path: &str) -> String {
+        request_with_method(port, token, "GET", path)
+    }
+
+    fn request_with_method(port: u16, token: Option<&str>, method: &str, path: &str) -> String {
+        let authorization = token.map_or_else(String::new, |token| {
+            format!("Authorization: Bearer {token}\r\n")
+        });
+        raw_request(
+            port,
+            &format!(
+                "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{authorization}Connection: close\r\n\r\n"
+            ),
+        )
+    }
+
+    fn raw_request(port: u16, request: &str) -> String {
+        String::from_utf8(raw_request_bytes(port, request)).unwrap()
+    }
+
+    fn raw_request_bytes(port: u16, request: &str) -> Vec<u8> {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).unwrap();
+        response
+    }
+
+    /// Like `raw_request_bytes`, signalling once the response contains `marker`.
+    #[cfg(target_os = "macos")]
+    fn raw_request_signalling(
+        port: u16,
+        request: &str,
+        marker: &[u8],
+        ready: mpsc::Sender<()>,
+    ) -> Vec<u8> {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(TEST_WAIT)).unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = Vec::new();
+        let mut buffer = [0; 1024];
+        let mut signalled = false;
+        loop {
+            let read = stream.read(&mut buffer).unwrap();
+            if read == 0 {
+                return response;
+            }
+            response.extend_from_slice(&buffer[..read]);
+            if !signalled && response.windows(marker.len()).any(|bytes| bytes == marker) {
+                signalled = true;
+                let _ = ready.send(());
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn request_with_dictation_token(
+        port: u16,
+        token: &str,
+        owner_token: &str,
+        method: &str,
+        path: &str,
+    ) -> String {
+        raw_request(
+            port,
+            &format!(
+                "{method} {path} HTTP/1.1\r\nAuthorization: Bearer {token}\r\nX-Hex-Dictation-Token: {owner_token}\r\nConnection: close\r\n\r\n"
+            ),
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    fn request_bytes(port: u16, token: &str, owner_token: &str, path: &str) -> Vec<u8> {
+        raw_request_bytes(
+            port,
+            &format!(
+                "GET {path} HTTP/1.1\r\nAuthorization: Bearer {token}\r\nX-Hex-Dictation-Token: {owner_token}\r\nConnection: close\r\n\r\n"
+            ),
+        )
+    }
+
+    fn response_body(response: &str) -> &str {
+        response.split_once("\r\n\r\n").unwrap().1
+    }
+
+    fn temp_directory() -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "hex-local-api-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn unused_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+}

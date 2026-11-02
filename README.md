@@ -111,6 +111,28 @@ python -m harness.cli --ui --share http://192.168.1.20:8766
 
 将示例 IP 替换为工作电脑的私有 IPv4；管理入口默认是 `http://127.0.0.1:8765`。工作电脑需保持运行，共享 HTTP 不加密，仅用于可信局域网。邀请、角色、审批和共享能力边界见 [局域网测试指南](docs/lan-testing.md)。
 
+## 语音输入
+
+输入框发送按钮左侧的麦克风支持点击开始／结束录音，或在输入区使用
+`Ctrl+Shift+Space`。转写结果追加到草稿，由用户确认后发送。默认使用
+Hex 的多语言模型自动识别中英文；首次准备模型需要联网，推理在本机执行。
+
+macOS 可直接安装 [Hex 官方签名应用](https://anoma.ly/hex/download/macos-arm64-dmg)，
+放入 `~/Applications/Hex.app` 或 `/Applications/Hex.app`，Harness 会自动复用。
+Windows 安装 [x64 版](https://anoma.ly/hex/download/windows-x64-setup) 或
+[ARM64 版](https://anoma.ly/hex/download/windows-arm64-setup) 后同样自动发现；
+全局听写可运行 `scripts\voice.cmd`。两平台输入框及录音声波共用相同交互。
+也可从源码构建（需要 Rust、C/C++ 编译器、CMake，以及支持其 Metal 依赖的 Apple SDK）：
+
+```sh
+make hex-build PYTHON=.venv/bin/python
+```
+
+其他应用也可使用同一引擎的原生全局听写：运行
+`make voice PYTHON=.venv/bin/python`，在 Hex 中准备模型、授予系统权限并设置快捷键；
+macOS 默认按住 Option 说话、松开后粘贴到前台应用。它是独立原生进程，
+不随 Harness 网页关闭。详细行为、构建与验收限制见 [语音输入](docs/hex-stt.md)。
+
 ## 开发与验证
 
 开发测试依赖使用 `python -m pip install -e ".[test]"`。从仓库根目录执行：

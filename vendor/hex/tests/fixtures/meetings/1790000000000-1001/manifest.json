@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "1790000000000-1001",
+  "title": "Weekly sync",
+  "status": "complete",
+  "created_at_ms": 1790000000000,
+  "ended_at_ms": 1790000040000,
+  "duration_ms": 40000,
+  "system": {
+    "file": "system.wav",
+    "sample_rate": 16000,
+    "first_pts_us": null,
+    "last_pts_us": null,
+    "first_arrival_us": null,
+    "samples": 0,
+    "dropped_packets": 0
+  },
+  "microphone": {
+    "file": "microphone.wav",
+    "sample_rate": 16000,
+    "first_pts_us": null,
+    "last_pts_us": null,
+    "first_arrival_us": null,
+    "samples": 0,
+    "dropped_packets": 0
+  },
+  "live_dropped_packets": 0,
+  "live_transcription_error": null,
+  "error": null,
+  "app": "Zoom",
+  "export_path": null,
+  "export_error": null,
+  "echo_suppressed_utterances": 0,
+  "notes": {
+    "title": "Scheduled Sessions Plan",
+    "summary": [
+      "Dax proposed scheduled sessions for agents."
+    ],
+    "action_items": [
+      {
+        "task": "Write the scheduled sessions spec",
+        "owner": "You"
+      },
+      {
+        "task": "Prototype the runner",
+        "owner": null
+      }
+    ],
+    "decisions": [
+      "Ship scheduled sessions next week."
+    ],
+    "generated_at_ms": 1790000100000,
+    "elapsed_ms": 9000,
+    "chunks": 1,
+    "total_chunks": 1
+  },
+  "notes_error": null
+}

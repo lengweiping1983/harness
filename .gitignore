@@ -89,3 +89,6 @@ node_modules/
 
 # Playwright MCP 验证产物
 .playwright-mcp/
+
+# hex 语音服务二进制（构建产物，由 scripts/build-hex.py 生成后随 wheel 分发，不入库）
+harness/resources/hex/

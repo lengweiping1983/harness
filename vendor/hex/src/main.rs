@@ -1,0 +1,870 @@
+/// The version Hex reports: the release version, or `0.0.0-dev-local-<commit>`
+/// for a build outside the Release workflow (build.rs).
+const VERSION: &str = env!("HEX_BUILD_VERSION");
+
+#[cfg(target_os = "macos")]
+mod accessibility;
+mod app_paths;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+mod app_settings;
+#[cfg(target_os = "macos")]
+mod apple_intelligence;
+#[cfg(target_os = "macos")]
+mod apple_speech;
+mod application_catalog;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+mod audio;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+mod calendar;
+#[cfg(hex_capture)]
+mod capture_host;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+mod control;
+mod desktop;
+mod dev_build;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+mod dictation;
+mod durable;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+mod feedback;
+mod history;
+#[cfg(target_os = "macos")]
+mod keyboard;
+#[cfg_attr(target_os = "macos", path = "keyboard_input_sources/macos.rs")]
+#[cfg_attr(target_os = "windows", path = "keyboard_input_sources/windows.rs")]
+#[cfg_attr(target_os = "linux", path = "keyboard_input_sources/x11.rs")]
+mod keyboard_input_sources;
+mod labs;
+#[cfg(target_os = "linux")]
+mod linux;
+mod local_api;
+#[cfg(target_os = "macos")]
+mod macos_rune;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod meeting;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod microphone_activity;
+mod net;
+#[cfg(target_os = "macos")]
+mod parakeet;
+#[cfg(target_os = "macos")]
+mod paste;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+mod personal_commands;
+#[cfg(target_os = "macos")]
+mod recognition;
+mod rune_hud;
+mod rune_ui;
+#[cfg(target_os = "macos")]
+mod suppression;
+mod transcription;
+mod updater;
+#[cfg(target_os = "windows")]
+mod windows;
+
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+
+#[cfg(target_os = "macos")]
+use clap::{Parser, Subcommand, ValueEnum};
+use color_eyre::Result;
+#[cfg(target_os = "macos")]
+use color_eyre::eyre::eyre;
+
+#[cfg(target_os = "macos")]
+#[derive(Parser)]
+#[command(
+    name = "hex",
+    version = crate::VERSION,
+    about = "Local, observable voice control",
+    long_about = "Local, observable voice control.\n\n\
+        Control commands (status, dictation, meetings record, settings, model, window, …) drive \
+        the one running Hex over its owner-only local API and never launch it, except `start` \
+        and `restart`. Every one takes --json for a versioned reply (docs/cli.md). Exit codes: \
+        0 done or nothing to change, 1 refused or failed, 2 usage, 3 Hex isn't running.",
+    after_help = "Run `hex <command> --help` for details, or `hex settings list` for every setting."
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+// Debug builds count the heap so `/profile/vitals` can split the footprint.
+#[cfg(all(debug_assertions, target_os = "macos"))]
+#[global_allocator]
+static ALLOC: procwatch::alloc::Counting = procwatch::alloc::Counting::system();
+
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+pub(crate) const DEVELOPER_FEATURES_ENABLED: bool = cfg!(debug_assertions);
+
+#[cfg(target_os = "macos")]
+#[derive(Subcommand)]
+enum Command {
+    #[command(flatten)]
+    Control(control::cli::ControlCli),
+    /// Run the desktop app with local dictation.
+    App {
+        /// Capture from this microphone instead of the saved one or the system default.
+        #[arg(long)]
+        device: Option<String>,
+        /// Arguments for a headless render, such as `--snap out.png --scene modes`.
+        #[arg(last = true)]
+        rune_args: Vec<String>,
+    },
+    /// Listen and transcribe until interrupted.
+    Listen {
+        /// Capture from this microphone instead of the saved one or the system default.
+        #[arg(long)]
+        device: Option<String>,
+    },
+    /// Run the headless local API service.
+    #[command(hide = true)]
+    Service {
+        /// Run as a direct child whose stdin is owned by the host application.
+        #[arg(long)]
+        embedded: bool,
+    },
+    /// Inspect and control the running desktop app or offline audio tools.
+    Dev {
+        #[command(subcommand)]
+        command: DevCommand,
+    },
+    /// The Scrawl capture capsule in a window of its own, driven by a fake
+    /// host, with live tuning. Records and sends nothing.
+    #[cfg(hex_capture)]
+    #[command(name = "capsule-playground", hide = true)]
+    CapsulePlayground {
+        /// Rune's flags, such as `--snap out.png --scene rule`.
+        #[arg(last = true)]
+        rune_args: Vec<String>,
+    },
+    #[cfg(debug_assertions)]
+    /// Record, transcribe, and browse local meetings.
+    Meeting {
+        #[command(subcommand)]
+        command: MeetingCommand,
+    },
+    /// Measure the local transcription runtime against a fixed WAV corpus.
+    #[command(hide = true)]
+    BenchmarkTranscription {
+        /// JSON manifest containing audio paths and reference transcripts.
+        manifest: PathBuf,
+        /// Runtime to measure.
+        #[arg(long, value_enum, default_value = "transcribe-cpp")]
+        backend: TranscriptionBenchmarkBackend,
+        /// Override the default GGUF model path for the transcribe.cpp backend.
+        #[arg(long)]
+        model: Option<PathBuf>,
+        /// Full-corpus passes discarded before measurement.
+        #[arg(long, default_value_t = 1)]
+        warmups: usize,
+        /// Full-corpus measured passes.
+        #[arg(long, default_value_t = 7)]
+        runs: usize,
+    },
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, ValueEnum)]
+enum TranscriptionBenchmarkBackend {
+    Onnx,
+    TranscribeCpp,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Subcommand)]
+enum DevCommand {
+    #[cfg(debug_assertions)]
+    /// Inspect the running app and window state.
+    Status,
+    #[cfg(debug_assertions)]
+    /// Show the developer recognition dashboard.
+    Dashboard,
+    #[cfg(debug_assertions)]
+    /// Drive a deterministic HUD state.
+    Hud {
+        #[arg(value_enum)]
+        state: control::developer_control::DeveloperHudState,
+    },
+    #[cfg(debug_assertions)]
+    /// Open the app and select a pane.
+    Show {
+        #[arg(value_enum)]
+        pane: control::developer_control::DeveloperPane,
+    },
+    #[cfg(all(debug_assertions, hex_capture))]
+    /// Run a capture headlessly, feeding WAV files in place of the
+    /// microphone, and write its bundle (needs the `capture` experiment).
+    CaptureReplay {
+        /// WAV files, joined with 300 ms of silence.
+        #[arg(required = true)]
+        wavs: Vec<PathBuf>,
+    },
+    /// Render offline audio through the Hex Microphone voice filter.
+    VoiceFilter {
+        #[command(subcommand)]
+        command: VoiceFilterCommand,
+    },
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Subcommand)]
+enum VoiceFilterCommand {
+    /// Apply a voice-filter mode across one or more dictation spans in a WAV file.
+    Render {
+        /// Input WAV path (16-bit PCM or 32-bit float).
+        input: PathBuf,
+        /// Voice filter mode id (muffled, muted, quiet, normal, chipmunk, robot, walkie, underwater, far).
+        #[arg(long, default_value = "muffled")]
+        mode: String,
+        /// Optional JSON mode spec override (matching presets.json).
+        #[arg(long)]
+        params: Option<String>,
+        /// Dictation span(s) in milliseconds, e.g. `1000-3500`.
+        #[arg(long = "dictation")]
+        dictation: Vec<String>,
+        /// Effect strength (`0.0` to `1.0`).
+        #[arg(long, default_value_t = 1.0)]
+        strength: f64,
+        /// Output WAV path.
+        #[arg(short = 'o', long = "output")]
+        output: PathBuf,
+    },
+}
+
+#[cfg(debug_assertions)]
+#[cfg(target_os = "macos")]
+#[derive(Subcommand)]
+enum MeetingCommand {
+    /// Record microphone and system audio until Ctrl-C.
+    Record {
+        /// Human-readable meeting title.
+        #[arg(long)]
+        title: Option<String>,
+    },
+    /// List recorded meetings.
+    List,
+    /// Print one meeting transcript.
+    Show { id: String },
+    /// Print applications currently using microphone input.
+    Probe,
+    /// Transcribe a meeting's recorded WAV tracks and publish its transcript.
+    Transcribe { id: String },
+    /// Write an Apple Intelligence title and summary for a meeting id, or
+    /// time the provisional title and the final title and summary for a
+    /// transcript Markdown file without saving them.
+    Summarize {
+        target: String,
+        /// Override the excerpt character budget (file targets only).
+        #[arg(long)]
+        excerpt_chars: Option<usize>,
+    },
+    /// Run live chapter passes and the boundary pass over a transcript
+    /// Markdown file as a recording would, with timings, without saving.
+    Chapters { path: PathBuf },
+    /// Replay a meeting folder's tracks and report which microphone lines
+    /// echo suppression keeps.
+    Echo {
+        directory: PathBuf,
+        /// Microphone start after the system track, when the manifest has
+        /// no arrival times.
+        #[arg(long)]
+        microphone_offset_ms: Option<u64>,
+        /// Also transcribe both tracks with the selected model.
+        #[arg(long)]
+        transcribe: bool,
+    },
+}
+
+#[cfg(target_os = "macos")]
+fn main() -> Result<()> {
+    color_eyre::install()?;
+    let cli = Cli::parse_from(mcp_alias_arguments(std::env::args_os().collect()));
+    let executable_name = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.file_stem().map(ToOwned::to_owned));
+    let bundled_watcher = is_bundled_app_executable(executable_name.as_deref());
+    // The app's GPU device and render pipeline start on a thread now, while
+    // the rest of launch runs; its first window takes them, and Rune drops
+    // them when the app opens none.
+    if opens_app(cli.command.as_ref(), bundled_watcher) {
+        rune::prewarm_gpu();
+    }
+    // A window of its own: no data folder, log, lock, or settings, so it
+    // runs beside the installed Hex.
+    #[cfg(hex_capture)]
+    if let Some(Command::CapsulePlayground { rune_args }) = &cli.command {
+        keyboard::initialize_layout()?;
+        rune_ui::capture_capsule::playground::run(rune_args.clone());
+        return Ok(());
+    }
+    // Control and read commands (status, settings, history, meetings, mcp,
+    // labs, …) talk to the running Hex or read files: no data folder, log,
+    // lock, GUI, or permission setup of their own, so an agent may run them
+    // over SSH while the app is running.
+    let cli = match cli.command {
+        Some(Command::Control(command)) => control::cli::finish(control::cli::run(command)),
+        command => Cli { command },
+    };
+    #[cfg(debug_assertions)]
+    match &cli.command {
+        Some(Command::Meeting {
+            command: MeetingCommand::List,
+        }) => {
+            return control::transcript_cli::meetings(
+                &control::transcript_cli::MeetingsCommand::List(Default::default()),
+            );
+        }
+        Some(Command::Meeting {
+            command: MeetingCommand::Show { id },
+        }) => {
+            return control::transcript_cli::meetings(
+                &control::transcript_cli::MeetingsCommand::Show {
+                    id: id.clone(),
+                    md: true,
+                    json: false,
+                    srt: false,
+                    vtt: false,
+                    from: None,
+                    to: None,
+                    chapter: None,
+                },
+            );
+        }
+        _ => {}
+    }
+    if let Some(Command::Dev {
+        command:
+            DevCommand::VoiceFilter {
+                command:
+                    VoiceFilterCommand::Render {
+                        input,
+                        mode,
+                        params,
+                        dictation,
+                        strength,
+                        output,
+                    },
+            },
+    }) = &cli.command
+    {
+        return audio::voice_filter::render_wav_command(
+            input,
+            mode,
+            params.as_deref(),
+            dictation,
+            *strength,
+            output,
+        );
+    }
+    // A headless render (`hex app -- --snap …`) draws fixtures: no data
+    // folder, log, lock, or settings, so it never touches the user's Hex.
+    if let Some(Command::App { rune_args, .. }) = &cli.command
+        && !rune_args.is_empty()
+    {
+        rune_ui::render_app(rune_args.clone()).run();
+        return Ok(());
+    }
+    let log_dir = app_paths::init_process_logging(&SHUTDOWN)?;
+
+    let event_path = log_dir.join("live.ndjson");
+    let bundled_service = executable_name.as_deref() == Some(std::ffi::OsStr::new("hex-service"));
+    let command = cli.command.unwrap_or({
+        if bundled_watcher {
+            Command::App {
+                device: None,
+                rune_args: Vec::new(),
+            }
+        } else if bundled_service {
+            Command::Service { embedded: false }
+        } else {
+            Command::Listen { device: None }
+        }
+    });
+    match command {
+        Command::App { device, .. } => open_app(event_path, device),
+        Command::Listen { device } => {
+            let _instance = desktop::instance::acquire("listener")?;
+            labs::log_launch();
+            let settings = app_settings::AppSettings::load()?;
+            audio::hex_microphone::host_service();
+            let events = desktop::events::EventLog::create(&event_path)?;
+            let history = match history::History::open_default(settings.history_retention) {
+                Ok(history) => Some(history),
+                Err(error) => {
+                    tracing::warn!(%error, "dictation history is unavailable");
+                    None
+                }
+            };
+            recognition::listen(events, device.as_deref(), &SHUTDOWN, None, history, None)
+        }
+        Command::Service { embedded } => {
+            if !embedded {
+                app_settings::AppSettings::load()?;
+            }
+            local_api::run_service(&log_dir, event_path, embedded, &SHUTDOWN)
+        }
+        Command::Control(_) => unreachable!("handled before startup"),
+        #[cfg(hex_capture)]
+        Command::CapsulePlayground { .. } => unreachable!("handled before startup"),
+        Command::Dev { command } => {
+            #[cfg(debug_assertions)]
+            {
+                use control::developer_control::{DeveloperCommand, DeveloperReply};
+                let command = match command {
+                    DevCommand::Dashboard => {
+                        return control::dashboard::run(event_path);
+                    }
+                    DevCommand::Status => DeveloperCommand::Status,
+                    DevCommand::Hud { state } => DeveloperCommand::Hud { state },
+                    DevCommand::Show { pane } => DeveloperCommand::ShowPane { pane },
+                    #[cfg(all(debug_assertions, hex_capture))]
+                    DevCommand::CaptureReplay { wavs } => {
+                        labs::log_launch();
+                        app_settings::AppSettings::load()?;
+                        let bundle = capture_host::replay(&wavs)?;
+                        println!("{}", bundle.display());
+                        return Ok(());
+                    }
+                    DevCommand::VoiceFilter { .. } => unreachable!("handled before startup"),
+                };
+                let reply = local_api::call_developer(&command)?;
+                if let DeveloperReply::Error { code, message } = &reply {
+                    return Err(eyre!("{code}: {message}"));
+                }
+                println!("{}", serde_json::to_string_pretty(&reply)?);
+                Ok(())
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                match command {
+                    DevCommand::VoiceFilter { .. } => unreachable!("handled before startup"),
+                }
+            }
+        }
+        #[cfg(debug_assertions)]
+        Command::Meeting {
+            command: MeetingCommand::Record { title },
+        } => {
+            app_settings::AppSettings::load()?;
+            meeting::record(
+                meeting::MeetingStart {
+                    title,
+                    ..Default::default()
+                },
+                &SHUTDOWN,
+                None,
+            )
+            .map(|_| ())
+        }
+        #[cfg(debug_assertions)]
+        Command::Meeting {
+            command: MeetingCommand::List,
+        } => {
+            for meeting in meeting::list()? {
+                println!(
+                    "{}\t{:?}\t{}ms\t{}",
+                    meeting.id,
+                    meeting.status,
+                    meeting.duration_ms.unwrap_or_default(),
+                    meeting.title
+                );
+            }
+            Ok(())
+        }
+        #[cfg(debug_assertions)]
+        Command::Meeting {
+            command: MeetingCommand::Show { id },
+        } => {
+            print!("{}", meeting::show(&id)?);
+            Ok(())
+        }
+        #[cfg(debug_assertions)]
+        Command::Meeting {
+            command: MeetingCommand::Probe,
+        } => meeting::watcher::probe(),
+        #[cfg(debug_assertions)]
+        Command::Meeting {
+            command: MeetingCommand::Transcribe { id },
+        } => {
+            app_settings::AppSettings::load()?;
+            let manifest = meeting::transcribe_meeting(&id)?;
+            println!("{}", meeting::display_title(&manifest));
+            if let Some(path) = manifest.export_path {
+                println!("{}", path.display());
+            }
+            if let Some(error) = manifest.export_error {
+                println!("{error}");
+            }
+            Ok(())
+        }
+        #[cfg(debug_assertions)]
+        Command::Meeting {
+            command:
+                MeetingCommand::Summarize {
+                    target,
+                    excerpt_chars,
+                },
+        } => {
+            let path = PathBuf::from(&target);
+            if path.is_file() {
+                print!("{}", meeting::summarize_file(&path, excerpt_chars)?);
+            } else {
+                app_settings::AppSettings::load()?;
+                let manifest = meeting::summarize(&target)?;
+                println!("{}", meeting::display_title(&manifest));
+                if let Some(path) = manifest.export_path {
+                    println!("{}", path.display());
+                }
+                if let Some(error) = manifest.notes_error {
+                    println!("{error}");
+                }
+            }
+            Ok(())
+        }
+        #[cfg(debug_assertions)]
+        Command::Meeting {
+            command: MeetingCommand::Chapters { path },
+        } => {
+            print!("{}", meeting::chapters_file(&path)?);
+            Ok(())
+        }
+        #[cfg(debug_assertions)]
+        Command::Meeting {
+            command:
+                MeetingCommand::Echo {
+                    directory,
+                    microphone_offset_ms,
+                    transcribe,
+                },
+        } => {
+            if transcribe {
+                app_settings::AppSettings::load()?;
+            }
+            print!(
+                "{}",
+                meeting::echo_report(&directory, microphone_offset_ms, transcribe)?
+            );
+            Ok(())
+        }
+        Command::BenchmarkTranscription {
+            manifest,
+            backend,
+            model,
+            warmups,
+            runs,
+        } => {
+            let backend = match backend {
+                TranscriptionBenchmarkBackend::Onnx => transcription::benchmark::Backend::Onnx,
+                TranscriptionBenchmarkBackend::TranscribeCpp => {
+                    transcription::benchmark::Backend::TranscribeCpp {
+                        model: match model {
+                            Some(model) => model,
+                            None => parakeet::default_model_path()?,
+                        },
+                    }
+                }
+            };
+            transcription::benchmark::run(&manifest, warmups, runs, backend)
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn open_app(event_path: PathBuf, device: Option<String>) -> Result<()> {
+    let _instance = desktop::instance::acquire("listener")?;
+    labs::log_launch();
+    audio::hex_microphone::host_service();
+    macos_rune::run(
+        &SHUTDOWN,
+        meeting::watcher::ListenerConfig { event_path, device },
+    )
+}
+
+/// A copy installed as `hex-meetings-mcp` only serves meetings: its
+/// arguments are those of `hex mcp`, and it never falls back to listening.
+#[cfg(target_os = "macos")]
+fn mcp_alias_arguments(mut arguments: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    let alias = arguments
+        .first()
+        .and_then(|program| std::path::Path::new(program).file_stem())
+        .is_some_and(|stem| stem == "hex-meetings-mcp");
+    if alias && arguments.get(1).is_none_or(|argument| argument != "mcp") {
+        arguments.insert(1, "mcp".into());
+    }
+    arguments
+}
+
+#[cfg(target_os = "macos")]
+fn is_bundled_app_executable(name: Option<&std::ffi::OsStr>) -> bool {
+    name.is_some_and(|name| name == "hex")
+}
+
+/// Whether this launch runs the app: `hex app` without Rune's own (headless)
+/// flags, or the bundled executable with no command. A hidden or login launch
+/// counts too, though it opens no window and Rune drops the prewarmed GPU:
+/// whether the window opens depends on settings, which may load only after
+/// the keyboard layout (`macos_rune::run`).
+#[cfg(target_os = "macos")]
+fn opens_app(command: Option<&Command>, bundled_watcher: bool) -> bool {
+    match command {
+        Some(Command::App { rune_args, .. }) => rune_args.is_empty(),
+        None => bundled_watcher,
+        Some(_) => false,
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::{Cli, Command, is_bundled_app_executable, mcp_alias_arguments, opens_app};
+    use crate::control::cli::ControlCli;
+    use clap::Parser;
+
+    #[test]
+    fn the_meetings_mcp_alias_always_serves_meetings() {
+        let parse = |arguments: &[&str]| {
+            Cli::parse_from(mcp_alias_arguments(
+                arguments.iter().map(Into::into).collect(),
+            ))
+            .command
+        };
+        assert!(matches!(
+            parse(&["/Users/kit/.local/bin/hex-meetings-mcp"]),
+            Some(Command::Control(ControlCli::Mcp { meetings_dir: None }))
+        ));
+        assert!(matches!(
+            parse(&["hex-meetings-mcp", "--meetings-dir", "/tmp/mirror"]),
+            Some(Command::Control(ControlCli::Mcp { meetings_dir: Some(directory) })) if directory.ends_with("mirror")
+        ));
+        assert!(matches!(
+            parse(&["hex-meetings-mcp", "mcp"]),
+            Some(Command::Control(ControlCli::Mcp { .. }))
+        ));
+        assert!(parse(&["hex"]).is_none());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn developer_show_accepts_every_developer_pane_spelling() {
+        use super::DevCommand;
+        use crate::control::developer_control::DeveloperPane;
+
+        for (pane, expected) in [
+            ("hud-lab", DeveloperPane::HudLab),
+            ("history", DeveloperPane::History),
+        ] {
+            let cli = Cli::try_parse_from(["hex", "dev", "show", pane]).unwrap();
+            let Some(Command::Dev {
+                command: DevCommand::Show { pane },
+            }) = cli.command
+            else {
+                panic!("expected dev show command");
+            };
+            assert_eq!(pane, expected);
+        }
+        assert!(Cli::try_parse_from(["hex", "dev", "show", "hudlab"]).is_err());
+        assert!(Cli::try_parse_from(["hex", "dev", "hud", "recording"]).is_ok());
+    }
+
+    #[test]
+    fn control_commands_parse_beside_the_read_commands() {
+        use crate::control::cli::CommandsCommand;
+        use crate::control::transcript_cli;
+        use clap::CommandFactory;
+
+        Cli::command().debug_assert();
+        let parse = |arguments: &[&str]| Cli::try_parse_from(arguments).map(|cli| cli.command);
+        #[cfg(hex_capture)]
+        {
+            assert!(matches!(
+                parse(&["hex", "capture", "stop", "--json"]),
+                Ok(Some(Command::Control(ControlCli::Annotate { command: crate::control::cli::CaptureCommand::Stop { output } }))) if output.json
+            ));
+            assert!(matches!(
+                parse(&["hex", "capture", "send", "latest", "--to", "ses_1"]),
+                Ok(Some(Command::Control(ControlCli::Annotate {
+                    command: crate::control::cli::CaptureCommand::Send { capture, to: Some(to), .. }
+                }))) if capture == "latest" && to == "ses_1"
+            ));
+            assert!(matches!(
+                parse(&["hex", "capture", "send", "latest", "--always"]),
+                Ok(Some(Command::Control(ControlCli::Annotate {
+                    command: crate::control::cli::CaptureCommand::Send {
+                        to: None,
+                        always: true,
+                        ..
+                    }
+                })))
+            ));
+            assert!(parse(&["hex", "capture", "route", "latest", "--explain"]).is_ok());
+        }
+        assert!(matches!(
+            parse(&["hex", "status", "--json"]),
+            Ok(Some(Command::Control(ControlCli::Status { output }))) if output.json
+        ));
+        assert!(matches!(
+            parse(&["hex", "dictation", "toggle"]),
+            Ok(Some(Command::Control(ControlCli::Dictation { .. })))
+        ));
+        assert!(matches!(
+            parse(&[
+                "hex",
+                "settings",
+                "set",
+                "release_microphone_while_idle",
+                "on"
+            ]),
+            Ok(Some(Command::Control(ControlCli::Settings { .. })))
+        ));
+        assert!(matches!(
+            parse(&["hex", "window", "show", "history"]),
+            Ok(Some(Command::Control(ControlCli::Window { .. })))
+        ));
+        for verb in ["reset", "restart"] {
+            assert!(matches!(
+                parse(&["hex", "onboarding", verb]),
+                Ok(Some(Command::Control(ControlCli::Onboarding { .. })))
+            ));
+        }
+        assert!(matches!(
+            parse(&["hex", "history", "clear", "--yes"]),
+            Ok(Some(Command::Control(ControlCli::History(
+                transcript_cli::HistoryArgs {
+                    action: Some(transcript_cli::HistoryAction::Clear { yes: true, .. }),
+                    ..
+                }
+            ))))
+        ));
+        assert!(matches!(
+            parse(&["hex", "history", "--json"]),
+            Ok(Some(Command::Control(ControlCli::History(
+                transcript_cli::HistoryArgs { action: None, .. }
+            ))))
+        ));
+        assert!(parse(&["hex", "history", "--limit", "5", "clear", "--yes"]).is_err());
+        assert!(matches!(
+            parse(&["hex", "meetings", "record", "--title", "Design sync"]),
+            Ok(Some(Command::Control(ControlCli::Meetings {
+                command: transcript_cli::MeetingsCommand::Record { title: Some(_), .. }
+            })))
+        ));
+        assert!(matches!(
+            parse(&["hex", "commands", "check"]),
+            Ok(Some(Command::Control(ControlCli::Commands {
+                command: CommandsCommand::Check
+            })))
+        ));
+        assert!(parse(&["hex", "meetings", "cancel"]).is_err());
+        assert!(matches!(
+            parse(&[
+                "hex",
+                "vocabulary",
+                "add",
+                "cappuccino",
+                "--sounds-like",
+                "capuchin,cap a chino"
+            ]),
+            Ok(Some(Command::Control(ControlCli::Vocabulary {
+                command: crate::control::cli::VocabularyCommand::Add {
+                    sounds_like: Some(_),
+                    ..
+                }
+            })))
+        ));
+        assert!(matches!(
+            parse(&["hex", "vocabulary", "list", "--json"]),
+            Ok(Some(Command::Control(ControlCli::Vocabulary {
+                command: crate::control::cli::VocabularyCommand::List { output }
+            }))) if output.json
+        ));
+        assert!(parse(&["hex", "vocabulary", "remove"]).is_err());
+    }
+
+    #[test]
+    fn labs_parse_as_a_read_command() {
+        use super::labs::LabsCommand;
+
+        assert!(matches!(
+            Cli::try_parse_from(["hex", "labs", "on", "live-text"]).map(|cli| cli.command),
+            Ok(Some(Command::Control(ControlCli::Labs {
+                command: Some(LabsCommand::On { feature })
+            }))) if feature == "live-text"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["hex", "labs"]).map(|cli| cli.command),
+            Ok(Some(Command::Control(ControlCli::Labs { command: None })))
+        ));
+        assert!(Cli::try_parse_from(["hex", "labs", "off"]).is_err());
+        #[cfg(target_os = "macos")]
+        assert!(matches!(
+            Cli::try_parse_from(["hex", "labs", "link", "live-text"]).map(|cli| cli.command),
+            Ok(Some(Command::Control(ControlCli::Labs {
+                command: Some(LabsCommand::Link { feature })
+            }))) if feature == "live-text"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["hex", "experiments", "enable", "live-text"])
+                .map(|cli| cli.command),
+            Ok(Some(Command::Control(ControlCli::Experiments { .. })))
+        ));
+    }
+
+    #[test]
+    fn the_packaged_executable_launches_the_app() {
+        assert!(is_bundled_app_executable(Some("hex".as_ref())));
+        assert!(!is_bundled_app_executable(Some("hex-service".as_ref())));
+    }
+
+    #[test]
+    fn only_app_launches_prewarm_the_gpu() {
+        let opens = |arguments: &[&str]| {
+            let arguments = mcp_alias_arguments(arguments.iter().map(Into::into).collect());
+            let bundled =
+                is_bundled_app_executable(std::path::Path::new(&arguments[0]).file_stem());
+            opens_app(Cli::parse_from(arguments).command.as_ref(), bundled)
+        };
+        assert!(opens(&["hex"]));
+        assert!(opens(&["/Applications/Hex.app/Contents/MacOS/hex"]));
+        assert!(opens(&["hex", "app"]));
+        assert!(opens(&["hex", "app", "--device", "MacBook Pro Microphone"]));
+        assert!(!opens(&["hex", "app", "--", "--snap", "/tmp/a.png"]));
+        assert!(!opens(&["hex-service"]));
+        assert!(!opens(&["hex-meetings-mcp"]));
+        for command in [
+            &["status"][..],
+            &["quit"],
+            &["mcp"],
+            &["history"],
+            &["listen"],
+            &["meetings", "list"],
+            &["settings", "list"],
+            &["capture", "status"],
+            &["dev", "dashboard"],
+        ] {
+            let arguments = [&["hex"][..], command].concat();
+            assert!(!opens(&arguments), "{command:?}");
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn main() -> Result<()> {
+    #[cfg(target_arch = "x86_64")]
+    transcription::cpu_floor::require();
+    linux::input_route::mark_streams();
+    linux::run(&SHUTDOWN)
+}
+
+#[cfg(target_os = "windows")]
+fn main() -> Result<()> {
+    // DLL search hardening first: the CPU check's message box loads DLLs.
+    windows::restrict_dll_search();
+    windows::gpu_fallback::choose();
+    #[cfg(target_arch = "x86_64")]
+    transcription::cpu_floor::require();
+    windows::run(&SHUTDOWN)
+}
+
+#[cfg(test)]
+mod code_shape_tests;

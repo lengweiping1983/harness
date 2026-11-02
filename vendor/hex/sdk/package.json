@@ -1,0 +1,15 @@
+{
+  "name": "hex-sdk-workspace",
+  "private": true,
+  "workspaces": [
+    "typescript",
+    "service-*"
+  ],
+  "scripts": {
+    "changeset": "changeset",
+    "release": "changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.3"
+  }
+}

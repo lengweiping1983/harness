@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil
 
 from setuptools.command.build_py import build_py
+from setuptools.command.bdist_wheel import bdist_wheel
 
 
 class BuildPy(build_py):
@@ -31,3 +32,19 @@ class BuildPy(build_py):
         destination = Path(self.build_lib) / '.harness' / 'skills'
         resources = [str(path) for path in destination.rglob('*') if path.is_file()]
         return super().get_outputs(include_bytecode=include_bytecode) + resources
+
+
+class BdistWheel(bdist_wheel):
+    """含本机语音二进制的 wheel 不得宣称可跨平台安装。"""
+
+    def finalize_options(self):
+        super().finalize_options()
+        root = Path(__file__).resolve().parent / 'harness' / 'resources' / 'hex'
+        if any(path.is_file() for path in root.rglob('*')):
+            self.root_is_pure = False
+
+    def get_tag(self):
+        python, abi, platform = super().get_tag()
+        if not self.root_is_pure:
+            return 'py3', 'none', platform
+        return python, abi, platform

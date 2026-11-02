@@ -99,6 +99,7 @@ from ..tools.builtin.shell_tools import build_shell_tools
 from ..tools.builtin.subagent_model_tools import build_list_subagent_models_tool
 from ..tools.builtin.subagent_tools import build_subagent_tools
 from ..tools.builtin.terminal_tools import TerminalSessionService, build_terminal_tools
+from ..tools.builtin.hex_tools import HexServiceManager, build_hex_tools, run_hex_owned
 from ..tools.builtin.todo_tools import TodoStore, build_todo_tools
 from ..tools.builtin.project_tools import build_project_tools
 from ..tools.builtin.web_tools import build_web_tools
@@ -275,6 +276,8 @@ class Harness:
         self.tools.add_post_hook(self.jobs.record_progress)
         # terminal_* 工具共用的常驻终端会话表
         self.terminals = TerminalSessionService()
+        # hex 语音转文字服务的生命周期管理器（懒启动，close 时优雅停机）
+        self.hex_service = HexServiceManager()
         # ask_user_question 的挂起/应答通道（UI 通过 bus 事件与 REST 应答）
         self.questions = QuestionBroker(self.bus)
         #: 外部 MCP 服务器桥接；工具表在 :meth:`ensure_started` 里补齐。
@@ -624,6 +627,8 @@ class Harness:
         # 对话内小组件是零副作用的展示能力，无条件注册以保持工具目录稳定。
         for tool in build_widget_tools():
             self.tools.register(tool)
+        # hex 语音转文字：随包二进制按需启动，按工具名发现（builtin:hex）。
+        self._register_optional_tools(build_hex_tools(self.hex_service), 'builtin:hex')
         if self.config.enable_present:
             self._register_optional_tools(build_present_tools(self.bus, cwd=cwd), 'builtin:present')
         if self.config.enable_workspace_deps:
@@ -2238,6 +2243,7 @@ class Harness:
             await attempt(self.provider_authorizations.close)
         await attempt(self.codex_gateway.close)
         await attempt(self.terminal_setup.close)
+        await attempt(run_hex_owned, self.hex_service.stop)
         await attempt(self.goal_runtime.close)
         await attempt(self.runtime.close)
         await attempt(self.session_titles.close)

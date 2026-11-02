@@ -38,12 +38,14 @@ superagent = ["cryptography>=50.0.2,<51"]
 [project.scripts]
 harness = "harness.cli:main"
 harness-mcp = "harness.mcp_server.cli:main"
+harness-voice = "harness.voice:main"
 
 [project.urls]
 Homepage = "https://github.com/lengweiping1983/harness"
 
 [tool.setuptools.cmdclass]
 build_py = "build_support.BuildPy"
+bdist_wheel = "build_support.BdistWheel"
 
 [tool.setuptools.packages.find]
 include = ["harness*"]
@@ -60,4 +62,7 @@ harness = [
   "academy/content/**/*.json",
   "academy/content/**/*.md",
   "academy/content/**/*.py",
+  # hex 语音服务二进制：由 scripts/build-hex.py 构建后随 wheel 分发，
+  # hex_tools.py 以包内固定路径加载，缺包会报"请先 make hex-build"。
+  "resources/hex/**/*",
 ]

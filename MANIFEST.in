@@ -1,3 +1,10 @@
 include build_support.py
 graft .harness/skills
 recursive-exclude .harness/skills *.pyc *.pyo .DS_Store
+# vendored hex 源码随 sdist 分发，支持从源码重新构建语音服务二进制
+graft vendor/hex
+prune vendor/hex/target
+recursive-exclude vendor/hex __pycache__ *.pyc *.pyo .DS_Store
+prune vendor/hex/.git
+include scripts/build-hex.py
+include scripts/python_bootstrap.py

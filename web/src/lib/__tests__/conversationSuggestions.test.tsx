@@ -6,6 +6,7 @@ import {useDraftStore} from '@/store/drafts'
 import {setLocale, t} from '@/i18n'
 
 const fixture = vi.hoisted(() => ({
+  voiceTranscript: undefined as undefined | ((text: string) => void),
   choose: undefined as undefined | ((text: string) => void),
   pending: {current: null as null | {text: string; caret: number; draftKey: string}},
 }))
@@ -28,6 +29,13 @@ vi.mock('@/hooks/useComposerEditor', () => ({useComposerEditor: (value: string) 
   taRef: {current: null}, dockRef: {current: null}, wrapRef: {current: null},
   pendingCompletion: fixture.pending, valueRef: {current: value}, resize: vi.fn(), scheduleFrame: vi.fn(), captureFrames: vi.fn(),
 })}))
+vi.mock('@/components/chat/VoiceButton', async original => {
+  const module = await original<typeof import('@/components/chat/VoiceButton')>()
+  return {VoiceButton: (props: Parameters<typeof module.VoiceButton>[0]) => {
+    fixture.voiceTranscript = props.onTranscript
+    return <module.VoiceButton {...props} />
+  }}
+})
 vi.mock('@/components/chat/ConversationSuggestions', async original => {
   const module = await original<typeof import('@/components/chat/ConversationSuggestions')>()
   return {ConversationSuggestions: (props: Parameters<typeof module.ConversationSuggestions>[0]) => {
@@ -97,4 +105,27 @@ it.each(['hidden', 'text', 'attachment', 'running', 'queued', 'submission'] as c
   const html = renderToStaticMarkup(<Composer {...props} showSuggestions={state !== 'hidden'} running={state === 'running'} queued={state === 'queued' ? 1 : 0} />)
   expect(html).not.toContain('welcome-suggestions')
   expect(fixture.choose).toBeUndefined()
+})
+
+
+it('places voice input immediately before send in the actual composer', async () => {
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(language)
+    const html = renderToStaticMarkup(<Composer {...props} />)
+    const microphone = html.indexOf(`aria-label="${t('ui.voice.start')}"`)
+    const send = html.indexOf(`aria-label="${t('ui.components.chat.Composer.edecf0ae6e51')}"`)
+    expect(microphone).toBeGreaterThan(0)
+    expect(send).toBeGreaterThan(microphone)
+    expect(html.slice(microphone, send)).not.toContain('data-lucide="scissors"')
+  }
+})
+
+
+it('appends dictation to the latest actual composer draft without sending', () => {
+  useDraftStore.getState().setText('__unsaved__', 'Original 用户')
+  renderToStaticMarkup(<Composer {...props} />)
+  useDraftStore.getState().setText('__unsaved__', 'Latest 用户')
+  fixture.voiceTranscript!('Speech 原文')
+  expect(useDraftStore.getState().bySession.__unsaved__.text).toBe('Latest 用户 Speech 原文')
+  expect(props.onSend).not.toHaveBeenCalled()
 })

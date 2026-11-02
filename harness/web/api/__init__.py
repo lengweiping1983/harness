@@ -24,6 +24,7 @@ from . import (
     project_board,
     runtime,
     screenshot,
+    voice,
     sessions,
     settings,
     mcp_service,
@@ -41,6 +42,7 @@ def build_router(ctx: Any) -> Router:
     router.include(attachments.build_router(ctx))
     router.include(codex_gateway.build_router(ctx))
     router.include(screenshot.build_router(ctx))
+    router.include(voice.build_router(ctx))
     router.include(catalog.build_router(ctx))
     router.include(sessions.build_router(ctx))
     router.include(interaction.build_router(ctx))

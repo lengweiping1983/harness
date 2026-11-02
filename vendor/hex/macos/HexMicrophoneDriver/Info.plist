@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>English</string>
+    <key>CFBundleExecutable</key>
+    <string>HexMicrophoneDriver</string>
+    <key>CFBundleIdentifier</key>
+    <string>anomaly.hex.microphone.driver</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Hex Microphone</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>2.3.1</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>MacOSX</string>
+    </array>
+    <key>CFBundleVersion</key>
+    <string>20301</string>
+    <key>CFPlugIn</key>
+    <string>YES</string>
+    <key>CFPlugInFactories</key>
+    <dict>
+        <key>A85E9410-37A1-4F2A-9B0D-7C8E2F4A19B3</key>
+        <string>HexMicrophoneDriverCreate</string>
+    </dict>
+    <key>CFPlugInTypes</key>
+    <dict>
+        <key>443ABAB8-E7B3-491A-B985-BEB9187030DB</key>
+        <array>
+            <string>A85E9410-37A1-4F2A-9B0D-7C8E2F4A19B3</string>
+        </array>
+    </dict>
+    <key>AudioServerPlugIn_MachServices</key>
+    <array/>
+</dict>
+</plist>

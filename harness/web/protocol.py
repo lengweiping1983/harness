@@ -19,6 +19,8 @@ from ..academy.protocol import SCHEMAS as ACADEMY_SCHEMAS, ENDPOINTS as ACADEMY_
 PERSONALITY_CODE = {'anyOf': [{'type': 'string', 'enum': list(STYLE_CODES)}, {'type': 'null'}]}
 
 SCHEMAS: dict[str, dict[str, Any]] = {
+    'VoiceTranscript': {'type': 'object', 'required': ['transcript'], 'additionalProperties': False,
+                        'properties': {'transcript': {'type': 'string'}}},
     'ConversationProject': {'type': 'object', 'additionalProperties': False, 'required': ['workspace_id', 'mode'], 'properties': {
         'workspace_id': {'type': 'string', 'minLength': 1}, 'mode': {'type': 'string', 'enum': ['local', 'worktree']},
         'ref': {'type': 'string', 'minLength': 1}, 'expected_head': {'type': ['string', 'null']},
@@ -1428,6 +1430,9 @@ def openapi(templates: list[str]) -> dict[str, Any]:
             if action in {'input', 'resize'}:
                 operation['requestBody'] = {'required': True, 'content': {'application/json': {'schema': {'$ref': '#/components/schemas/' + ('TerminalInput' if action == 'input' else 'TerminalResize')}}}}
                 operation['responses']['409'] = {'description': tr('python.protocol.12ef38b84e8b')}
+        if path == '/api/v1/voice/transcriptions':
+            operation['requestBody'] = {'required': True, 'content': {'audio/wav': {'schema': {'type': 'string', 'format': 'binary'}}}}
+            operation['responses']['200']['content'] = {'application/json': {'schema': {'$ref': '#/components/schemas/VoiceTranscript'}}}
         if path == '/api/v1/screenshot/capabilities':
             operation['responses']['200']['content'] = {'application/json': {'schema': {'$ref': '#/components/schemas/ScreenshotCapabilities'}}}
         if path == '/api/v1/terminal/types':
