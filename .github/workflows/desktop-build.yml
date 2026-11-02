@@ -42,6 +42,9 @@ jobs:
       - name: Build bundled runtime and installers
         run: npm --prefix desktop run package -- --${{ matrix.arch }}
         env:
+          HARNESS_UPDATE_REPOSITORY: ${{ vars.HARNESS_UPDATE_REPOSITORY }}
+          HARNESS_UPDATE_URL: ${{ vars.HARNESS_UPDATE_URL }}
+          HARNESS_RELEASE_BUILD: '1'
           CSC_LINK: ${{ secrets[matrix.certificate] }}
           CSC_KEY_PASSWORD: ${{ secrets[matrix.password] }}
           APPLE_ID: ${{ secrets.DESKTOP_APPLE_ID }}

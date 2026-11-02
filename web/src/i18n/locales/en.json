@@ -3015,6 +3015,7 @@
   "ui.desktop.menu.updateDevelopment": "Updates are available in installed releases. Development builds do not check for updates.",
   "ui.desktop.menu.updateCurrent": "You are up to date.",
   "ui.desktop.menu.updateAvailable": "An update is available. Download it now? It will install the next time you quit the application.",
+  "ui.desktop.menu.quitInstall": "Quit and Install",
   "ui.desktop.menu.updateDownloaded": "The update is downloaded. Keep working; it will install the next time you quit the application.",
   "ui.desktop.menu.updateFailed": "The update could not be completed. Check your connection and try again.",
   "ui.desktop.menu.downloadUpdate": "Download Update",

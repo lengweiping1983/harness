@@ -8,7 +8,7 @@ test('preload forwards scoped browser errors unchanged and releases its listener
  const ipcRenderer=new EventEmitter()
  let desktop
  const electron={ipcRenderer,contextBridge:{exposeInMainWorld(name,value){assert.equal(name,'harnessDesktop');desktop=value}}}
- runInNewContext(readFileSync(new URL('../preload.cjs',import.meta.url),'utf8'),{require(name){assert.equal(name,'electron');return electron}})
+ runInNewContext(readFileSync(new URL('../preload.cjs',import.meta.url),'utf8'),{process:{platform:'win32'},require(name){assert.equal(name,'electron');return electron}})
  const seen=[]
  const unsubscribe=desktop.onBrowserError(value=>seen.push(value))
  const failure={session_id:'Original-owner',message:'Original-{name} 原文'}

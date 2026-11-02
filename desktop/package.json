@@ -9,8 +9,8 @@
     "test": "node ../scripts/run_node_tests.mjs tests",
     "test:about-panel": "node tests/about-panel-smoke.mjs",
     "package:prepare": "npm --prefix ../web run build && node prepare-release.mjs",
-    "package:dir": "electron-builder --dir --publish never",
-    "package": "npm run package:prepare && electron-builder --publish never"
+    "package:dir": "electron-builder --config electron-builder.config.cjs --dir --publish never",
+    "package": "npm run package:prepare && electron-builder --config electron-builder.config.cjs --publish never"
   },
   "devDependencies": {
     "builder-util": "26.15.3",

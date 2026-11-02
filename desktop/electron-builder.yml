@@ -13,6 +13,8 @@ files:
   - '!prepare-release.mjs'
   - '!verify-runtime.mjs'
   - '!release-assets.mjs'
+  - '!electron-builder.config.cjs'
+  - '!update-source.cjs'
   - '!setup.mjs'
   - '!launch.mjs'
   - capture-screen.ps1
@@ -36,8 +38,3 @@ nsis:
   perMachine: false
   deleteAppDataOnUninstall: false
 artifactName: Harness-${version}-${os}-${arch}.${ext}
-publish:
-  provider: github
-  owner: lengweiping1983
-  repo: harness
-  releaseType: draft

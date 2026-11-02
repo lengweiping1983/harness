@@ -3015,6 +3015,7 @@
   "ui.desktop.menu.updateDevelopment": "开发版本不检查更新。请使用已安装的正式版本。",
   "ui.desktop.menu.updateCurrent": "当前已是最新版本。",
   "ui.desktop.menu.updateAvailable": "发现新版本。是否下载？下载完成后将在你下次退出应用时安装。",
+  "ui.desktop.menu.quitInstall": "退出并安装",
   "ui.desktop.menu.updateDownloaded": "更新已下载。你可以继续工作；下次退出应用时将安装更新。",
   "ui.desktop.menu.updateFailed": "无法完成更新。请检查网络后重试。",
   "ui.desktop.menu.downloadUpdate": "下载更新",

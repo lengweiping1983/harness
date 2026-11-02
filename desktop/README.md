@@ -52,7 +52,7 @@ macOS 菜单栏和 Windows 窗口菜单提供新建对话（⌘/Ctrl+Shift+U）�
 npm --prefix desktop test
 ```
 
-`npm --prefix desktop test` 发现 `desktop/tests/*.test.mjs`，当前覆盖 Python 运行时选择、后端监督、权限隔离、浏览器 IPC 来源校验与会话控制权隔离、对话框接管及不支持时保留原处理器、安装锁竞争和进程退出。截图编辑器的持续浏览器回归位于 `web/tests/screenshot-smoke.mjs`，由 `npm --prefix web test` 构建并运行，核对多行编辑、系统剪贴板与附件像素一致、复制失败及取消等分支。截图来源为确定性图片，不替代 Windows／Linux 原生抓屏、多显示器或安装包验证。
+`npm --prefix desktop test` 发现 `desktop/tests/*.test.mjs`，当前覆盖 Python 运行时选择、后端监督、权限隔离、浏览器 IPC 来源校验与会话控制权隔离、对话框接管及不支持时保留原处理器、安装锁竞争和进程退出。截图编辑器的持续浏览器回归位于 `web/tests/screenshot-smoke.mjs`，由显式 `npm --prefix web run test:browser` 运行，核对多行编辑、系统剪贴板与附件像素一致、复制失败及取消等分支。截图来源为确定性图片，不替代 Windows／Linux 原生抓屏、多显示器或安装包验证。
 
 同一桌面用户目录只运行一个实例。重复启动会恢复并聚焦已有窗口；启动尚未完成时保留聚焦请求，不再启动第二套后端。原生菜单打开项目目录选择器仅打开表单，不创建会话或发送任务。
 
@@ -66,6 +66,9 @@ npm --prefix desktop test
 npm --prefix model-runtime ci
 npm --prefix web ci
 npm --prefix desktop ci
+# 任选一个允许匿名读取的更新源，源码仓库可以继续保持私有
+export HARNESS_UPDATE_REPOSITORY='OWNER/PUBLIC_RELEASE_REPO'
+# 或 export HARNESS_UPDATE_URL='https://downloads.example.com/harness/stable/'
 npm --prefix desktop run package
 ```
 
@@ -84,15 +87,48 @@ npm --prefix desktop run package
 
 发行准备与构建前运行时校验沿用[桌面语言选择和资源规则](../docs/internationalization.md)，`HARNESS_LANGUAGE=en` 或 `zh-CN` 可显式选择，否则按系统地区选择。自有拒绝与完成提示使用资源模板；路径、命令和外部诊断原样保留，失败不自动重放安装命令，也不自动删除已有暂存目录。
 
-启动时静默检查稳定版更新；帮助菜单提供检查更新，有新版时显示“有可用更新”。下载需要用户选择，完成后可继续工作，下次正常退出时安装；不强制重启。网络失败明确提示并允许重试。开发版不联网检查。
+启动时静默检查稳定版更新；帮助菜单提供检查更新，有新版时显示“有可用更新”，确认对话框展示目标版本。下载需要用户选择，帮助菜单显示整数百分比。等待完整下载与原生校验完成后才显示“更新已准备好”，不以 macOS 提前发出的下载事件作为成功依据。完成后可继续工作，或选择“退出并安装”；两者均沿现有窗口离开确认与后端关闭流程正常退出，不直接调用强制重启。下次启动使用更新后的版本。下载或签名失败保留错误，不报告完成；再次检查确认版本后允许显式重试。开发版不联网检查，稳定版不自动接收预发布或降级。
 
 ## 自动构建与发布位置
 
-`.github/workflows/desktop-build.yml` 可手动运行，或由 `desktop-v*` 标签触发。Windows x64、macOS arm64 和 x64 分别使用原生 runner，构建流程保留构建前运行时校验，当前不再执行安装包冒烟。工作流只上传 Actions artifacts，不创建 Release 或发布外部资产。
+当前私有仓库暂停 Actions，不要求启用远端 CI。`.github/workflows/desktop-build.yml` 保留为未来恢复时的手动模板，只有 `workflow_dispatch` 入口，不由标签触发。Windows x64、macOS arm64 和 x64 分别使用原生 runner，构建流程保留构建前运行时校验，当前不再执行安装包冒烟。工作流只上传 Actions artifacts，不创建 Release 或发布外部资产。
 
-全部构建成功后，`Harness-release-assets` artifact 汇总安装文件和更新清单，校验版本、大小及 SHA-512，合并 Mac 双架构 `latest-mac.yml`。不得用一个架构的清单覆盖另一个。
+汇总器 `release-assets.mjs` 接受包含三个平台子目录的输入，要求同一稳定版本、Windows x64 的 EXE、Mac arm64／x64 的 DMG 和 ZIP，以及每个安装文件的 blockmap。核对清单中的大小、SHA-512 和复制后的字节，合并 Mac 双架构 `latest-mac.yml`，并生成覆盖安装文件与 blockmap 的 `SHA512SUMS`；缺失、冲突或混入其他版本立即失败。输出目录必须为空，不能覆盖旧发布目录。恢复工作流后，其 `Harness-release-assets` artifact 使用同一汇总器。
 
-正式下载与更新位置统一为 [仓库 GitHub Releases](https://github.com/lengweiping1983/harness/releases)。将汇总 artifact 中全部文件放入同一个稳定版 Release，安装文件和 blockmap 先到位，再让更新清单可见。客户端已配置该仓库。此方案要求用户能匿名读取 Release，不向安装用户嵌入私有仓库发布令牌。
+正式下载与更新源在构建时由 `electron-builder.config.cjs` 配置并写入安装包内部的 `app-update.yml`，不通过客户端环境变量更换服务器。必须二选一：
+
+- `HARNESS_UPDATE_REPOSITORY=OWNER/PUBLIC_RELEASE_REPO`：单独的公开 GitHub 下载仓库，源码可继续私有；Release 标签使用 `v<desktop/package.json 的版本>`，例如 `v0.2.0`。不能用 `desktop-v0.2.0` 作为更新仓库的 Release 标签。
+- `HARNESS_UPDATE_URL=https://HOST/harness/stable/`：静态 HTTPS 更新目录。必须允许匿名读取，不能在 URL 中带凭据、查询参数或片段；安装包、blockmap 和两个 latest 清单同目录。
+
+未配置、配置冲突或地址非法时打包失败，避免默认指向不可公开读取的私有仓库。不在安装包嵌入 GitHub Token。公开托管安装包意味着其中的程序文件可被公众下载，须由仓库所有者确认分发范围。
+
+### 每次正式发布
+
+1. 先选定长期更新源；源地址须从第一版可更新安装包开始固定。已分发的旧包若指向不可用地址，需要人工安装一次配置正确的新包；无法靠新服务修复旧包内固定的地址。
+2. 执行 `npm --prefix desktop version 0.2.0 --no-git-tag-version`（替换为实际递增的稳定版本），同步提交 `package.json` 与锁文件。桌面更新比较的是桌面版本，不是 Python 包版本。版本一旦发布，不覆盖同版本资产。
+3. 在三个独立且干净的原生构建检出中安装依赖：Mac Apple Silicon、Mac Intel、Windows x64。先配置相同的更新源，再运行打包。准备目录已有内容时按原错误指引处理，禁止清理用户数据。
+4. 正式构建设置 `HARNESS_RELEASE_BUILD=1`，强制代码签名；Mac 另要求 Apple 公证凭据。macOS 设置 `CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`；Windows 设置该平台的 `CSC_LINK`、`CSC_KEY_PASSWORD`。证书和密码只保存在构建机安全环境中。恢复 Actions 时使用下述平台 secrets，并在 repository variables 中配置一个更新源；不自动发布。
+5. macOS 各自在目标机器执行 `npm --prefix desktop run package -- --arm64` 或 `--x64`。Windows PowerShell 示例（占位地址替换为实际来源，签名凭据已安全设置）：
+
+   ```powershell
+   $env:HARNESS_UPDATE_REPOSITORY = 'OWNER/PUBLIC_RELEASE_REPO'
+   $env:HARNESS_RELEASE_BUILD = '1'
+   npm --prefix model-runtime ci
+   npm --prefix web ci
+   npm --prefix desktop ci
+   npm --prefix desktop run package -- --x64
+   ```
+
+6. 只收集本轮 `.run/installers` 的安装文件、blockmap、latest 清单，分别放入 `.run/artifacts/mac-arm64`、`mac-x64`、`win-x64`。不要复制 unpacked 应用目录。执行：
+
+   ```sh
+   node desktop/release-assets.mjs .run/artifacts .run/release-assets
+   ```
+
+7. GitHub 来源先建立草稿 Release，上传汇总目录全部文件，核对后一次发布为普通稳定版，不能勾选 prerelease。HTTPS 来源先上传版本化安装文件、blockmap 和校验文件，确认均可匿名下载后最后替换两个 latest 清单；清单禁止长时间缓存。保留旧版本资产，供旧客户端差分下载失败时回退完整下载。`SHA512SUMS` 是离线核对依据，不替代应用签名或客户端清单校验。
+8. 用上一正式版本真实升级到下一版：Mac arm64、Mac Intel、Windows x64 分别验证检查、拒绝下载、下载进度、断网及校验失败、退出确认取消、继续工作、正常退出安装、再次启动的版本号，以及项目、对话、设置、凭据保持。Mac 从 DMG 安装到 `/Applications` 后测试；Windows 使用 NSIS 安装版。签名／公证和实机矩阵未验收前不宣称发行完成。
+
+若新版本有缺陷，停止发布错误清单并发布更高版本的修复包；自动降级已关闭，不覆盖同版本文件或自动迁移用户数据。
 
 签名凭据按系统隔离：macOS 使用 `DESKTOP_MAC_CSC_LINK`、`DESKTOP_MAC_CSC_KEY_PASSWORD`，公证使用 `DESKTOP_APPLE_ID`、`DESKTOP_APPLE_APP_SPECIFIC_PASSWORD`、`DESKTOP_APPLE_TEAM_ID`；Windows 使用 `DESKTOP_WINDOWS_CSC_LINK`、`DESKTOP_WINDOWS_CSC_KEY_PASSWORD` 及可信 Authenticode 证书。
 
