@@ -13,7 +13,7 @@ export function useDesktopMenu() {
   useEffect(() => {
     const desktop = (window as unknown as {harnessDesktop?: DesktopMenu}).harnessDesktop
     if (!desktop?.setMenu || !booted) return
-    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','close','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
+    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
     void desktop.setMenu(Object.fromEntries(keys.map(key => [key, t('ui.desktop.menu.' + key)]))).catch(error => console.error(t('ui.desktop.menuSyncFailed'), error))
   }, [locale, booted])
   useEffect(() => {

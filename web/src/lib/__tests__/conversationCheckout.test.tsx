@@ -1,6 +1,7 @@
 import {afterEach, expect, it, vi} from 'vitest'
 import {renderToStaticMarkup} from 'react-dom/server'
 import {ConversationCheckout, ConversationCheckoutFields} from '@/components/chat/ConversationCheckout'
+import {CheckoutBranchOptions} from '@/components/chat/CheckoutBranchMenu'
 import {NewConversationProject} from '@/components/chat/NewConversationProject'
 import {useAppStore} from '@/store/app'
 import {setLocale, t} from '@/i18n'
@@ -25,7 +26,12 @@ it('renders local and worktree branches, dirty and first-commit states through t
       const html = renderToStaticMarkup(<ConversationCheckoutFields compact={compact} options={options} value={{...value, mode}} onChange={() => {}} onRefresh={() => {}} />)
       expect(html).toContain(t(mode === 'local' ? 'ui.newConversation.branch' : 'ui.newConversation.baseBranch'))
       expect(html).toContain(t(mode === 'local' ? 'ui.newConversation.dirtyLocal' : 'ui.newConversation.dirtyIsolated'))
-      expect(html.includes('origin/remote')).toBe(mode === 'worktree')
+      expect(html).toContain('aria-haspopup="menu"')
+      expect(html).not.toContain('<select')
+      const branches = renderToStaticMarkup(<CheckoutBranchOptions options={options} selected="main" isolated={mode === 'worktree'} onChange={() => {}} />)
+      expect(branches.includes('origin/remote')).toBe(mode === 'worktree')
+      expect(branches).toContain('role="menuitemradio" aria-checked="true"')
+      expect(branches.match(/>main</g)).toHaveLength(1)
       expect(html).toContain('role="switch"')
       expect(html).not.toContain(t(mode === 'local' ? 'ui.newConversation.local' : 'ui.newConversation.isolated'))
       expect(html).toContain('title="main"')
@@ -43,6 +49,17 @@ it('renders local and worktree branches, dirty and first-commit states through t
     const loading = renderToStaticMarkup(<ConversationCheckout cwd="/project" value={null} onChange={() => {}} />)
     expect(loading).toContain(t('ui.newConversation.checking'))
   }
+})
+it('preserves long branch names, detached HEAD and disabled branch controls', () => {
+  const branch = 'feature/保留原始分支名/' + 'long-name-'.repeat(12)
+  const html = renderToStaticMarkup(<CheckoutBranchOptions options={options} selected={branch} isolated onChange={() => {}} />)
+  expect(html).toContain(branch)
+  expect(html.match(/aria-checked="true"/g)).toHaveLength(1)
+  const detached = renderToStaticMarkup(<CheckoutBranchOptions options={{...options, local_branches: []}} selected="HEAD" isolated={false} onChange={() => {}} />)
+  expect(detached).toContain('>HEAD</span>')
+  expect(detached.match(/role="menuitemradio"/g)).toHaveLength(1)
+  const disabled = renderToStaticMarkup(<ConversationCheckoutFields options={options} value={value} disabled onChange={() => {}} onRefresh={() => {}} />)
+  expect(disabled.match(/<button[^>]*aria-haspopup="menu"[^>]*>/)?.[0]).toContain('disabled=""')
 })
 it('shows project choice before a project exists and preserves the selected project name', () => {
   for (const language of ['en', 'zh-CN', 'en'] as const) {

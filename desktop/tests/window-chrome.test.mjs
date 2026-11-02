@@ -31,6 +31,19 @@ test('localized top-level menus retain native roles, accelerators, readiness and
   }
 })
 
+test('File omits Close Window and the platform retains exactly one native Quit action', () => {
+  for (const platform of ['darwin', 'win32', 'linux']) for (const language of ['en', 'zh-CN', 'en']) {
+    const template = applicationMenu({platform, text: key => language + key, command: () => {}})
+    const file = template.find(group => group.label === language + 'file').submenu
+    const items = template.flatMap(group => group.submenu)
+    assert.equal(items.some(item => item.role === 'close'), false)
+    assert.equal(items.filter(item => item.role === 'quit').length, 1)
+    assert.equal(file.at(-1).type === 'separator', false)
+    assert.equal(file.some(item => item.role === 'quit'), platform !== 'darwin')
+    if (platform === 'darwin') assert.equal(template[0].submenu.at(-1).role, 'quit')
+  }
+})
+
 test('chrome IPC admits only the application main frame and releases its handlers when the window closes', async () => {
   const window = Object.assign(new EventEmitter(), {webContents:{mainFrame:{url:'http://127.0.0.1:8765/'}, getZoomFactor:()=>1}, getContentSize:()=>[800,600], setTitleBarOverlay:value=>appearances.push(value)})
   const handlers = new Map(), appearances = [], popups = []

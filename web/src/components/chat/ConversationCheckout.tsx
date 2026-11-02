@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react'
-import {Folder, GitBranch} from 'lucide-react'
+import {Folder} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import {runtimeRequest} from '@/lib/http'
 import {failureText} from '@/lib/resourceError'
@@ -10,6 +10,7 @@ import type {ConversationCheckout as Checkout} from '@/lib/conversationProject'
 import {Button, RefreshButton, Switch, Tooltip} from '@/components/ui/primitives'
 import {cn} from '@/lib/utils'
 import {usePageVisible} from '@/hooks/usePageVisible'
+import {CheckoutBranchMenu} from './CheckoutBranchMenu'
 
 type Status = 'loading' | 'ready' | 'error'
 
@@ -66,17 +67,10 @@ export function ConversationCheckoutFields({options, value, disabled = false, co
     <RefreshButton size={compact ? 'xs' : 'sm'} className="text-xs" label={t('ui.newConversation.refresh')} disabled={disabled} onClick={onRefresh} />
   </div>
   const isolated = value.mode === 'worktree'
-  const refs = isolated ? options.refs : options.local_branches
   const selected = value.ref ?? options.branch ?? 'HEAD'
   return <div className={compact ? 'contents' : 'space-y-2'} data-conversation-checkout="true">
     <div className={cn('text-xs', compact ? 'contents' : 'refresh-action-container flex flex-wrap items-center gap-3')}>
-      <label className="flex min-w-0 items-center gap-1.5"><GitBranch className="h-3.5 w-3.5 shrink-0 text-muted" />
-        <span className="sr-only">{t(isolated ? 'ui.newConversation.baseBranch' : 'ui.newConversation.branch')}</span>
-        <select aria-label={t(isolated ? 'ui.newConversation.baseBranch' : 'ui.newConversation.branch')} title={selected} value={selected} disabled={disabled}
-          onChange={event => update({ref: event.target.value})} className={cn('min-w-0 max-w-path rounded-lg border border-line bg-surface', compact ? 'h-6 px-1.5' : 'h-8 px-2')}>
-          {[...new Set([selected, ...refs])].map(ref => <option key={ref} value={ref}>{ref}</option>)}
-        </select>
-      </label>
+      <CheckoutBranchMenu key={value.cwd + ':' + value.mode} options={options} selected={selected} isolated={isolated} compact={compact} disabled={disabled} onChange={ref => update({ref})} />
       <Tooltip content={t(isolated ? 'ui.newConversation.isolated' : 'ui.newConversation.local')}>
         <label className={cn('flex items-center gap-2 text-xs', compact ? 'h-6' : 'h-8')}><Switch checked={isolated} disabled={disabled || !options.head}
           onChange={event => update({mode: event.target.checked ? 'worktree' : 'local', ref: event.target.checked || options.local_branches.includes(selected) ? selected : options.branch ?? 'HEAD'})} />{t('ui.newConversation.worktree')}</label>
