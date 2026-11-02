@@ -1017,7 +1017,6 @@ body {
 :root[data-desktop-platform='darwin'] .app-shell[data-mode='columns'] .sidebar-tab-header {
   padding-left: var(--desktop-traffic-light-inset);
 }
-:root[data-desktop-platform='darwin'] .sidebar-header-logo { display: none; }
 :root[data-desktop-platform='darwin'] .sidebar-header-new { width: 32px; padding: 0; }
 :root[data-desktop-platform='darwin'] .sidebar-header-new > span { display: none; }
 :root[data-desktop-platform='darwin'] .conversation-tab-header [role='tab'] {

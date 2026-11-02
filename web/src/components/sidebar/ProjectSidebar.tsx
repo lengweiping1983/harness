@@ -1,4 +1,3 @@
-import { HarnessLogo } from '@/components/ui/HarnessLogo'
 import {useSessionNotificationStore} from '@/store/sessionNotifications'
 import {SessionListSkeleton} from './SessionListSkeleton'
 import {failureText} from '@/lib/resourceError'
@@ -188,7 +187,6 @@ export function ProjectSidebar() {
     <div className="flex h-full min-h-0 flex-col">
       {/* 顶栏：收起、刷新和新会话。 */}
       <header className="sidebar-tab-header flex items-center gap-1 px-2">
-        <HarnessLogo className="sidebar-header-logo mr-1 h-6 w-6 shrink-0" />
         <WorkspaceAction action="collapse-left" label={t('ui.sidebar.collapse')} data-panel-toggle="left" aria-controls="project-sidebar" onClick={() => useAppStore.getState().toggleSidebar()} />
         <IconButton
           label={t("ui.components.sidebar.ProjectSidebar.aee887434131")}
