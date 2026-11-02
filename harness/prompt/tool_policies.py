@@ -31,6 +31,7 @@ def build_tool_policies(names: set) -> list:
         ('glob', 1400, 'policy.glob'),
         ('grep', 1500, 'policy.grep_read' if 'read' in names else 'policy.grep'),
         ('lsp', 2200, 'policy.lsp'),
+        ('show_widget', 1800, 'policy.visualization'),
     ):
         if tool in names:
             out.append((f'tool:{tool}', order, lambda key=key: tr(key)))

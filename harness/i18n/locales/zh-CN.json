@@ -8311,5 +8311,6 @@
   "ui.voice.pidProbeFailed": "无法查询 Hex 进程：{operation} 返回 Windows 错误 {code}。",
   "runtime.voice.launchFailed": "无法启动 Hex：{detail}",
   "ui.renderer.incomplete": "HTML 块尚未闭合。源码已保留，围栏闭合后才能预览。",
-  "ui.widget.initializationFailed": "预览未能在等待时间内完成初始化。可以查看保留的源码，或手动重新运行。"
+  "ui.widget.initializationFailed": "预览未能在等待时间内完成初始化。可以查看保留的源码，或手动重新运行。",
+  "policy.visualization": "用户在对话中请求 HTML 可视化、交互演示、图表、计算器或模拟时，优先在对话中交付可视化：调用 show_widget 并传入完整 title 和 widget_code，或直接输出完整的 html type=\"renderer\" 代码围栏。只创建本地 HTML 文件、截图、read_image 结果、文件链接或声称已创建，都不会发布可交互预览。先做小而可用、自包含的版本，就绪后立即展示，不要为了截图、额外示例或长时间浏览器调试而一直不输出可视化。用户未要求文件或独立项目时，对话演示不需要写工作区、启动开发服务器、安装浏览器、截图或编写 Shell 验收脚本。保留用户明确要求的测试，单独如实报告实际范围；发布预览不能证明交互已测试。使用内联 CSS 和 JavaScript，保留可读的静态内容、响应式尺寸和可访问控件，不依赖宿主权限或 fetch/WebSocket。widget_guidelines 可提供设计约束。show_widget 成功后简要说明如何操作，不重复粘贴源码。矢量示意图仍使用渐进 svg 围栏。用户明确指定格式或实现方式时遵循用户要求。"
 }

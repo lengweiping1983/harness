@@ -69,3 +69,14 @@ it('authored thinking and replies preserve identity and separate adjacent proces
   expect(authored).toMatchObject({text:'Original 原文 {name}'})
  }
 })
+
+it('keeps visualization calls outside collapsed activity groups through loading, success and failure', () => {
+  for (const status of ['running', 'ok', 'error'] as const) {
+    const widget: Block = {kind: 'tool', id: 'widget', callId: 'widget-call', turn: 1, at: 2, name: 'show_widget', status,
+      display: status === 'ok' ? {widget: {title: 'Original', kind: 'html', code: '<button>Go</button>'}} : undefined}
+    const input = rows([thought('before'), tool('read'), widget, thought('after'), tool('check')])
+    const output = groupToolRuns(input, {})
+    expect(output.map(row => row.id)).toEqual(['tool-run:1:before', 'widget', 'tool-run:1:after'])
+    expect(output[1]).toBe(input[2])
+  }
+})

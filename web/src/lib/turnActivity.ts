@@ -53,7 +53,7 @@ export function conversationRows(rows: ChangeRow[], turns: Record<number, TurnAc
     if (row.kind !== 'block' || !row.block.turn || !turns[row.block.turn]) return false
     const block = row.block, activity = turns[block.turn!]!
     if (block.kind === 'user' || block.kind === 'error' || block.kind === 'question' || block.kind === 'deliverables' || block.kind === 'turn') return false
-    if (block.kind === 'tool' && (block.status !== 'ok' || block.name === 'ask_user_question' || authoredPlugin(block))) return false
+    if (block.kind === 'tool' && (block.status !== 'ok' || block.name === 'ask_user_question' || block.name === 'show_widget' || authoredPlugin(block))) return false
     if (block.kind === 'notice' && block.tone === 'warn') return false
     if (block.kind === 'subagent' && block.status !== 'completed') return false
     // 未收到最终回复关联时保留正文可见，避免运行中或不完整窗口隐藏回复。

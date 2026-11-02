@@ -52,3 +52,20 @@ it.each(['pending','running','completed','failed','interrupted','done','error','
   expect(result.some(row=>row.id==='agent')).toBe(status!=='completed')
   expect(result.find(row=>row.kind==='activity')).toMatchObject({count:status==='completed'?1:0})
 })
+
+it('preserves visualization deliveries through both disclosure layers and restored completed turns', async () => {
+  const {groupToolRuns} = await import('../toolRuns')
+  for (const kind of ['svg', 'html']) for (const status of ['running', 'ok', 'error'] as const) {
+    const widget: Block = {kind: 'tool', id: 'widget', callId: 'widget-call', turn: 1, at: 3000, name: 'show_widget', status,
+      display: status === 'ok' ? {widget: {title: 'Original', kind, code: kind === 'svg' ? '<svg viewBox="0 0 10 10"/>' : '<button>Go</button>'}} : undefined}
+    const final: Block = {kind: 'assistant', id: 'final', sourceSeq: 9, turn: 1, at: 4000, text: 'Final'}
+    for (const reason of [undefined, 'completed', 'aborted']) for (const open of [false, true]) {
+      const result = groupToolRuns(conversationRows(rows([user, thought, {...running, status: 'ok'}, widget, final]),
+        {1: {...start, reason, finalResponseSeq: reason ? 9 : undefined}}, {1: open}), {})
+      const deliveries = result.filter(row => row.kind === 'block' && row.block.id === 'widget')
+      expect(deliveries).toHaveLength(1)
+      expect(deliveries[0]).toMatchObject({kind: 'block', block: widget})
+      expect(result.filter(row => row.kind === 'activity')).toHaveLength(1)
+    }
+  }
+})

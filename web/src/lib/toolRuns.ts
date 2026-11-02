@@ -29,7 +29,7 @@ const ACTIONS: Record<ActivityKind, string> = {
 /** Group adjacent process blocks from the same turn; preserve narrative and author boundaries. */
 function eligible(block: Block): boolean {
   return (block.kind === 'thinking' && block.turn !== undefined && !block.author && !block.speaker) ||
-    (block.kind === 'tool' && block.name !== 'ask_user_question' && !authoredPlugin(block))
+    (block.kind === 'tool' && block.name !== 'ask_user_question' && block.name !== 'show_widget' && !authoredPlugin(block))
 }
 export function groupToolRuns(rows: ConversationRow[], choices: Record<string, boolean>, identities = new Map<string, string>()): GroupedConversationRow[] {
   const result: GroupedConversationRow[] = []
