@@ -268,6 +268,7 @@ python -m venv .run/semantic-eval
 | 面板隐藏与迟到结果 | `ExecutionTracePanel.tsx`、`TeamMemberDetails.tsx`；`member-trace-visibility-smoke.mjs`、`plan-visibility-smoke.mjs` |
 | 共享对话 | `harness/web/api/collaboration.py`、`shared_projection.py`；`shared-session-smoke.mjs`、`test_collaboration_error_language.py` |
 | 生成协议 | `harness/web/protocol.py`、`response_contracts.py`；`test_protocol_current_boundaries.py`、两个生成器的 `--check` |
+| Superagent 自主目标与本机提交 | `app/superagent_missions.py`、`superagent_mission_store.py`、`superagent_local.py`；`test_superagent_missions.py`、`test_superagent_local.py`，并保留原事件、Router、Worker、结果及信道回归 |
 
 后端测试名称均相对 `tests/`，前端纯逻辑测试使用 `rg --files web/src` 定位，浏览器场景位于 `web/tests/`。不在此固定用例总数或将已记录风险描述为已覆盖。
 

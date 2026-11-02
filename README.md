@@ -65,7 +65,7 @@ python -m harness.cli --cwd /path/to/project --memory-import archive.jsonl
 
 默认作用域为 project；user 使用 `--memory-scope user`，session 还须同时指定 `--memory-scope session --memory-session SESSION_ID`。导出不覆盖已有文件，导入会写入选定作用域，归档约束见 [存储与恢复](docs/storage.md)。
 
-显式 Superagent 模式使用 `python -m harness.cli --superagent /path/to/config.json`，可加 `--superagent-once` 处理当前批次后退出。它装配独立 Router 和 Worker 宿主，从专用目录接收可信事件，自动建立工作树与对话；同一任务的新 Thread 可复用原 Worker 并接续订阅，由 Router 输出回复候选。可选 GitHub／飞书信道接收核验身份的事件，并在显式授权后发送和核实原来源回复；飞书加密回调需安装 `.[superagent]` 可选依赖。配置、运行目录和当前限制见 [Superagent 模式](docs/superagent.md#本地文件模式运行入口)；工作台、任务监督和远程执行仍待实现。
+显式 Superagent 模式使用 `python -m harness.cli --superagent /path/to/config.json`，可加 `--superagent-once` 处理当前批次后退出。配置 `autonomy` 后，一个目标可自动拆解为依赖任务，经并行工作、真实产物交接、集成、独立复核和有限修正后形成候选；默认 Router 继续支持单任务及 Thread 续接。使用 `--superagent-submit "目标"` 直接提交，`--superagent-status` 读取状态，无需手写事件 JSON。可选 GitHub／飞书信道在显式授权后接收事件、发送并核实原来源回复；飞书加密回调需安装 `.[superagent]`。配置与当前限制见 [Superagent 模式](docs/superagent.md)；工作台、完整任务监督和远程执行仍待实现。
 
 三层记忆默认使用本地关键词召回；显式启用本地语义候选的依赖、缓存与限制见 [扩展文档](docs/extensions.md#可选本地语义记忆候选)。
 

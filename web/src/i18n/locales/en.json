@@ -4638,7 +4638,7 @@
   "ui.providers.resetKeys": "Reset key status",
   "ui.providers.environmentHint": "Use the current environment or cloud credentials. Fill in the required parameters below.",
   "ui.providers.localHint": "Use the local OpenCode runtime and profile.",
-  "ui.providers.models": "Models",
+  "ui.providers.models": "Model management",
   "ui.providers.probing": "Fetching…",
   "ui.providers.discover": "Fetch available models",
   "ui.providers.discoverFallback": "Could not refresh the catalog. The current cache and model selection are unchanged.",
