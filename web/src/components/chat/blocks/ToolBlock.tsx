@@ -46,6 +46,7 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
   const images = useMemo(() => toolImages(block), [block.name, block.output, block.display, block.input, locale])
   const widget = useMemo(() => widgetPayload(block), [block.name, block.status, block.display])
   const widgetPending = useMemo(() => widgetPreview(block), [block.name, block.status, block.input])
+  const isWidget = block.name === 'show_widget'
   const argsRejected = toolArgsFailure(block)
   const fileRejected = fileWriteRejected(block)
   const notExecuted = argsRejected || Boolean(block.display && typeof block.display === 'object' && 'not_executed' in block.display && block.display.not_executed)
@@ -78,8 +79,8 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
       >
         <ToolActivityIcon kind={activity.kind} name={block.name} running={running} skipped={skipped} failed={failed} />
         <span className="min-w-0 max-w-full truncate" title={activity.label}>{images.length && block.status !== 'running' ? t(block.status === 'error' ? 'ui.toolBlock.imagesPartial' : 'ui.toolBlock.imagesViewed', {count: images.length}) : activity.label}</span>
-        {activity.detail ? <span className="min-w-0 flex-1 truncate text-faint" title={activity.detail}>{activity.detail}</span> : null}
-        <ChevronRight aria-hidden className={cn('ml-auto h-3 w-3 shrink-0 text-faint', open && 'rotate-90')} />
+        {activity.detail ? <span className={cn('min-w-0 truncate text-faint', !isWidget && 'flex-1')} title={activity.detail}>{activity.detail}</span> : null}
+        <ChevronRight aria-hidden className={cn('h-3 w-3 shrink-0 text-faint', !isWidget && 'ml-auto', open && 'rotate-90')} />
       </button>
 
       {todoIssue ? <div role="note" className="ml-5 mb-2 space-y-1 rounded-md border border-line bg-raised p-3 text-xs leading-reading">
@@ -102,7 +103,6 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
 
       {block.name === 'browser' && sessionId ? <button type="button" className="ml-5 mb-1 text-xs text-brand hover:underline focus-visible:underline" onClick={() => useAppStore.getState().setInspectorTab('browser')}>{t("ui.components.chat.blocks.ToolBlock.4d689adda874")}</button> : null}
       {images.length ? <ImageGallery images={images} /> : null}
-      {widget ? <WidgetCard key={`${sessionId ?? activeSessionId}:${block.callId}:${block.id}`} payload={widget} /> : widgetPending ? <WidgetLoading preview={widgetPending} /> : null}
       {open && running && progressText ? <div className="ml-5 mt-1 border-l border-line pl-4">
         <pre ref={progressView} aria-label={t("ui.components.chat.blocks.ToolBlock.8f3ea71ba079")} tabIndex={0}
           onScroll={(event) => { const view = event.currentTarget; followOutput.current = view.scrollHeight - view.scrollTop - view.clientHeight < 24 }}
@@ -111,7 +111,7 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
       </div> : null}
 
       {open ? (
-        <div id={detailId} className="ml-5 space-y-3 border-l border-line py-3 pl-4">
+        <div id={detailId} className={cn('ml-5 space-y-3', isWidget ? 'my-2 rounded-xl border border-line bg-raised/30 p-3' : 'border-l border-line py-3 pl-4')}>
           <LearnHarnessButton topic="tool" />
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
             <code>{block.name}</code>
@@ -188,6 +188,9 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
           ) : null}
         </div>
       ) : null}
+      {widget || widgetPending ? <div className="mt-2 min-w-0">
+        {widget ? <WidgetCard key={`${sessionId ?? activeSessionId}:${block.callId}:${block.id}`} payload={widget} /> : <WidgetLoading preview={widgetPending} />}
+      </div> : null}
     </div>
   )
 })

@@ -42,6 +42,8 @@ await browserScenario(async({server,browser})=>{
   for(const locale of ['en','zh-CN','en'])for(const dark of [false,true])for(const width of [390,1440]){
    await page.setViewportSize({width,height:900})
    await page.evaluate(async({locale,dark})=>{await window.locale(locale);document.documentElement.classList.toggle('dark',dark)},{locale,dark})
+   await page.getByRole('heading',{name:locale==='en'?'Background tasks':'后台任务',exact:true}).waitFor()
+   await page.getByRole('button',{name:locale==='en'?'Refresh background tasks':'刷新后台任务状态',exact:true}).waitFor()
    await check(locale)
    assert.equal(await page.locator('body').evaluate(node=>node.scrollWidth<=innerWidth+1),true)
   }
@@ -52,7 +54,7 @@ await browserScenario(async({server,browser})=>{
   await page.getByRole('button',{name:await page.evaluate(()=>window.copy('ui.runtime.refresh')),exact:true}).waitFor()
  })
  assert.equal(await page.evaluate(()=>window.reads.length),2,'Language and theme changes must not restart reads')
- const refresh=page.getByRole('button',{name:'Refresh running tasks',exact:true})
+ const refresh=page.getByRole('button',{name:'Refresh background tasks',exact:true})
  await refresh.evaluate(button=>{button.click();button.click()})
  await page.waitForFunction(()=>window.reads.length===3)
  assert.equal(await refresh.isDisabled(),true,'An in-flight refresh must not overlap another read')

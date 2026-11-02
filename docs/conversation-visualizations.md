@@ -68,6 +68,8 @@ HTML 支持片段与完整文档，包含内联 CSS、JavaScript、Canvas、SVG 
 
 `show_widget` 调用在加载、成功和失败状态均作为独立对话行保留，`turnActivity.ts` 的轮次折叠与 `toolRuns.ts` 的活动分组不隐藏它。轮次完成、历史重开和收起过程后，已提交的 SVG／HTML 仍直接可见；运行中卡片的加载态不能在成功时被过程摘要替换。
 
+可视化工具摘要的收展箭头紧跟标题文字。箭头控制工具调用详情，详情默认收起；展开后紧接摘要、位于预览上方，使用完整四周边框、圆角和内边距标明详情的开始与结束，并与预览保留间距。收展详情不隐藏或重建预览，已加载的交互状态继续保留。
+
 卡片提供源码／渲染切换、复制、下载与放大。SVG 支持保存 PNG 和复制图片；PNG 从实际图形取样颜色、字体与尺寸，避免导出工具栏图标或丢失主题颜色。源码下载仍可编辑。
 
 HTML 在 `sandbox="allow-scripts"` 的不透明来源 iframe 中执行，不授予宿主 DOM、Cookie、存储或原生工具权限。CSP 禁止 fetch、WebSocket、表单提交、对象嵌入与 base 修改；内联代码和已列明的 jsDelivr、cdnjs、unpkg、esm.sh 依赖可加载，HTTPS 图片／字体同样允许。不是可任意联网或访问工作区的运行环境。
@@ -91,7 +93,7 @@ HTML 在 `sandbox="allow-scripts"` 的不透明来源 iframe 中执行，不授�
 - `svgScope.test.ts` 核对多图 ID 和引用隔离；`streaming.test.ts` 保留分段与渐进内容边界，并核对渲染块（`type="renderer"`）的识别、分段与闭合状态。
 - `rendererRemark.integration.test.tsx` 使用实际 Markdown、清洗器和卡片组件，核对顶格／列表／引用／文件预览的闭合与中断、原始 HTML 保持、普通 HTML／XML／SVG 分流和双语控件；仅沙箱 DOM 边界由替身接收源码。
 - `htmlSandboxRuntime.test.ts` 在受控 VM 中执行实际注入脚本，核对启动／绘制握手、早期错误、消息归属、隐藏恢复、键盘边界及千次布局通知合并。`htmlSandboxFrame.test.tsx` 用受控钩子与 DOM 替身验证宿主超时、迟到就绪、双语提示、源码代次隔离和文档复用；这些单测不替代真实浏览器验收。
-- `visualization-conversation-smoke.mjs` 将真实工具结果交给实际 `Conversation`，核对加载、完成、历史重开、两层折叠及语言／主题／宽度切换后的预览与控件状态。
+- `widgetDisclosure.test.tsx` 核对工具详情位于预览之前且四周边框完整、默认收起时预览仍可见，以及加载和失败时的展示边界。`visualization-conversation-smoke.mjs` 将真实工具结果交给实际 `Conversation`，覆盖加载、完成、历史重开、两层折叠及语言／主题／宽度切换后的预览与控件状态，并包含标题旁箭头、键盘收展、详情完整边框、与预览不重叠及交互状态保持的布局断言；浏览器专项须显式执行。
 - `visualization-smoke.mjs` 使用上述真实工具结果渲染组件，核对交互参数变化、源码／放大状态保留、英文→中文→英文、明暗主题、窄宽屏、错误重跑、旧消息拒绝和 SVG 下载／PNG 尺寸。
 - `markdown-stream-smoke.mjs` 与 `chart-focus-smoke.mjs` 保留原有 SVG／Mermaid 流式绘制和放大后的焦点、Escape、滚动归属回归。
 

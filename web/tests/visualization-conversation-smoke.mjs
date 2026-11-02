@@ -67,6 +67,30 @@ await browserScenario(async({server,browser})=>{
   await frame.locator('#workers').evaluate(node=>{node.value='8';node.dispatchEvent(new Event('input',{bubbles:true}))})
   assert.equal(await frame.locator('#queued').textContent(),'16')
   await page.locator('.widget-host > svg').waitFor()
+  const widget=page.locator('[data-tool-call-id="widget-3"]')
+  const disclosure=widget.locator(':scope > button').first()
+  const detailId=await disclosure.getAttribute('aria-controls')
+  assert.ok(detailId)
+  assert.equal(await disclosure.evaluate(button=>{
+   const title=button.querySelector('span[title]:last-of-type'),arrow=button.querySelector('.lucide-chevron-right')
+   const gap=title&&arrow?arrow.getBoundingClientRect().left-title.getBoundingClientRect().right:-1
+   return gap>=0&&gap<=12
+  }),true,'The disclosure arrow stays beside the visualization title')
+  await disclosure.focus()
+  await page.keyboard.press('Enter')
+  await widget.locator('button[aria-expanded="true"]').first().waitFor()
+  assert.equal(await widget.evaluate((node,id)=>{
+   const detail=node.querySelector(`[id="${id}"]`),preview=node.querySelector('figure')
+   if(!detail||!preview||detail.getBoundingClientRect().bottom>preview.getBoundingClientRect().top)return false
+   const style=getComputedStyle(detail)
+   return ['borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth'].every(side=>parseFloat(style[side])>0)
+  },detailId),true,'Expanded details appear above the preview without overlapping it')
+  await frame.getByRole('button',{name:'运行模拟 · 1',exact:true}).waitFor()
+  await disclosure.focus()
+  await page.keyboard.press('Space')
+  await widget.locator(`[id="${detailId}"]`).waitFor({state:'detached'})
+  assert.equal(await widget.locator(`[id="${detailId}"]`).count(),0)
+  await frame.getByRole('button',{name:'运行模拟 · 1',exact:true}).waitFor()
   const activity=page.locator('[data-row-id="activity-turn-1"] button')
   await activity.click()
   await page.locator('[data-tool-run-turn="1"] button[aria-expanded="false"]').waitFor()

@@ -19,7 +19,7 @@ export const INSPECTOR_PANELS = [
   {value: 'files', labelKey: 'ui.components.inspector.Inspector.39932f24fe11', keywords: 'files explorer folder directory', diagnostic: false},
   {value: 'browser', labelKey: 'ui.components.inspector.Inspector.e19c3b9e266c', keywords: 'browser preview chrome chromium web', diagnostic: false},
   {value: 'terminal', labelKey: 'ui.components.inspector.Inspector.e2a76ef1f12e', keywords: 'terminal shell console bash zsh powershell', diagnostic: false},
-  {value: 'runtime', labelKey: 'ui.components.inspector.Inspector.75b269496f69', keywords: 'runtime jobs background', diagnostic: true},
+  {value: 'runtime', labelKey: 'ui.components.inspector.Inspector.75b269496f69', keywords: 'runtime jobs background tasks', diagnostic: true},
   {value: 'context', labelKey: 'ui.components.inspector.Inspector.6fc38ef3602f', keywords: 'context tokens usage', diagnostic: true},
   {value: 'prompts', labelKey: 'ui.trace.title', keywords: 'trace requests tools execution prompts', diagnostic: true},
 ] as const satisfies ReadonlyArray<{value: InspectorTab; labelKey: string; keywords: string; diagnostic: boolean}>
