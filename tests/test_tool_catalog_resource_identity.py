@@ -23,6 +23,24 @@ class ToolCatalogResourceIdentityTests(unittest.TestCase):
                 self.assertEqual(resolve('mcp', 'fixture').label, 'MCP')
         self.assertEqual([category.id for category in CATEGORIES], ids)
 
+    def test_background_tool_collection_uses_same_plural_label_as_panel(self):
+        async def execute(args, ctx):
+            return 'Original result 原文'
+        registry = ToolRegistry()
+        for name in ('job_list', 'job_output', 'job_kill'):
+            registry.register(ToolDefinition(ToolSchema(name=name, description='Original description 原文',
+                parameters={'type': 'object', 'properties': {}}), execute))
+        host = SimpleNamespace(tools=registry)
+        category = resolve('job', 'job_list')
+        for language, expected in (('en', 'Background tasks'), ('zh-CN', '后台任务'), ('en', 'Background tasks')):
+            with current_language.set(language):
+                catalog = tool_catalog(host)
+                self.assertEqual([item['name'] for item in catalog], ['job_kill', 'job_list', 'job_output'])
+                self.assertTrue(all(item['category'] == 'job' and item['category_label'] == expected for item in catalog))
+                self.assertIs(resolve('job', 'job_list'), category)
+                self.assertEqual(category.label, expected)
+                self.assertEqual(tr('ui.components.inspector.Inspector.75b269496f69'), expected)
+
     def test_catalog_preserves_custom_title_even_with_internal_executor_and_matching_product_text(self):
         original = resources('zh-CN')['python.presets.ea932f93ed9d']
         async def execute(args, ctx):

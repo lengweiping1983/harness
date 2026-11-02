@@ -268,9 +268,11 @@ python -m venv .run/semantic-eval
 | 面板隐藏与迟到结果 | `ExecutionTracePanel.tsx`、`TeamMemberDetails.tsx`；`member-trace-visibility-smoke.mjs`、`plan-visibility-smoke.mjs` |
 | 共享对话 | `harness/web/api/collaboration.py`、`shared_projection.py`；`shared-session-smoke.mjs`、`test_collaboration_error_language.py` |
 | 生成协议 | `harness/web/protocol.py`、`response_contracts.py`；`test_protocol_current_boundaries.py`、两个生成器的 `--check` |
-| Superagent 自主目标与本机提交 | `app/superagent_missions.py`、`superagent_mission_store.py`、`superagent_local.py`；`test_superagent_missions.py`、`test_superagent_local.py`，并保留原事件、Router、Worker、结果及信道回归 |
+| Superagent 自主目标、监督与本机提交 | `app/superagent_missions.py`、`superagent_mission_store.py`、`superagent_mission_status.py`、`superagent_local.py`；`test_superagent_missions.py`、`test_superagent_mission_snapshots.py`、`test_superagent_mission_status.py`、`test_superagent_local.py`，并保留原事件、Router、Worker、结果及信道回归 |
 
 后端测试名称均相对 `tests/`，前端纯逻辑测试使用 `rg --files web/src` 定位，浏览器场景位于 `web/tests/`。不在此固定用例总数或将已记录风险描述为已覆盖。
+
+`python scripts/benchmark_superagent_reads.py` 使用临时收件箱与目标账本测量固定八节点、十六条标准的 `jobs()` 读取：单独统计连接／原事件读取次数，预热后记录中位数、p95 和一次读取的分配峰值，同时输出源码与基准指纹。不构造模型宿主，不读写用户状态；方法与限定范围的实测记录见 [Superagent 协调审查](superagent-review.md#账本读取基准)。该基准不代替常规验证或真实端到端性能验收。
 
 ## 防止再次引入已修复问题
 
@@ -336,7 +338,7 @@ MCP 服务及隧道准备的自有错误用 `McpServiceError` 保存资源键和
 
 `tests/test_preset_skill_resource_identity.py` 验证四个预设与已持有摘要视图按显式键反复切换语言、安装参数嵌套副本隔离、外部原文恰等于产品文案时不被翻译，以及可选系统发现路径下的技能目录/加载/网页投影保持原文。真实 Harness 安装仅使用临时目录，核对首次配套技能模板及重装不覆盖用户编辑，不连接远端服务。
 
-工具分类保存显式资源键，分类名称在目录读取时解析；未被当前目录或图标消费链使用的分类 hint 已移除。工具标题保持注册原值，不按文案内容或执行函数模块推断翻译所有权。`tests/test_tool_catalog_resource_identity.py` 验证同一分类实例反复切换语言，以及标题恰等于产品文案时仍保持原文；工具名和分类 ID 不变。
+工具分类保存显式资源键，分类名称在目录读取时解析；未被当前目录或图标消费链使用的分类 hint 已移除。工具标题保持注册原值，不按文案内容或执行函数模块推断翻译所有权。`tests/test_tool_catalog_resource_identity.py` 验证同一分类实例反复切换语言，以及标题恰等于产品文案时仍保持原文；工具名和分类 ID 不变。其中后台任务工具经 `tool_catalog` 输出集合名称“后台任务 / Background tasks”，英中英回归核对三个公开工具与后台任务面板使用同一名称，保留术语一致性检查。
 
 ## 工具说明资源与消费者回归
 

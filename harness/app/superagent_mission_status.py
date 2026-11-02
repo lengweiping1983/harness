@@ -14,14 +14,18 @@ def run_progress(record, events):
     except ValueError as exc:
         raise _error('corrupt') from exc
     calls = tool_invocations(scoped)
-    active = [row['name'] for row in calls if row['_start_event'] is not None and row['_result_event'] is None]
+    started = [row for row in calls if row['_start_event'] is not None]
+    completed = [row for row in started if confirmed_tool_result(row)]
+    # 轮次结束或停止不证明工具写入已撤销；无确切结果保留为未确认，不能继续冒充活动。
+    active = [row['name'] for row in started if row['status'] == 'running' and row['_result_event'] is None
+              and record.status in ('running', 'stopping')]
     last = scoped[-1] if scoped else None
     return {'id': record.id, 'status': record.status, 'settled': record.settled,
             'created_at': record.created_at, 'started_at': record.started_at, 'finished_at': record.finished_at,
             'last_activity': {'seq': last.seq, 'time': last.time, 'type': last.type} if last else None,
-            'tools': {'started': sum(row['_start_event'] is not None for row in calls),
-                      'completed': sum(confirmed_tool_result(row) for row in calls),
-                      'errors': sum(confirmed_tool_result(row) and row['_result']['is_error'] for row in calls),
+            'tools': {'started': len(started), 'completed': len(completed),
+                      'unconfirmed': len(started) - len(completed),
+                      'errors': sum(row['_result']['is_error'] for row in completed),
                       'active': [name[:128] for name in active[:16]],
                       'active_truncated': len(active) > 16 or any(len(name) > 128 for name in active[:16])}}
 

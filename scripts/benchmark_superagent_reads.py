@@ -19,7 +19,7 @@ from harness.app.superagent_inbox import SuperagentInbox
 from harness.app.superagent_mission_store import MissionStore, digest, packed
 
 
-def benchmark():
+def benchmark(store_type=MissionStore):
     """调用计数与耗时分别测量，预热后记录同输入中位数、p95 和分配峰值。"""
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -29,7 +29,7 @@ def benchmark():
                               thread_ids=['project'], human=True, explicit=True)
         profiles = {'inspect': {'repo': str(root), 'description': 'Inspect project files.', 'sources': ['local'], 'tools': ['read']}}
         limits = {'max_steps': 8, 'max_attempts': 3, 'max_missions': 16, 'integrator_profile': 'inspect', 'reviewer_profile': 'inspect'}
-        store = MissionStore(root / 'missions.sqlite3', inbox, identity='benchmark', profiles=profiles, limits=limits)
+        store = store_type(root / 'missions.sqlite3', inbox, identity='benchmark', profiles=profiles, limits=limits)
         plan = {'steps': [{'id': 'step-' + str(index), 'profile_id': 'inspect', 'instruction': 'Inspect the input file.', 'depends_on': []}
                            for index in range(8)],
                 'acceptance': [{'id': 'evidence-' + str(index), 'criterion': 'Every input file has been inspected.', 'kind': 'inspection'}
@@ -70,10 +70,11 @@ def benchmark():
             _, peak = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()
-        source = Path(sys.modules[MissionStore.__module__].__file__).read_bytes()
+        source = Path(sys.modules[store_type.__module__].__file__).read_bytes()
         return {'python': sys.version.split()[0], 'platform': platform.system(),
                 'input': {'jobs': 8, 'checks': 16, 'samples': 100, 'warmup': 20},
-                'source_sha256': hashlib.sha256(source).hexdigest(), 'counts_per_read': counts,
+                'source_sha256': hashlib.sha256(source).hexdigest(),
+                'benchmark_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), 'counts_per_read': counts,
                 'median_ms': round(statistics.median(durations), 4), 'p95_ms': round(sorted(durations)[94], 4), 'peak_bytes': peak}
 
 

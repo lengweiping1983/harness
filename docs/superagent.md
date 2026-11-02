@@ -115,7 +115,7 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 6. **有限修正**：复核明确失败时，原集成对话在同一工作树中接收结构化反馈，形成新运行；随后建立新的复核对话和工作树。工作节点的历史不重放，旧复核不能替代本轮证据。集成与复核最多各运行 `max_attempts` 次；耗尽进入 `blocked`，原因 `budget/attempts-exhausted`。
 7. **完成与发布**：所有标准通过、最终回复有效且来源修订仍授权时，目标进入 `completed`，并在同一协调事务追加独立的完成序号。快慢目标反序结束不会漏掉后完成的旧目标。最终候选通过现有本地发布及已授权信道发送；中间节点和失败推测不自动广播。
 
-目标状态为 `planning/running/integrating/reviewing/completed/blocked/unknown/rejected/suppressed`，`status.json` 增加 `missions.states/recent`，列出原运行、工作树、交付树、依赖、修正轮数和有界复核摘要。完整报告与逐项证据留在 `missions.sqlite3`，原工具日志、用量及轮次仍属于原宿主，协调账本不复制执行历史。`max_missions` 限制活动目标，`max_workers` 仍限制保留的全部 Worker 创建记录；不会隐式删除旧工作树或释放历史容量。
+目标状态为 `planning/running/integrating/reviewing/completed/blocked/unknown/rejected/suppressed`。`max_missions` 限制活动目标，`max_workers` 仍限制保留的全部 Worker 创建记录；不会隐式删除旧工作树或释放历史容量。完整报告与逐项证据留在 `missions.sqlite3`，原工具日志、用量及轮次仍属于原宿主，协调账本不复制执行历史。只读监督的字段与边界见下节。
 
 运行提交、导入、捕获均先记录意图。丢失确认后只按原提交键或确切导入／交付树回查；不能确认则 `unknown`，不重放写入。原运行失败或重启中断进入 `blocked`，不会因为长时间没有文本重新执行原命令。来源撤销在创建、提交和最终完成前复核，已受理操作仍由原宿主收尾。
 
@@ -124,6 +124,29 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 自主模式的工作节点不订阅原 Thread，防止一句跟进广播到全部依赖节点。每个明确事件建立一个独立目标，普通非明确跟进不会续接目标；默认 Router 的单任务 Thread 续接继续保留，但两种协调方式不混用。目标中途引导、跨来源目标关联、用户问答、动态重规划和未知状态的人工核实界面尚未提供。失败目标保留状态与全部资源供检查，当前不能通过自动重试命令强行恢复未知副作用。
 
 回归见 `tests/test_superagent_missions.py`：确定性模型通过真实文件、Shell、Git 和运行控制器核对依赖产物、独立复核、有限修正、伪造证据、候选变化、来源撤销、冻结基线、慢任务、丢回执、重启与双语实际消费。设计审查依据与待验证风险见 [Superagent 协调审查](superagent-review.md)。
+
+### 自主目标的只读监督
+
+`status.json` 的 `missions.states` 统计全部目标；`recent` 最多展示 16 项，依次优先活动目标、`unknown/blocked/rejected`、`suppressed`、已完成目标，同类按接纳序号倒序。`total/shown/has_more` 明示总量与截断，不能把 `recent` 当成全部任务清单。每个目标含原来源、工作树、交付树、修正轮数、有界完成标准及复核摘要；`budget` 提供当前尝试、上限及 `planning/delivery` 阶段，尚无合法计划的终止目标仍归规划阶段。`work.total/delivered` 仅表示计划工作节点数与已冻结交付数，没有计划时总数为 `null`，这些数值不是业务完成百分比。
+
+任务的 `run` 按原稳定提交键核对运行身份，从该 `run_id` 的唯一轮次事件派生最后活动及工具计数。同一集成对话的下一轮不会覆盖上一轮进度。创建、开始、结束时间保留原运行的 Unix 秒值，`last_activity.time` 保留原事件的 Unix 毫秒值；无本轮事件时为 `null`。`tools.started/completed/errors` 分别统计实际开始、具有唯一且身份匹配结果、已确认错误；`unconfirmed` 是已开始但缺少确切配对结果的总数，包含尚在执行与已中断的调用。`active` 只列当前仍执行的调用名称，最多 16 项，每项最多 128 字符，`active_truncated` 标记截断。轮次结束不能把缺失结果伪装为完成，停止也不证明未知副作用已撤销。运行正文、工具参数、输出和错误原文不进入该运行摘要。
+
+`waiting_for` 来自当前事实，不依据沉默时长猜测卡死：
+
+| 机器值 | 当前等待 |
+|---|---|
+| `dependencies` | 前置未交付；`unresolved_dependencies` 列出确切节点、任务与状态，尚未创建时后两项为 `null` |
+| `worker-capacity`、`conversation-busy` | 工作宿主已满，或该对话的原运行尚未结束 |
+| `workspace-preparation`、`dispatch` | 工作资源准备或就绪任务待提交 |
+| `run-queue`、`run`、`run-stop` | 原运行排队、执行或停止中 |
+| `run-cleanup`、`background-jobs` | 原运行尚未收尾，或已收尾但所属后台作业未结束 |
+| `plan-validation`、`delivery-capture`、`failure-settlement` | 等待协调器验证规划、冻结交付或结算明确失败 |
+| `submission-reconciliation`、`delivery-reconciliation`、`result-reconciliation` | 已持久记录的提交、导入／捕获或未知操作只读回查 |
+| `mission-halted` | 目标已停止调度；未结束节点另带 `scheduling_halted=true` |
+
+已接受的运行在目标停止调度后仍展示其真实执行／收尾状态；已 `done/blocked` 的节点不继承同一会话后续修正轮次的后台等待。状态读取不创建资源、不探测 Git、不推进结算、不发模型请求，也不重放未知操作。目标账本的游标、统计、目标及任务在一次 SQLite 读事务内读取，逐项保留原有哈希与身份验证；原收件箱、运行和后台作业属于独立事实源，不宣称跨库或跨运行的原子快照，也不跨调用缓存授权。
+
+`tests/test_superagent_mission_status.py` 覆盖轮次隔离、工具配对、隐私、截断及等待矩阵；`tests/test_superagent_mission_snapshots.py` 覆盖只读快照、损坏拒绝和并发更新一致性；实际协调器的零写入、未知不推进及原提交身份回归在 `tests/test_superagent_missions.py`。`--superagent-status` 读取最后保存的投影，不证明进程仍存活；完整任务分页和普通用户工作台尚未提供。
 
 ## GitHub Webhook 与评论信道
 
@@ -284,6 +307,8 @@ coordinator = SuperagentRouter(
     workers={"fix-1": "Investigate and fix regressions in this project"},
 )
 status = await coordinator.tick()
+# 只推进、不构造状态；需要时另行调用 coordinator.status()。
+# await coordinator.tick(include_status=False)
 # 或由宿主管理停止事件，并等待消费循环；构造器不创建后台任务。
 # await coordinator.serve(stop_event)
 ```
@@ -298,7 +323,9 @@ status = await coordinator.tick()
 
 模型决策落盘后，待派送输入复用原投递器。来源修订在新提交前及启动等待后复核，改变后记为 `skipped`，不能用旧研判扩大当前策略。任务停止也阻止新提交；已经受理的投递仍按原键核对，不撤销或抹去原运行。容量不足的输入保持 `pending`，后续 `tick` 自动续投；输入队列施加有界背压，每次最多推进 16 项。`unknown` 工作投递单独保留，不通过消费循环重放。
 
-`status()` 只读返回游标、输入状态计数及最近批次的状态、原 `run_id` 和机器原因。输入状态包括 `waiting`、`pending`、`settled`、`unknown`、`skipped`、`rejected` 和 `ignored`；其中 `settled` 仅表示派发阶段已结算，仍不表示 Worker 完成或业务验收通过。`serve(stop_event, interval=0.5)` 持续调用有界推进，间隔范围为 0.01–60 秒；停止事件、取消等待或 `close()` 停止后续消费，不取消宿主已受理的运行。两个运行器须归属同一事件循环，跨线程调用协调器会回到工作宿主所属循环。调用失败向宿主传播，循环不会吞掉错误继续运行。
+`status()` 只读返回游标、输入状态计数及最近批次的状态、原 `run_id` 和机器原因。输入状态包括 `waiting`、`pending`、`settled`、`unknown`、`skipped`、`rejected` 和 `ignored`；其中 `settled` 仅表示派发阶段已结算，仍不表示 Worker 完成或业务验收通过。`tick(include_status=True)` 默认推进后返回状态，显式传 `False` 时只推进并返回 `None`，参数只接受布尔值；自主协调器沿用这一调用约定。CLI 服务在完成候选与信道处理后统一构造一次最终状态，不在同一轮重复回读。
+
+`serve(stop_event, interval=0.5)` 持续调用有界推进，间隔范围为 0.01–60 秒；停止事件、取消等待或 `close()` 停止后续消费，不取消宿主已受理的运行。两个运行器须归属同一事件循环，跨线程调用协调器会回到工作宿主所属循环。调用失败向宿主传播，循环不会吞掉错误继续运行。
 
 `tests/test_superagent_router.py` 使用独立临时宿主和确定性模型传输，核对真实模型请求、实际 Worker 对话、英中英切换、冻结批次、并发消费者、容量续投、严格决策、策略撤销、原返回丢失、损坏原件及重开后的精确回查。它不证明在线模型的研判质量，也不证明真实信道、长期运行或业务验收已完成。
 

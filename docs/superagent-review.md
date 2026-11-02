@@ -38,8 +38,30 @@
 | 来源在导入只读预检期间撤销 | 预检后重新核对授权，保留原件而不启动导入 | `test_revocation_during_import_preflight_prevents_new_workspace_write` |
 | 并发本机提交暴露半个文件或产生重复事件 | 同目录完整准备后硬链接独占公开，身份键与正文分别核对 | `test_superagent_local.py` 的并发、相同身份冲突与无宿主 CLI 回归 |
 | 同一实例切换语言 | 实际规划调用按当前宿主语言解析显式资源 | `test_runtime_language_round_trip_reaches_actual_planner_requests` |
+| 旧活动／阻塞目标被新完成目标挤出监督列表 | `MissionStore.status_snapshots` 按活动、待关注、抑制、完成分组，有界输出并报告总量及截断 | `test_older_active_and_attention_goals_are_visible_ahead_of_new_completions` |
+| 同一集成会话复用，后轮进度污染前轮 | `run_progress` 以原运行唯一轮次限定事件；终态任务不继承后轮后台等待 | `test_previous_run_in_reused_conversation_keeps_its_own_terminal_activity`、`test_terminal_run_cleanup_and_background_wait_have_distinct_meaning` |
+| 主运行未更新计数，或工具结果未确认却显示完成／活动 | 从原事件的真实开始及唯一结果配对计数；中断或终态的缺失结果保留 `unconfirmed` | `test_tool_progress_is_derived_from_current_run_instead_of_unused_counter`、`test_interrupted_or_terminal_tool_without_result_stays_unconfirmed`、`test_unpaired_or_duplicate_result_does_not_fabricate_completion` |
+| 状态读取推进未知提交或泄露执行正文 | `_submission` 只读核对原提交，摘要只投影元信息；不调用结算或执行入口 | `test_status_reads_original_run_without_writes_or_accepting_mismatched_identity`、`test_missing_submission_remains_unknown_without_replay`、`test_tool_progress_is_derived_from_current_run_instead_of_unused_counter` |
+| 规划尚未接纳便进入未知或终止状态，预算误标为交付阶段 | 预算阶段按是否已有合法计划判定，不能仅凭目标是否仍为 `planning` | `test_missing_submission_remains_unknown_without_replay` |
+| 多节点状态查询重复连接、验证计划及读取原事件 | `_decode_mission/_decode_job` 保留完整验证，一次读事务批量解析；不跨调用缓存 | `test_batch_read_checks_one_goal_and_original_event_without_repeating_connections`、`test_each_batch_entry_retains_hash_json_profile_dependency_and_resource_validation`、`test_plan_and_original_event_are_revalidated_on_each_snapshot` |
+| 目标与任务之间并发更新形成混合快照 | 显式 `BEGIN` 绑定目标账本读取；返回嵌套对象独立，不回写 | `test_goal_and_jobs_share_one_read_transaction_during_concurrent_update`、`test_snapshot_returns_independent_nested_objects_and_does_not_write` |
+| 服务一轮内构造两次状态 | `tick(include_status=False)` 只推进，服务在候选及信道处理后读取一次最终状态 | `test_service_builds_one_fresh_snapshot_per_tick` |
 
 这些回归均使用隔离临时数据和确定性模型传输。命令成功和调用配对能验证协调行为，不能验证在线模型的判断质量。
+
+## 账本读取基准
+
+2026-11-03 在本机 macOS、Python 3.14.7 使用同一 `scripts/benchmark_superagent_reads.py::benchmark` 比较基线 `8862d91` 与快照实现 `506ffc2` 的目标存储源码。两版源码分别在隔离临时数据库运行，未切换或改写主工作区。固定八个待执行工作节点、十六条完成标准，预热二十次后各采样一百次；连接与原事件次数单独统计，计时阶段不保留计数包装，分配峰值由另一次读取测量。
+
+| `jobs()` 单次读取 | 基线 | 快照实现 |
+|---|---:|---:|
+| 目标账本连接 | 17 | 1 |
+| 原收件事件读取 | 8 | 1 |
+| 中位耗时 | 4.9253 ms | 0.5309 ms |
+| p95 耗时 | 5.3717 ms | 0.6282 ms |
+| Python 分配峰值 | 29,480 B | 26,055 B |
+
+基准脚本 SHA-256 为 `b2d880e214f5723982ed929c4aa8d3e1694e9a1f19017c37a645e4ddd8fc94ba`；基线存储源码为 `f157f4d1c1bd6db6a549e632c01b96dcef3ca338f1788dc5b9b478668afc4ded`，快照源码为 `a691cd2459ede295e77b9552d0559e5b73bf4111e22572ade24031f5fd45dc71`。当前实现可用 `python scripts/benchmark_superagent_reads.py` 复测；`benchmark(store_type)` 可接收从上述基线源码独立加载的存储类，保留同一测量方法。该结果仅证明固定小账本读取减少重复工作，不代表完整状态生成、模型执行、真实任务吞吐或跨平台性能；没有据此给出端到端加速结论。
 
 ## 待验证风险与产品缺口
 
@@ -49,4 +71,4 @@
 - 合并冲突、失败或中断运行、未知操作和资源总容量耗尽保留明确状态；当前不自动解决冲突、迁移配置、清理历史资源或重放任务。
 - 状态只保存有界摘要；完整复核在账本，原报告、工具与用量在原运行。仍需要面向普通用户的工作台与分页读取接口。
 
-没有可复现实测，不记录“世界最强”“全面超过其他系统”或性能提升结论。
+尚无统一在线任务集与独立业务判定的比较证据，不记录“世界最强”或“全面超过其他系统”的结论。

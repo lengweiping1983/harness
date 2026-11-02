@@ -6,6 +6,7 @@ import shlex
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -356,9 +357,51 @@ class SuperagentMissionTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(service.router_host.runtime, 'submit', side_effect=OSError('unknown submission')) as attempted:
             with self.assertRaisesRegex(OSError, 'unknown submission'):
                 await service.tick()
+            before = service.router.store.path.read_bytes()
+            with patch.object(service.router, '_reconcile_job', side_effect=AssertionError('状态读取不得结算提交')):
+                for _ in range(3):
+                    mission = service.router.status()['missions']['recent'][0]
+                    self.assertEqual(mission['state'], 'planning')
+                    self.assertEqual(mission['jobs'][0]['state'], 'unknown')
+                    self.assertEqual(mission['budget']['phase'], 'planning')
+                    self.assertEqual(mission['jobs'][0]['waiting_for'], 'result-reconciliation')
+                    self.assertNotIn('run', mission['jobs'][0])
+            self.assertEqual(service.router.store.path.read_bytes(), before)
             self.assertEqual(await service.serve(asyncio.Event(), once=True), 2)
             self.assertEqual(attempted.call_count, 1)
-        self.assertEqual(service.router.status()['missions']['states'], {'unknown': 1})
+        status = service.router.status()
+        self.assertEqual(status['missions']['states'], {'unknown': 1})
+        self.assertEqual(status['missions']['recent'][0]['budget']['phase'], 'planning')
+
+    async def test_status_reads_original_run_without_writes_or_accepting_mismatched_identity(self):
+        service = await self.open()
+        receipt = self.receive(text='secret-request-sentinel')
+        await service.tick()
+        await service.tick()
+        await self.settle()
+        store = service.router.store
+        job = store.jobs(store.mission_id(receipt['id']))[0]
+        runtime = service.router_host.runtime
+        record = runtime.find_submission(job['data']['session_id'], job['id'])
+        before = store.path.read_bytes()
+        with patch.object(service.router, '_reconcile_job', side_effect=AssertionError('状态读取不得写入')) as reconcile, \
+                patch.object(runtime, 'submit', side_effect=AssertionError('状态读取不得执行')) as submit, \
+                patch.object(service.worker_host.worktrees, 'git', side_effect=AssertionError('状态读取不得探测 Git')) as git:
+            status = service.router.status()
+            progress = status['missions']['recent'][0]['jobs'][0]['run']
+            self.assertEqual(progress['id'], record.id)
+            self.assertEqual(progress['status'], 'completed')
+            self.assertTrue(progress['settled'])
+            self.assertNotIn('secret-request-sentinel', json.dumps(status))
+            for changed in (replace(record, id='another-run'), replace(record, session_id='another-session'),
+                            replace(record, request_id='another-job'), replace(record, text='another-payload')):
+                with self.subTest(record=changed.id, session=changed.session_id, request=changed.request_id), \
+                        patch.object(runtime, 'find_submission', return_value=changed):
+                    with self.assertRaises(HarnessError) as caught:
+                        service.router.status()
+                    self.assertEqual(caught.exception.code, 'superagent/conflict')
+            self.assertEqual((reconcile.call_count, submit.call_count, git.call_count), (0, 0, 0))
+        self.assertEqual(store.path.read_bytes(), before)
 
     async def test_source_revocation_during_final_capture_suppresses_completion(self):
         service = await self.open()

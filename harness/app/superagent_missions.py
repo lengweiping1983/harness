@@ -614,7 +614,7 @@ class SuperagentMissions(SuperagentRouter):
         for mission, jobs in snapshots:
             recent.append({**{key: mission[key] for key in ('id', 'state', 'reason', 'round', 'base_commit', 'source_id', 'event_id')},
                 'budget': {'attempt': mission['round'], 'max_attempts': self.store.limits['max_attempts'],
-                           'phase': 'planning' if mission['state'] == 'planning' else 'delivery'},
+                           'phase': 'planning' if mission['plan'] is None else 'delivery'},
                 'work': {'total': len(mission['plan']['steps']) if mission['plan'] else None,
                          'delivered': sum(job['role'] == 'work' and job['state'] == 'done' for job in jobs)},
                 'acceptance': [{**check, 'criterion': check['criterion'][:512],

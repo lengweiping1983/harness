@@ -31,7 +31,8 @@ class MissionProgressTests(unittest.IsolatedAsyncioTestCase):
     def test_tool_progress_is_derived_from_current_run_instead_of_unused_counter(self):
         record = AgentRun('second', session_id='shared', status='running', tool_calls=999, started_at=0.2)
         result = run_progress(record, self.events())
-        self.assertEqual(result['tools'], {'started': 2, 'completed': 1, 'errors': 1, 'active': ['grep'], 'active_truncated': False})
+        self.assertEqual(result['tools'], {'started': 2, 'completed': 1, 'unconfirmed': 1, 'errors': 1,
+                                          'active': ['grep'], 'active_truncated': False})
         self.assertEqual(result['last_activity'], {'seq': 8, 'time': 240, 'type': 'tool/call'})
         self.assertFalse(result['settled'])
         self.assertNotIn('secret-', json.dumps(result))
@@ -55,6 +56,38 @@ class MissionProgressTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HarnessError) as caught:
             run_progress(AgentRun('second', status='running'), events)
         self.assertEqual(caught.exception.code, 'superagent/corrupt')
+
+    def test_interrupted_or_terminal_tool_without_result_stays_unconfirmed(self):
+        events = self.events()
+        interrupted = events + [SessionEvent('turn/end', 9, 250, {'turn': 2, 'run_id': 'second'})]
+        for status, scoped in (('running', interrupted), ('failed', events), ('interrupted', interrupted)):
+            with self.subTest(status=status):
+                result = run_progress(AgentRun('second', status=status), scoped)
+                self.assertEqual(result['tools']['active'], [])
+                self.assertEqual(result['tools']['started'], 2)
+                self.assertEqual(result['tools']['completed'], 1)
+                self.assertEqual(result['tools']['unconfirmed'], 1)
+
+    def test_unpaired_or_duplicate_result_does_not_fabricate_completion(self):
+        events = self.events()
+        for data in ({'call_id': 'failed', 'name': 'grep'}, {'call_id': 'failed', 'name': 'read'}):
+            with self.subTest(data=data):
+                result = SessionEvent('tool/result', 9, 250, {'turn': 2, 'run_id': 'second', **data,
+                    'results': [{'tool_use_id': 'failed', 'is_error': False, 'content': 'secret-output-sentinel'}]})
+                progress = run_progress(AgentRun('second', status='running'), events + [result])
+                self.assertEqual(progress['tools']['completed'], 0)
+                self.assertEqual(progress['tools']['unconfirmed'], 2)
+                self.assertNotIn('secret-', json.dumps(progress))
+
+    def test_active_names_are_bounded_and_report_truncation(self):
+        events = [SessionEvent('turn/start', 0, 100, {'turn': 1, 'run_id': 'many'})]
+        events.extend(SessionEvent('tool/call', index + 1, 110, {'turn': 1, 'run_id': 'many',
+            'call_id': str(index), 'name': 'x' * 129, 'status': 'running'}) for index in range(17))
+        result = run_progress(AgentRun('many', status='running'), events)
+        self.assertEqual(result['tools']['started'], 17)
+        self.assertEqual(result['tools']['unconfirmed'], 17)
+        self.assertEqual(result['tools']['active'], ['x' * 128] * 16)
+        self.assertTrue(result['tools']['active_truncated'])
 
     async def test_terminal_run_cleanup_and_background_wait_have_distinct_meaning(self):
         mission = {'state': 'running'}
