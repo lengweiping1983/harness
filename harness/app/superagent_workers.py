@@ -50,8 +50,9 @@ class SuperagentWorkers:
 
     def __init__(self, harness, inbox: SuperagentInbox, *, owner_session_id: str,
                  profiles: dict[str, SuperagentWorkerProfile], path: Path | None = None,
-                 max_workers: int = 128) -> None:
+                 max_workers: int = 128, mission_store=None) -> None:
         self.harness, self.inbox = harness, inbox
+        self.mission_store = mission_store
         self.owner = _text(owner_session_id, 'owner_session_id', limit=128)
         if type(max_workers) is not int or not 1 <= max_workers <= 128:
             raise _error('invalid', field='max_workers')
@@ -84,8 +85,11 @@ class SuperagentWorkers:
         self.path = Path(path) if path is not None else inbox.path.with_name(inbox.path.stem + '.workers.sqlite3')
         if self.path.resolve() == inbox.path.resolve():
             raise _error('invalid', field='path')
-        self.identity = json.dumps({'home': str(harness.config.home.resolve()), 'inbox': str(inbox.path.resolve()),
-            'owner': self.owner, 'profiles': self._profiles, 'max_workers': max_workers}, ensure_ascii=False, sort_keys=True)
+        binding = {'home': str(harness.config.home.resolve()), 'inbox': str(inbox.path.resolve()),
+            'owner': self.owner, 'profiles': self._profiles, 'max_workers': max_workers}
+        if mission_store is not None:
+            binding['missions'] = str(mission_store.path.resolve())
+        self.identity = json.dumps(binding, ensure_ascii=False, sort_keys=True)
         self._fingerprint = hashlib.sha256(self.identity.encode('utf-8')).hexdigest()
         self.team = 'superagent-' + hashlib.sha256(inbox.instance_id.encode('utf-8')).hexdigest()[:32]
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,6 +150,8 @@ class SuperagentWorkers:
     def ready_catalog(self, source_ids):
         """只列出当前授权可见、模板允许接收本批次来源的活动任务。"""
         self._open()
+        if self.mission_store is not None:
+            return {}
         with self._db() as db:
             ids = [row[0] for row in db.execute("SELECT task_id FROM workers WHERE instance=? AND state='ready' ORDER BY rowid LIMIT 129",
                                                (self.inbox.instance_id,))]
@@ -201,6 +207,8 @@ class SuperagentWorkers:
                         or not 1 <= row['revision'] <= 9223372036854775807
                         or len(row['commit_id']) not in (40, 64) or any(ch not in '0123456789abcdef' for ch in row['commit_id'])):
                     raise ValueError
+                if self.mission_store is not None and self.mission_store.scope(row['batch_id'], row['profile_id'])[1] != row['commit_id']:
+                    raise ValueError
                 if row['state'] not in {'planned','workspace_creating','workspace_ready','session_creating','session_ready','ready','unknown','skipped'}:
                     raise ValueError
                 if (row['state'] in {'planned','workspace_creating','workspace_ready','skipped'} and row['stage'] != 'workspace'
@@ -248,7 +256,8 @@ class SuperagentWorkers:
                 raise _error('conflict')
             return old
         spec = self._profiles[profile]
-        commit = self.harness.worktrees.git(Path(spec['repo']), 'rev-parse', '--verify', 'HEAD^{commit}').strip()
+        commit = (self.mission_store.scope(batch_id, profile)[1] if self.mission_store is not None else
+                  self.harness.worktrees.git(Path(spec['repo']), 'rev-parse', '--verify', 'HEAD^{commit}').strip())
         with current_language.set(resolve_language(self.harness.config.language).effective_language):
             title = tr('superagent.worker_title', task=task_id)
         with self._db(write=True) as db:
@@ -284,8 +293,9 @@ class SuperagentWorkers:
                        (state, state, workspace, session, row['task_id'], self.inbox.instance_id, *previous, row['stage']))
 
     def _workspace(self, row):
+        group = self.mission_store.scope(row['batch_id'], row['profile_id'])[0] if self.mission_store is not None else row['task_id']
         matches = [item for item in self.harness.worktrees.list() if item.get('team') == self.team
-                   and item.get('team_run_id') == row['task_id'] and item.get('team_member') == row['task_id']
+                   and item.get('team_run_id') == group and item.get('team_member') == row['task_id']
                    and item.get('owner_session_id') == self.owner]
         if len(matches) > 1:
             raise _error('conflict')
@@ -390,8 +400,9 @@ class SuperagentWorkers:
                     self._native()
                     if not self._eligible(event, profile_id, item['revision']):
                         return None
+                    group = self.mission_store.scope(batch_id, profile_id)[0] if self.mission_store is not None else row['task_id']
                     return self.harness.worktrees.create_team(self._profiles[profile_id]['repo'], [row['task_id']],
-                        team=self.team, owner_session_id=self.owner, run_id=row['task_id'], ref=row['commit_id'])
+                        team=self.team, owner_session_id=self.owner, run_id=group, ref=row['commit_id'])
                 task = asyncio.create_task(asyncio.to_thread(create))
                 try:
                     created = await join_cleanup(task)
@@ -436,8 +447,9 @@ class SuperagentWorkers:
             row = self._get(row['task_id'])
         if row['state'] == 'session_ready':
             self.inbox.register_task(row['task_id'], session_id=row['session_id'])
-            for thread in event['thread_ids']:
-                self.inbox.subscribe(row['task_id'], source_id=event['source_id'], thread_id=thread)
+            if self.mission_store is None:
+                for thread in event['thread_ids']:
+                    self.inbox.subscribe(row['task_id'], source_id=event['source_id'], thread_id=thread)
             self._mark(row, 'ready')
         return self._get(row['task_id'])
 

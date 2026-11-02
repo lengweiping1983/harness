@@ -25,6 +25,8 @@ from .superagent_dispatch import SuperagentDispatcher
 from .superagent_router import SuperagentRouter
 from .superagent_workers import SuperagentWorkerProfile, SuperagentWorkers
 from .superagent_results import SuperagentResults
+from .superagent_mission_store import MissionStore, validate_autonomy
+from .superagent_missions import SuperagentMissions
 from .superagent_github import SuperagentGitHub, github_credentials, validate_github
 from .superagent_feishu import SuperagentFeishu, feishu_credentials, validate_feishu
 
@@ -48,7 +50,7 @@ def read_config(path: Path):
         value = strict_json(raw.decode('utf-8'))
         required = {'version','instance_id','state_dir','language','router_model','worker_model',
                     'base_url','permission_policy','sources','profiles'}
-        if (not isinstance(value, dict) or set(value) - required - {'max_active','max_workers','interval','once_timeout','github','feishu'}
+        if (not isinstance(value, dict) or set(value) - required - {'max_active','max_workers','interval','once_timeout','github','feishu','autonomy'}
                 or required - set(value) or type(value['version']) is not int or value['version'] != 1):
             raise ValueError
         _text(value['instance_id'], 'instance_id')
@@ -91,6 +93,8 @@ def read_config(path: Path):
                 raise ValueError
         if value['interval'] < 0.01:
             raise ValueError
+        if 'autonomy' in value:
+            value['autonomy'] = validate_autonomy(value['autonomy'], value['profiles'])
         if 'github' in value:
             value['github'] = validate_github(value['github'],value['sources'])
         if 'feishu' in value:
@@ -185,13 +189,21 @@ class SuperagentService:
             profiles = {name: SuperagentWorkerProfile(Path(value['repo']), value['description'],
                         tuple(value['sources']), tuple(value['tools']), model=spec['worker_model'])
                         for name, value in spec['profiles'].items()}
+            mission_store = (MissionStore(service.root / 'missions.sqlite3', service.inbox,
+                identity={'config': spec, 'session_id': session_id}, profiles=spec['profiles'], limits=spec['autonomy'])
+                if 'autonomy' in spec else None)
             service.factory = SuperagentWorkers(service.worker_host, service.inbox,
-                owner_session_id=session_id, profiles=profiles, max_workers=spec['max_workers'])
+                owner_session_id=session_id, profiles=profiles, max_workers=spec['max_workers'], mission_store=mission_store)
             service.dispatcher = SuperagentDispatcher(service.worker_host, service.inbox, max_active=spec['max_active'])
-            service.router = SuperagentRouter(service.dispatcher, service.router_host,
-                session_id=session_id, workers={}, worker_factory=service.factory)
-            service.results = SuperagentResults(service.router,
-                reply_limits={spec['feishu']['source_id']:99} if 'feishu' in spec else None)
+            reply_limits = {spec['feishu']['source_id']:99} if 'feishu' in spec else None
+            if mission_store is not None:
+                service.router = SuperagentMissions(service.dispatcher, service.router_host,
+                    session_id=session_id, worker_factory=service.factory, store=mission_store, reply_limits=reply_limits)
+                service.results = service.router.results
+            else:
+                service.router = SuperagentRouter(service.dispatcher, service.router_host,
+                    session_id=session_id, workers={}, worker_factory=service.factory)
+                service.results = SuperagentResults(service.router, reply_limits=reply_limits)
             for name in ('incoming','receipts','drafts'):
                 (service.root / name).mkdir(exist_ok=True)
             if channel_credentials is not None:

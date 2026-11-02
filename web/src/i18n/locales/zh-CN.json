@@ -4630,7 +4630,7 @@
   "ui.providers.resetKeys": "重置密钥状态",
   "ui.providers.environmentHint": "使用当前环境或云认证，可在下方填写所需参数。",
   "ui.providers.localHint": "使用本机 OpenCode 的运行时与资料。",
-  "ui.providers.models": "模型",
+  "ui.providers.models": "模型管理",
   "ui.providers.probing": "正在获取…",
   "ui.providers.discover": "获取可用模型",
   "ui.providers.discoverFallback": "未能获取新模型列表，保留现有缓存和所选模型。",
