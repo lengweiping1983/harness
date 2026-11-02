@@ -31,7 +31,7 @@ await browserScenario(async({server,browser})=>{
  await page.goto(server.resolvedUrls.local[0]+'__connections')
  await page.getByText('Initial 原文',{exact:true}).waitFor()
  for(const language of ['en','zh-CN','en'])for(const theme of ['light','dark'])for(const width of [390,1440]){
-  await page.setViewportSize({width,height:900});await page.evaluate(({language,theme})=>{window.locale(language);document.documentElement.className=theme;document.documentElement.dataset.theme=theme},{language,theme})
+  await page.setViewportSize({width,height:900});await page.evaluate(async({language,theme})=>{await window.locale(language);document.documentElement.className=theme;document.documentElement.dataset.theme=theme},{language,theme})
   const labels=await page.evaluate(()=>({title:window.copy('ui.providers.title'),summary:window.copy('ui.providers.summary',{state:window.copy('ui.providers.state.configured'),connections:1,models:1})}))
   await page.getByRole('heading',{name:labels.title,exact:true}).waitFor();await page.getByText(labels.summary,{exact:true}).waitFor()
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1),false)
@@ -40,8 +40,11 @@ await browserScenario(async({server,browser})=>{
  const name=page.getByLabel('Provider name',{exact:true}).first();await name.fill('Draft 原文')
  for(const language of ['en','zh-CN','en']){
   await page.evaluate(language=>window.locale(language),language)
-  const labels=await page.evaluate(()=>Object.fromEntries(['protocol','endpoint','authentication','connectionName'].map(key=>[key,window.copy('ui.providers.'+key)])))
-  const protocol=page.getByLabel(labels.protocol,{exact:true});await protocol.waitFor({state:'visible'})
+  const labels=await page.evaluate(()=>Object.fromEntries(['protocol','endpoint','authentication','connectionName','supplierName'].map(key=>[key,window.copy('ui.providers.'+key)])))
+  const protocol=page.getByRole('combobox',{name:labels.protocol,exact:true});await protocol.waitFor({state:'visible'})
+  await page.getByRole('combobox',{name:labels.authentication,exact:true}).waitFor({state:'visible'})
+  assert.equal(await page.getByRole('textbox',{name:labels.supplierName,exact:true}).inputValue(),'Draft 原文')
+  assert.equal(await protocol.inputValue(),'openai-completions')
   assert.equal(await page.getByLabel(labels.connectionName,{exact:true}).count(),0)
   assert.equal(await protocol.evaluate((element,endpointLabel)=>{
    const advanced=element.closest('details').querySelector('details')
@@ -49,7 +52,7 @@ await browserScenario(async({server,browser})=>{
    return !advanced.open&&!advanced.contains(element)&&!!(element.compareDocumentPosition(endpoint)&Node.DOCUMENT_POSITION_FOLLOWING)
   },labels.endpoint),true)
  }
- await page.getByLabel('API protocol',{exact:true}).selectOption('openai-responses')
+ await page.getByRole('combobox',{name:'API protocol',exact:true}).selectOption('openai-responses')
 
  await page.getByPlaceholder('******3blr',{exact:true}).waitFor()
  const save=page.getByRole('button',{name:'Save',exact:true});await save.click();await held

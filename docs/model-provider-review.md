@@ -72,7 +72,9 @@
 
 ## 已修正问题与回归
 
-- 手动模型配置曾在 `ConnectionEditor.addManualModel` 仅接收模型 ID，新增后才能展开下方列表补填参数；目录标题、数量与按钮也分散占行。当前由 `ProviderModelEditor.tsx` 提供添加前的完整草稿与共享编辑字段，`ModelConnections` 保留接口草稿归属、分页和重复准入；工具栏集中排列，已选模型默认收起参数。`provider-manual-model-smoke.mjs` 使用真实设置页核对添加前完整参数、容量拒绝、重复 ID／双击、输入法、连续添加重置与焦点、保存正文及重开读取，并在英中英、明暗与窄宽屏切换中保留同一份草稿。`provider-add-flow-smoke.mjs` 保留对应参数保存断言，既有目录／保存／布局场景同步限定已选模型作用域。本轮验证范围仅限此手动配置场景及必要的资源同步、类型和生产构建；其他业务、在线账号、桌面和完整浏览器套件不在范围内。
+- 手动模型配置曾在 `ConnectionEditor.addManualModel` 仅接收模型 ID，新增后才能展开下方列表补填参数；目录标题、数量与按钮也分散占行。当前由 `ProviderModelEditor.tsx` 提供添加前的完整草稿与共享编辑字段，`ModelConnections` 保留接口草稿归属、分页和重复准入；工具栏集中排列，已选模型默认收起参数。`provider-manual-model-smoke.mjs` 使用真实设置页核对添加前完整参数、容量拒绝、重复 ID／双击、输入法、连续添加重置与焦点、保存正文及重开读取，并在英中英、明暗与窄宽屏切换中保留同一份草稿。焦点事件核对确认 `ManualModelEditor.add` 已将焦点放回模型 ID 输入框；草稿重置收起推理字段后，物理双击的第二下可能落到下方新增卡片并移走焦点。因此单击和回车分别验收返回焦点，物理双击独立核对只新增一个模型；重开后的参数读取限定到原模型卡片，避免命中其他收起卡片中的同名输入。`provider-add-flow-smoke.mjs` 保留对应参数保存断言；这些受控回归不代表在线账号、桌面或完整浏览器套件验收。
+
+- 协议字段曾被 `model-connections-smoke.mjs` 的精确 label 文本定位误报为不可见；实际 `ConnectionEditor` 接口面板已展开，无障碍树中具名 combobox 可见。场景改按角色和当前语言资源定位协议及认证，保留字段顺序、高级设置默认收起、草稿保持、单次保存与卸载后旧回执隔离断言；不为定位问题改变产品表单或增加重复标签。
 
 - 没有已配置模型但进程带有单模型 Key 时，`web/models.py:model_catalog` 原先将 `config.model` 合成为 OpenRouter 条目；未装配提供商目录时还会把 `model_routes` 与当前模型合成为目录，导致设置空态下仍出现保底模型。现移除这两条合成路径、`ModelSpec`／`_synthetic` 及专用双语说明，目录继续投影已配置提供商和已登录订阅账号。`test_model_catalog.py` 经真实 `/api/v1/models` 路由验证环境变量、旧默认与可见性设置、无提供商目录、提供商移除及重开、账号准入和去重，并保留正常模型身份、容量、思考档位、默认选择与当前隐藏模型仍可见的行为；读取保持原配置和文件字节。`test_catalog_authoring_image_language.py` 的英中英回归改为核对空目录，图片与插件错误的语言断言继续保留。当前目录规则见 [模型提供商](model-providers.md)。
 

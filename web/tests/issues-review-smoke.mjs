@@ -10,14 +10,16 @@ import {AutomationsPage} from '/src/components/overlays/AutomationsPage.tsx'
 import {McpServicePanel} from '/src/components/overlays/McpServicePanel.tsx'
 import {LiveChart} from '/src/components/markdown/LiveChart.tsx'
 import {CodeBlock} from '/src/components/markdown/CodeBlock.tsx'
-import {setLocale} from '/src/i18n/index.ts'
+import {setLocale,t} from '/src/i18n/index.ts'
 import '/src/styles.css'
 const root = createRoot(document.getElementById('root'))
 window.locale = setLocale
+window.copy = t
+window.chartSource = JSON.stringify({mark:'bar',encoding:{x:{field:'x'}},data:{values:[{x:1}]}})
 window.charts = () => root.render(React.createElement('div', null,
   React.createElement(Mermaid, {chart:'graph TD; A[开始]-->B[完成]'}),
   React.createElement(Mermaid, {chart:'graph TD; C[第二张]-->D[完成]'}),
-  React.createElement(LiveChart, {lang:'vega-lite', code:JSON.stringify({mark:'bar',encoding:{x:{field:'x'}},data:{values:[{x:1}]}}),closed:true}),
+  React.createElement(LiveChart, {lang:'vega-lite', code:window.chartSource,closed:true}),
   React.createElement(CodeBlock, {code:'const value = "hello"; // comment'}),
   React.createElement(CodeBlock, {language:'javascript',code:'const value = "hello"; // comment'})))
 window.automations = () => root.render(React.createElement(AutomationsPage))
@@ -33,10 +35,15 @@ await browserScenario(async ({server, browser}) => {
   page.on('pageerror', error => {errors.push(error.message); console.error(error.message)})
   await page.goto(server.resolvedUrls.local[0] + '__issues')
   await page.waitForFunction(() => window.ready)
-  await page.evaluate(() => {window.locale('zh-CN'); window.charts()})
+  await page.evaluate(async () => {await window.locale('zh-CN'); window.charts()})
   await page.waitForFunction(() => document.querySelectorAll('.mermaid-host svg').length === 2)
   assert.ok(await page.getByText('纯文本', {exact:true}).count())
-  assert.ok(await page.getByText('标记', {exact:true}).count())
+  const chart = page.locator('figure').filter({has:page.locator('iframe')})
+  const frame = chart.frameLocator('iframe')
+  await frame.locator('#chart[data-chart-ready="true"]').waitFor()
+  await chart.locator('[aria-busy="false"] > iframe').waitFor()
+  assert.ok(await frame.locator('.mark-rect path').count(), 'Vega-Lite must render actual bars')
+  await frame.locator('#chart').evaluate(node => {window.originalChart = node})
   await page.locator('.hljs-keyword').waitFor()
   const keywordLight = await page.locator('.hljs-keyword').first().evaluate(element => getComputedStyle(element).color)
   const light = await page.locator('.mermaid-host .node rect').first().evaluate(element => getComputedStyle(element).fill)
@@ -50,7 +57,16 @@ await browserScenario(async ({server, browser}) => {
   await page.setViewportSize({width:1440,height:900})
   await page.evaluate(() => window.locale('en'))
   await page.getByText('Plain text', {exact:true}).waitFor()
-  await page.getByText('Mark', {exact:true}).waitFor()
+  for (const language of ['en','zh-CN','en']) {
+    await page.evaluate(language => window.locale(language), language)
+    const labels = await page.evaluate(() => ({code:window.copy('ui.widget.viewCode'),rendering:window.copy('ui.widget.viewWidget')}))
+    await chart.getByRole('button', {name:labels.code,exact:true}).click()
+    assert.equal(await chart.locator('pre').textContent(), await page.evaluate(() => window.chartSource))
+    await chart.getByRole('button', {name:labels.rendering,exact:true}).click()
+    await chart.locator('[aria-busy="false"] > iframe').waitFor()
+    assert.equal(await frame.locator('#chart').evaluate(node => node === window.originalChart), true)
+    assert.ok(await frame.locator('.mark-rect path').count())
+  }
   assert.notEqual(await page.locator('.hljs-keyword').first().evaluate(element => getComputedStyle(element).color), keywordLight)
   await page.screenshot({path:'../output/issues-ui/en-dark-wide.png',fullPage:true})
   let calls = 0, release

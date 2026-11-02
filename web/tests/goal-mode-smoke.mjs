@@ -58,6 +58,12 @@ try {
       }
       async function idle() {await page.waitForFunction(() => !document.querySelector('.composer-editor')?.getAttribute('aria-describedby'))}
       async function goal() {return (await (await page.request.get(baseURL + '/api/v1/sessions/' + sessionId + '/goal')).json()).goal}
+      async function stableTitle() {
+        await page.waitForFunction(() => document.querySelector('#project-sidebar [aria-current="page"]')?.getAttribute('aria-label') === 'first ordinary goal fixture')
+        await page.getByRole('tab', {name: 'first ordinary goal fixture', exact: true}).waitFor()
+        const catalog = await (await page.request.get(baseURL + '/api/v1/sessions')).json()
+        assert.equal(catalog.sessions.find(session => session.id === sessionId).title, 'first ordinary goal fixture')
+      }
       async function screenshot(stage) {
         if (!process.env.HARNESS_TEST_SCREENSHOTS) return
         await mkdir(process.env.HARNESS_TEST_SCREENSHOTS, {recursive: true})
@@ -89,15 +95,14 @@ try {
       await form.waitFor({state: 'detached'})
       assert.equal(await removeGoal.count(), 0)
       await removePlan.focus(); await page.keyboard.press('Enter')
-      // 先物化的空会话没有显式标题，名称来自含模式命令的消息摘要。
+      // 首次人工输入建立稳定标题，后续目标只更新任务摘要。
       await send('/plan first ordinary goal fixture')
       await page.getByText('fixture response verified', {exact: true}).waitFor()
       await idle()
-      await page.waitForFunction(() => document.querySelector('#project-sidebar [aria-current="page"]')?.getAttribute('aria-label') === 'first ordinary goal fixture')
-      await page.getByRole('tab', {name: 'first ordinary goal fixture', exact: true}).waitFor()
+      await stableTitle()
       await page.reload()
       await input.waitFor()
-      assert.equal(await page.locator('#project-sidebar [aria-current="page"]').getAttribute('aria-label'), 'first ordinary goal fixture')
+      await stableTitle()
       await removePlan.focus(); await page.keyboard.press('Enter')
       await removePlan.waitFor({state: 'detached'})
       await send('/goal'); await form.waitFor()
@@ -154,8 +159,7 @@ try {
       await dock.getByRole('status').filter({hasText: t('ui.lib.goalActivity.b7e3e715f18b')}).waitFor()
       await idle()
       const blocked = await goal()
-      await page.waitForFunction(() => document.querySelector('#project-sidebar [aria-current="page"]')?.getAttribute('aria-label') === 'goal fixture blocked')
-      await page.getByRole('tab', {name: 'goal fixture blocked', exact: true}).waitFor()
+      await stableTitle()
       await send('/goal'); await send('blocked ordinary supplement'); await idle()
       assert.equal(sends.at(-1), 'blocked ordinary supplement')
       assert.equal((await goal()).id, blocked.id)
@@ -185,13 +189,13 @@ try {
       const catalog = await (await page.request.get(baseURL + '/api/v1/sessions')).json()
       assert.equal(catalog.sessions.find(session => session.id === sessionId).summary, 'goal fixture blocked',
         'Late internal goal control must not replace the task summary')
-      await page.waitForFunction(() => document.querySelector('#project-sidebar [aria-current="page"]')?.getAttribute('aria-label') === 'goal fixture blocked')
-      await page.getByRole('tab', {name: 'goal fixture blocked', exact: true}).waitFor()
+      await stableTitle()
       await screenshot('late-control')
       await page.reload()
       await input.waitFor()
-      await page.waitForFunction(() => document.querySelector('#project-sidebar [aria-current="page"]')?.getAttribute('aria-label') === 'goal fixture blocked')
-      await page.getByRole('tab', {name: 'goal fixture blocked', exact: true}).waitFor()
+      await stableTitle()
+      const reopenedCatalog = await (await page.request.get(baseURL + '/api/v1/sessions')).json()
+      assert.equal(reopenedCatalog.sessions.find(session => session.id === sessionId).summary, 'goal fixture blocked')
       assert.equal(await page.locator('html').getAttribute('lang'), language)
       assert.equal(await page.locator('html').getAttribute('data-theme'), theme)
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))

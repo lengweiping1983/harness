@@ -16,7 +16,7 @@ function Fixture(){
  window.disable=setDisabled;window.compact=setCompact;window.project=cwd=>setValue(current=>({...current,cwd}));window.dialogWrap=setDialog
  const fields=React.createElement('main',{className:'p-4'},React.createElement('div',{className:'refresh-action-container flex min-w-0 flex-wrap items-center gap-2'},
   React.createElement(ConversationCheckoutFields,{options,value,compact,disabled,onChange:next=>{window.changes.push(next);setValue(next)},onRefresh:()=>window.refreshes++})),
-  React.createElement('input',{'aria-label':'Original draft',defaultValue:'Original 草稿'}))
+  React.createElement('input',{'aria-label':'Original draft',className:'ml-auto block',defaultValue:'Original 草稿'}))
  return dialog?React.createElement(Overlay,{onClose:()=>{window.dialogCloses++;setDialog(false)},className:'max-w-lg'},fields):fields
 }
 createRoot(document.getElementById('root')).render(React.createElement(Fixture))
@@ -76,9 +76,19 @@ await browserScenario(async ({server, browser}) => {
   await menu.waitFor({state:'hidden'})
   assert.equal(await anchor.isDisabled(), true)
   await page.evaluate(() => {window.disable(false); window.compact(false)})
-  await anchor.click(); await page.getByRole('textbox').click()
+  const draft = page.getByRole('textbox', {name:'Original draft',exact:true})
+  await anchor.click(); await menu.waitFor()
+  assert.equal(await draft.evaluate(node => {
+    const box=node.getBoundingClientRect()
+    return document.elementFromPoint(box.x+box.width/2,box.y+box.height/2)===node
+  }), true, 'Outside-click target must be outside the branch menu')
+  await draft.click()
   await menu.waitFor({state:'hidden'})
-  assert.equal(await page.getByRole('textbox').inputValue(), 'Original 草稿')
+  assert.equal(await draft.evaluate(node => document.activeElement===node), true)
+  assert.equal(await draft.inputValue(), 'Original 草稿')
+  await anchor.click(); await draft.focus()
+  await menu.waitFor({state:'hidden'})
+  assert.equal(await draft.evaluate(node => document.activeElement===node), true)
   await page.evaluate(() => window.dialogWrap(true))
   await page.getByRole('dialog').waitFor()
   await anchor.click(); await menu.waitFor()
