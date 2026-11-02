@@ -222,35 +222,37 @@ export function CommandPalette() {
     <Overlay onClose={() => setOpen(false)} labelledBy={`${formId}-title`} className="max-w-xl">
       <h2 id={`${formId}-title`} className="sr-only">{t("ui.components.overlays.CommandPalette.a72832b006c1")}</h2>
       <div className="flex items-center gap-2 border-b border-line px-3.5 py-2.5">
-        <Search className="h-4 w-4 shrink-0 text-faint" />
-        <input data-command-search
-          autoFocus
-          role="combobox"
-          aria-label={t("ui.components.overlays.CommandPalette.a72832b006c1")}
-          aria-expanded={results.length > 0}
-          aria-autocomplete="list"
-          aria-controls={`${formId}-results`}
-          aria-activedescendant={results[cursor] ? optionId(results[cursor].id) : undefined}
-          aria-describedby={`${formId}-count`}
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); setActiveId(null) }}
-          onKeyDown={(e) => {
-            if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
-            if (!results.length) return
-            if (e.key === 'ArrowDown') {
-              e.preventDefault()
-              setActiveId(results[(cursor + 1) % results.length].id)
-            } else if (e.key === 'ArrowUp') {
-              e.preventDefault()
-              setActiveId(results[(cursor - 1 + results.length) % results.length].id)
-            } else if (e.key === 'Enter') {
-              e.preventDefault()
-              runAt(cursor)
-            }
-          }}
-          placeholder={t("ui.components.overlays.CommandPalette.c869118b11e2")}
-          className="h-7 min-w-0 flex-1 bg-transparent text-sm text-ink placeholder:text-faint focus:outline-none"
-        />
+        <div className="ui-input-group flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-raised/60 px-2.5 py-1">
+          <Search className="h-4 w-4 shrink-0 text-faint" />
+          <input data-command-search
+            autoFocus
+            role="combobox"
+            aria-label={t("ui.components.overlays.CommandPalette.a72832b006c1")}
+            aria-expanded={results.length > 0}
+            aria-autocomplete="list"
+            aria-controls={`${formId}-results`}
+            aria-activedescendant={results[cursor] ? optionId(results[cursor].id) : undefined}
+            aria-describedby={`${formId}-count`}
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setActiveId(null) }}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+              if (!results.length) return
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                setActiveId(results[(cursor + 1) % results.length].id)
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                setActiveId(results[(cursor - 1 + results.length) % results.length].id)
+              } else if (e.key === 'Enter') {
+                e.preventDefault()
+                runAt(cursor)
+              }
+            }}
+            placeholder={t("ui.components.overlays.CommandPalette.c869118b11e2")}
+            className="h-7 min-w-0 flex-1 bg-transparent text-sm text-ink placeholder:text-faint focus:outline-none"
+          />
+        </div>
         <Kbd>Esc</Kbd>
       </div>
 
