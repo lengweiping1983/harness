@@ -63,7 +63,7 @@ export function ConversationCheckoutFields({options, value, disabled = false, co
   if (!options.is_git) return <div className={cn('text-xs text-muted', compact ? 'contents' : 'refresh-action-container flex flex-wrap items-center gap-2')}>
     {!compact && <Folder className="h-3.5 w-3.5" />}
     <span className="text-xs text-muted">{t(options.is_git === null ? 'ui.newConversation.gitDisabled' : 'ui.newConversation.folderOnly')}</span>
-    <RefreshButton size="sm" label={t('ui.newConversation.refresh')} disabled={disabled} onClick={onRefresh} />
+    <RefreshButton size={compact ? 'xs' : 'sm'} className="text-xs" label={t('ui.newConversation.refresh')} disabled={disabled} onClick={onRefresh} />
   </div>
   const isolated = value.mode === 'worktree'
   const refs = isolated ? options.refs : options.local_branches
@@ -73,15 +73,15 @@ export function ConversationCheckoutFields({options, value, disabled = false, co
       <label className="flex min-w-0 items-center gap-1.5"><GitBranch className="h-3.5 w-3.5 shrink-0 text-muted" />
         <span className="sr-only">{t(isolated ? 'ui.newConversation.baseBranch' : 'ui.newConversation.branch')}</span>
         <select aria-label={t(isolated ? 'ui.newConversation.baseBranch' : 'ui.newConversation.branch')} title={selected} value={selected} disabled={disabled}
-          onChange={event => update({ref: event.target.value})} className="h-8 min-w-0 max-w-path rounded-lg border border-line bg-surface px-2">
+          onChange={event => update({ref: event.target.value})} className={cn('min-w-0 max-w-path rounded-lg border border-line bg-surface', compact ? 'h-6 px-1.5' : 'h-8 px-2')}>
           {[...new Set([selected, ...refs])].map(ref => <option key={ref} value={ref}>{ref}</option>)}
         </select>
       </label>
       <Tooltip content={t(isolated ? 'ui.newConversation.isolated' : 'ui.newConversation.local')}>
-        <label className="flex h-8 items-center gap-2 text-xs"><Switch checked={isolated} disabled={disabled || !options.head}
+        <label className={cn('flex items-center gap-2 text-xs', compact ? 'h-6' : 'h-8')}><Switch checked={isolated} disabled={disabled || !options.head}
           onChange={event => update({mode: event.target.checked ? 'worktree' : 'local', ref: event.target.checked || options.local_branches.includes(selected) ? selected : options.branch ?? 'HEAD'})} />{t('ui.newConversation.worktree')}</label>
       </Tooltip>
-      <RefreshButton size="sm" label={t('ui.newConversation.refresh')} disabled={disabled} onClick={onRefresh} />
+      <RefreshButton size={compact ? 'xs' : 'sm'} className="text-xs" label={t('ui.newConversation.refresh')} disabled={disabled} onClick={onRefresh} />
     </div>
     {!options.head && <p className="basis-full text-2xs text-warn">{t('ui.newConversation.commitRequired')}</p>}
     {options.dirty && <p className="basis-full text-2xs text-warn">{t(isolated ? 'ui.newConversation.dirtyIsolated' : 'ui.newConversation.dirtyLocal')}</p>}

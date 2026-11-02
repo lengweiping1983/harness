@@ -683,6 +683,8 @@ UI字号检查按PostCSS声明解析，覆盖属性空白、大小写与值内�
 
 编辑器帧归属场景同时覆盖已排队与原动作捕获后迟到排队两类，正常、切换、A→B→A、禁用、卸载共十场景；提交/补全/附件隔离夹具复用真实编辑器调度，保留原准入、IME及附件断言。
 
+桌面更新回归 `desktop/tests/updates.test.mjs` 覆盖开发版不联网、检查与下载的并发准入、进度、macOS 提前事件、原生错误和空下载结果拒绝，以及显式重试。`update-source.test.mjs` 核对公开 GitHub／HTTPS 构建配置、凭据拒绝和同一菜单状态的英中英消费；`release-assets.test.mjs` 通过隔离文件验证双架构清单合并、安装文件哈希、缺失 blockmap 与旧输出拒绝。它们属于显式桌面专项，不生成签名安装包，不代表跨平台实际升级验收；发布操作见 [桌面端](../desktop/README.md#每次正式发布)。
+
 ## 文本编码默认与例外
 
 统一规则、工具参数和适配边界见 [文本编码](text-encoding.md)。源码检查覆盖受版本控制和新增自有文本，不转换用户文件；Makefile 的 verify 与 test-full 均由 scripts/verify.py 执行编码检查。测试入口在执行用例前通过所属子解释器启用 UTF-8，不以修改 Python 内置 open 或宿主 locale 达成默认。

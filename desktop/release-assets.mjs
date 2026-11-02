@@ -1,6 +1,6 @@
 import {createReadStream} from 'node:fs'
 import {createHash} from 'node:crypto'
-import {mkdir, readdir, readFile, copyFile, writeFile} from 'node:fs/promises'
+import {mkdir, readdir, readFile, copyFile, writeFile, lstat} from 'node:fs/promises'
 import path from 'node:path'
 import {fileURLToPath} from 'node:url'
 import yaml from 'js-yaml'
@@ -9,9 +9,9 @@ export function mergeManifests(manifests) {
   if (!manifests.length) throw Error('No update manifests')
   const files = new Map()
   for (const manifest of manifests) {
-    if (manifest.version !== manifests[0].version || !Array.isArray(manifest.files)) throw Error('Update manifest versions or files do not match')
+    if (!manifest || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.version) || manifest.version !== manifests[0].version || !Array.isArray(manifest.files) || !manifest.files.length) throw Error('Update manifest versions or files do not match')
     for (const file of manifest.files) {
-      if (typeof file.url !== 'string' || !/^[\w.-]+$/.test(file.url) || !Number.isSafeInteger(file.size) || file.size <= 0 || typeof file.sha512 !== 'string') throw Error('Invalid update asset')
+      if (!file || typeof file.url !== 'string' || !/^[\w.-]+$/.test(file.url) || !Number.isSafeInteger(file.size) || file.size <= 0 || typeof file.sha512 !== 'string' || !/^[A-Za-z0-9+/]{86}==$/.test(file.sha512)) throw Error('Invalid update asset')
       const prior = files.get(file.url)
       if (prior && (prior.sha512 !== file.sha512 || prior.size !== file.size)) throw Error('Conflicting update asset: ' + file.url)
       files.set(file.url, file)
@@ -31,6 +31,8 @@ export async function assembleAssets(input, output) {
   const sources = new Map()
   for (const directory of directories) {
     for (const name of await readdir(directory)) {
+      if (!/^(latest.*\.yml|.*\.(exe|zip|dmg|blockmap))$/.test(name)) continue
+      if (!(await lstat(path.join(directory, name))).isFile()) throw Error('Release assets must be regular files: ' + name)
       if (/^latest.*\.yml$/.test(name)) {
         const manifest = yaml.load(new TextDecoder('utf-8', {fatal:true}).decode(await readFile(path.join(directory, name))))
         const rows = manifests.get(name) || []; rows.push(manifest); manifests.set(name, rows)
@@ -44,6 +46,7 @@ export async function assembleAssets(input, output) {
   if (!manifests.has('latest.yml') || !manifests.has('latest-mac.yml')) throw Error('Both Windows and macOS update manifests are required')
   const mac = merged.find(([name]) => name === 'latest-mac.yml')[1]
   if (!mac.files.some(file => /-arm64\.zip$/.test(file.url)) || !mac.files.some(file => /-x64\.zip$/.test(file.url))) throw Error('Both macOS architectures are required')
+  if (!merged.find(([name]) => name === 'latest.yml')[1].files.some(file => /-win-x64\.exe$/.test(file.url))) throw Error('Windows x64 installer is required')
   const versions = new Set(merged.map(([, manifest]) => manifest.version))
   if (versions.size !== 1) throw Error('Installer versions differ across platforms')
   for (const [, manifest] of merged) for (const file of manifest.files) {
@@ -52,8 +55,34 @@ export async function assembleAssets(input, output) {
     const actual = await hashFile(source)
     if (actual.sha512 !== file.sha512 || actual.size !== file.size) throw Error('Installer checksum mismatch: ' + file.url)
   }
+  const version = [...versions][0]
+  const required = [`Harness-${version}-win-x64.exe`, ...['arm64','x64'].flatMap(arch => [`Harness-${version}-mac-${arch}.zip`, `Harness-${version}-mac-${arch}.dmg`])]
+  const referenced = new Set(merged.flatMap(([, manifest]) => manifest.files.map(file => file.url)))
+  for (const name of required) {
+    if (!sources.has(name) || !referenced.has(name)) throw Error('Missing release asset or manifest entry: ' + name)
+    if (!sources.has(name + '.blockmap')) throw Error('Missing blockmap: ' + name)
+  }
+  for (const name of sources.keys()) {
+    const installer = name.replace(/\.blockmap$/, '')
+    if (!required.includes(installer)) throw Error('Unexpected release asset: ' + name)
+  }
+  try {
+    if ((await readdir(output)).length) throw Error('Release output must be empty: ' + output)
+  } catch (error) {if (error.code !== 'ENOENT') throw error}
   await mkdir(output, {recursive:true})
-  for (const [name, source] of sources) await copyFile(source, path.join(output, name))
+  const checksums = []
+  for (const [name, source] of sources) {
+    const before = await hashFile(source)
+    await copyFile(source, path.join(output, name))
+    const copied = await hashFile(path.join(output, name))
+    if (before.sha512 !== copied.sha512 || before.size !== copied.size) throw Error('Asset changed while copying: ' + name)
+    for (const [, manifest] of merged) {
+      const entry = manifest.files.find(file => file.url === name)
+      if (entry && (entry.sha512 !== copied.sha512 || entry.size !== copied.size)) throw Error('Installer changed after validation: ' + name)
+    }
+    checksums.push(`${Buffer.from(copied.sha512, 'base64').toString('hex')}  ${name}`)
+  }
+  await writeFile(path.join(output, 'SHA512SUMS'), checksums.sort().join('\n') + '\n')
   for (const [name, manifest] of merged) await writeFile(path.join(output, name), yaml.dump(manifest))
   console.log(`Validated release ${[...versions][0]}: ${sources.size} assets, ${merged.length} update manifests`)
 }

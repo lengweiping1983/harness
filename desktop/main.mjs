@@ -10,7 +10,7 @@ import {DesktopUpdates} from './updates.mjs'
 import {applicationMenu} from './application-menu.mjs'
 import {windowChrome, attachWindowChrome} from './window-chrome.mjs'
 import {configureAboutPanel} from './about-panel.mjs'
-import {app, BrowserWindow, WebContentsView, ipcMain, session, shell, clipboard, dialog, Menu, screen, desktopCapturer, protocol, Notification} from 'electron'
+import {autoUpdater as nativeAutoUpdater, app, BrowserWindow, WebContentsView, ipcMain, session, shell, clipboard, dialog, Menu, screen, desktopCapturer, protocol, Notification} from 'electron'
 import {ScreenshotSession} from './screenshot.mjs'
 import {FastScreenCapture} from './fast-screen-capture.mjs'
 import {ScreenshotImages, screenshotScheme} from './screenshot-images.mjs'
@@ -57,19 +57,26 @@ async function startDesktop() {
   window = new BrowserWindow({width: 1440, height: 960, minWidth: 800, minHeight: 600, title: 'Harness', icon: brandIcon, ...windowChrome(), webPreferences: {preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true}})
   instanceReady()
   let menuReady = false
-  const updates = new DesktopUpdates({updater:updaterPackage.autoUpdater, packaged:app.isPackaged, notify:() => installMenu(menuReady)})
+  const updates = new DesktopUpdates({updater:updaterPackage.autoUpdater, nativeUpdater:process.platform === 'darwin' ? nativeAutoUpdater : null, packaged:app.isPackaged, notify:() => installMenu(menuReady)})
   let updateDialog = false
   async function showUpdates() {
     if (updateDialog) return
     updateDialog = true
     const message = async key => dialog.showMessageBox(window, {type:'info', title:'Harness', message:menuText[key], buttons:[menuText.ok]})
+    async function showDownloaded() {
+      if (window.isDestroyed()) return
+      const choice = await dialog.showMessageBox(window, {type:'info', title:'Harness', message:menuText.updateDownloaded, detail:updates.version || '', buttons:[menuText.quitInstall, menuText.later], defaultId:1, cancelId:1})
+      if (choice.response === 0) app.quit()
+    }
     try {
       const result = await updates.check()
+      if (window.isDestroyed()) return
       if (result.state === 'available') {
-        const choice = await dialog.showMessageBox(window, {type:'info', title:'Harness', message:menuText.updateAvailable, buttons:[menuText.downloadUpdate, menuText.later], defaultId:0, cancelId:1})
-        if (choice.response === 0) {await updates.download(); await message('updateDownloaded')}
-      } else await message(result.state === 'development' ? 'updateDevelopment' : result.state === 'downloaded' ? 'updateDownloaded' : 'updateCurrent')
-    } catch (error) {console.error('Update failed:', error.message); await message('updateFailed')}
+        const choice = await dialog.showMessageBox(window, {type:'info', title:'Harness', message:menuText.updateAvailable, detail:result.version, buttons:[menuText.downloadUpdate, menuText.later], defaultId:0, cancelId:1})
+        if (choice.response === 0) {await updates.download(); await showDownloaded()}
+      } else if (result.state === 'downloaded') await showDownloaded()
+      else await message(result.state === 'development' ? 'updateDevelopment' : 'updateCurrent')
+    } catch (error) {console.error('Update failed:', error.message); if (!window.isDestroyed()) await message('updateFailed')}
     finally {updateDialog = false}
   }
   let menuText = null
@@ -82,7 +89,7 @@ async function startDesktop() {
   function installMenu(ready) {
     menuReady = ready
     if (!menuText || window.isDestroyed()) return
-    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenu({text:key => menuText[key], ready, updateState:updates.state, command:action => {
+    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenu({text:key => menuText[key], ready, updateState:updates.state, updateProgress:updates.progress, command:action => {
       if (action === 'updates') {void showUpdates(); return}
       if (action === 'about') {app.showAboutPanel(); return}
       window.webContents.send('desktop-command', action)
@@ -92,7 +99,7 @@ async function startDesktop() {
   attachWindowChrome({window, ipcMain, Menu, origin})
   ipcMain.handle('desktop-menu', (event, labels) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) throw Error('Untrusted menu request')
-    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','close','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect']
+    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','close','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
     if (!labels || keys.some(key => typeof labels[key] !== 'string' || !labels[key].trim() || labels[key].length > 120)) throw Error('Invalid menu labels')
     menuText = Object.fromEntries(keys.map(key => [key, labels[key]]))
     installMenu(true)
