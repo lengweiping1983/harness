@@ -50,6 +50,10 @@ await browserScenario(async({server,browser})=>{
       assert.deepEqual(await cards.allTextContents(),suggestions.map(key=>strings[key]))
       await cards.first().click()
       assert.equal(await page.evaluate(()=>window.suggestions.at(-1)),strings[suggestions[0]])
+      const scenarioButtons=page.locator('.welcome-scenarios button')
+      assert.equal(await scenarioButtons.count(),3)
+      const scenarioText=await page.locator('.welcome-scenarios').textContent()
+      for(const key of ['5f3a9c1e8d2b','7c4d2e9a6f18','9e5f1b7c3a46','3d8a2c6e4b97','6b1e4d8a2c59','2c7f5a9d1e83']) assert.ok(scenarioText.includes(strings['ui.components.chat.Conversation.'+key]),key)
       await page.evaluate(({language,theme})=>window.configure('settings',language,theme),{language,theme})
       for(const group of ['agents','connections','advanced']) {const button=page.getByRole('button',{name:strings['ui.settings.groups.'+group],exact:true});if(await button.getAttribute('aria-expanded')==='false')await button.click()}
       for(const key of ['ui.memory.heading','ui.settings.tools.title','ui.agents.directory','ui.extensions.skills','ui.extensions.connectors','ui.extensions.plugins']){
@@ -66,5 +70,5 @@ await browserScenario(async({server,browser})=>{
     assert.deepEqual(errors,[])
     await page.close()
   }
-  console.log('Static copy: repeated bilingual suggestions and click text, settings labels, keyed persistence errors and untouched external permission answers across eight layouts passed')
+  console.log('Static copy: repeated bilingual suggestions, scenario entries and click text, settings labels, keyed persistence errors and untouched external permission answers across eight layouts passed')
 },{entry:'/__static-copy-entry.js',vite:{plugins:[{name:'static-copy-fixture',resolveId(id){if(id==='/__static-copy-entry.js')return id},load(id){if(id==='/__static-copy-entry.js')return entry},configureServer(server){server.middlewares.use('/__static-copy',async(_req,res,next)=>{try{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__static-copy',html))}catch(error){next(error)}})}}]}})

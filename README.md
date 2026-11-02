@@ -152,4 +152,5 @@ make verify PYTHON=.venv/bin/python
 - [存储与恢复](docs/storage.md)、[扩展能力](docs/extensions.md)
 - [国际化与语言边界](docs/internationalization.md)及[文本编码](docs/text-encoding.md)
 - [OpenCode 本机适配](docs/opencode-local.md)、[GitHub 协作](docs/github-workflow.md)与[局域网测试](docs/lan-testing.md)
+- [办公 / 开发 / 设计场景迁移](docs/scenarios.md)
 - [仓库协作约定](AGENTS.md)

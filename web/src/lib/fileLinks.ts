@@ -63,6 +63,28 @@ export function fileUrl(
   return `/api/v1/file?${qs.toString()}`
 }
 
+export function isHtmlPath(target: string): boolean {
+  return /\.(html?|xhtml)$/i.test(target.split('#')[0]!.split('?')[0]!)
+}
+
+/**
+ * 网页预览地址：目录结构落在路径里，页面内的相对资源才能解析回工作区文件。
+ * 工作区根本身没有目录名可用，用 `__root__` 占位。
+ */
+export function previewUrl(
+  path: string,
+  opts: { root?: string | null } = {},
+): string {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
+  const entry = parts.pop() ?? ''
+  const folder = parts.join('/')
+  const qs = new URLSearchParams()
+  const root = opts.root !== undefined ? opts.root : getFileRoot()
+  if (root) qs.set('root', root)
+  const query = qs.size ? `?${qs.toString()}` : ''
+  return `/api/v1/preview/${encodeURIComponent(folder || '__root__')}/${encodeURIComponent(entry)}${query}`
+}
+
 /** 从 `#L12` / `#L12-L20` 解析行号区间。 */
 export function parseLineFragment(hash: string): { start: number; end?: number } | undefined {
   const m = /^#L(\d+)(?:-L?(\d+))?$/.exec(hash.trim())

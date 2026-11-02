@@ -23,6 +23,7 @@ import { groupToolRuns } from '@/lib/toolRuns'
 import { completionRows, type CompletedConversationRow } from '@/lib/turnCompletion'
 import { TurnCompletionBar } from './blocks/TurnCompletionBar'
 import { TurnElapsed } from './blocks/TurnElapsed'
+import { ConversationScenarios } from './ConversationScenarios'
 import { readTurnDisclosure, rememberTurnDisclosures } from '@/lib/turnDisclosure'
 import { appendedBlockCount } from '@/lib/conversationArrival'
 import { FileChangesCard } from './blocks/FileChangesCard'
@@ -739,6 +740,7 @@ function EmptyState() {
         <h2 className="text-2xl leading-9 font-semibold tracking-tight text-ink">{t("ui.components.chat.Conversation.e33a219fc51f")}</h2>
         <p className="mx-auto max-w-md text-sm leading-relaxed text-muted">{t("ui.components.chat.Conversation.2838a5c07278")}</p>
       </div>
+      <ConversationScenarios />
     </div>
   )
 }

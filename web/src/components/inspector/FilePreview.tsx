@@ -1,7 +1,7 @@
 import { t, useLocale } from '@/i18n'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp, RefreshCw, Search, X } from 'lucide-react'
-import { fileUrl, isImagePath, isTextFile, isVideoPath, isAudioPath, guessKind } from '@/lib/fileLinks'
+import { fileUrl, previewUrl, isHtmlPath, isImagePath, isTextFile, isVideoPath, isAudioPath, guessKind } from '@/lib/fileLinks'
 import { findFileMatches, lineStarts, parseLineSelection, type FileLineRange } from '@/lib/fileNavigation'
 import { languageFromPath } from '@/lib/diff'
 import { highlightToHtml, isHighlightable } from '@/lib/highlight'
@@ -37,7 +37,8 @@ export function FilePreview({ path, root, lineRange, navigationId, focusContent 
   const locale = useLocale()
 
   const markdown = /\.(md|markdown)$/i.test(path)
-  const [view, setView] = useState<'reading' | 'source'>(markdown && !lineRange ? 'reading' : 'source')
+  const html = isHtmlPath(path)
+  const [view, setView] = useState<'reading' | 'source'>((markdown || html) && !lineRange ? 'reading' : 'source')
   const reader = useRef<HTMLDivElement>(null)
   const readingScroll = useRef(0)
   const [text, setText] = useState<string | null>(null)
@@ -147,7 +148,7 @@ export function FilePreview({ path, root, lineRange, navigationId, focusContent 
     locate(lineRange, focusContent)
   }, [text, lineRange?.start, lineRange?.end, navigationId, starts.length, view])
   useEffect(() => { if (finding) findInput.current?.focus() }, [finding])
-  useEffect(() => { setFinding(false); setQuery(''); readingScroll.current = 0; setView(markdown && !lineRange ? 'reading' : 'source') }, [navigationId, markdown, lineRange?.start, lineRange?.end])
+  useEffect(() => { setFinding(false); setQuery(''); readingScroll.current = 0; setView((markdown || html) && !lineRange ? 'reading' : 'source') }, [navigationId, markdown, html, lineRange?.start, lineRange?.end])
   useEffect(() => {
     if (text === null || !focusContent) return
     if (view === 'reading' && reader.current) { reader.current.scrollTop = readingScroll.current; reader.current.focus({ preventScroll: true }) }
@@ -192,7 +193,7 @@ export function FilePreview({ path, root, lineRange, navigationId, focusContent 
   }}>
     <header className="file-preview-header flex items-center gap-2 border-b border-line px-3 py-2 text-xs">
       <span className="min-w-0 flex-1 truncate font-medium" title={path}>{path.split(/[\\/]/).pop()}</span>
-      {markdown && text !== null && !error ? <button type="button" className="file-view-toggle" onClick={() => {
+      {(markdown || html) && text !== null && !error ? <button type="button" className="file-view-toggle" onClick={() => {
         setView(view === 'reading' ? 'source' : 'reading')
         if (view === 'source') { setFinding(false); setQuery('') }
       }}>{view === 'reading' ? t("ui.components.inspector.FilePreview.035440298e53") : t("ui.components.inspector.FilePreview.13495f8f1914")}</button> : null}
@@ -201,7 +202,7 @@ export function FilePreview({ path, root, lineRange, navigationId, focusContent 
     </header>
     {image ? <button type="button" aria-label={t("ui.components.inspector.FilePreview.ba742ac7dcaa")} onClick={() => openImage(url, path)} className="file-preview-image block w-full p-2"><img src={url} alt={path} className="max-h-80 w-full object-contain" onError={() => setError({ key: 'ui.components.inspector.FilePreview.effa0053fe92' })} /></button> : null}
     {error ? <div role="alert" className="space-y-2 p-3 text-xs text-danger"><p>{t(error.key, error.values)}</p>{readable && text === null ? <button type="button" onClick={() => setRetry((value) => value + 1)} className="text-ink underline">{t("ui.components.inspector.FilePreview.5857e5b72d49")}</button> : null}</div> : null}
-    {readable ? text === null ? !error ? <p className="p-3 text-xs text-muted">{t("ui.components.inspector.FilePreview.b75809afbe0c")}</p> : null : markdown && view === 'reading' ? <div ref={reader} tabIndex={0} role="region" aria-label={t("ui.components.inspector.FilePreview.96183d9557ac")} data-markdown-reader onScroll={(event) => { readingScroll.current = event.currentTarget.scrollTop }} className="max-h-file-reader overflow-auto px-4 py-3 focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand">
+    {readable ? text === null ? !error ? <p className="p-3 text-xs text-muted">{t("ui.components.inspector.FilePreview.b75809afbe0c")}</p> : null : html && view === 'reading' ? <iframe key={url} src={previewUrl(path, { root })} title={t('ui.filePreview.htmlPreview')} sandbox="allow-scripts" className="h-file-reader w-full border-0 bg-white" /> : markdown && view === 'reading' ? <div ref={reader} tabIndex={0} role="region" aria-label={t("ui.components.inspector.FilePreview.96183d9557ac")} data-markdown-reader onScroll={(event) => { readingScroll.current = event.currentTarget.scrollTop }} className="max-h-file-reader overflow-auto px-4 py-3 focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand">
       <Markdown fileSource={{ path, root }} className="w-full min-w-0 text-compact leading-7 [&>p]:break-words [&>h1:first-child]:mt-0">{text}</Markdown>
     </div> : <>
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-xs">

@@ -30,6 +30,15 @@ MAX_FILE_BYTES = 256 * 1024 * 1024
 #: 允许按媒体类型直接内联预览的前缀。
 INLINE_TYPES = ("image/", "video/", "audio/")
 
+#: 内联后仍要关进沙箱的类型：脚本可用，但页面拿不到同源身份。
+SANDBOXED_TYPES = ("text/html",)
+
+#: 沙箱策略：允许脚本，否则交互页面全部失效；不给同源身份，因此页面无法调用本机接口。
+SANDBOX_POLICY = "sandbox allow-scripts"
+
+#: 站点预览路由里代表"工作区根"的目录名——路由需要一个真实片段，空片段会被路由丢掉。
+ROOT_MARK = "__root__"
+
 #: 目录列举时最多返回多少项。
 MAX_LIST_ENTRIES = 500
 
@@ -241,7 +250,8 @@ def build_router(ctx: Any) -> Router:
 
         content_type = _content_type(path)
         previewable = content_type.startswith(INLINE_TYPES) or content_type == "application/pdf"
-        disposition = "inline" if previewable and request.get("download") != "1" else "attachment"
+        sandboxed = content_type.startswith(SANDBOXED_TYPES)
+        disposition = "inline" if (previewable or sandboxed) and request.get("download") != "1" else "attachment"
         common = {
             "Content-Type": content_type,
             "Accept-Ranges": "bytes",
@@ -249,6 +259,9 @@ def build_router(ctx: Any) -> Router:
             "Cache-Control": "private, max-age=60",
             "Content-Disposition": content_disposition(path.name, disposition),
         }
+        # 网页内联后仍然同源，靠 CSP 把它降级成沙箱文档：脚本能跑，但拿不到本机接口。
+        if sandboxed and disposition == "inline":
+            common["Content-Security-Policy"] = SANDBOX_POLICY
 
         range_header = request.header("Range")
         span = _parse_range(range_header, size) if range_header else None
@@ -271,6 +284,38 @@ def build_router(ctx: Any) -> Router:
         response = bytes_response(body, status=200, headers=common)
         response.headers["Content-Length"] = str(len(body))
         return response
+
+    @router.get("/api/v1/preview/{entry}")
+    @router.get("/api/v1/preview/{folder}/{entry}")
+    def preview_page(request: Any, entry: str, folder: str = ROOT_MARK) -> Any:
+        """按站点目录结构提供预览，让页面里的相对路径仍然指向工作区里的真实文件。
+
+        ``/api/v1/file?path=`` 的基址是接口本身，页面里的 ``styles.css`` 会被解析成
+        ``/api/v1/styles.css`` 而不是站点目录里的同名文件；多文件站点因此必须走这条
+        路径形态的路由，由目录片段还原相对关系。
+        """
+        root = _resolved_root(ctx, request.get("root"))
+        directory = "" if (folder or ROOT_MARK) == ROOT_MARK else folder
+        path = _safe_join(root, f"{directory}/{entry}" if directory else entry)
+        if not path.exists():
+            raise NotFound(tr('python.workspace.cef4dd39fa00', p0=f"{directory}/{entry}"), code="file/not-found")
+        if path.is_dir():
+            raise BadRequest(tr('python.workspace.f68cd022e6e1'), code="file/is-directory")
+        if not path.is_file():
+            raise BadRequest(tr('python.workspace.9258823564ec'), code="file/not-regular")
+        size = path.stat().st_size
+        if size > MAX_FILE_BYTES:
+            raise BadRequest(tr('python.workspace.d0adf150b018', p0=f'{size}'), code="file/too-large")
+        content_type = _content_type(path)
+        common = {
+            "Content-Type": content_type,
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=60",
+            "Content-Disposition": content_disposition(path.name, "inline"),
+        }
+        if content_type.startswith(SANDBOXED_TYPES):
+            common["Content-Security-Policy"] = SANDBOX_POLICY
+        return bytes_response(path.read_bytes(), status=200, headers=common)
 
     return router
 
