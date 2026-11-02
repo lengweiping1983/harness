@@ -26,6 +26,8 @@ await browserScenario(async({server,browser})=>{
   await remove.waitFor();await remove.locator('..').hover()
   assert.equal(await remove.evaluate(node=>{const r=node.getBoundingClientRect();return node.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))}),true)
   await remove.click();assert.equal(await page.evaluate(()=>window.selected()),undefined)
+  // 移除后焦点在下一帧才交还编辑器。等这一帧跑完再开始键盘步骤，否则 Enter 会落到编辑器上。
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
   await page.evaluate(()=>window.restore());await remove.waitFor();await remove.focus();await remove.press('Enter')
   assert.equal(await page.evaluate(()=>window.selected()),undefined)
   assert.deepEqual(errors,[]);await page.close()

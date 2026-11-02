@@ -39,11 +39,13 @@ await browserScenario(async({server,browser})=>{
  await page.getByText('Model list: 2 total · 0 selected',{exact:true}).last().waitFor()
  await openPicker();await picker.getByRole('checkbox').first().check();await closePicker(true)
  await page.getByText('Model options',{exact:true}).click()
- const limits=page.getByRole('group',{name:/models selected|已选择.*个模型/}).locator('input[type=number]')
+ const selected=page.getByRole('group',{name:/models selected|已选择.*个模型/})
+ const limits=selected.locator('input[type=number]')
  assert.equal(await limits.nth(0).inputValue(),'131072')
  assert.equal(await limits.nth(1).inputValue(),'8192')
- await page.getByRole('checkbox',{name:'Image',exact:true}).isChecked().then(value=>assert.equal(value,true))
- await page.getByRole('checkbox',{name:'Video',exact:true}).isChecked().then(value=>assert.equal(value,false))
+ // 手工添加表单也有同名能力勾选框，已选模型的能力必须限定在已选分组内核对。
+ await selected.getByRole('checkbox',{name:'Image',exact:true}).isChecked().then(value=>assert.equal(value,true))
+ await selected.getByRole('checkbox',{name:'Video',exact:true}).isChecked().then(value=>assert.equal(value,false))
  const modelId=page.getByRole('textbox',{name:'Enter a model ID',exact:true});await modelId.fill('https://misplaced.example.invalid')
  for(const language of ['en','zh-CN','en'])for(const theme of ['light','dark'])for(const width of [390,1440]){
   await page.setViewportSize({width,height:900});await page.evaluate(({language,theme})=>{window.locale(language);document.documentElement.className=theme;document.documentElement.dataset.theme=theme},{language,theme})

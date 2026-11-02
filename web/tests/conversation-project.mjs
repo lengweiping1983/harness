@@ -17,7 +17,11 @@ export async function chooseFixtureProject(page) {
   await page.keyboard.press('ControlOrMeta+Shift+u')
   const dock = page.locator('.composer-dock')
   const dialog = page.getByRole('dialog', {name: copy('ui.newConversation.chooseProject'), exact: true})
-  if (!await dock.getByRole('button', {name: workspace.name, exact: true}).isVisible()) {
+  const chosen = dock.getByRole('button', {name: workspace.name, exact: true})
+  // 新会话会带出项目选择器，弹层要等一帧才挂载完成。立即判定会在遮罩已盖住底座时点击底座按钮，
+  // 被遮罩拦截后只能等到超时，看起来像产品缺陷，实际是夹具没等弹层就绪。
+  await chosen.or(dialog).first().waitFor({state: 'visible'})
+  if (!await chosen.isVisible()) {
     if (!await dialog.isVisible()) {
       await dock.getByRole('button', {name: copy('ui.newConversation.chooseProject'), exact: true}).click()
     }
@@ -25,7 +29,7 @@ export async function chooseFixtureProject(page) {
     await dialog.getByRole('button', {name: copy('ui.newConversation.useProject'), exact: true}).click()
     await dialog.waitFor({state: 'hidden'})
   }
-  await dock.getByRole('button', {name: workspace.name, exact: true}).waitFor()
+  await chosen.waitFor()
   await dock.getByText(copy('ui.newConversation.checking'), {exact: true}).waitFor({state: 'hidden'})
   assert.equal(await dock.getByRole('alert').count(), 0, 'The selected fixture directory must pass its checkout check')
   return workspace
