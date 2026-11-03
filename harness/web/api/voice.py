@@ -67,14 +67,34 @@ def build_router(ctx: Any) -> Router:
             raise BadRequest(tr('ui.voice.invalid'), code='voice/invalid',
                              details={'copy': {'key': 'ui.voice.invalid'}}) from error
 
+        timings: dict[str, float] = {}
+
         async def run():
-            return await run_hex_owned(ctx.harness.hex_service.transcribe_prepared, request.body)
+            return await run_hex_owned(ctx.harness.hex_service.transcribe_prepared, request.body, timings=timings)
 
         try:
             result = ctx.call(run(), timeout=780)
         except HexToolError as error:
             raise ServiceUnavailable(str(error), code='voice/unavailable',
                                      details={'copy': error.copy or {'key': 'ui.voice.engineFailed'}, 'reason': str(error)}) from error
-        return json_response({'transcript': result['transcript']}).with_header('Cache-Control', 'no-store')
+        response = json_response({'transcript': result['transcript']}).with_header('Cache-Control', 'no-store')
+        if timings:
+            response.with_header('Server-Timing', ', '.join(f'voice_{name};dur={value:.2f}' for name, value in timings.items()))
+        return response
+
+    @router.post('/api/v1/voice/preparations')
+    def prepare(request):
+        require_local(request)
+
+        async def run():
+            await run_hex_owned(ctx.harness.hex_service.prepare_transcription)
+
+        try:
+            ctx.call(run(), timeout=630)
+        except HexToolError as error:
+            raise ServiceUnavailable(str(error), code='voice/unavailable',
+                                     details={'copy': error.copy or {'key': 'ui.voice.engineFailed'},
+                                              'reason': str(error)}) from error
+        return json_response({'ready': True}).with_header('Cache-Control', 'no-store')
 
     return router

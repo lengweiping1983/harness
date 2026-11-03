@@ -59,7 +59,7 @@ it('checks the engine and owned desktop settings without launching Hex or showin
   for (const locale of ['en','zh-CN','en'] as const) {
     await setLocale(locale)
     const html=markup()
-    expect(html).toContain(t('ui.voice.dictation.composer'))
+    expect(html).toContain(t('ui.voice.dictation.composer',{shortcut:formatVoiceShortcut('Control+Shift+Space')}))
     expect(html).not.toContain('Hex')
     expect(html).not.toContain('The multilingual model is prepared when needed')
     expect(html).not.toContain('多语言模型按需准备')
@@ -86,7 +86,9 @@ it.each([
   }
   expect(bridge.configure).not.toHaveBeenCalled()
   expect(bridge.permission).not.toHaveBeenCalled()
-  shortcut().props.onChange({target:{value:edited}})
+  expect(shortcut().props.readOnly).toBe(true)
+  const nativeEvent={code:'KeyK',key:'K',ctrlKey:platform==='Win32',metaKey:platform==='MacIntel',shiftKey:true,altKey:false}
+  shortcut().props.onKeyDown({nativeEvent,...nativeEvent,preventDefault:vi.fn(),stopPropagation:vi.fn()})
   bridge.configure.mockResolvedValueOnce({ok:true,data:{...status,shortcut:accelerator}})
   await save()
   expect(bridge.configure).toHaveBeenCalledExactlyOnceWith({enabled:false,shortcut:accelerator})
@@ -174,5 +176,33 @@ it('keeps damaged saved settings visible and does not auto repair them on refres
   await vi.waitFor(() => expect(markup()).toContain(t('ui.voice.global.settingsInvalid')))
   refresh()
   await vi.waitFor(() => expect(bridge.status).toHaveBeenCalledTimes(2))
+  expect(bridge.configure).not.toHaveBeenCalled()
+})
+
+it('keeps the saved shortcut through bare letters, composition and repeats, then captures one chord',async () => {
+  render(); await vi.waitFor(() => expect(checkbox().props.disabled).toBe(false))
+  const key={code:'KeyD',key:'d',ctrlKey:false,altKey:false,metaKey:false,shiftKey:false}
+  for(const extra of [{},{isComposing:true,ctrlKey:true},{keyCode:229,ctrlKey:true},{repeat:true,ctrlKey:true},{code:'ControlLeft',key:'Control',ctrlKey:true}]) {
+    const nativeEvent={...key,...extra}
+    shortcut().props.onKeyDown({...nativeEvent,nativeEvent,preventDefault:vi.fn(),stopPropagation:vi.fn()})
+    expect(shortcut().props.value).toBe(formatVoiceShortcut(DEFAULT_VOICE_SHORTCUT))
+  }
+  const nativeEvent={...key,ctrlKey:true,altKey:true}
+  shortcut().props.onKeyDown({...nativeEvent,nativeEvent,preventDefault:vi.fn(),stopPropagation:vi.fn()})
+  expect(shortcut().props.value).toBe(formatVoiceShortcut('Control+Alt+D'))
+  expect(bridge.configure).not.toHaveBeenCalled()
+  await save()
+  expect(bridge.configure).toHaveBeenCalledExactlyOnceWith({enabled:false,shortcut:'Control+Alt+D'})
+})
+
+it('explains a missing backend route through English, Chinese, English without replaying reads or saving',async () => {
+  fetchMock.mockResolvedValueOnce(Response.json({code:'route/not-found',message:'missing /api/v1/voice/dictation'},{status:404}))
+  render(); await vi.waitFor(() => expect(markup()).toContain(t('ui.voice.backendMismatch')))
+  for(const locale of ['en','zh-CN','en'] as const) {
+    await setLocale(locale)
+    expect(markup()).toContain(t('ui.voice.backendMismatch'))
+    expect(markup()).not.toContain('missing /api/v1/voice/dictation')
+  }
+  expect(fetchMock).toHaveBeenCalledOnce()
   expect(bridge.configure).not.toHaveBeenCalled()
 })

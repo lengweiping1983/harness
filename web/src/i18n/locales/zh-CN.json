@@ -4856,7 +4856,7 @@
   "ui.voice.dictation.useWindows": "切到目标输入框，按住 Ctrl+Space 说话，松开输入文字。已修改快捷键时，以 Hex 设置为准。",
   "ui.voice.dictation.lifecycle": "听写独立运行，用完后从 Hex 退出。",
   "ui.voice.dictation.inHarness": "在 Harness 中",
-  "ui.voice.dictation.composer": "点击发送旁的麦克风开始和结束录音，也可在输入框按 Ctrl+Shift+Space。文字追加到草稿，确认后再发送。",
+  "ui.voice.dictation.composer": "点击发送旁的麦克风开始和结束录音，也可在输入框按 {shortcut}。文字追加到草稿，确认后再发送。",
   "ui.voice.dictation.requested": "已请求打开。请先完成 Hex 中显示的准备步骤，再开始听写。",
   "ui.voice.dictation.unconfirmed": "尚未确认打开。请先检查 Hex 窗口，再决定是否重新打开。",
   "ui.voice.dictation.missing": "缺少内置语音引擎，请安装完整的 Harness 桌面应用。",
@@ -4872,7 +4872,7 @@
   "ui.voice.global.disabled": "全局听写已关闭。",
   "ui.voice.global.enable": "启用全局听写",
   "ui.voice.global.shortcut": "全局快捷键",
-  "ui.voice.global.toggleHelp": "按一次快捷键开始录音，再按一次结束并转写。默认组合为 {shortcut}。",
+  "ui.voice.global.toggleHelp": "点击快捷键框后直接按下组合键。按一次开始录音，再按一次结束并转写。默认组合为 {shortcut}。",
   "ui.voice.global.save": "保存听写设置",
   "ui.voice.global.saved": "听写设置已保存。",
   "ui.voice.global.permission": "允许输入到其他应用",
@@ -4912,5 +4912,6 @@
   "ui.screenshot.captureFailed": "未能截取屏幕。请再次点击截图重试；缺少权限时会引导授权。",
   "ui.collaboration.error.screenshot/permission-required": "已打开屏幕录制设置。允许用于运行 Harness 的应用后再次点击截图；如果 macOS 提示需要重启，请重启该应用。",
   "ui.collaboration.error.screenshot/accessibility-required": "已打开辅助功能设置。允许用于运行 Harness 的应用后再次点击隐藏窗口截图。",
-  "ui.collaboration.error.screenshot/permission-settings-failed": "未能打开授权入口，请再次点击此功能申请权限。"
+  "ui.collaboration.error.screenshot/permission-settings-failed": "未能打开授权入口，请再次点击此功能申请权限。",
+  "ui.voice.backendMismatch": "当前后端缺少语音接口。请重启 Harness，并确认应用与后端使用相同版本。"
 }

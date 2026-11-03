@@ -6,7 +6,7 @@ import {setLocale, t} from '@/i18n'
 import {ResourceError} from '@/lib/resourceError'
 
 const hooks = vi.hoisted(() => ({cursor: 0, slots: [] as unknown[], cleanups: [] as (() => void)[], events: new Map<string, (event: unknown) => void>()}))
-const recording = vi.hoisted(() => ({create: vi.fn(), request: vi.fn()}))
+const recording = vi.hoisted(() => ({create: vi.fn(), request: vi.fn(), prepare: vi.fn()}))
 vi.mock('react', async original => ({...await original<typeof import('react')>(),
   useRef: (value: unknown) => {const index = hooks.cursor++; return hooks.slots[index] ??= {current: value}},
   useState: (value: unknown) => {const index = hooks.cursor++; if (!(index in hooks.slots)) hooks.slots[index] = value
@@ -22,7 +22,7 @@ vi.mock('react', async original => ({...await original<typeof import('react')>()
 vi.mock('@/i18n', async original => {const module = await original<typeof import('@/i18n')>(); return {...module, useLocale: module.getLocale}})
 vi.mock('react-dom', () => ({createPortal: (node: unknown) => node}))
 vi.mock('@/lib/voiceRecorder', () => ({createVoiceRecorder: recording.create}))
-vi.mock('@/lib/http', async original => ({...await original<typeof import('@/lib/http')>(), request: recording.request}))
+vi.mock('@/lib/http', async original => ({...await original<typeof import('@/lib/http')>(), request:(...args:unknown[]) => (args[0]==='/api/v1/voice/preparations' ? recording.prepare : recording.request)(...args)}))
 const initialApp = useAppStore.getState()
 const editor = {current: {getBoundingClientRect: () => ({top: 400, right: 600}), closest: () => ({contains: () => true})} as unknown as HTMLTextAreaElement}
 const onTranscript = vi.fn()
@@ -40,7 +40,7 @@ function button(node: unknown): ReactElement<Record<string, any>> {
 }
 beforeEach(() => {
   hooks.slots = []; hooks.cleanups = []; hooks.events.clear()
-  onTranscript.mockClear(); recording.create.mockReset(); recording.request.mockReset()
+  onTranscript.mockClear(); recording.create.mockReset(); recording.request.mockReset();recording.prepare.mockReset().mockResolvedValue({ok:true,data:{ready:true}})
   vi.stubGlobal('window', {innerWidth: 800, innerHeight: 800})
   vi.stubGlobal('document', {hidden: false, body: {}, documentElement: {}, activeElement: editor.current,
     addEventListener: (name: string, handler: (event: unknown) => void) => hooks.events.set(name, handler),
@@ -92,8 +92,44 @@ it('shows a focused preparation prompt while microphone permission is pending', 
     return node && typeof node === 'object' ? content((node as ReactElement<{children?: unknown}>).props?.children) : ''
   }
   expect(content(pending)).toContain(t('ui.voice.opening'))
+  expect(recording.prepare).not.toHaveBeenCalled()
   ready({finish: async () => new ArrayBuffer(48), dispose: vi.fn()})
   await vi.waitFor(() => expect(button(render()).props['aria-label']).toBe(t('ui.voice.stop')))
+  expect(recording.prepare).toHaveBeenCalledExactlyOnceWith('/api/v1/voice/preparations', {method:'POST', timeout:630_000})
+})
+
+it('prepares during recording and waits for that single result before posting audio', async () => {
+  const finish=vi.fn(async () => new ArrayBuffer(48)),dispose=vi.fn()
+  let prepared!:(value:unknown) => void
+  recording.create.mockReturnValue({ready:Promise.resolve({finish,dispose}),dispose})
+  recording.prepare.mockReturnValue(new Promise(resolve => {prepared=resolve}))
+  recording.request.mockResolvedValue({ok:true,data:{transcript:'prepared speech'}})
+  await button(render()).props.onClick()
+  expect(recording.prepare).toHaveBeenCalledOnce()
+  expect(button(render()).props['aria-label']).toBe(t('ui.voice.stop'))
+  const stopping=button(render()).props.onClick()
+  await vi.waitFor(() => expect(finish).toHaveBeenCalledOnce())
+  expect(recording.request).not.toHaveBeenCalled()
+  prepared({ok:true,data:{ready:true}})
+  await stopping
+  expect(recording.request).toHaveBeenCalledOnce()
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('prepared speech')
+})
+
+it.each(['failure','switch','unmount'])('does not replay preparation or post audio after preparation %s', async kind => {
+  const dispose=vi.fn()
+  recording.create.mockReturnValue({ready:Promise.resolve({finish:async () => new ArrayBuffer(48),dispose}),dispose})
+  let prepared!:(value:unknown) => void
+  recording.prepare.mockReturnValue(new Promise(resolve => {prepared=resolve}))
+  await button(render()).props.onClick()
+  const stopping=button(render()).props.onClick()
+  if(kind==='switch')useAppStore.setState({activeSessionId:'another'})
+  if(kind==='unmount')hooks.cleanups.splice(0).reverse().forEach(cleanup => cleanup())
+  prepared({ok:false,status:503,code:'voice/unavailable',message:'failed',details:{copy:{key:'ui.voice.engineFailed'}}})
+  await stopping
+  expect(recording.prepare).toHaveBeenCalledOnce()
+  expect(recording.request).not.toHaveBeenCalled()
+  expect(onTranscript).not.toHaveBeenCalled()
 })
 
 it('serializes double clicks, appends the transcript once and never sends a message', async () => {

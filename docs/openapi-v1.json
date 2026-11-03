@@ -1875,6 +1875,52 @@
         ]
       }
     },
+    "/api/v1/voice/preparations": {
+      "post": {
+        "operationId": "post_api_v1_voice_preparations",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicePreparation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/status": {
       "get": {
         "operationId": "get_api_v1_status",
@@ -19165,6 +19211,18 @@
   },
   "components": {
     "schemas": {
+      "VoicePreparation": {
+        "type": "object",
+        "required": [
+          "ready"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ready": {
+            "const": true
+          }
+        }
+      },
       "VoiceTranscript": {
         "type": "object",
         "required": [

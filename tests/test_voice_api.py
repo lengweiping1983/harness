@@ -76,6 +76,63 @@ class VoiceApiTests(unittest.TestCase):
         self.assertEqual(caught.exception.details['copy'],
                          {'key': 'ui.voice.binaryMissing', 'params': {'path': '/fixture/hex'}})
 
+    def test_preparation_is_explicit_local_and_does_not_transcribe(self):
+        """预热接口只在显式本机请求执行，拒绝共享身份与远程请求。"""
+        router = build_router(self.ctx)
+        for method, path in [('GET', '/api/v1/voice/dictation'), ('POST', self.path),
+                             ('POST', '/api/v1/voice/preparations')]:
+            router.resolve(method, path)
+        handler, _ = router.resolve('POST', '/api/v1/voice/preparations')
+        for subject, ip, host in [('guest', '127.0.0.1', 'localhost'), (None, '203.0.113.1', 'localhost'),
+                                  (None, '127.0.0.1', '203.0.113.1')]:
+            with self.assertRaises(BadRequest):
+                handler(Request('POST', '/api/v1/voice/preparations', {}, {'Host': host}, b'',
+                                subject=subject, client_ip=ip))
+        self.service.prepare_transcription.assert_not_called()
+        for language in ('en', 'zh-CN', 'en'):
+            with current_language.set(language):
+                result = handler(Request('POST', '/api/v1/voice/preparations', {}, {'Host': 'localhost'}, b'', client_ip='::1'))
+                self.assertEqual(json.loads(result.body), {'ready': True})
+                self.assertEqual(result.headers['Cache-Control'], 'no-store')
+        self.assertEqual(self.service.prepare_transcription.call_count, 3)
+        self.service.transcribe_prepared.assert_not_called()
+
+    def test_assembled_application_registers_all_current_voice_routes(self):
+        """核对实际应用装配入口，不能只验证语音子路由。"""
+        from harness import Harness, HarnessConfig
+        from harness.web.context import WebContext
+        with tempfile.TemporaryDirectory() as directory:
+            instance = Harness(HarnessConfig(home=directory, cwd=directory, api_key='offline',
+                                             enable_mcp=False, enable_automations=False))
+            loop = asyncio.new_event_loop()
+            try:
+                router = WebContext(instance, loop).router()
+                for method, path in [('GET', '/api/v1/voice/dictation'), ('POST', self.path),
+                                     ('POST', '/api/v1/voice/preparations')]:
+                    handler, _ = router.resolve(method, path)
+                    self.assertEqual(handler.__module__, 'harness.web.api.voice')
+            finally:
+                loop.run_until_complete(instance.close())
+                loop.close()
+
+    def test_transcription_reports_phase_timings_without_audio_or_text_in_headers(self):
+        """诊断响应头分开报告排队、准备与推理，不暴露录音或正文。"""
+        def transcribe(audio, *, timings):
+            timings.update(queue=12.345, prepare=0.234, inference=1234.567)
+            return {'transcript': 'Hello 中文'}
+        self.service.transcribe_prepared.side_effect = transcribe
+        response = self.handler(self.request())
+        self.assertEqual(response.headers['Server-Timing'], 'voice_queue;dur=12.35, voice_prepare;dur=0.23, voice_inference;dur=1234.57')
+
+    def test_preparation_failure_is_not_replayed_or_reported_as_ready(self):
+        """准备失败保持资源身份及诊断，只执行一次。"""
+        self.service.prepare_transcription.side_effect = HexToolError('raw preparation failure')
+        handler, _ = build_router(self.ctx).resolve('POST', '/api/v1/voice/preparations')
+        with self.assertRaises(ServiceUnavailable) as caught:
+            handler(self.request())
+        self.assertEqual(caught.exception.details['reason'], 'raw preparation failure')
+        self.service.prepare_transcription.assert_called_once()
+
 
 class VoiceCommandTests(unittest.TestCase):
     def test_explicit_native_commands_are_forwarded(self):

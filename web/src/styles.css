@@ -1036,7 +1036,6 @@ body {
 .windows-titlebar button:hover, .windows-titlebar button[aria-expanded='true'] { color: rgb(var(--c-ink)); background: rgb(var(--c-line) / .6); }
 .windows-titlebar button:focus-visible { outline: 2px solid rgb(var(--c-brand)); outline-offset: -2px; }
 .windows-titlebar button:disabled { opacity: .45; }
-.windows-titlebar-name { margin-left: auto; padding: 0 12px; font-size: var(--text-caption); }
 :root[data-desktop-platform='win32'] .app-shell { --workspace-header-height: 44px; }
 :root[data-desktop-platform='win32'] .app-shell[data-mode='overlay'] > .panel { top: calc(var(--desktop-titlebar-height) + var(--workspace-header-height)); }
 :root[data-desktop-platform='win32'] .app-shell[data-mode='overlay'][data-panels='1'] > .panel-scrim { top: calc(var(--desktop-titlebar-height) + var(--workspace-header-height)); }

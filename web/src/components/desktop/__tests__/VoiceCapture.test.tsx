@@ -5,7 +5,7 @@ import {setLocale,t} from '@/i18n'
 import {ResourceError} from '@/lib/resourceError'
 
 const hooks=vi.hoisted(()=>({cursor:0,slots:[] as unknown[],cleanups:[] as (()=>void)[]}))
-const capture=vi.hoisted(()=>({create:vi.fn(),request:vi.fn()}))
+const capture=vi.hoisted(()=>({create:vi.fn(),request:vi.fn(),prepare:vi.fn()}))
 vi.mock('react',async original=>({...await original<typeof import('react')>(),
   useRef:(value:unknown)=>{const index=hooks.cursor++;return hooks.slots[index]??={current:value}},
   useState:(value:unknown)=>{const index=hooks.cursor++;if(!(index in hooks.slots))hooks.slots[index]=value
@@ -16,7 +16,7 @@ vi.mock('react',async original=>({...await original<typeof import('react')>(),
 }))
 vi.mock('@/i18n',async original=>{const module=await original<typeof import('@/i18n')>();return {...module,useLocale:module.getLocale}})
 vi.mock('@/lib/voiceRecorder',()=>({createVoiceRecorder:capture.create}))
-vi.mock('@/lib/http',async original=>({...await original<typeof import('@/lib/http')>(),request:capture.request}))
+vi.mock('@/lib/http',async original=>({...await original<typeof import('@/lib/http')>(),request:(...args:unknown[]) => (args[0]==='/api/v1/voice/preparations' ? capture.prepare : capture.request)(...args)}))
 let action:(value:any)=>void
 const bridge={ready:vi.fn(),phase:vi.fn(),complete:vi.fn(),cancel:vi.fn(),onAction:vi.fn()}
 const render=()=>{hooks.cursor=0;return VoiceCapture()}
@@ -28,7 +28,7 @@ function text(node:unknown):string {
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(done=>{resolve=done});return {promise,resolve}}
 beforeEach(()=>{
   hooks.cursor=0;hooks.slots=[];hooks.cleanups=[]
-  capture.create.mockReset();capture.request.mockReset()
+  capture.create.mockReset();capture.request.mockReset();capture.prepare.mockReset().mockResolvedValue({ok:true,data:{ready:true}})
   bridge.ready.mockReset().mockResolvedValue({ok:true,data:{action:'start',id:'first'}})
   bridge.phase.mockReset().mockResolvedValue({ok:true,data:null})
   bridge.complete.mockReset().mockResolvedValue({ok:true,data:{result:'draft'}})
@@ -50,6 +50,24 @@ it('owns one recorder across ready and duplicate start, then submits and inserts
   await vi.waitFor(()=>expect(bridge.complete).toHaveBeenCalledExactlyOnceWith('first','original speech'))
   for(const language of ['en','zh-CN','en'] as const){await setLocale(language);expect(text(render())).toContain(t('ui.voice.global.draft'))}
   expect(capture.request).toHaveBeenCalledOnce()
+  expect(capture.prepare).toHaveBeenCalledOnce()
+})
+
+it.each(['success','cancel','failure'])('shares preparation started during recording through %s without replaying audio',async kind=>{
+  const preparation=deferred<any>()
+  capture.prepare.mockReturnValue(preparation.promise)
+  render();await vi.waitFor(()=>expect(bridge.phase).toHaveBeenCalledWith('first','recording'))
+  expect(capture.prepare).toHaveBeenCalledOnce()
+  action({action:'stop',id:'first'})
+  await vi.waitFor(()=>expect(bridge.phase).toHaveBeenCalledWith('first','processing'))
+  expect(capture.request).not.toHaveBeenCalled()
+  if(kind==='cancel')action({action:'cancel'})
+  preparation.resolve(kind==='failure'?{ok:false,status:503,code:'voice/unavailable',message:'failed',details:{copy:{key:'ui.voice.engineFailed'}}}:{ok:true,data:{ready:true}})
+  if(kind==='success')await vi.waitFor(()=>expect(bridge.complete).toHaveBeenCalledOnce())
+  else if(kind==='failure')await vi.waitFor(()=>expect(text(render())).toContain(t('ui.voice.engineFailed')))
+  else {await preparation.promise;await Promise.resolve();await Promise.resolve()}
+  expect(capture.request).toHaveBeenCalledTimes(kind==='success'?1:0)
+  expect(capture.prepare).toHaveBeenCalledOnce()
 })
 
 it.each(['cancel','replace','unmount'] as const)('does not insert an accepted transcription after %s',async kind=>{

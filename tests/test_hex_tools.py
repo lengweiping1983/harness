@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+import asyncio
 from pathlib import Path
 from unittest import mock
 
@@ -140,7 +141,8 @@ class HexPathTests(unittest.TestCase):
 
     def test_macos_signed_app_fallback_keeps_bundle_path(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch('harness.tools.builtin.hex_tools.sys.platform', 'darwin'), \
-             mock.patch('harness.tools.builtin.hex_tools.Path.home', return_value=Path(tmp)):
+             mock.patch('harness.tools.builtin.hex_tools.Path.home', return_value=Path(tmp)), \
+             mock.patch('harness.tools.builtin.hex_tools.__file__', str(Path(tmp) / 'tools/builtin/hex_tools.py')):
             binary = Path(tmp) / 'Applications/Hex.app/Contents/MacOS/hex'
             binary.parent.mkdir(parents=True)
             binary.touch()
@@ -158,6 +160,79 @@ class HexPathTests(unittest.TestCase):
 
 
 class HexApiClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_recording_preparation_and_concurrent_audio_share_one_confirmed_model(self):
+        """录音预热与并发转写串行收敛，第二段音频不再做预热推理。"""
+        class Counting(FakeHexHandler):
+            paths = []
+
+            def do_POST(self):
+                self.paths.append(self.path)
+                super().do_POST()
+
+        fake = FakeHexServer(Counting)
+        manager = HexServiceManager(discovery=fake.discovery)
+        try:
+            await asyncio.gather(asyncio.to_thread(manager.prepare_transcription),
+                                 asyncio.to_thread(manager.prepare_transcription))
+            timings = {}
+            results = await asyncio.gather(
+                asyncio.to_thread(manager.transcribe_prepared, b'first', timings=timings),
+                asyncio.to_thread(manager.transcribe_prepared, b'second'))
+            self.assertEqual([result['transcript'] for result in results], [Counting.transcript] * 2)
+            self.assertEqual(sum(path.startswith('/models/') for path in Counting.paths), 1)
+            self.assertEqual(Counting.paths[0], f'/models/{DEFAULT_MODEL}/prepare?language=auto')
+            self.assertTrue(all('language=auto' in path for path in Counting.paths if path.startswith('/transcriptions?')))
+            self.assertEqual(sum(path.startswith('/transcriptions?') for path in Counting.paths), 2)
+            self.assertEqual(set(timings), {'queue', 'prepare', 'inference'})
+            self.assertTrue(all(value >= 0 for value in timings.values()))
+            await asyncio.to_thread(manager.prepare_transcription, language='zh')
+            self.assertTrue(Counting.paths[-1].endswith('/prepare?language=zh'))
+            self.assertEqual(sum(path.startswith('/models/') for path in Counting.paths), 2)
+        finally:
+            manager.stop()
+            fake.close()
+
+    async def test_preparation_cache_is_bound_to_authenticated_endpoint_and_not_failed_requests(self):
+        """端点替换或准备失败不能沿用旧成功，不自动重放失败请求。"""
+        first, second = FakeHexServer(), FakeHexServer()
+        manager = HexServiceManager(discovery=first.discovery)
+        try:
+            with mock.patch.object(manager, 'prepare_model', wraps=manager.prepare_model) as prepare:
+                manager.prepare_transcription()
+                manager.prepare_transcription()
+                self.assertEqual(prepare.call_count, 1)
+                manager.discovery_path = second.discovery
+                manager.prepare_transcription()
+                self.assertEqual(prepare.call_count, 2)
+            failure = HexToolError('fixture inference failure')
+            with mock.patch.object(manager, 'transcribe', side_effect=failure) as send:
+                with self.assertRaises(HexToolError) as caught:
+                    manager.transcribe_prepared(b'audio')
+                self.assertIs(caught.exception, failure)
+                send.assert_called_once()
+            with mock.patch.object(manager, 'prepare_model', side_effect=failure) as prepare:
+                with self.assertRaises(HexToolError):
+                    manager.prepare_transcription()
+                prepare.assert_called_once()
+                self.assertIsNone(manager._prepared)
+            manager.prepare_transcription()
+            manager.stop()
+            with self.assertRaises(HexToolError):
+                manager.prepare_transcription()
+        finally:
+            manager.stop()
+            first.close()
+            second.close()
+
+    async def test_invalid_audio_never_prepares_or_launches_engine(self):
+        """无效音频在下载或进程启动前拒绝。"""
+        manager = HexServiceManager()
+        with mock.patch.object(manager, 'ensure_running') as start:
+            for audio in (b'', b'0' * (64 * 1024 * 1024 + 1)):
+                with self.assertRaises(HexToolError):
+                    manager.transcribe_prepared(audio)
+            start.assert_not_called()
+
     async def test_reuses_live_discovery_without_spawning(self):
         fake = FakeHexServer()
         try:

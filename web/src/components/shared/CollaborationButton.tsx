@@ -17,11 +17,10 @@ function operationFeedback(error: unknown): CollaborationFeedback {
     ...(typeof text === 'string' ? {} : {copy: text})}
 }
 
-export function CollaborationButton({sessionId}: {sessionId: string}) {
+export function CollaborationButton({sessionId, open, onOpen, onClose}: {sessionId: string | null; open: boolean; onOpen(): void; onClose(): void}) {
   useLocale()
-  const [open, setOpen] = useState(false)
-  return <><Button size="sm" variant="ghost" icon={<UserPlus size={14} aria-hidden="true" />} onClick={() => setOpen(true)}>{t('ui.collaboration.invite')}</Button>
-    {open && <Members key={sessionId} sessionId={sessionId} close={() => setOpen(false)} />}</>
+  return <><Button size="sm" variant="ghost" className="shrink-0" icon={<UserPlus size={14} aria-hidden="true" />} onClick={onOpen}>{t('ui.collaboration.invite')}</Button>
+    {open && sessionId && <Members key={sessionId} sessionId={sessionId} close={onClose} />}</>
 }
 function Members({sessionId, close}: {sessionId: string; close: () => void}) {
   const [data, setData] = useState<SessionCollaboration | null>(null)

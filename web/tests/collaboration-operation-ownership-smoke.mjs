@@ -16,7 +16,8 @@ collaboration.invite=(id,role)=>new Promise((resolve,reject)=>window.writes.push
 collaboration.approve=(id,invitation,revision)=>new Promise((resolve,reject)=>window.writes.push({kind:'approve',id,invitation,revision,resolve,reject}))
 window.finish=(index,success)=>{const write=window.writes[index];if(!success){write.reject(new ResourceError({key:'ui.http.invalidResponse'}));return}write.resolve({ok:true,data:write.kind==='invite'?{id:'created',token:'fixture.created.signature',role:write.role,expires_at:123}:window.state.access})}
 window.releaseReads=()=>{window.holdRead=false;window.readWaiters.splice(0).forEach(resolve=>resolve())}
-createRoot(document.getElementById('root')).render(React.createElement(CollaborationButton,{sessionId:'owner'}))
+function Fixture(){const [open,setOpen]=React.useState(false);return React.createElement(CollaborationButton,{sessionId:'owner',open,onOpen:()=>setOpen(true),onClose:()=>setOpen(false)})}
+createRoot(document.getElementById('root')).render(React.createElement(Fixture))
 `
 await browserScenario(async({server,browser})=>{
  for(const mode of ['invite','approve','throw','read-throw','unmount','poll-race']){

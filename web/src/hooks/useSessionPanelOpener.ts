@@ -2,7 +2,7 @@ import {useLayoutEffect, useRef, useState} from 'react'
 import {useAppStore} from '@/store/app'
 
 /** 已受理的新对话创建仍完成，面板打开只属于原挂载实例。 */
-export function useGoalOpener(activeSessionId: string | null) {
+export function useSessionPanelOpener(activeSessionId: string | null) {
   const mounted = useRef(false)
   const [request, setRequest] = useState<{sessionId: string; serial: number} | null>(null)
   useLayoutEffect(() => {mounted.current = true; return () => {mounted.current = false}}, [])
@@ -16,5 +16,5 @@ export function useGoalOpener(activeSessionId: string | null) {
     if (!sessionId || latest.activeSessionId !== sessionId || !activeSessionId && latest.newSessionRevision !== origin) return
     setRequest(current => ({sessionId, serial: (current?.serial ?? 0) + 1}))
   }
-  return {request, open}
+  return {request, open, close: () => setRequest(null)}
 }

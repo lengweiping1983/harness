@@ -20,5 +20,7 @@ it('reuses current menu resources in Windows without exposing window control rep
     expect(markup.match(/role="menuitem"/g)).toHaveLength(5)
     for(const text of locale==='en'?['File','Edit','View','Window','Help']:['文件','编辑','视图','窗口','帮助'])expect(markup).toContain('>'+text+'</button>')
     expect(markup).not.toMatch(/Minimize|Maximize|关闭窗口/)
+    expect(markup).not.toContain('windows-titlebar-name')
+    expect(markup).not.toContain('>Harness</span>')
   }
 })

@@ -93,6 +93,5 @@ function TitleBar({desktop}: {desktop: WindowsChrome}) {
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {event.preventDefault(); void open(key, event.currentTarget)}
         }}>{t('ui.desktop.menu.' + key)}</button>)}
     </nav>
-    <span className="windows-titlebar-name" aria-hidden="true">Harness</span>
   </header>
 }

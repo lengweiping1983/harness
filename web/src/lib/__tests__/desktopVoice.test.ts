@@ -1,5 +1,5 @@
 import {afterEach, expect, it, vi} from 'vitest'
-import {DEFAULT_VOICE_SHORTCUT, formatVoiceShortcut, voiceShortcutAccelerator} from '../desktopVoice'
+import {DEFAULT_VOICE_SHORTCUT, formatVoiceShortcut, voiceShortcutAccelerator, recordedVoiceShortcut} from '../desktopVoice'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -22,4 +22,13 @@ it.each([
   ['constructor+K', 'constructor+K'],
 ])('converts explicit display aliases in %s without guessing other key names', (display, accelerator) => {
   expect(voiceShortcutAccelerator(display)).toBe(accelerator)
+})
+
+it('records physical letter, function and space chords while keeping Control literal on macOS', () => {
+  const key={code:'KeyD',key:'d',ctrlKey:true,altKey:false,shiftKey:true,metaKey:false,repeat:false,isComposing:false,keyCode:68}
+  expect(recordedVoiceShortcut(key)).toBe('Control+Shift+D')
+  expect(recordedVoiceShortcut({...key,code:'KeyD',key:'∂',altKey:true})).toBe('Control+Alt+Shift+D')
+  expect(recordedVoiceShortcut({...key,code:'Space',key:' '})).toBe('Control+Shift+Space')
+  expect(recordedVoiceShortcut({...key,code:'F12',key:'F12'})).toBe('Control+Shift+F12')
+  for(const changed of [{isComposing:true},{keyCode:229},{repeat:true},{code:'ShiftLeft',key:'Shift'},{ctrlKey:false,shiftKey:false}]) expect(recordedVoiceShortcut({...key,...changed})).toBeNull()
 })

@@ -4,13 +4,14 @@ import {getLocale, setLocale, t, useLocale} from '@/i18n'
 import {Button} from '@/components/ui/primitives'
 import {createVoiceRecorder, type VoiceRecorder} from '@/lib/voiceRecorder'
 import {desktopVoice, type VoiceAction} from '@/lib/desktopVoice'
-import {request, unwrap, ApiError} from '@/lib/http'
+import {unwrap, ApiError} from '@/lib/http'
+import {prepareVoiceInput, voiceRequest} from '@/lib/voiceApi'
 import {noticeText} from '@/lib/noticeText'
 import {failureText, ResourceError} from '@/lib/resourceError'
 import type {NoticeText} from '@/types'
 import {VoiceWaveform, updateVoiceWaveform} from '@/components/chat/VoiceWaveform'
 
-interface Capture {id: string; disposed: boolean; recorder?: VoiceRecorder; dispose(): void}
+interface Capture {id: string; disposed: boolean; recorder?: VoiceRecorder; preparation?: ReturnType<typeof prepareVoiceInput>; dispose(): void}
 
 export function VoiceCapture() {
   useLocale()
@@ -40,7 +41,9 @@ export function VoiceCapture() {
       const wav = await recorder.finish()
       if (capture.disposed) return
       if (wav.byteLength <= 44) throw new ResourceError({key:'ui.voice.empty'})
-      const value = await unwrap(request<{transcript: string}>('/api/v1/voice/transcriptions', {
+      await unwrap(capture.preparation!)
+      if (capture.disposed || active.current !== capture) return
+      const value = await unwrap(voiceRequest<{transcript: string}>('/api/v1/voice/transcriptions', {
         method:'POST', headers:{'Content-Type':'audio/wav'}, body:wav, timeout:780000,
       }))
       if (capture.disposed || active.current !== capture) return
@@ -86,6 +89,7 @@ export function VoiceCapture() {
     void recording.ready.then(async recorder => {
       if (current.disposed || active.current !== current) {recorder.dispose(); return}
       current.recorder = recorder
+      current.preparation = prepareVoiceInput()
       const reply = await bridge!.phase(current.id, 'recording')
       if (current.disposed || active.current !== current) return
       if (!reply.ok) {current.dispose(); setError(reply.copy); setPhase('done'); return}

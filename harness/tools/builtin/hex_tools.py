@@ -292,6 +292,7 @@ class HexServiceManager:
         self._owned_document: DiscoveryDocument | None = None
         self._reader: threading.Thread | None = None
         self._reader_error: BaseException | None = None
+        self._prepared: tuple[str, str, str, str] | None = None
         # 本机 API 只使用 HTTP，不初始化代理、系统证书库或文件等其他协议。
         self._opener = urllib.request.OpenerDirector()
         for handler in (urllib.request.HTTPHandler(), urllib.request.HTTPDefaultErrorHandler(),
@@ -437,6 +438,7 @@ class HexServiceManager:
 
     def _stop_process(self) -> None:
         """关闭 stdin 租约，必要时升级终止，收回握手线程后才清空句柄。"""
+        self._prepared = None
         process = self._process
         errors: list[BaseException] = []
         if process is not None:
@@ -519,15 +521,18 @@ class HexServiceManager:
                 tr('python.hex_tools.request_failed', p0=str(error))
             ) from error
 
-    def prepare_model(self, model: str, timeout: float = MODEL_PREPARE_TIMEOUT) -> None:
-        """准备转录模型：首次会从 HuggingFace 下载，之后秒回（幂等）。
+    def prepare_model(self, model: str, timeout: float = MODEL_PREPARE_TIMEOUT,
+                      *, language: str = DEFAULT_LANGUAGE) -> None:
+        """显式准备转录模型：必要时下载、加载，并执行引擎预热。
 
         prepare 端点返回 SSE 事件流（进度/完成/错误），这里逐行读到
         ``"type":"ok"`` 为止；调用方（异步工具）应通过
         ``asyncio.to_thread`` 执行，避免阻塞事件循环。
         """
-        validate_selection(model, DEFAULT_LANGUAGE)
-        payload = self._request("POST", f"/models/{quote(model, safe='')}/prepare", timeout=timeout)
+        validate_selection(model, language)
+        self._prepared = None
+        payload = self._request("POST", f"/models/{quote(model, safe='')}/prepare?" +
+                                urlencode({'language': language}), timeout=timeout)
         try:
             events_text = payload.decode("utf-8")
         except UnicodeDecodeError as error:
@@ -579,13 +584,42 @@ class HexServiceManager:
             raise HexToolError(tr('python.hex_tools.bad_response'))
         return result
 
-    def transcribe_prepared(self, audio: bytes, *, model: str = DEFAULT_MODEL,
-                            language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
-        """串行执行完整模型准备和转录；关闭等待本次操作真正结束。"""
+    def prepare_transcription(self, *, model: str = DEFAULT_MODEL,
+                              language: str = DEFAULT_LANGUAGE) -> None:
+        """录音期间提前准备，同一认证端点和选择只复用已确认的成功。"""
         validate_selection(model, language)
         with self._lock:
-            self.prepare_model(model)
-            return self.transcribe(audio, model=model, language=language)
+            endpoint = self.ensure_running()
+            selection = (*endpoint, model, language)
+            if self._prepared == selection:
+                return
+            self._prepared = None
+            self.prepare_model(model, language=language)
+            self._prepared = selection
+
+    def transcribe_prepared(self, audio: bytes, *, model: str = DEFAULT_MODEL,
+                            language: str = DEFAULT_LANGUAGE,
+                            timings: dict[str, float] | None = None) -> dict[str, Any]:
+        """串行执行完整模型准备和转录；关闭等待本次操作真正结束。"""
+        validate_selection(model, language)
+        if not audio or len(audio) > MAX_AUDIO_BYTES:
+            raise HexToolError(tr('ui.voice.invalid'))
+        started = time.perf_counter()
+        with self._lock:
+            admitted = time.perf_counter()
+            self.prepare_transcription(model=model, language=language)
+            prepared = time.perf_counter()
+            try:
+                return self.transcribe(audio, model=model, language=language)
+            except BaseException:
+                # 失败可能表示模型已被替换或端点已变化；本次不重放音频。
+                self._prepared = None
+                raise
+            finally:
+                if timings is not None:
+                    timings.update(queue=(admitted - started) * 1000,
+                                   prepare=(prepared - admitted) * 1000,
+                                   inference=(time.perf_counter() - prepared) * 1000)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):

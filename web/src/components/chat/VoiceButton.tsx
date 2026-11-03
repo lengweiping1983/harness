@@ -3,7 +3,8 @@ import {useEffect, useRef, useState, type RefObject} from 'react'
 import {Loader2, Mic} from 'lucide-react'
 import {Button, Tooltip} from '@/components/ui/primitives'
 import {t, useLocale} from '@/i18n'
-import {request, ApiError, unwrap} from '@/lib/http'
+import {ApiError, unwrap} from '@/lib/http'
+import {prepareVoiceInput, voiceRequest} from '@/lib/voiceApi'
 import {noticeText} from '@/lib/noticeText'
 import {failureText, ResourceError} from '@/lib/resourceError'
 import {createVoiceRecorder, type VoiceRecorder} from '@/lib/voiceRecorder'
@@ -13,7 +14,7 @@ import type {NoticeText} from '@/types'
 import {desktopVoice} from '@/lib/desktopVoice'
 
 type Phase = 'idle' | 'opening' | 'recording' | 'processing'
-interface Operation {disposed: boolean; dispose(): void; recorder?: VoiceRecorder}
+interface Operation {disposed: boolean; dispose(): void; recorder?: VoiceRecorder; preparation?: ReturnType<typeof prepareVoiceInput>}
 
 export function VoiceButton({editor, disabled, onTranscript}: {
   editor: RefObject<HTMLTextAreaElement>; disabled: boolean; onTranscript(text: string): void
@@ -107,7 +108,9 @@ export function VoiceButton({editor, disabled, onTranscript}: {
         const wav = await recorder.finish()
         if (existing.disposed) return
         if (wav.byteLength <= 44) {setError({key: 'ui.voice.empty'}); return}
-        const result = await unwrap(request<{transcript: string}>('/api/v1/voice/transcriptions', {
+        await unwrap(existing.preparation!)
+        if (existing.disposed || !mounted.current) return
+        const result = await unwrap(voiceRequest<{transcript: string}>('/api/v1/voice/transcriptions', {
           method: 'POST', headers: {'Content-Type': 'audio/wav'}, body: wav, timeout: 780000,
         }))
         if (existing.disposed || !mounted.current) return
@@ -145,6 +148,7 @@ export function VoiceButton({editor, disabled, onTranscript}: {
       const recorder = await capture.ready
       if (current.disposed || !mounted.current) {recorder.dispose(); return}
       current.recorder = recorder
+      current.preparation = prepareVoiceInput()
       setPhase('recording')
     } catch (failure) {
       if (operation.current === current) {

@@ -3,11 +3,11 @@ import {browserScenario} from './browser-scenario.mjs'
 const entry=`
 import React from 'react'
 import {createRoot} from 'react-dom/client'
-import {useGoalOpener} from '/src/hooks/useGoalOpener.ts'
+import {useSessionPanelOpener} from '/src/hooks/useSessionPanelOpener.ts'
 import {useAppStore} from '/src/store/app.ts'
 let release;window.calls=0
 useAppStore.setState({activeSessionId:null,newSessionRevision:1,materializeSession:()=>{window.calls++;return new Promise(resolve=>release=()=>{useAppStore.setState({activeSessionId:'owner'});resolve(true)})}})
-function Fixture({owner}){const {request,open}=useGoalOpener(owner);return React.createElement('div',null,React.createElement('button',{onClick:()=>{window.opening=open()}},'Open'),React.createElement('output',null,JSON.stringify(request)))}
+function Fixture({owner}){const {request,open}=useSessionPanelOpener(owner);return React.createElement('div',null,React.createElement('button',{onClick:()=>{window.opening=open()}},'Open'),React.createElement('output',null,JSON.stringify(request)))}
 const root=createRoot(document.getElementById('root'));window.show=owner=>root.render(React.createElement(Fixture,{key:owner??'empty',owner}));window.hide=()=>root.render(null);window.release=()=>release();window.change=()=>useAppStore.setState({newSessionRevision:2});window.show(null)
 `
 await browserScenario(async({server,browser})=>{

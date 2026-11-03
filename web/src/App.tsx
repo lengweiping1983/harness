@@ -1,5 +1,5 @@
 import {SessionListSkeleton} from '@/components/sidebar/SessionListSkeleton'
-import {useGoalOpener} from '@/hooks/useGoalOpener'
+import {useSessionPanelOpener} from '@/hooks/useSessionPanelOpener'
 import {noticeText} from '@/lib/noticeText'
 import { createPanelFocusFrames } from '@/lib/panelFocus'
 import {CollaborationButton} from '@/components/shared/CollaborationButton'
@@ -76,7 +76,8 @@ export default function App() {
 
   const channel = useSessionSocket(activeSessionId)
   const chat = useChat(activeSessionId)
-  const {request: goalOpenRequest, open: openGoal} = useGoalOpener(activeSessionId)
+  const {request: goalOpenRequest, open: openGoal} = useSessionPanelOpener(activeSessionId)
+  const {request: collaborationOpenRequest, open: openCollaboration, close: closeCollaboration} = useSessionPanelOpener(activeSessionId)
 
   const exportSession = useCallback(() => {
     if (!activeSessionId) return
@@ -236,7 +237,7 @@ export default function App() {
         titleIndicator={<SessionRunningIndicator sessionId={activeSessionId} />}
         headerLeading={!sidebarVisible && <WorkspaceAction action="expand-left" label={t('ui.sidebar.expand')} data-panel-toggle="left" aria-controls="project-sidebar" onClick={() => useAppStore.getState().toggleSidebar()} />}
         headerTrailing={<>
-          {activeSessionId && <CollaborationButton key={activeSessionId} sessionId={activeSessionId} />}
+          <CollaborationButton sessionId={activeSessionId} open={Boolean(activeSessionId && collaborationOpenRequest?.sessionId === activeSessionId)} onOpen={openCollaboration} onClose={closeCollaboration} />
           {!inspectorVisible && <WorkspaceAction action="new-tab" label={t('ui.trace.hub')} aria-controls="task-inspector" aria-expanded={false} data-panel-toggle="right" onClick={() => useAppStore.getState().setInspectorTab('home')} />}
         </>}
         conversation={{

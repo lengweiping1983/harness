@@ -1,4 +1,5 @@
 import {t} from '@/i18n'
+import {voiceRequest} from './voiceApi'
 import {readTextPage} from './textPage'
 import {attachmentErrorCopy} from './attachmentErrors'
 import type { ExternalAgentCatalog } from './externalAgents'
@@ -72,7 +73,7 @@ function openVoiceDictation() {
 }
 
 export const api = {
-  voiceDictation: (signal?: AbortSignal) => request<import('./protocol.generated').VoiceDictationCapabilities>('/api/v1/voice/dictation', {signal}),
+  voiceDictation: (signal?: AbortSignal) => voiceRequest<import('./protocol.generated').VoiceDictationCapabilities>('/api/v1/voice/dictation', {signal}),
   openVoiceDictation,
   accessStatus: () => request<import('./protocol.generated').BrowserAccessStatus>('/api/v1/access/status'),
   accessLogin: (token: string) => request<import('./protocol.generated').BrowserAccessSession>('/api/v1/access/login', {method: 'POST', body: JSON.stringify({token})}),

@@ -3,6 +3,17 @@ import {isMac} from '@/lib/utils'
 
 export const DEFAULT_VOICE_SHORTCUT = 'Control+Alt+Space'
 
+/** 记录实际组合键，组合输入、自动重复与单独修饰键不修改已存快捷键。 */
+export function recordedVoiceShortcut(event: Pick<KeyboardEvent, 'code' | 'key' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey' | 'repeat' | 'isComposing' | 'keyCode'>): string | null {
+  if (event.isComposing || event.keyCode === 229 || event.repeat) return null
+  let key = /^(Key[A-Z]|Digit[0-9])$/.test(event.code) ? event.code.replace(/^(Key|Digit)/, '') : ''
+  if (/^F([1-9]|1\d|2[0-4])$/.test(event.key)) key = event.key
+  const named: Record<string, string> = {Space:'Space', Enter:'Enter', Tab:'Tab', Backspace:'Backspace', Delete:'Delete', Insert:'Insert', Home:'Home', End:'End', PageUp:'PageUp', PageDown:'PageDown', ArrowUp:'Up', ArrowDown:'Down', ArrowLeft:'Left', ArrowRight:'Right'}
+  if (Object.hasOwn(named, event.code)) key = named[event.code]
+  if (!key || !(event.ctrlKey || event.altKey || event.metaKey || event.shiftKey)) return null
+  return [event.ctrlKey && 'Control', event.altKey && 'Alt', event.metaKey && 'Command', event.shiftKey && 'Shift', key].filter(Boolean).join('+')
+}
+
 /** 显示名称与 Electron 加速键分开，保存时只转换明确的按键别名。 */
 export function voiceShortcutAccelerator(value: string): string {
   const aliases: Record<string, string> = {Ctrl:'Control', '⌃':'Control', Option:'Alt', '⌥':'Alt', Cmd:'Command', '⌘':'Command', '⇧':'Shift'}

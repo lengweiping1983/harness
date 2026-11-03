@@ -4,7 +4,7 @@ import {t, useLocale} from '@/i18n'
 import {api} from '@/lib/api'
 import {noticeText} from '@/lib/noticeText'
 import {failureText} from '@/lib/resourceError'
-import {desktopVoice, DEFAULT_VOICE_SHORTCUT, formatVoiceShortcut, voiceShortcutAccelerator, type DesktopVoiceStatus} from '@/lib/desktopVoice'
+import {desktopVoice, DEFAULT_VOICE_SHORTCUT, formatVoiceShortcut, recordedVoiceShortcut, type DesktopVoiceStatus} from '@/lib/desktopVoice'
 import {usePageVisible} from '@/hooks/usePageVisible'
 import {Button, RefreshButton} from '@/components/ui/primitives'
 import type {ResourceText} from '@/types'
@@ -17,7 +17,7 @@ export function VoiceInputPage() {
   const [engine, setEngine] = useState<VoiceDictationCapabilities | null>(null)
   const [status, setStatus] = useState<DesktopVoiceStatus | null>(null)
   const [enabled, setEnabled] = useState(false)
-  const [shortcut, setShortcut] = useState<{display:string; accelerator?:string}>({display:formatVoiceShortcut(DEFAULT_VOICE_SHORTCUT), accelerator:DEFAULT_VOICE_SHORTCUT})
+  const [shortcut, setShortcut] = useState(DEFAULT_VOICE_SHORTCUT)
   const [reading, setReading] = useState(false)
   const [writing, setWriting] = useState(false)
   const [error, setError] = useState<ResourceText>('')
@@ -48,7 +48,7 @@ export function VoiceInputPage() {
       else {setEngine(null); setError((capabilities.details as {copy?: ResourceText} | undefined)?.copy ?? capabilities.copy ?? capabilities.message)}
       if (desktop?.ok) {
         setStatus(desktop.data)
-        if (edits.current === edit) {setEnabled(desktop.data.enabled); setShortcut({display:formatVoiceShortcut(desktop.data.shortcut), accelerator:desktop.data.shortcut})}
+        if (edits.current === edit) {setEnabled(desktop.data.enabled); setShortcut(desktop.data.shortcut)}
         if (capabilities.ok) setError(desktop.data.error ?? '')
       } else if (desktop && !desktop.ok) setError(desktop.copy)
       else if (capabilities.ok) setError('')
@@ -68,11 +68,11 @@ export function VoiceInputPage() {
     const current = ++generation.current, edit = edits.current
     setReading(false); setWriting(true); setError(''); setNotice(''); setDiagnostic('')
     try {
-      const result = await bridge.configure({enabled, shortcut:shortcut.accelerator ?? voiceShortcutAccelerator(shortcut.display)})
+      const result = await bridge.configure({enabled, shortcut})
       if (!mounted.current || current !== generation.current || document.hidden) return
       if (result.ok) {
         setStatus(result.data)
-        if (edits.current === edit) {setEnabled(result.data.enabled); setShortcut({display:formatVoiceShortcut(result.data.shortcut), accelerator:result.data.shortcut})}
+        if (edits.current === edit) {setEnabled(result.data.enabled); setShortcut(result.data.shortcut)}
         setNotice({key:'ui.voice.global.saved'})
       } else {
         setError(result.copy)
@@ -110,7 +110,7 @@ export function VoiceInputPage() {
     <h3 className="ui-section-title">{t('ui.voice.dictation.title')}</h3>
     <div className="space-y-3">
       <h4 className="ui-card-title">{t('ui.voice.dictation.inHarness')}</h4>
-      <p className="text-xs leading-reading text-muted">{t('ui.voice.dictation.composer')}</p>
+      <p className="text-xs leading-reading text-muted">{t('ui.voice.dictation.composer', {shortcut:formatVoiceShortcut('Control+Shift+Space')})}</p>
     </div>
     <div className="space-y-4 rounded-xl border border-line p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -123,10 +123,17 @@ export function VoiceInputPage() {
           onChange={event => {edits.current++; setEnabled(event.target.checked); setNotice('')}} />{t('ui.voice.global.enable')}</label>
         <label className="block space-y-2 text-xs">
           <span>{t('ui.voice.global.shortcut')}</span>
-          <input className="ui-input w-full" value={shortcut.display} maxLength={100} disabled={writing || reading} spellCheck={false}
-            onChange={event => {edits.current++; setShortcut({display:event.target.value}); setNotice('')}} />
+          <input className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm" value={formatVoiceShortcut(shortcut)} disabled={writing || reading} spellCheck={false}
+            readOnly aria-describedby="voice-shortcut-help" onKeyDown={event => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return
+              if (event.key === 'Tab' && !event.ctrlKey && !event.altKey && !event.metaKey) return
+              if (event.key === 'Escape' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {event.stopPropagation(); event.currentTarget.blur(); return}
+              event.preventDefault(); event.stopPropagation()
+              const value = recordedVoiceShortcut(event.nativeEvent)
+              if (value) {edits.current++; setShortcut(value); setNotice('')}
+            }} />
         </label>
-        <p className="text-xs leading-reading text-faint">{t('ui.voice.global.toggleHelp', {shortcut:formatVoiceShortcut(DEFAULT_VOICE_SHORTCUT)})}</p>
+        <p id="voice-shortcut-help" className="text-xs leading-reading text-faint">{t('ui.voice.global.toggleHelp', {shortcut:formatVoiceShortcut(DEFAULT_VOICE_SHORTCUT)})}</p>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="primary" icon={<Mic aria-hidden className="h-4 w-4" />} loading={writing} disabled={reading || !engine?.available || !status?.supported} onClick={() => void save()}>{t('ui.voice.global.save')}</Button>
           {status && !status.accessibility && <Button size="sm" disabled={writing || reading} onClick={() => void permission()}>{t('ui.voice.global.permission')}</Button>}

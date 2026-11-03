@@ -17,7 +17,8 @@ const roles=${JSON.stringify(roles)}
 const caps={observer:['read'],collaborator:['read','contribute'],administrator:['read','contribute','manage']}
 window.state={origin:'https://fixture.invalid',access:{session_id:'owner',owner:'local-owner',revision:7,members:{'local-owner':['manage'],...Object.fromEntries(roles.map(role=>['Original-'+role,caps[role]]))},profiles:Object.fromEntries(roles.map(role=>['Original-'+role,{display_name:'Original profile 原文 '+role}]))},invitations:roles.map(role=>({id:'Original invite '+role,display_name:'Original invitation 原文 '+role,role,status:'open',expires_at:123}))}
 collaboration.state=async()=>{window.reads++;return {ok:true,data:window.state}}
-createRoot(document.getElementById('root')).render(React.createElement(CollaborationButton,{sessionId:'owner'}))
+function Fixture(){const [open,setOpen]=React.useState(false);return React.createElement(CollaborationButton,{sessionId:'owner',open,onOpen:()=>setOpen(true),onClose:()=>setOpen(false)})}
+createRoot(document.getElementById('root')).render(React.createElement(Fixture))
 `
 await browserScenario(async({server,browser})=>{
  const page=await browser.newPage(),errors=[],requests=[];page.on('pageerror',error=>errors.push(error.message))

@@ -8406,7 +8406,7 @@
   "ui.voice.dictation.useWindows": "Focus a text field, hold Ctrl+Space to speak, then release to insert text. If you changed the shortcut, use the one set in Hex.",
   "ui.voice.dictation.lifecycle": "Dictation runs independently. Quit it from Hex when finished.",
   "ui.voice.dictation.inHarness": "In Harness",
-  "ui.voice.dictation.composer": "Click the microphone beside Send to start and finish recording, or press Ctrl+Shift+Space in the editor. Text is added to your draft for review.",
+  "ui.voice.dictation.composer": "Click the microphone beside Send to start and finish recording, or press {shortcut} in the editor. Text is added to your draft for review.",
   "ui.voice.dictation.requested": "Open request sent. Complete any setup shown in Hex before dictating.",
   "ui.voice.dictation.unconfirmed": "Could not confirm opening. Check the Hex window before opening again.",
   "ui.voice.dictation.missing": "The built-in voice engine is missing. Install the complete Harness desktop app.",
@@ -8425,7 +8425,7 @@
   "ui.voice.global.disabled": "Global dictation is off.",
   "ui.voice.global.enable": "Enable global dictation",
   "ui.voice.global.shortcut": "Global shortcut",
-  "ui.voice.global.toggleHelp": "Press the shortcut once to record, and again to transcribe. Default: {shortcut}.",
+  "ui.voice.global.toggleHelp": "Click the shortcut field and press a key combination. Press it once to record, and again to transcribe. Default: {shortcut}.",
   "ui.voice.global.save": "Save dictation settings",
   "ui.voice.global.saved": "Dictation settings saved.",
   "ui.voice.global.permission": "Allow input into other apps",
@@ -8466,5 +8466,6 @@
   "ui.collaboration.error.screenshot/permission-required": "Screen Recording settings are open. Allow the app running Harness, then click Screenshot again. Restart that app if macOS asks you to.",
   "ui.collaboration.error.screenshot/accessibility-required": "Accessibility settings are open. Allow the app running Harness, then click Hide window and capture again.",
   "ui.collaboration.error.screenshot/permission-settings-failed": "Could not open the permission request. Try this feature again to request access.",
-  "desktop.release.cameraUsage": "Harness uses the camera only when you allow it for a website."
+  "desktop.release.cameraUsage": "Harness uses the camera only when you allow it for a website.",
+  "ui.voice.backendMismatch": "The voice API is missing from the running backend. Restart Harness and check that the app and backend use the same version."
 }
