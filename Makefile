@@ -1,5 +1,5 @@
 # Harness 开发命令
-.PHONY: help verify verify-plan test-full test test-python test-web test-desktop test-browser check test-verbose ui dev lint clean hex-build hex-clean voice
+.PHONY: help verify verify-plan test-full test test-python test-web test-desktop test-browser check test-verbose ui dev lint clean hex-build hex-clean hex-vendor desktop-check voice
 
 PYTHON ?= python3
 export HARNESS_PYTHON := $(PYTHON)
@@ -19,7 +19,9 @@ help:
 	@echo "  make dev           启动 Web 热更新与 Python 自动重载"
 	@echo "  make lint          语法与未使用 import 检查"
 	@echo "  make voice         打开全局语音听写与快捷键设置（须已安装或构建 Hex）"
-	@echo "  make hex-build     构建本机 Hex 语音引擎"
+	@echo "  make hex-build     可选：本地编译 Hex 语音引擎（打包默认已用版本库预编译引擎）"
+	@echo "  make hex-vendor    打印登记/升级版本库预编译引擎的用法"
+	@echo "  make desktop-check 只检查桌面构建环境缺件（不修改任何文件）"
 	@echo "  make clean         清理缓存"
 
 test: check test-python test-web
@@ -66,13 +68,26 @@ clean:
 	find . -name '*.pyc' -delete 2>/dev/null || true
 	rm -rf .pytest_cache 2>/dev/null || true
 
-# 构建 vendored hex 语音服务二进制（先装 Rust 工具链与 CMake，需要本机编译工具链）
+# 可选：构建 vendored hex 语音服务二进制（需要 Rust + CMake + 匹配的系统 SDK）。
+# 桌面打包默认使用 desktop/hex-engine/ 下随版本库分发的官方预编译引擎，
+# 不需要执行本目标；本地编译产物写入 harness/resources/hex/，作为优先级最低的回退。
 hex-build:
 	"$(PYTHON)" scripts/build-hex.py
 
 hex-clean:
 	@echo "删除 vendored hex 的构建缓存（仅删除本项目创建并标记的目录）"
 	"$(PYTHON)" scripts/build-hex.py --clean-cache
+
+hex-vendor:
+	@echo "登记/升级随版本库分发的预编译引擎，例如："
+	@echo "  node scripts/vendor-hex-engine.mjs /path/to/hex --version 3.3.0 --source 'https://anoma.ly/hex/download/macos-arm64-dmg'"
+	@echo "  node scripts/vendor-hex-engine.mjs /path/to/hex --check   # 只校验不写入"
+	@echo "完成后执行 git add desktop/hex-engine；详见 desktop/hex-engine/README.md"
+
+# 打包前的环境预检：检出 npm ci 未完整展开的依赖、缺失的平台二进制与 electron/dist。
+# npm run package 会自动执行修复版；此目标用于 CI 或人工只读核对。
+desktop-check:
+	node scripts/bootstrap-desktop-build.mjs --check
 
 # 独立原生听写进程，为前台任意应用提供全局快捷键。
 voice:

@@ -6,6 +6,12 @@ module.exports = async function () {
   const {setupCopy} = await import('./setup-copy.mjs')
   const copy = setupCopy()
   const config = yaml.load(readFileSync(path.join(__dirname, 'electron-builder.yml'), 'utf8'))
+  // 本机/沙箱构建若 zip 附加工序不可用，可用 HARNESS_MAC_TARGETS=dmg 只打 DMG。
+  // 正式发布不设置该变量，保持 dmg + zip（release-assets.mjs 需要 zip 与 blockmap）。
+  if (process.env.HARNESS_MAC_TARGETS && config.mac) {
+    const targets = process.env.HARNESS_MAC_TARGETS.split(',').map(value => value.trim()).filter(Boolean)
+    if (targets.length) config.mac.target = targets
+  }
   config.publish = updateSource(process.env, copy)
   config.extraMetadata = {...config.extraMetadata, harnessUpdateSource:config.publish}
   config.mac.extendInfo = {...config.mac.extendInfo, NSMicrophoneUsageDescription:copy('desktop.release.microphoneUsage'), NSCameraUsageDescription:copy('desktop.release.cameraUsage')}

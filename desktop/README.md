@@ -82,17 +82,63 @@ Windows 原生顶栏显式验收入口为 `node desktop/tests/windows-titlebar-s
 
 安装版内置 CPython 3.14.10、锁定依赖、内置技能、前端及 Hex 识别引擎，无需用户安装 Python、Node.js 或 npm；语音输入与全局听写由 Harness 自己管理，无需另行安装 Hex；入口及边界见[语音输入](../docs/hex-stt.md)。Git 与用户项目所需 SDK 由项目环境提供。应用更新不清理或迁移会话、凭据及用户设置。
 
-构建要求 Node.js 22+、npm、uv，并在目标系统和目标 CPU 架构上执行；macOS 另需 Swift 编译器构建原生输入辅助程序。先通过 `make hex-build` 准备本机识别引擎，或用 `HARNESS_HEX_BINARY` 指定匹配系统与 CPU 的合法预编译引擎。缺失或身份不匹配时拒绝打包，运行时不要求用户安装独立 Hex。保留的手动构建工作流使用 uv 0.13.6，本机 uv 0.11.5 也可读取仓库固定的下载清单，不依赖其内置目录是否包含 CPython 3.14.10：
+构建要求 Node.js 22+、npm、uv，并在目标系统和目标 CPU 架构上执行；macOS 另需 Swift 编译器构建原生输入辅助程序。识别引擎**默认取自随版本库分发的 `desktop/hex-engine/<平台>-<架构>/`**，无需本机编译；也可用 `HARNESS_HEX_BINARY` 显式指定匹配系统与 CPU 的合法预编译引擎，而 `make hex-build` 写入 `harness/resources/hex/` 的本地编译产物只作为最后回退。缺失或身份不匹配时拒绝打包，运行时不要求用户安装独立 Hex。保留的手动构建工作流使用 uv 0.13.6，本机 uv 0.11.5 也可读取仓库固定的下载清单，不依赖其内置目录是否包含 CPython 3.14.10：
 
 ```sh
 npm --prefix model-runtime ci
 npm --prefix web ci
 npm --prefix desktop ci
+# 可选：只读预检构建环境缺件（npm run package 会自动运行修复版）
+make desktop-check
 # 当前桌面安装包发布与更新仓库
 export HARNESS_UPDATE_REPOSITORY='lengweiping1983/SuperHarness'
 # 或 export HARNESS_UPDATE_URL='https://downloads.example.com/harness/stable/'
 npm --prefix desktop run package
 ```
+
+### 随版本库分发的 Hex 引擎
+
+`desktop/hex-engine/` 是打包的长期引擎来源，**纳入版本库**；`output/` 会被清理，`harness/resources/hex/` 只是打包期工作副本（两者都被 `.gitignore` 忽略），不要作为依赖来源。目录内每个平台子目录含二进制、`LICENSE`、`THIRD_PARTY_NOTICES.md` 和记录版本／来源／SHA-256 的 `engine.json`。查找优先级：
+
+1. `HARNESS_HEX_BINARY`（显式覆盖，绝对路径或相对仓库根目录）；
+2. `desktop/hex-engine/<tag>/hex`（默认，`tag` 为 `macos-arm64`、`macos-x86_64`、`windows-x86_64` 等）；
+3. `harness/resources/hex/<tag>/hex`（`make hex-build` 本地编译产物的兼容回退）。
+
+升级引擎用标准脚本，它会校验 Mach-O／PE 头中的平台与 CPU、计算 SHA-256、复制许可证、清除 macOS 隔离属性并重写 `engine.json`：
+
+```sh
+node scripts/vendor-hex-engine.mjs /path/to/hex --check       # 先只读校验
+node scripts/vendor-hex-engine.mjs /path/to/hex \
+  --version 3.3.0 --source 'https://anoma.ly/hex/download/macos-arm64-dmg'
+git add desktop/hex-engine
+```
+
+`.gitattributes` 已把该目录标记为 `binary`，禁止文本／换行转换；打包前自举会核对 `engine.json` 的 SHA-256，不一致立即报错。二进制约 60 MB，升级时留意仓库体积。
+
+不走本地编译的原因：`vendor/hex`（源码 3.2.0）在 macOS 上的 `apple-metal 0.10.0` 需要 macOS 15+ SDK 与 SwiftPM 沙箱，部分开发机只有 CommandLineTools 14.2 且系统禁用 `sandbox-exec`，本地编译无法通过；官方预编译引擎（3.3.0）已含全部平台适配。具备完整工具链时 `make hex-build` 仍可用作回退。
+
+### 构建环境自举与已知踩坑
+
+本机实测 `npm ci` 有时不会完整展开依赖树、也不执行 postinstall，会让构建在十几分钟后才以 `command not found` 或 `Cannot find module` 失败。这些情况已固化为 `scripts/bootstrap-desktop-build.mjs`，由 `npm run package`／`package:dir` 自动执行（`make desktop-check` 为只读版）：
+
+| 现象 | 根因 | 自动处理 |
+| --- | --- | --- |
+| web 构建报 `Cannot find module @esbuild/darwin-arm64`（或 `@rollup/rollup-*`） | `npm ci` 漏装 esbuild／rollup 的可选平台二进制 | 真实加载探测，按 `optionalDependencies` 版本补装 `--no-save --no-package-lock` |
+| `electron-builder: command not found` | `.bin` 软链接未生成 | `package.json` 直接用 `node ./node_modules/electron-builder/cli.js`，不依赖软链接 |
+| `Cannot find module '@sindresorhus/is'` 等 | 嵌套依赖未展开 | 探测关键模块与 CLI 冒烟，不完整则删净 `node_modules` 后 `npm ci` 重装 |
+| 打包时 `electronDist` 不存在 | electron 的 postinstall 被跳过 | 调用 `node_modules/electron/install.js` 下载分发 |
+| 准备阶段报「暂存目录不是全新目录」 | 外壳 `rm` 被 IDE 安全删除钩子接管，`rm -rf` 静默失效 | `package:prepare` 传 `--clean-staging`，由自举用 Node `fs.rmSync` 直删 `resources/`（保留 `managed/` 的 CPython 缓存）；`package:dir` 不清理以便复用 |
+| 引擎启动冒烟被 Gatekeeper 拦截 | 下载的二进制带 `com.apple.quarantine` | 对版本库引擎目录执行 `xattr -cr` |
+
+自举脚本幂等、只用 Node 内置模块，并在子进程里清除编辑器注入的 `NODE_OPTIONS` shim。`--check` 模式发现问题返回非零、不修改任何文件，适合 CI 预检。
+
+在受限沙箱中，`zip` 附加工序可能报 `zip process failed 13 / Archive write preflight unavailable`，**只影响更新用的 zip，DMG 主体不受影响**。本机开发可只打 DMG：
+
+```sh
+HARNESS_MAC_TARGETS=dmg npm --prefix desktop run package -- --arm64
+```
+
+正式发布不要设置该变量，`mac.target` 保持 `dmg` + `zip`（`release-assets.mjs` 需要 zip 与 blockmap）。
 
 Python 引导显式使用 `desktop/python-downloads.json`，固定 CPython 3.14.10、20261026 构建的下载地址与 SHA-256，来源为 [uv 0.13.6 上游清单](https://github.com/astral-sh/uv/blob/0.13.6/crates/uv-python-managed/download-metadata.json)中的 macOS／Windows arm64 和 x64 普通构建。升级运行时时同步更新清单、准备脚本、运行时元数据及回归。引导和平台／架构／版本检查在 Electron 准备前完成，失败保留 uv 原始错误并输出当前语言的处理指引，不降级 Python、不自动升级 uv。`--no-bin` 禁止安装全局命令，`--no-registry` 只禁止写入 Windows 注册表，与 Python 包索引或下载目录无关。
 
@@ -105,7 +151,7 @@ npm --prefix desktop run package
 
 该本地目录只替代 CPython 下载；Electron 和 Python 依赖仍需要各自的缓存或可用网络。清单由脚本参数指定，不使用继承的 `UV_PYTHON_DOWNLOADS_JSON_URL` 改写发行版本或哈希。镜像与 `file://` 规则见 [uv Python 下载说明](https://docs.astral.sh/uv/reference/cli/#uv-python-install)。
 
-产物位于 `.run/installers`：Windows x64 为 NSIS `.exe`；macOS arm64／x64 为 `.dmg`、更新用 `.zip`、blockmap 及 `latest-mac.yml`。准备阶段显式安装锁定版本的 Electron，构建复用已安装分发，不重复请求同一 Electron 压缩包。构建前校验运行时系统、CPU 和版本，不支持把 arm64 Python 放进 x64 安装包。仅准备应用可运行 `npm --prefix desktop run package:prepare` 和 `npm --prefix desktop run package:dir`。无签名凭据的本机开发构建可设置 `CSC_IDENTITY_AUTO_DISCOVERY=false`。
+产物位于 `.run/installers`：Windows x64 为 NSIS `.exe`；macOS arm64／x64 为 `.dmg`、更新用 `.zip`、blockmap 及 `latest-mac.yml`。准备阶段显式安装锁定版本的 Electron，构建复用已安装分发，不重复请求同一 Electron 压缩包。构建前校验运行时系统、CPU 和版本，不支持把 arm64 Python 放进 x64 安装包。仅准备应用可运行 `npm --prefix desktop run package:prepare` 和 `npm --prefix desktop run package:dir`，两者同样会自动执行构建环境自举。无签名凭据的本机开发构建可设置 `CSC_IDENTITY_AUTO_DISCOVERY=false`；受限环境只打 DMG 见上文的 `HARNESS_MAC_TARGETS=dmg`。
 
 发行准备与构建前运行时校验沿用[桌面语言选择和资源规则](../docs/internationalization.md)，`HARNESS_LANGUAGE=en` 或 `zh-CN` 可显式选择，否则按系统地区选择。自有拒绝与完成提示使用资源模板；路径、命令和外部诊断原样保留，失败不自动重放安装命令，也不自动删除已有暂存目录。
 

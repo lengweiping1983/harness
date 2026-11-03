@@ -41,7 +41,12 @@ export async function prepareVoice({root, staging, platform, arch, execute, copy
   const filename = platform === 'win32' ? 'hex.exe' : 'hex'
   const relative = path.join('harness/resources/hex', tag, filename)
   const destination = path.join(root, relative)
-  const source = binary ? path.resolve(root, binary) : destination
+  // 引擎来源优先级：显式环境变量 > 随版本库分发的预编译引擎 > 本机编译产物。
+  // desktop/hex-engine/ 是纳入版本库的长期依赖来源；harness/resources/hex/ 只是
+  // 打包期工作副本（被 .gitignore 忽略），不能作为唯一来源，否则清理产物后即无法打包。
+  const vendored = path.join(root, 'desktop/hex-engine', tag, filename)
+  const source = binary ? path.resolve(root, binary)
+    : existsSync(vendored) ? vendored : destination
   if (!existsSync(source)) throw Error(copy('desktop.release.voiceMissing', {path:source}))
   let identity
   try {identity = await voiceBinaryIdentity(source)} catch (cause) {throw Error(copy('desktop.release.voiceMismatch', {platform, arch}), {cause})}
@@ -49,11 +54,16 @@ export async function prepareVoice({root, staging, platform, arch, execute, copy
   await mkdir(path.dirname(destination), {recursive:true})
   if (source !== destination) await copyFile(source, destination)
   // 许可证与第三方声明随识别引擎分发；用户数据和模型不参与构建复制。
-  const licenses = path.basename(path.dirname(source)) === 'MacOS' && path.basename(path.dirname(path.dirname(source))) === 'Contents'
-    ? path.join(path.dirname(source), '../Resources') : path.join(root, 'vendor/hex')
+  // 依次查引擎同目录（版本库预编译引擎）、Hex.app 的 Contents/Resources、
+  // 以及 vendor/hex 源码目录，兼容三种来源。
+  const engineDir = path.dirname(source)
+  const hexAppResources = path.basename(engineDir) === 'MacOS' && path.basename(path.dirname(engineDir)) === 'Contents'
+    ? path.join(engineDir, '../Resources') : null
+  const licenseDirs = [engineDir, hexAppResources, path.join(root, 'vendor/hex')].filter(Boolean)
   for (const name of ['LICENSE','THIRD_PARTY_NOTICES.md']) {
-    const file = path.join(licenses, name)
-    if (existsSync(file)) await copyFile(file, path.join(path.dirname(destination), name))
+    const target = path.join(path.dirname(destination), name)
+    const file = licenseDirs.map(dir => path.join(dir, name)).find(candidate => existsSync(candidate))
+    if (file && path.resolve(file) !== path.resolve(target)) await copyFile(file, target)
   }
   const helpers = path.join(staging, 'voice')
   await mkdir(helpers, {recursive:true})

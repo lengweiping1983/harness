@@ -4,3 +4,7 @@ harness/llm/runtime/* text eol=lf
 # 品牌原稿与分发矢量按字节核对，跨平台检出保持一致。
 assets/brand/*.svg text eol=lf
 web/public/brand/*.svg text eol=lf
+
+# 随版本库分发的预编译 Hex 引擎是二进制，禁止任何文本/换行转换。
+# 一旦被当作文本检出，60MB Mach-O / PE 会被改写并导致 engine.json 校验失败。
+desktop/hex-engine/** binary

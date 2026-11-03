@@ -93,3 +93,7 @@ node_modules/
 
 # hex 语音服务二进制（构建产物，由 scripts/build-hex.py 生成后随 wheel 分发，不入库）
 harness/resources/hex/
+
+# 桌面打包用的官方预编译 Hex 引擎随源码库分发，必须保持可跟踪。
+# 它不能放在 output/（会被清理）；harness/resources/hex/ 与 output/ 仍只是构建期工作副本。
+!desktop/hex-engine/

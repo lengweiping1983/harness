@@ -121,8 +121,10 @@ python -m harness.cli --ui --share http://192.168.1.20:8766
 其他应用先复制文字，再在原应用仍处于前台时请求粘贴。macOS 自动粘贴需要允许 Harness 使用辅助功能。
 退出 Harness 后全局快捷键、录音窗口及所属语音服务一起收尾。
 
-源码构建可运行 `make hex-build PYTHON=.venv/bin/python`，或在打包时通过 `HARNESS_HEX_BINARY`
-提供匹配本机系统和 CPU 的已编译 Hex 引擎。缺少引擎会拒绝生成桌面安装包。
+源码构建桌面安装包时，默认使用随版本库分发的预编译引擎（`desktop/hex-engine/<平台>-<架构>/`），
+无需本机编译；也可运行 `make hex-build PYTHON=.venv/bin/python` 本地编译，或在打包时通过
+`HARNESS_HEX_BINARY` 指定匹配本机系统和 CPU 的已编译引擎。缺少引擎会拒绝生成桌面安装包。
+引擎目录与升级流程、构建环境自检见 [桌面端文档](desktop/README.md)。
 详细行为、构建与验收边界见 [语音输入](docs/hex-stt.md)。
 
 ## 开发与验证
