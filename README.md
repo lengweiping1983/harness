@@ -65,7 +65,7 @@ python -m harness.cli --cwd /path/to/project --memory-import archive.jsonl
 
 默认作用域为 project；user 使用 `--memory-scope user`，session 还须同时指定 `--memory-scope session --memory-session SESSION_ID`。导出不覆盖已有文件，导入会写入选定作用域，归档约束见 [存储与恢复](docs/storage.md)。
 
-显式 Superagent 模式使用 `python -m harness.cli --superagent /path/to/config.json`，可加 `--superagent-once` 处理当前批次后退出。配置 `autonomy` 后，一个目标可自动拆解为依赖任务，经并行工作、真实产物交接、集成、独立复核和有限修正后形成候选；默认 Router 继续支持单任务及 Thread 续接。使用 `--superagent-submit "目标"` 直接提交，`--superagent-status` 读取状态，无需手写事件 JSON。可选 GitHub／飞书信道在显式授权后接收事件、发送并核实原来源回复；飞书加密回调需安装 `.[superagent]`。配置与当前限制见 [Superagent 模式](docs/superagent.md)；工作台、完整任务监督和远程执行仍待实现。
+显式 Superagent 模式使用 `python -m harness.cli --superagent /path/to/config.json`，可加 `--superagent-once` 处理当前批次后退出。配置 `autonomy` 后，一个目标可自动拆解为依赖任务，经并行工作、真实产物交接、集成、独立复核和有限修正后形成候选；默认 Router 继续支持单任务及 Thread 续接。可选 Watchdog 会持久记录长任务心跳并在明确阈值后生成关注项或安全阻塞，不会重放未知副作用。使用 `--superagent-submit "目标"` 直接提交，`--superagent-status` 读取状态，无需手写事件 JSON。可选 GitHub／飞书信道在显式授权后接收事件、发送并核实原来源回复；飞书加密回调需安装 `.[superagent]`。配置与当前限制见 [Superagent 模式](docs/superagent.md)；工作台、远程执行和跨设备任务监督仍待实现。
 
 自主目标还支持持久控制：`--superagent-pause/--superagent-resume/--superagent-cancel --superagent-mission MISSION_ID`。控制请求写入独立账本并按请求身份幂等处理；暂停冻结新的调度，取消停止目标活动运行，状态快照保留每条控制命令及修订号。
 

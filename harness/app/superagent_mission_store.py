@@ -12,6 +12,7 @@ from ..core.errors import HarnessError
 from ..core.sqlite import prepare_database
 from .superagent_inbox import _error, _json, _text
 from .superagent_checkpoints import validate_checkpoint
+from .superagent_watchdog import validate_watchdog
 
 
 SCHEMA = '''
@@ -48,7 +49,7 @@ def packed(value):
 def validate_autonomy(value, profiles):
     """配置必须显式选择集成与复核模板，不由模型扩大工具权限。"""
     required = {'max_steps', 'max_attempts', 'max_missions', 'integrator_profile', 'reviewer_profile'}
-    if (not isinstance(value, dict) or required - set(value) or set(value) - required - {'max_work_turns'}):
+    if (not isinstance(value, dict) or required - set(value) or set(value) - required - {'max_work_turns', 'watchdog'}):
         raise _error('invalid', field='autonomy')
     for name, maximum in (('max_steps', 8), ('max_attempts', 5), ('max_missions', 128)):
         if type(value[name]) is not int or not 1 <= value[name] <= maximum:
@@ -58,9 +59,12 @@ def validate_autonomy(value, profiles):
             raise _error('invalid', field='autonomy.' + name)
     if 'max_work_turns' in value and (type(value['max_work_turns']) is not int or not 1 <= value['max_work_turns'] <= 32):
         raise _error('invalid', field='autonomy.max_work_turns')
+    normalized = dict(value)
+    if 'watchdog' in value:
+        normalized['watchdog'] = validate_watchdog(value['watchdog'])
     if profiles[value['integrator_profile']]['repo'] != profiles[value['reviewer_profile']]['repo']:
         raise _error('invalid', field='autonomy.profiles')
-    return dict(value)
+    return normalized
 
 
 def validate_plan(value, profiles, source_id, limits):

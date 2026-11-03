@@ -1,6 +1,6 @@
 # Superagent 模式与实现边界
 
-当前 Harness 提供两种显式 Superagent 协调方式：默认 Router 为事件选择 Worker 并整理回复；配置 `autonomy` 后，一个明确目标可分解为有限任务图，经真实文件交接、集成、独立复核和有限修正后交付。显式配置阶段预算后，长工作节点可在新对话、新工作树中自动接续。两种方式都复用持久收件箱、原运行、模板工具权限及独立工作树。GitHub／飞书信道可在显式授权后发送并核实原来源回复；默认 Router 还支持跨来源续接同一 Worker。动态来源管理、主动规则、Watchdog、工作台和远程执行仍未形成完整闭环。现有团队、持续目标和定时自动化保留各自语义。
+当前 Harness 提供两种显式 Superagent 协调方式：默认 Router 为事件选择 Worker 并整理回复；配置 `autonomy` 后，一个明确目标可分解为有限任务图，经真实文件交接、集成、独立复核和有限修正后交付。显式配置阶段预算后，长工作节点可在新对话、新工作树中自动接续；可选 Watchdog 会把目标进度和停滞窗口持久化，并在达到明确阈值时生成关注项或安全阻塞目标。两种方式都复用持久收件箱、原运行、模板工具权限及独立工作树。GitHub／飞书信道可在显式授权后发送并核实原来源回复；默认 Router 还支持跨来源续接同一 Worker。动态来源管理、工作台和远程执行仍未形成完整闭环。现有团队、持续目标和定时自动化保留各自语义。
 
 ## 本地文件模式运行入口
 
@@ -46,7 +46,7 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-once
 
 普通 CLI 的对话、UI、外部执行器、记忆归档及运行覆盖参数不能与该模式混用。全局 `--language` 控制 CLI 帮助和入口提示，配置中的 `language` 控制两个模型宿主及运行提示词。运行器直接使用显式配置和上述密钥环境变量，不通过普通 `make_harness` 或 `HarnessConfig.from_env` 读取个人运行设置、密钥池文件或连接器配置；两个专用宿主仍使用自身状态目录中的当前存储。此命令会调用配置的真实模型端点并执行模板授予的工具，不能把只读示例配置误当作操作系统沙箱。
 
-配置最多 131072 字节，拒绝未知字段、重复 JSON 对象键及非标准数值。`state_dir` 和模板 `repo` 支持 `~`；相对路径以配置文件所在目录为基准解析。必填字段见示例；可选 `max_active` 默认为 3、`max_workers` 默认为 128、`interval` 默认为 0.5 秒、`once_timeout` 默认为 600 秒，范围分别为 1–128、1–128、0.01–60 秒和大于 0 至 86400 秒。`autonomy` 的格式见下节。来源和模板各最多 32 项，其余字段边界沿用后文 SDK。配置按标准化后的完整值绑定该状态目录，不能在重启时静默替换模型、来源或工具权限；当前没有热更新配置、迁移或重新绑定入口。
+配置最多 131072 字节，拒绝未知字段、重复 JSON 对象键及非标准数值。`state_dir` 和模板 `repo` 支持 `~`；相对路径以配置文件所在目录为基准解析。必填字段见示例；可选 `max_active` 默认为 3、`max_workers` 默认为 128、`interval` 默认为 0.5 秒、`once_timeout` 默认为 600 秒，范围分别为 1–128、1–128、0.01–60 秒和大于 0 至 86400 秒。`autonomy` 的格式见下节；其中可选 `watchdog` 的 `stale_after` 为 1–604800 秒，`max_stale_ticks` 为 1–32，`action` 只能是 `attention` 或 `block`。来源和模板各最多 32 项，其余字段边界沿用后文 SDK。配置按标准化后的完整值绑定该状态目录，不能在重启时静默替换模型、来源或工具权限；当前没有热更新配置、迁移或重新绑定入口。
 
 运行目录包含 `incoming/`、`receipts/`、`drafts/`、`status.json`、`service.sqlite3`、收件箱及协调账本，以及独立的 `router-home/`、`worker-home/` 和网关目录。启动前持有本机非阻塞进程锁，第二个实例在构造模型宿主前拒绝；正常退出或进程结束释放锁，锁文件保留。首次 Router 对话先记录创建意图，再在初始头中保存配置指纹；重启按确切元数据回查，不因回执丢失重复建立对话。已有结构或身份不符时保留原件并明确报错。
 
@@ -99,7 +99,12 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
   "max_attempts": 3,
   "max_missions": 16,
   "integrator_profile": "inspect",
-  "reviewer_profile": "inspect"
+  "reviewer_profile": "inspect",
+  "watchdog": {
+    "stale_after": 900,
+    "max_stale_ticks": 3,
+    "action": "attention"
+  }
 }
 ```
 
@@ -115,7 +120,9 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 6. **有限修正**：复核明确失败时，原集成对话在同一工作树中接收结构化反馈，形成新运行；随后建立新的复核对话和工作树。工作节点的历史不重放，旧复核不能替代本轮证据。集成与复核最多各运行 `max_attempts` 次；耗尽进入 `blocked`，原因 `budget/attempts-exhausted`。
 7. **完成与发布**：所有标准通过、最终回复有效且来源修订仍授权时，目标进入 `completed`，并在同一协调事务追加独立的完成序号。快慢目标反序结束不会漏掉后完成的旧目标。最终候选通过现有本地发布及已授权信道发送；中间节点和失败推测不自动广播。
 
-目标状态为 `planning/running/integrating/reviewing/completed/blocked/unknown/rejected/suppressed/cancelled`。`max_missions` 限制活动目标，`max_workers` 仍限制保留的全部 Worker 创建记录；不会隐式删除旧工作树或释放历史容量。完整报告与逐项证据留在 `missions.sqlite3`，原工具日志、用量及轮次仍属于原宿主，协调账本不复制执行历史。只读监督的字段与边界见下节。
+目标状态为 `planning/running/integrating/reviewing/completed/blocked/unknown/rejected/suppressed/cancelled`。`max_missions` 限制活动目标，`max_workers` 仍限制保留的全部 Worker 创建记录；不会隐式删除旧工作树或释放历史容量。完整报告与逐项证据留在 `missions.sqlite3`，原工具日志、用量及轮次仍属于原宿主，协调账本不复制执行历史。启用 autonomy 时会在同一状态目录旁创建独立的 `watchdog.sqlite3`，保存每个目标的进度指纹、最后进展、停滞窗口和升级原因；它不复制工具输出，也不改变原运行所有权。未配置 `watchdog` 时使用 `stale_after=900` 秒、`max_stale_ticks=3`、`action=attention` 的安全默认值。
+
+Watchdog 按每个目标独立的有界采样间隔观察目标账本和任务状态，采样不会把高频协调 tick 变成额外的磁盘事务，也不会让并行目标互相抢占心跳。进度指纹同时包含目标账本、任务交付和原运行的有界活动摘要；工具事件、轮次或最后活动变化会清零停滞计数。指纹在一个 `stale_after` 窗口内没有变化时最多增加一个停滞窗口，避免高频 tick 放大证据。`attention` 将目标标为 `stalled` 并在 `status.json` 的顶层 `watchdog` 及目标 `watchdog` 字段中给出有界摘要，供工作台或人工处理；它不会取消、重放或复制未知运行。只有显式选择 `action=block` 且达到 `max_stale_ticks`，协调器才把活动目标安全转为 `blocked`，原因固定为 `watchdog/stalled`。重启只回读心跳账本，不发送信号、不创建资源、不重放命令。
 
 运行提交、导入、捕获均先记录意图。丢失确认后只按原提交键或确切导入／交付树回查；不能确认则 `unknown`，不重放写入。原运行失败或重启中断进入 `blocked`，不会因为长时间没有文本重新执行原命令。来源撤销在创建、提交和最终完成前复核，已受理操作仍由原宿主收尾。
 
@@ -184,7 +191,7 @@ python -m harness.cli --superagent /path/to/superagent.json \
 
 ### 自主目标的只读监督
 
-`status.json` 的 `missions.states` 统计全部目标；`recent` 最多展示 16 项，依次优先活动目标、`unknown/blocked/rejected/cancelled`、`suppressed`、已完成目标，同类按接纳序号倒序。`total/shown/has_more` 明示总量与截断，不能把 `recent` 当成全部任务清单。每个目标含原来源、工作树、交付树、修正轮数、有界完成标准及复核摘要；`budget` 提供当前尝试、上限及 `planning/delivery` 阶段，尚无合法计划的终止目标仍归规划阶段。`work.total/delivered` 仅表示计划工作节点数与已冻结交付数，没有计划时总数为 `null`，这些数值不是业务完成百分比。
+`status.json` 的 `missions.states` 统计全部目标；`recent` 最多展示 16 项，依次优先活动目标、`unknown/blocked/rejected/cancelled`、`suppressed`、已完成目标，同类按接纳序号倒序。`total/shown/has_more` 明示总量与截断，不能把 `recent` 当成全部任务清单。每个目标含原来源、工作树、交付树、修正轮数、有界完成标准及复核摘要，并含 `watchdog` 心跳摘要或 `null`；`budget` 提供当前尝试、上限及 `planning/delivery` 阶段，尚无合法计划的终止目标仍归规划阶段。顶层 `watchdog.states` 统计 `healthy/stalled/blocked`，`items` 有界列出最需要关注的目标。`work.total/delivered` 仅表示计划工作节点数与已冻结交付数，没有计划时总数为 `null`，这些数值不是业务完成百分比。
 
 任务的 `run` 按原稳定提交键核对运行身份，从该 `run_id` 的唯一轮次事件派生最后活动及工具计数。同一集成对话的下一轮不会覆盖上一轮进度。`run.turn` 是本运行的确切轮次，尚未开始时为 `null`；目标同时提供原 `revision/thread_ids`，用于绑定本机节点指令。创建、开始、结束时间保留原运行的 Unix 秒值，`last_activity.time` 保留原事件的 Unix 毫秒值；无本轮事件时为 `null`。`tools.started/completed/errors` 分别统计实际开始、具有唯一且身份匹配结果、已确认错误；`unconfirmed` 是已开始但缺少确切配对结果的总数，包含尚在执行与已中断的调用。`active` 只列当前仍执行的调用名称，最多 16 项，每项最多 128 字符，`active_truncated` 标记截断。轮次结束不能把缺失结果伪装为完成，停止也不证明未知副作用已撤销。运行正文、工具参数、输出和错误原文不进入该运行摘要。
 
@@ -512,9 +519,11 @@ Router 对照冻结名单选择已有任务；推理期间新建 Worker 不能�
 2. 常驻协调层：在已有连续 Router、任务续接和跨来源 Thread 关联上补齐完整按需召回及协调工具。
 3. 自动调度与任务关联：在已有模板创建、任务复用、持续消费和容量续投之上补齐输入采用回执、交回、循环路由限制及归档管理。
 4. 持久消费与交付：补齐事件已被模型采用的独立证据、其他外部信道的发送核实及未知状态的显式人工处理入口。
-5. 任务监督：在自主模式已有依赖、后台等待、修正预算和明确阻塞原因的基础上，补齐实际进展诊断、人工核实及长期运行证据，不能只看进程是否存活。
+5. 任务监督：Watchdog 已提供持久心跳、停滞识别和安全升级；仍需补齐实际工具进展的跨运行诊断、人工核实及长期运行证据，不能只看进程是否存活。
 6. 独立部署与远程执行：计算、持久状态及设备环境的实际解耦，以及设备断线重连的核验。
 7. 用户可操作入口：在已有本地 CLI 运行入口上补齐工作台、来源策略编辑、任务归属、待决问题和结果核实。
+
+Watchdog 仍不是跨设备租约、操作系统级进程监督或业务验收。远程执行、断线重连和工作台需要在这些事实之上继续补齐。
 
 `--superagent CONFIG` 开启前述运行模式，按配置选择本地文件及可选 GitHub／飞书信道；以上尚未实现的完整闭环不能由该参数开启，也不能直接加载绑定其他 Harness 运行时的 Superagent 插件。
 

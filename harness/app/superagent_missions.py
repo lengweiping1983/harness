@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from .superagent_mission_store import TERMINAL, digest, packed, validate_plan
 from .superagent_mission_status import dependencies, run_progress, waiting_reason
 from .superagent_mission_control import MissionControlRuntime
 from .superagent_checkpoints import validate_checkpoint, work_heads, status_jobs
+from .superagent_watchdog import MissionWatchdog
 from .superagent_router import SuperagentRouter
 from .worktree_delivery import snapshot_tree
 
@@ -79,6 +81,17 @@ class SuperagentMissions(SuperagentRouter):
         self.control = control
         self.control_runtime = MissionControlRuntime(self) if control is not None else None
         self.results = MissionResults(self, reply_limits)
+        # Watchdog 使用独立账本，避免旧 missions.sqlite3 需要隐式迁移。
+        watchdog_identity = packed({'instance': self.inbox.instance_id,
+                                    'watchdog': self.store.limits.get('watchdog')})
+        self.watchdog = MissionWatchdog(self.store.path.with_name('watchdog.sqlite3'),
+                                        instance_id=self.inbox.instance_id,
+                                        identity=watchdog_identity,
+                                        limits=self.store.limits.get('watchdog'))
+        # 每个目标独立节流；全局节流会让并行目标中只有第一个目标获得心跳。
+        self._watchdog_next_sample = {}
+        self._watchdog_cache = {}
+        self._watchdog_status_cache = None
         self._tick_task = None
 
     def _allowed(self, mission):
@@ -143,6 +156,26 @@ class SuperagentMissions(SuperagentRouter):
                 raise _error('corrupt')
         else:
             self._worker_row(self.store.mission(job['mission']), job)
+
+    def _watchdog_activity(self, jobs):
+        """从原运行派生有界活动摘要，避免把静止的账本字段误当成静止的运行。"""
+        activity = []
+        active_states = {'submitting', 'accepted', 'capturing', 'unknown'}
+        for job in jobs:
+            if job['state'] not in active_states:
+                continue
+            session_id = job['data'].get('session_id')
+            if not session_id or 'payload' not in job['data']:
+                continue
+            record = self._submission(job)
+            if record is None:
+                continue
+            host = self.harness if job['role'] == 'plan' else self.dispatcher.harness
+            progress = run_progress(record, host.get_session(session_id).events)
+            activity.append({'job_id': job['id'], 'run_id': record.id, 'status': progress['status'],
+                             'settled': progress['settled'], 'turn': progress['turn'],
+                             'last_activity': progress['last_activity'], 'tools': progress['tools']})
+        return activity
 
     def _reconcile_job(self, job):
         record = self._record(job)
@@ -682,6 +715,18 @@ class SuperagentMissions(SuperagentRouter):
             if not self._allowed(mission):
                 self._stop_mission(mission, 'suppressed', 'source/revoked')
                 continue
+            now = time.monotonic()
+            next_sample = self._watchdog_next_sample.get(mission['id'], 0.0)
+            if now >= next_sample:
+                jobs = self.store.jobs(mission['id'])
+                heartbeat = self.watchdog.observe(mission, jobs, activity=self._watchdog_activity(jobs))
+                self._watchdog_next_sample[mission['id']] = now + max(0.25, min(self.watchdog.limits['stale_after'], 5.0))
+                self._watchdog_cache[mission['id']] = heartbeat
+                self._watchdog_status_cache = self.watchdog.status()
+                if heartbeat['state'] == 'blocked':
+                    # 只升级已观察到的长期停滞，不回放、不重提原运行。
+                    self._stop_mission(mission, 'blocked', 'watchdog/stalled')
+                    continue
             self._schedule(mission)
             for job in self.store.jobs(mission['id']):
                 mission = self.store.mission(mission['id'])
@@ -727,6 +772,17 @@ class SuperagentMissions(SuperagentRouter):
                     events[key] = host.get_session(sid).events
                 progress = run_progress(record, events[key])
                 item['run'] = progress
+                if job['state'] == 'accepted' and sid not in background:
+                    # 运行已结算但后台作业仍未交回时，原工具回执是比瞬时注册表更稳定的证据。
+                    try:
+                        calls = tool_invocations(turn_events(events[key], run_id=record.id))
+                    except ValueError as exc:
+                        raise _error('corrupt') from exc
+                    background = set(background)
+                    if any((isinstance(call.get('display'), Mapping) and call['display'].get('background') is True)
+                           or (isinstance(call.get('input'), Mapping) and call['input'].get('run_in_background') is True)
+                           for call in calls):
+                        background.add(sid)
         unresolved = dependencies(mission, job, jobs)
         active = host.runtime.active.get(sid)
         reason = waiting_reason(mission, job, progress=progress, unresolved=unresolved,
@@ -770,12 +826,20 @@ class SuperagentMissions(SuperagentRouter):
             if self.control_runtime is not None and control['mode'] == 'cancelled':
                 control['stopping'] = self.control_runtime.stopping(mission['id'])
             visible = status_jobs(jobs) if 'max_work_turns' in self.store.limits else jobs
+            heartbeat = self._watchdog_cache.get(mission['id'])
+            if heartbeat is None and self._watchdog_status_cache is not None:
+                heartbeat = next((item for item in self._watchdog_status_cache['items']
+                                  if item['mission'] == mission['id']), None)
+            if heartbeat is None:
+                # 有界顶层摘要可能截断较旧目标；目标详情仍按稳定身份回查自己的心跳。
+                heartbeat = self.watchdog.get(mission['id'])
             recent.append({**{key: mission[key] for key in ('id', 'state', 'reason', 'round', 'base_commit', 'source_id', 'event_id', 'revision', 'thread_ids')},
                 'budget': {'attempt': mission['round'], 'max_attempts': self.store.limits['max_attempts'],
                            'phase': 'planning' if mission['plan'] is None else 'delivery'},
                 'work': {'total': len(mission['plan']['steps']) if mission['plan'] else None,
                          'delivered': sum(job['state'] == 'done' for job in work_heads(jobs).values())},
                 'control': control,
+                'watchdog': heartbeat,
                 'acceptance': [{**check, 'criterion': check['criterion'][:512],
                                 'criterion_truncated': len(check['criterion']) > 512}
                                for check in mission['plan']['acceptance']] if mission['plan'] else [],
@@ -791,4 +855,5 @@ class SuperagentMissions(SuperagentRouter):
                 'missions': {'states': counts, 'recent': recent, 'total': sum(counts.values()),
                              'shown': len(recent), 'has_more': sum(counts.values()) > len(recent)},
                 **({'control': self.control.status()} if self.control is not None else {}),
-                **({'guidance': self.guidance.status()} if self.guidance is not None else {})}
+                **({'guidance': self.guidance.status()} if self.guidance is not None else {}),
+                'watchdog': self._watchdog_status_cache or self.watchdog.status()}
