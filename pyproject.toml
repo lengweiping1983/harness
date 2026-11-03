@@ -62,7 +62,9 @@ harness = [
   "academy/content/**/*.json",
   "academy/content/**/*.md",
   "academy/content/**/*.py",
-  # hex 语音服务二进制：由 scripts/build-hex.py 构建后随 wheel 分发，
-  # hex_tools.py 以包内固定路径加载，缺包会报"请先 make hex-build"。
+  # hex 语音服务二进制：由 desktop/prepare-voice.mjs 从 desktop/hex-engine/
+  # （随版本库分发的官方预编译引擎）复制到打包期运行时路径，再随 wheel 分发；
+  # 本仓库不再包含 Hex 源码，也不在打包时编译引擎。
+  # hex_tools.py 以包内固定路径加载，缺失即是安装包不完整。
   "resources/hex/**/*",
 ]

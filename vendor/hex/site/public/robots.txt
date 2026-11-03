@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: __ORIGIN__/sitemap.xml

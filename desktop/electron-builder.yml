@@ -13,6 +13,7 @@ files:
   - '!prepare-release.mjs'
   - '!prepare-voice.mjs'
   - '!verify-runtime.mjs'
+  - '!hex-engine-manifest.mjs'
   - '!release-assets.mjs'
   - '!electron-builder.config.cjs'
   - '!update-source.cjs'

@@ -45,7 +45,9 @@ export async function assembleAssets(input, output) {
   const merged = [...manifests].map(([name, rows]) => [name, mergeManifests(rows)])
   if (!manifests.has('latest.yml') || !manifests.has('latest-mac.yml')) throw Error('Both Windows and macOS update manifests are required')
   const mac = merged.find(([name]) => name === 'latest-mac.yml')[1]
-  if (!mac.files.some(file => /-arm64\.zip$/.test(file.url)) || !mac.files.some(file => /-x64\.zip$/.test(file.url))) throw Error('Both macOS architectures are required')
+  // 官方 Hex 3.3.0 未提供 macOS x64 资产，随版本库分发的引擎只有 macos-arm64，
+  // 发布矩阵因此只要求 macOS arm64；日后登记 macos-x86_64 引擎后可在此恢复双架构。
+  if (!mac.files.some(file => /-arm64\.zip$/.test(file.url))) throw Error('macOS arm64 installer is required')
   if (!merged.find(([name]) => name === 'latest.yml')[1].files.some(file => /-win-x64\.exe$/.test(file.url))) throw Error('Windows x64 installer is required')
   const versions = new Set(merged.map(([, manifest]) => manifest.version))
   if (versions.size !== 1) throw Error('Installer versions differ across platforms')
@@ -56,7 +58,7 @@ export async function assembleAssets(input, output) {
     if (actual.sha512 !== file.sha512 || actual.size !== file.size) throw Error('Installer checksum mismatch: ' + file.url)
   }
   const version = [...versions][0]
-  const required = [`Harness-${version}-win-x64.exe`, ...['arm64','x64'].flatMap(arch => [`Harness-${version}-mac-${arch}.zip`, `Harness-${version}-mac-${arch}.dmg`])]
+  const required = [`Harness-${version}-win-x64.exe`, `Harness-${version}-mac-arm64.zip`, `Harness-${version}-mac-arm64.dmg`]
   const referenced = new Set(merged.flatMap(([, manifest]) => manifest.files.map(file => file.url)))
   for (const name of required) {
     if (!sources.has(name) || !referenced.has(name)) throw Error('Missing release asset or manifest entry: ' + name)

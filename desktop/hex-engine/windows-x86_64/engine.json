@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "version": "3.3.0",
+  "platform": "win32",
+  "arch": "x64",
+  "sha256": "8eb6dfb49d59d30d7834fdbe52e4ac598a650989c2611590585fb4210d4fd1b2",
+  "source": "https://github.com/anomalyco/hex/releases/download/v3.3.0/hex-3.3.0-windows-x64.exe",
+  "vendored_at": "2026-11-03",
+  "binary": "hex.exe",
+  "notes": "官方预编译 Hex 语音引擎，随源码库分发；由 scripts/vendor-hex-engine.mjs 登记。请勿手工编辑 sha256。"
+}

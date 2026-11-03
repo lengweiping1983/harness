@@ -19,11 +19,11 @@
  * 问题；`--check` 只报告不修改，可用于 CI 预检。只依赖 Node 内置模块。
  */
 
-import {existsSync, readFileSync, rmSync, createReadStream} from 'node:fs'
-import {createHash} from 'node:crypto'
+import {existsSync, readFileSync, rmSync} from 'node:fs'
 import {spawnSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import path from 'node:path'
+import {platformTag, assertEngineIntegrity, engineDir} from '../desktop/hex-engine-manifest.mjs'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const CHECK = process.argv.includes('--check')
@@ -183,38 +183,30 @@ function ensureFreshStaging() {
   }
 }
 
-async function sha256(file) {
-  return new Promise((resolve, reject) => {
-    const hash = createHash('sha256')
-    const stream = createReadStream(file)
-    stream.on('data', chunk => hash.update(chunk))
-    stream.on('error', reject)
-    stream.on('end', () => resolve(hash.digest('hex')))
-  })
-}
-
-/** 核对随版本库分发的预编译引擎，防止二进制被换行转换或损坏。 */
+/** 核对随版本库分发的预编译引擎：清单、文件头身份、sha256 一次校验。
+ *  实现收敛到 desktop/hex-engine-manifest.mjs，与登记脚本、prepare-voice、
+ *  verify-runtime 共用同一份规则，避免各处解析不一致放过版本漂移。 */
 async function ensureHexEngine() {
   if (!['darwin', 'win32'].includes(PLATFORM)) {
     notes.push('非桌面目标平台，跳过引擎校验')
     return
   }
-  const tag = `${PLATFORM === 'darwin' ? 'macos' : 'windows'}-${ARCH === 'x64' ? 'x86_64' : ARCH}`
-  const dir = path.join(ROOT, 'desktop', 'hex-engine', tag)
+  const tag = platformTag(PLATFORM, ARCH)
+  const dir = path.join(engineDir(ROOT), tag)
   const manifestPath = path.join(dir, 'engine.json')
   if (!existsSync(manifestPath)) {
-    notes.push(`该平台无版本库预编译引擎 (${tag})；打包将回退到 harness/resources/hex/ 或 HARNESS_HEX_BINARY`)
+    // 桌面打包已完全不编译引擎源码：仓库内不再保留 vendored Hex 源码，也不需要
+    // Rust / CMake / MSVC / Vulkan / Apple SDK 那一整套工具链。缺少版本库预编译
+    // 引擎必须立刻失败，而不是等打包十几分钟后才报错。
+    // 唯一例外是显式设置了 HARNESS_HEX_BINARY 的自备引擎覆盖场景。
+    if (!process.env.HARNESS_HEX_BINARY) {
+      throw Error(`打包缺少版本库预编译 Hex 引擎: ${manifestPath}\n`
+        + '请用 node scripts/vendor-hex-engine.mjs <hex 二进制> --version <版本> --source <来源> 登记官方引擎。')
+    }
+    notes.push(`该平台未登记版本库引擎 (${tag})；改用 HARNESS_HEX_BINARY 显式指定的引擎`)
     return
   }
-  const meta = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  const binary = path.join(dir, meta.binary || (PLATFORM === 'win32' ? 'hex.exe' : 'hex'))
-  if (!existsSync(binary)) throw Error(`engine.json 声明的二进制不存在: ${binary}`)
-  const actual = await sha256(binary)
-  if (actual !== meta.sha256) {
-    throw Error(`hex 引擎 sha256 不匹配！期望 ${meta.sha256}，实际 ${actual}。\n`
-      + '常见原因是 git 把二进制当文本做了换行转换；请确认 .gitattributes 的 binary 标记，'
-      + '并重新执行 node scripts/vendor-hex-engine.mjs 登记引擎。')
-  }
+  const meta = assertEngineIntegrity(ROOT, tag)
   // 从 DMG/网络复制来的二进制可能带隔离属性，导致启动冒烟测试被 Gatekeeper 拦截。
   if (PLATFORM === 'darwin' && !CHECK) {
     const result = run('/usr/bin/xattr', ['-cr', dir])

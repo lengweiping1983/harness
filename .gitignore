@@ -91,7 +91,8 @@ node_modules/
 # Playwright MCP 验证产物
 .playwright-mcp/
 
-# hex 语音服务二进制（构建产物，由 scripts/build-hex.py 生成后随 wheel 分发，不入库）
+# hex 语音服务二进制（打包期工作副本，由 desktop/prepare-voice.mjs 从
+# desktop/hex-engine/ 复制而来，随 wheel 分发，不入库）
 harness/resources/hex/
 
 # 桌面打包用的官方预编译 Hex 引擎随源码库分发，必须保持可跟踪。

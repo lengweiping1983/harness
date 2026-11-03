@@ -4,20 +4,26 @@
  *
  * 用法：
  *   node scripts/vendor-hex-engine.mjs /path/to/hex \
- *     --version 3.3.0 --source 'https://anoma.ly/hex/download/macos-arm64-dmg'
- *   node scripts/vendor-hex-engine.mjs /path/to/Hex.app/Contents/MacOS/hex --check
+ *     --version 3.3.0 --source 'https://github.com/anomalyco/hex/releases/download/v3.3.0/hex-3.3.0-windows-x64.exe'
+ *   node scripts/vendor-hex-engine.mjs /path/to/hex.exe --check
  *
- * 会校验 Mach-O / PE 头中的平台与 CPU、计算 sha256、复制许可证、
- * 清除 macOS 隔离属性并生成 engine.json。--check 只校验不写入。
+ * 校验 Mach-O / PE 头中的平台与 CPU、计算 sha256、复制许可证、清除 macOS
+ * 隔离属性并生成 engine.json。--check 只校验不写入。
+ *
+ * 版本防漂移：若二进制可在本机执行，会运行 `<引擎> --version` 读取自报版本并与
+ * --version 严格比对。历史踩坑是「随版本库分发的预编译引擎 3.3.0」与「早期
+ * vendored 源码 3.2.0」并存，手工登记很容易把二进制版本写错；此校验把版本绑定到
+ * 二进制本身。仓库已不再保留 Hex 源码，登记是唯一的引擎来源。
+ * 跨平台登记（例如 macOS 上登记 Windows PE）无法执行时仅提示，不阻断。
+ *
  * 详见 desktop/hex-engine/README.md。
  */
 
-import {existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, chmodSync, openSync, readSync, closeSync} from 'node:fs'
-import {createHash} from 'node:crypto'
-import {createReadStream} from 'node:fs'
+import {existsSync, writeFileSync, copyFileSync, mkdirSync, chmodSync} from 'node:fs'
 import {spawnSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import path from 'node:path'
+import {identifyBinary, sha256File, assertEngineIntegrity, platformTag} from '../desktop/hex-engine-manifest.mjs'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const argv = process.argv.slice(2)
@@ -42,68 +48,63 @@ if (!existsSync(source)) {
   process.exit(2)
 }
 
-/** 读取文件头，识别 macOS Mach-O / Windows PE 的平台与 CPU 架构。 */
-function identify(file) {
-  const fd = openSync(file, 'r')
-  try {
-    const header = Buffer.alloc(128)
-    readSync(fd, header, 0, header.length, 0)
-    if (header.readUInt32LE(0) === 0xfeedfacf || header.readUInt32BE(0) === 0xfeedfacf) {
-      const code = header.readUInt32LE(0) === 0xfeedfacf
-        ? header.readUInt32LE(4) : header.readUInt32BE(4)
-      const arch = {0x100000c: 'arm64', 0x1000007: 'x64'}[code]
-      if (arch) return {platform: 'darwin', arch}
-    }
-    if (header.toString('ascii', 0, 2) === 'MZ') {
-      const offset = header.readUInt32LE(60)
-      if (offset < 64 || offset > 1024 * 1024 || header.readUInt32LE(offset) !== 0x4550) {
-        throw Error('无效的 Windows 可执行文件')
-      }
-      const arch = {0x8664: 'x64', 0xaa64: 'arm64'}[header.readUInt16LE(offset + 4)]
-      if (arch) return {platform: 'win32', arch}
-    }
-    throw Error('不是可识别的 macOS / Windows 可执行文件')
-  } finally {closeSync(fd)}
-}
-
-function sha256(file) {
-  return new Promise((resolve, reject) => {
-    const hash = createHash('sha256')
-    const stream = createReadStream(file)
-    stream.on('data', chunk => hash.update(chunk))
-    stream.on('error', reject)
-    stream.on('end', () => resolve(hash.digest('hex')))
-  })
-}
-
-/** 许可证与第三方声明：优先引擎同目录，其次 Hex.app 的 Resources，最后源码目录。 */
+/** 许可证与第三方声明：优先引擎同目录，其次 Hex.app 的 Resources。 */
 function licenseDirs(sourceDir) {
   const dirs = [sourceDir]
   if (path.basename(sourceDir) === 'MacOS' && path.basename(path.dirname(sourceDir)) === 'Contents') {
     dirs.push(path.join(sourceDir, '../Resources'))
   }
-  dirs.push(path.join(ROOT, 'vendor', 'hex'))
   return dirs
 }
 
-async function main() {
-  const identity = identify(source)
+/** 运行 `<引擎> --version` 读取自报版本；无法执行（跨平台/依赖缺失）时返回 null。 */
+function probeVersion(file) {
+  const result = spawnSync(file, ['--version'], {encoding: 'utf8', timeout: 15000, windowsHide: true})
+  if (result.error || result.status !== 0) return null
+  const match = /\bhex\s+(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)\b/i.exec(result.stdout || '')
+  return match ? match[1] : null
+}
+
+function assertDeclaredVersion(declared, reported) {
+  if (!reported) {
+    console.log('  · 二进制在本机不可执行（跨平台登记），跳过自报版本比对；请人工核对来源版本。')
+    return
+  }
+  if (reported !== declared) {
+    throw Error(`声明版本 ${declared} 与二进制自报版本 ${reported} 不一致；请勿手工登记错误版本。`)
+  }
+  console.log(`  · 二进制自报版本 ${reported} 与声明一致`)
+}
+
+function main() {
+  const identity = identifyBinary(source)
   const platform = options.platform || identity.platform
   const arch = options.arch || identity.arch
   if (platform !== identity.platform || arch !== identity.arch) {
     throw Error(`声明的 ${platform}-${arch} 与文件头识别出的 ${identity.platform}-${identity.arch} 不一致`)
   }
-  const tag = `${platform === 'darwin' ? 'macos' : 'windows'}-${arch === 'x64' ? 'x86_64' : arch}`
+  const tag = platformTag(platform, arch)
   const filename = platform === 'win32' ? 'hex.exe' : 'hex'
-  const digest = await sha256(source)
+  const digest = sha256File(source)
   console.log(`识别: ${identity.platform}/${identity.arch} → ${tag}`)
   console.log(`sha256: ${digest}`)
+
   if (options.check) {
+    if (options.version) assertDeclaredVersion(options.version, probeVersion(source))
+    // --check 传入已登记目录时可顺带核对现有清单。
+    const manifest = path.join(ROOT, 'desktop', 'hex-engine', tag, 'engine.json')
+    if (existsSync(manifest)) {
+      const checked = assertEngineIntegrity(ROOT, tag)
+      console.log(`  · 现有清单 v${checked.version} 完整性校验通过`)
+    }
     console.log('\n--check：仅校验，未写入任何文件。')
     return
   }
 
   if (!options.version) throw Error('缺少 --version（例如 3.3.0）')
+  if (!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(options.version)) throw Error(`版本格式不合法: ${options.version}`)
+  assertDeclaredVersion(options.version, probeVersion(source))
+
   const dir = path.join(ROOT, 'desktop', 'hex-engine', tag)
   mkdirSync(dir, {recursive: true})
   const destination = path.join(dir, filename)
@@ -136,11 +137,14 @@ async function main() {
     notes: '官方预编译 Hex 语音引擎，随源码库分发；由 scripts/vendor-hex-engine.mjs 登记。请勿手工编辑 sha256。',
   }
   writeFileSync(path.join(dir, 'engine.json'), JSON.stringify(metadata, null, 2) + '\n')
-  console.log(`\n已登记到 ${path.relative(ROOT, dir)}`)
+  assertEngineIntegrity(ROOT, tag)
+  console.log(`\n已登记到 ${path.relative(ROOT, dir)} (v${options.version})，完整性复检通过`)
   console.log('请检查改动后执行: git add desktop/hex-engine')
 }
 
-main().catch(error => {
+try {
+  main()
+} catch (error) {
   console.error(`\n登记失败: ${error.message}`)
   process.exitCode = 1
-})
+}
