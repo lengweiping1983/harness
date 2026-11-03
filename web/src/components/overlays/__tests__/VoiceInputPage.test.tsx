@@ -4,6 +4,7 @@ import {renderToStaticMarkup} from 'react-dom/server'
 import {VoiceInputPage} from '../VoiceInputPage'
 import {setLocale, t} from '@/i18n'
 import {SETTINGS_PAGES} from '@/lib/settingsCatalog'
+import {DEFAULT_VOICE_SHORTCUT, formatVoiceShortcut} from '@/lib/desktopVoice'
 
 const hooks = vi.hoisted(() => ({cursor:0, slots:[] as unknown[], cleanups:new Map<number, () => void>()}))
 vi.mock('react', async original => ({...await original<typeof import('react')>(),
@@ -34,6 +35,7 @@ function nodes(node:unknown): ReactElement<Record<string,any>>[] {
 }
 const save=() => nodes(render()).find(node => node.props.children===t('ui.voice.global.save'))!.props.onClick()
 const checkbox=() => nodes(render()).find(node => node.type==='input' && node.props.type==='checkbox')!
+const shortcut=() => nodes(render()).find(node => node.type==='input' && node.props.spellCheck===false)!
 const refresh=() => nodes(render()).find(node => node.props.label===t('ui.voice.dictation.refresh'))!.props.onClick()
 function unmount() {for (const cleanup of [...hooks.cleanups.values()].reverse()) cleanup(); hooks.cleanups.clear()}
 function deferred<T>() {let resolve!:(value:T) => void; const promise=new Promise<T>(done => {resolve=done}); return {promise,resolve}}
@@ -43,6 +45,7 @@ beforeEach(() => {
   bridge.configure.mockReset().mockResolvedValue({ok:true,data:{...status,enabled:true}})
   bridge.permission.mockReset().mockResolvedValue({ok:true,data:status})
   vi.stubGlobal('window',{harnessDesktop:{voice:bridge}})
+  vi.stubGlobal('navigator',{platform:'MacIntel'})
   vi.stubGlobal('fetch',fetchMock)
   vi.stubGlobal('document',{hidden:false,documentElement:{},addEventListener:vi.fn(),removeEventListener:vi.fn()})
   fetchMock.mockImplementation(async () => Response.json(capabilities))
@@ -56,14 +59,49 @@ it('checks the engine and owned desktop settings without launching Hex or showin
   for (const locale of ['en','zh-CN','en'] as const) {
     await setLocale(locale)
     const html=markup()
-    expect(html).toContain(t('ui.voice.global.description'))
-    expect(html).toContain(t('ui.voice.global.toggleHelp'))
+    expect(html).toContain(t('ui.voice.dictation.composer'))
+    expect(html).not.toContain('Hex')
+    expect(html).not.toContain('The multilingual model is prepared when needed')
+    expect(html).not.toContain('多语言模型按需准备')
+    expect(html).toContain(t('ui.voice.global.toggleHelp',{shortcut:formatVoiceShortcut(DEFAULT_VOICE_SHORTCUT)}))
     expect(html).not.toContain(capabilities.download_url)
     expect(nodes(render()).filter(node => node.type === 'a')).toHaveLength(0)
   }
   expect(fetchMock).toHaveBeenCalledTimes(1)
   expect(bridge.configure).not.toHaveBeenCalled()
   expect(bridge.permission).not.toHaveBeenCalled()
+})
+
+it.each([
+  ['MacIntel','⌃ + ⌥ + Space','⌘ + ⇧ + K','Command+Shift+K'],
+  ['Win32','Ctrl + Alt + Space','Ctrl + Shift + K','Control+Shift+K'],
+])('uses native shortcut names in the field and help on %s, then saves the accelerator once',async (platform,initial,edited,accelerator) => {
+  vi.stubGlobal('navigator',{platform})
+  render(); await vi.waitFor(() => expect(checkbox().props.disabled).toBe(false))
+  for (const locale of ['en','zh-CN','en'] as const) {
+    await setLocale(locale)
+    expect(shortcut().props.value).toBe(initial)
+    expect(markup()).toContain(t('ui.voice.global.toggleHelp',{shortcut:initial}))
+    expect(markup()).not.toContain('Control+Alt+Space')
+  }
+  expect(bridge.configure).not.toHaveBeenCalled()
+  expect(bridge.permission).not.toHaveBeenCalled()
+  shortcut().props.onChange({target:{value:edited}})
+  bridge.configure.mockResolvedValueOnce({ok:true,data:{...status,shortcut:accelerator}})
+  await save()
+  expect(bridge.configure).toHaveBeenCalledExactlyOnceWith({enabled:false,shortcut:accelerator})
+  expect(shortcut().props.value).toBe(edited)
+  expect(fetchMock).toHaveBeenCalledOnce()
+})
+
+it.each(['MacIntel','Win32'])('keeps unedited stored modifier aliases when saving on %s',async platform => {
+  vi.stubGlobal('navigator',{platform})
+  const accelerator='CommandOrControl+Option+K'
+  bridge.status.mockResolvedValue({ok:true,data:{...status,shortcut:accelerator}})
+  render(); await vi.waitFor(() => expect(checkbox().props.disabled).toBe(false))
+  expect(shortcut().props.value).toBe(formatVoiceShortcut(accelerator))
+  await save()
+  expect(bridge.configure).toHaveBeenCalledExactlyOnceWith({enabled:false,shortcut:accelerator})
 })
 
 it('does not enable dictation until an explicit save and serializes double clicks',async () => {

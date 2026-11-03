@@ -10,6 +10,14 @@ class VoiceError extends Error {
   constructor(key, cause) {super(key, {cause}); this.copy = {key:'ui.voice.global.' + key}}
 }
 
+/** 自有错误只传资源身份；技术详情只保留实际底层诊断。 */
+function voiceFailure(error) {
+  let cause = error.cause ?? error
+  while (cause.copy && cause.cause) cause = cause.cause
+  const diagnostic = cause.copy ? undefined : cause.message
+  return {copy:error.copy ?? {key:'ui.voice.global.failed'}, ...(diagnostic ? {diagnostic} : {})}
+}
+
 /** 全局听写仅由 Harness 的主进程、录音窗口和所属操作共同拥有。 */
 export class DesktopVoice {
   constructor({app, BrowserWindow, globalShortcut, clipboard, screen, systemPreferences, shell, systemPermissions, getWindow, getURL, preload, nativePath, platform = process.platform}) {
@@ -173,7 +181,7 @@ export class DesktopVoice {
         const permission = await this.systemPermissions.request('accessibility')
         if (this.closed || this.active !== current) return
         if (!permission.granted) {
-          const error = new Error('System input permission required'); error.copy = permission.copy
+          const error = new Error(permission.copy.key); error.copy = permission.copy
           throw error
         }
       }
@@ -216,7 +224,7 @@ export class DesktopVoice {
     if (this.window && !this.window.isDestroyed()) {this.window.webContents.send('voice-action', {action:'cancel'}); this.window.hide()}
   }
   fail(error) {
-    this.captureFailure = {action:'error', copy:error.copy ?? {key:'ui.voice.global.failed'}, diagnostic:error.message}
+    this.captureFailure = {action:'error', ...voiceFailure(error)}
     if (!this.closed) {
       try {
         const window = this.ensureWindow()
@@ -252,5 +260,5 @@ export class DesktopVoice {
 
 export async function voiceReply(execute) {
   try {return {ok:true, data:await execute()}}
-  catch (error) {return {ok:false, copy:error.copy ?? {key:'ui.voice.global.failed'}, diagnostic:error.cause?.message ?? error.message}}
+  catch (error) {return {ok:false, ...voiceFailure(error)}}
 }

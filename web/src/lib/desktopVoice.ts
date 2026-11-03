@@ -1,4 +1,20 @@
 import type {ResourceCopy} from '@/types'
+import {isMac} from '@/lib/utils'
+
+export const DEFAULT_VOICE_SHORTCUT = 'Control+Alt+Space'
+
+/** 显示名称与 Electron 加速键分开，保存时只转换明确的按键别名。 */
+export function voiceShortcutAccelerator(value: string): string {
+  const aliases: Record<string, string> = {Ctrl:'Control', '⌃':'Control', Option:'Alt', '⌥':'Alt', Cmd:'Command', '⌘':'Command', '⇧':'Shift'}
+  return value.split('+').map(key => {key = key.trim(); return Object.hasOwn(aliases, key) ? aliases[key] : key}).join('+')
+}
+
+export function formatVoiceShortcut(value: string, mac = isMac()): string {
+  const names: Record<string, string> = mac
+    ? {Control:'⌃', Alt:'⌥', Command:'⌘', CommandOrControl:'⌘', Shift:'⇧'}
+    : {Control:'Ctrl', CommandOrControl:'Ctrl'}
+  return voiceShortcutAccelerator(value).split('+').map(key => Object.hasOwn(names, key) ? names[key] : key).join(' + ')
+}
 
 export interface DesktopVoiceStatus {
   supported: boolean

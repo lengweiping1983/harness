@@ -112,3 +112,19 @@ it('keeps system authorization guidance bilingual without recording or transcrib
   await vi.waitFor(()=>expect(bridge.phase).toHaveBeenCalledWith('second','done'))
   expect(capture.create).toHaveBeenCalledTimes(2)
 })
+
+it('shows resource-only accessibility guidance without redundant technical details or replaying permission requests',async()=>{
+  bridge.ready.mockResolvedValue({ok:true,data:{action:'error',copy:{key:'ui.systemPermission.accessibility.settings'}}})
+  render()
+  await vi.waitFor(()=>expect(text(render())).toContain(t('ui.systemPermission.accessibility.settings')))
+  for(const locale of ['en','zh-CN','en'] as const){
+    await setLocale(locale)
+    const output=text(render())
+    expect(output).toContain(t('ui.systemPermission.accessibility.settings'))
+    expect(output).not.toContain(t('ui.voice.diagnostic'))
+    expect(output).not.toContain('System input permission required')
+  }
+  expect(bridge.ready).toHaveBeenCalledOnce()
+  expect(capture.create).not.toHaveBeenCalled()
+  expect(capture.request).not.toHaveBeenCalled()
+})
