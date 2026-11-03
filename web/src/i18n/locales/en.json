@@ -4899,5 +4899,20 @@
   "ui.desktop.menu.updateInvalidRelease": "The update source returned invalid release information. Check the release page.",
   "ui.desktop.menu.updateMetadataTooLarge": "The release information is too large to read safely. Check the release page.",
   "ui.desktop.menu.updateHttpFailure": "The update source returned HTTP {status}. Check the release page or try again later.",
-  "ui.desktop.menu.openReleasePage": "Open release page"
+  "ui.desktop.menu.openReleasePage": "Open release page",
+  "ui.systemPermission.required": "Permission needed",
+  "ui.systemPermission.requestFailed": "Could not open the permission request. Try this feature again to request access.",
+  "ui.systemPermission.screen.request": "Allow screen recording in the system prompt, then click Screenshot again.",
+  "ui.systemPermission.microphone.request": "Allow microphone access in the system prompt, then click the microphone again.",
+  "ui.systemPermission.camera.request": "Allow camera access in the system prompt, then try this feature again.",
+  "ui.systemPermission.screen.settings": "Screen Recording settings are open. Allow Harness, then click Screenshot again. Restart Harness if macOS asks you to.",
+  "ui.systemPermission.microphone.settings": "Microphone settings are open. Allow Harness (or desktop apps on Windows), then click the microphone again. Restart Harness if the system asks you to.",
+  "ui.systemPermission.camera.settings": "Camera settings are open. Allow Harness (or desktop apps on Windows), then try this feature again. Restart Harness if the system asks you to.",
+  "ui.systemPermission.accessibility.settings": "Accessibility settings are open. Allow Harness, then press the dictation shortcut again.",
+  "ui.systemPermission.microphone.browser": "Microphone access is needed. Click the site controls beside the address bar to allow the microphone, then click it again. If the system blocked access, allow your browser in its microphone settings.",
+  "ui.systemPermission.screen.browser": "Click Screenshot again and allow screen sharing in the chooser. If the system blocked access, allow your browser in Screen Recording settings, then return here.",
+  "ui.screenshot.captureFailed": "Could not take a screenshot. Click Screenshot to try again; any missing permission will be requested.",
+  "ui.collaboration.error.screenshot/permission-required": "Screen Recording settings are open. Allow the app running Harness, then click Screenshot again. Restart that app if macOS asks you to.",
+  "ui.collaboration.error.screenshot/accessibility-required": "Accessibility settings are open. Allow the app running Harness, then click Hide window and capture again.",
+  "ui.collaboration.error.screenshot/permission-settings-failed": "Could not open the permission request. Try this feature again to request access."
 }

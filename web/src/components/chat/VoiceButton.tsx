@@ -5,7 +5,7 @@ import {Button, Tooltip} from '@/components/ui/primitives'
 import {t, useLocale} from '@/i18n'
 import {request, ApiError, unwrap} from '@/lib/http'
 import {noticeText} from '@/lib/noticeText'
-import {failureText} from '@/lib/resourceError'
+import {failureText, ResourceError} from '@/lib/resourceError'
 import {createVoiceRecorder, type VoiceRecorder} from '@/lib/voiceRecorder'
 import {VoiceWaveform, updateVoiceWaveform} from './VoiceWaveform'
 import {useAppStore} from '@/store/app'
@@ -146,10 +146,10 @@ export function VoiceButton({editor, disabled, onTranscript}: {
       if (current.disposed || !mounted.current) {recorder.dispose(); return}
       current.recorder = recorder
       setPhase('recording')
-    } catch {
+    } catch (failure) {
       if (operation.current === current) {
         operation.current = null
-        if (mounted.current) {setPhase('idle'); setError({key: 'ui.voice.micFailed'})}
+        if (mounted.current) {setPhase('idle'); setError(failure instanceof ResourceError ? failureText(failure) : {key: 'ui.voice.micFailed'})}
       }
     }
   }

@@ -3,6 +3,7 @@ import type {ReactElement} from 'react'
 import {VoiceButton} from '../VoiceButton'
 import {useAppStore} from '@/store/app'
 import {setLocale, t} from '@/i18n'
+import {ResourceError} from '@/lib/resourceError'
 
 const hooks = vi.hoisted(() => ({cursor: 0, slots: [] as unknown[], cleanups: [] as (() => void)[], events: new Map<string, (event: unknown) => void>()}))
 const recording = vi.hoisted(() => ({create: vi.fn(), request: vi.fn()}))
@@ -60,6 +61,22 @@ it('keeps the actual microphone localized through English, Chinese and English',
     expect(button(render()).props['aria-label']).toBe(t('ui.voice.start'))
   }
   expect(recording.create).not.toHaveBeenCalled()
+})
+
+it('renders native permission guidance in the current language and retries from the same microphone', async () => {
+  const dispose = vi.fn()
+  recording.create.mockImplementation(() => ({ready:Promise.reject(new ResourceError({key:'ui.systemPermission.microphone.settings'})), dispose}))
+  const text = (node:unknown):string => typeof node === 'string' ? node : Array.isArray(node) ? node.map(text).join('') : node && typeof node === 'object' ? text((node as ReactElement<{children?:unknown}>).props?.children) : ''
+  await button(render()).props.onClick()
+  for (const locale of ['en','zh-CN','en'] as const) {
+    await setLocale(locale)
+    expect(text(render())).toContain(t('ui.systemPermission.microphone.settings'))
+  }
+  expect(recording.create).toHaveBeenCalledOnce()
+  await button(render()).props.onClick()
+  expect(recording.create).toHaveBeenCalledTimes(2)
+  expect(recording.request).not.toHaveBeenCalled()
+  expect(onTranscript).not.toHaveBeenCalled()
 })
 
 it('shows a focused preparation prompt while microphone permission is pending', async () => {

@@ -278,6 +278,8 @@ HTTP 历史、导出及 WS 初始快照、实时帧、重放使用服务端公�
 
 `GET /api/v1/screenshot/capabilities` 返回 native、hideWindow 和 reason；可用时 reason 为 null，不可用时为显式浏览器资源对象 `{key: "ui.screenshot.nativeUnavailable"}`。能力只读探测不执行截图；前端保存资源身份，菜单和已发出的提示随当前语言解析，切换语言不重复探测或捕获。
 
+本机 macOS 的 `POST /api/v1/screenshot` 在捕获前申请屏幕录制权限，隐藏窗口另核对辅助功能权限。权限不足时打开对应系统设置，并分别返回 `403 screenshot/permission-required` 或 `403 screenshot/accessibility-required`，尚未执行捕获或隐藏窗口；打开设置失败返回 `503 screenshot/permission-settings-failed`，保留原始异常原因。错误码对应公开双语资源，切换界面语言不重发请求；交互规则见 [系统权限与再次授权](../desktop/README.md#系统权限与再次授权)。
+
 ## 设置页管理 MCP 执行服务
 
 设置页的 MCP 服务面板通过本机管理接口启动和停止独立执行服务，显示本机地址、公网地址及运行状态，并可显式查看或复制临时连接密码。启动提示与公网地址标签按实际隧道模式区分临时地址和固定地址。管理接口只允许本机入口访问；共享入口不能启停服务或读取密码。

@@ -1,7 +1,7 @@
 /** One frozen screen image; never keep a sharing stream alive. */
 export class ScreenshotSession {
-  constructor({window, screen, desktopCapturer, captureScreen, publishImage, releaseImage, suspend, resume, delay = ms => new Promise(resolve => setTimeout(resolve, ms))}) {
-    Object.assign(this, {window, screen, desktopCapturer, captureScreen, publishImage, releaseImage, suspend, resume, delay})
+  constructor({window, screen, desktopCapturer, authorize, captureScreen, publishImage, releaseImage, suspend, resume, delay = ms => new Promise(resolve => setTimeout(resolve, ms))}) {
+    Object.assign(this, {window, screen, desktopCapturer, authorize, captureScreen, publishImage, releaseImage, suspend, resume, delay})
     this.active = false
     this.cleanupFailure = null
     this.snapshot = null
@@ -14,8 +14,13 @@ export class ScreenshotSession {
     this.active = true
     const generation = ++this.generation
     const window = this.window
-    this.snapshot = {bounds:window.getBounds(), normalBounds:window.getNormalBounds?.() || window.getBounds(), maximized:window.isMaximized(), fullscreen:window.isFullScreen(), simpleFullscreen:window.isSimpleFullScreen(), alwaysOnTop:window.isAlwaysOnTop()}
     try {
+      if (this.authorize) {
+        const permission = await this.authorize()
+        if (generation !== this.generation || window.isDestroyed()) return null
+        if (!permission.granted) {this.active = false; return {permission:permission.copy}}
+      }
+      this.snapshot = {bounds:window.getBounds(), normalBounds:window.getNormalBounds?.() || window.getBounds(), maximized:window.isMaximized(), fullscreen:window.isFullScreen(), simpleFullscreen:window.isSimpleFullScreen(), alwaysOnTop:window.isAlwaysOnTop()}
       const display = this.screen.getDisplayMatching(this.snapshot.bounds)
       if (hideWindow) {window.hide(); await this.delay(process.platform === 'win32' ? 50 : 150)}
       if (generation !== this.generation) return null

@@ -2,6 +2,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest'
 import type {ReactElement} from 'react'
 import {VoiceCapture} from '../VoiceCapture'
 import {setLocale,t} from '@/i18n'
+import {ResourceError} from '@/lib/resourceError'
 
 const hooks=vi.hoisted(()=>({cursor:0,slots:[] as unknown[],cleanups:[] as (()=>void)[]}))
 const capture=vi.hoisted(()=>({create:vi.fn(),request:vi.fn()}))
@@ -98,4 +99,16 @@ it('a failed microphone releases ownership and never submits an empty recording'
   expect(dispose).toHaveBeenCalled()
   expect(bridge.phase).toHaveBeenCalledWith('first','done')
   expect(capture.request).not.toHaveBeenCalled()
+})
+
+it('keeps system authorization guidance bilingual without recording or transcribing',async()=>{
+  capture.create.mockImplementation(()=>({ready:Promise.reject(new ResourceError({key:'ui.systemPermission.microphone.settings'})),dispose:vi.fn()}))
+  render()
+  await vi.waitFor(()=>expect(bridge.phase).toHaveBeenCalledWith('first','done'))
+  for(const locale of ['en','zh-CN','en'] as const){await setLocale(locale);expect(text(render())).toContain(t('ui.systemPermission.microphone.settings'))}
+  expect(capture.create).toHaveBeenCalledOnce()
+  expect(capture.request).not.toHaveBeenCalled()
+  action({action:'start',id:'second'})
+  await vi.waitFor(()=>expect(bridge.phase).toHaveBeenCalledWith('second','done'))
+  expect(capture.create).toHaveBeenCalledTimes(2)
 })

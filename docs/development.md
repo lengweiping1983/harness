@@ -490,6 +490,8 @@ OAuth收尾回归补充授权忽略取消的屏障，注销后释放旧结果与
 
 `screenshot-error-language-smoke.mjs` 检查同一截图编辑实例的图片加载错误随语言往返更新且不重新加载图片；PNG 编码失败通过 `ScreenshotError` 保留资源身份，`screenshotErrorLanguage.test.ts` 验证无需重复编码即可重新呈现。用户标注和外部异常保持原文，截图完整交互仍由 `screenshot-smoke.mjs` 验证。
 
+`tests/test_screenshot_permissions.py` 使用系统框架和设置命令替身，核对本机截图授权不足时仅打开对应设置、原捕获和隐藏均未执行、英中英错误资源及锁释放。`voiceRecorder.test.ts`、`screenshotShortcuts.test.tsx` 核对拒绝后再次点击、资源型 IPC 失败、语言切换不重放和迟到授权归属；`VoiceButton.test.tsx` 与 `VoiceCapture.test.tsx` 保留实际消费端回归。`desktop/tests/system-permissions.test.mjs` 属于显式桌面专项，覆盖首次申请、拒绝后设置跳转、系统状态重查和截图捕获前的权限检查；替身不证明系统弹窗或安装包实机验收。
+
 `request-error-language-smoke.mjs` 验证真实请求详情中已保存的传输错误随语言切换更新且不重读；`watchRequestLanguage.test.ts` 验证状态轮询保留错误资源身份及403后停止轮询。计划历史列表/详情也保留传输资源身份，隐藏/重开行为继续由计划可见性场景核对，外部错误保持原文。
 
 `directory-error-language-smoke.mjs` 与 `memory-error-language-smoke.mjs` 检查同一目录/召回预览组件的已存协议错误随语言往返更新且只读取一次；记忆预览直接订阅语言变化。计划证据保存传输资源身份，读取取消与重开继续由计划可见性场景核对。外部异常不按原文猜测翻译，切换语言不自动重试。

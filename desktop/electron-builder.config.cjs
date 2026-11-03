@@ -8,7 +8,7 @@ module.exports = async function () {
   const config = yaml.load(readFileSync(path.join(__dirname, 'electron-builder.yml'), 'utf8'))
   config.publish = updateSource(process.env, copy)
   config.extraMetadata = {...config.extraMetadata, harnessUpdateSource:config.publish}
-  config.mac.extendInfo = {...config.mac.extendInfo, NSMicrophoneUsageDescription:copy('desktop.release.microphoneUsage')}
+  config.mac.extendInfo = {...config.mac.extendInfo, NSMicrophoneUsageDescription:copy('desktop.release.microphoneUsage'), NSCameraUsageDescription:copy('desktop.release.cameraUsage')}
   if (process.env.HARNESS_RELEASE_BUILD === '1') {
     config.forceCodeSigning = true
     if (process.platform === 'darwin') {

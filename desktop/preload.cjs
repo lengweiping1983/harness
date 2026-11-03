@@ -7,6 +7,7 @@ if (['darwin', 'win32'].includes(process.platform)) {
 }
 contextBridge.exposeInMainWorld('harnessDesktop', {
   platform: process.platform,
+  requestSystemPermission: capability => ipcRenderer.invoke('system-permission', capability),
   voice: {
     context: value => ipcRenderer.invoke('desktop-voice', 'context', value),
     receipt: (id, accepted) => ipcRenderer.invoke('desktop-voice', 'receipt', {id, accepted}),

@@ -8,6 +8,7 @@ import {useAppStore} from '@/store/app'
 import {setLocale, t} from '@/i18n'
 import {HOTKEYS, HOTKEY_ROWS, formatHotkey} from '@/lib/hotkeyCatalog'
 import {requestScreenshot} from '@/lib/screenshotCommand'
+import {noticeText} from '@/lib/noticeText'
 
 const hooks = vi.hoisted(() => ({cursor:0, slots:[] as any[], cleanups:new Map<number, () => void>()}))
 const capture = vi.hoisted(() => ({capabilities:vi.fn()}))
@@ -164,4 +165,50 @@ it('waits for cleanup and keeps failed cleanup locked for menu and keyboard entr
   await vi.waitFor(() => expect(useAppStore.getState().toasts.at(-1)?.title).toEqual({key:'ui.screenshot.cleanupFailed'}))
   render(); press(); commands.forEach(handler => handler('screenshot'))
   expect(screenshot).toHaveBeenCalledTimes(2); expect(focus).not.toHaveBeenCalled()
+})
+
+it('keeps permission guidance bilingual and lets the next explicit click authorize again', async () => {
+  screenshot.mockImplementation((action:string) => Promise.resolve(action === 'capture' ? {permission:{key:'ui.systemPermission.screen.settings'}} : null))
+  render(); press()
+  await vi.waitFor(() => expect(focus).toHaveBeenCalledOnce())
+  const notice = useAppStore.getState().toasts.at(-1)!
+  expect(notice.title).toEqual({key:'ui.systemPermission.required'})
+  expect(notice.description).toEqual({key:'ui.systemPermission.screen.settings'})
+  for (const locale of ['en','zh-CN','en'] as const) {
+    await setLocale(locale); render()
+    expect(noticeText(notice.title)).toBe(t('ui.systemPermission.required'))
+    expect(noticeText(notice.description!)).toBe(t('ui.systemPermission.screen.settings'))
+  }
+  expect(screenshot.mock.calls.filter(([action]) => action === 'capture')).toHaveLength(1)
+  expect(addFiles).not.toHaveBeenCalled()
+  press()
+  await vi.waitFor(() => expect(focus).toHaveBeenCalledTimes(2))
+  expect(screenshot.mock.calls.filter(([action]) => action === 'capture')).toHaveLength(2)
+})
+
+it('consumes localized native failure receipts and treats restoration failures as locked', async () => {
+  screenshot.mockImplementation((action:string) => Promise.resolve({failure:{key:action === 'capture' ? 'ui.screenshot.captureFailed' : 'ui.screenshot.cleanupUnknown'}}))
+  render(); press()
+  await vi.waitFor(() => expect(useAppStore.getState().toasts.at(-1)?.title).toEqual({key:'ui.screenshot.cleanupFailed'}))
+  const notices = useAppStore.getState().toasts
+  expect(notices.at(-2)?.description).toEqual({key:'ui.screenshot.captureFailed'})
+  for (const locale of ['en','zh-CN','en'] as const) {
+    await setLocale(locale); render()
+    expect(noticeText(notices.at(-2)!.description!)).toBe(t('ui.screenshot.captureFailed'))
+  }
+  press()
+  expect(screenshot).toHaveBeenCalledTimes(2)
+  expect(focus).not.toHaveBeenCalled()
+})
+
+it('discards delayed permission guidance after a conversation round-trip', async () => {
+  let complete!:(value:unknown) => void
+  screenshot.mockImplementation((action:string) => action === 'capture' ? new Promise(resolve => {complete = resolve}) : Promise.resolve(null))
+  render(); press()
+  useAppStore.setState({activeSessionId:'capture-b'}); useAppStore.setState({activeSessionId:'capture-a'})
+  const previous = useAppStore.getState().toasts.length
+  complete({permission:{key:'ui.systemPermission.screen.settings'}})
+  await vi.waitFor(() => expect(screenshot).toHaveBeenCalledWith('finish'))
+  expect(useAppStore.getState().toasts).toHaveLength(previous)
+  expect(focus).not.toHaveBeenCalled()
 })

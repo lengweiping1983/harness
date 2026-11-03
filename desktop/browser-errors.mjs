@@ -28,6 +28,7 @@ const failures = {
   urlInvalid: {code:'browser/url-invalid', key:'browser.desktop.invalidAddress'},
   permissionInactive: {code:'browser/permission-inactive', key:'browser.desktop.permissionInactive'},
   permissionInvalid: {code:'browser/permission-invalid', key:'browser.desktop.permissionInvalid'},
+  systemPermission: {code:'browser/system-permission-required', key:'ui.systemPermission.requestFailed'},
   downloadNameLimit: {code:'browser/download-name-limit', key:'browser.desktop.downloadNameLimit'},
   downloadMissing: {code:'browser/download-missing', key:'browser.desktop.downloadMissing'},
   downloadIncomplete: {code:'browser/download-incomplete', key:'browser.desktop.downloadIncomplete'},

@@ -61,7 +61,9 @@ export async function prepareVoice({root, staging, platform, arch, execute, copy
     await execute('/usr/bin/xcrun', ['swiftc', '-O', path.join(root, 'desktop/voice-native.swift'), '-o', path.join(helpers, 'voice-native')], {cwd:root})
     for (const [directory, language] of [['en.lproj','en'],['zh-Hans.lproj','zh-CN']]) {
       await mkdir(path.join(helpers, directory), {recursive:true})
-      await writeFile(path.join(helpers, directory, 'InfoPlist.strings'), '"NSMicrophoneUsageDescription" = ' + JSON.stringify(setupCopy(language)('desktop.release.microphoneUsage')) + ';\n')
+      const localized = setupCopy(language)
+      await writeFile(path.join(helpers, directory, 'InfoPlist.strings'),
+        ['microphone','camera'].map(type => `"NS${type === 'microphone' ? 'Microphone' : 'Camera'}UsageDescription" = ${JSON.stringify(localized(`desktop.release.${type}Usage`))};\n`).join(''))
     }
   }
   else await copyFile(path.join(root, 'desktop/voice-native.ps1'), path.join(helpers, 'voice-native.ps1'))

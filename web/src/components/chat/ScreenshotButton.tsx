@@ -15,6 +15,7 @@ import { useAnchoredMenu } from '@/hooks/useAnchoredMenu'
 import { ScreenshotCrop } from './ScreenshotCrop'
 import {formatHotkey, HOTKEYS} from '@/lib/hotkeyCatalog'
 import {registerScreenshotCommand} from '@/lib/screenshotCommand'
+import type {DesktopScreenshotResult} from '@/lib/systemPermissions'
 
 export function ScreenshotButton({ addFiles, focusEditor }: { addFiles: (files: File[]) => Promise<void>; focusEditor: () => void }) {
   useLocale()
@@ -37,7 +38,7 @@ export function ScreenshotButton({ addFiles, focusEditor }: { addFiles: (files: 
   const style = useAnchoredMenu(anchor, open, 260)
   const toast = useAppStore((state) => state.toast)
   const browserSupported = Boolean(navigator.mediaDevices?.getDisplayMedia)
-  const desktop = (window as unknown as {harnessDesktop?: {screenshot?: (action: 'capture' | 'finish', hideWindow?: boolean) => Promise<string | {url: string} | {data: Uint8Array<ArrayBuffer>; type: string} | null>}}).harnessDesktop
+  const desktop = (window as unknown as {harnessDesktop?: {screenshot?: (action: 'capture' | 'finish', hideWindow?: boolean) => Promise<DesktopScreenshotResult>}}).harnessDesktop
   const supported = Boolean(desktop?.screenshot || capabilities?.native || browserSupported)
   const canHide = Boolean(desktop?.screenshot || capabilities?.hideWindow)
   useLayoutEffect(() => {
@@ -61,7 +62,8 @@ export function ScreenshotButton({ addFiles, focusEditor }: { addFiles: (files: 
     if (finishing.current) return finishing.current
     if (!active.current) return Promise.resolve()
     if (mounted.current) setSource(null)
-    const operation = Promise.resolve().then(() => desktop?.screenshot?.('finish')).then(() => {
+    const operation = Promise.resolve().then(() => desktop?.screenshot?.('finish')).then(result => {
+      if (result && typeof result === 'object' && 'failure' in result) throw new ResourceError(result.failure)
       active.current = false
       if (mounted.current) { setBusy(false); pendingFocus.current() }
     }).catch(() => {
@@ -87,7 +89,10 @@ export function ScreenshotButton({ addFiles, focusEditor }: { addFiles: (files: 
     try {
       if (desktop?.screenshot) {
         const data = await desktop.screenshot('capture', hideWindow)
-        if (data && ownsScope()) { cropping = true; setSource(typeof data === 'string' ? pngFile(data) : 'url' in data ? data.url : new Blob([data.data], {type:data.type})) }
+        if (data && typeof data === 'object' && 'failure' in data) throw new ResourceError(data.failure)
+        if (data && typeof data === 'object' && 'permission' in data) {
+          if (ownsScope()) toast({title:{key:'ui.systemPermission.required'}, description:data.permission, tone:'warn'})
+        } else if (data && ownsScope()) { cropping = true; setSource(typeof data === 'string' ? pngFile(data) : 'url' in data ? data.url : new Blob([data.data], {type:data.type})) }
       } else if (capabilities?.native) {
         if (hideWindow) {
           token = 'harness-capture-' + newIdentity()
@@ -105,8 +110,9 @@ export function ScreenshotButton({ addFiles, focusEditor }: { addFiles: (files: 
     } catch (error) {
       if (!ownsScope()) return
       const denied = error instanceof DOMException && error.name === 'NotAllowedError'
-      toast({ title: {key: denied ? "ui.components.chat.ScreenshotButton.0d15da148fa8" : "ui.components.chat.ScreenshotButton.aa6477207270"},
-        description: denied ? {key: "ui.components.chat.ScreenshotButton.8c220b49f848"} : error instanceof Error ? failureText(error) : {key: "ui.components.chat.ScreenshotButton.54a4e4ed731c"}, tone: 'warn' })
+      const permissionRequired = error instanceof ApiError && ['screenshot/permission-required','screenshot/accessibility-required'].includes(error.code)
+      toast({ title: {key: denied || permissionRequired ? 'ui.systemPermission.required' : "ui.components.chat.ScreenshotButton.aa6477207270"},
+        description: denied ? {key:'ui.systemPermission.screen.browser'} : error instanceof Error ? failureText(error) : {key: "ui.components.chat.ScreenshotButton.54a4e4ed731c"}, tone: 'warn' })
     } finally {
       if (token && document.title.includes(token)) document.title = oldTitle
       // Browser crop owns busy state until confirm/cancel.

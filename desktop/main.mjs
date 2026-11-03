@@ -17,6 +17,7 @@ import {configureAboutPanel} from './about-panel.mjs'
 import {autoUpdater as nativeAutoUpdater, app, BrowserWindow, WebContentsView, ipcMain, session, shell, clipboard, dialog, Menu, screen, desktopCapturer, protocol, Notification, systemPreferences, globalShortcut} from 'electron'
 import {ScreenshotSession} from './screenshot.mjs'
 import {FastScreenCapture} from './fast-screen-capture.mjs'
+import {SystemPermissions, screenshotReply} from './system-permissions.mjs'
 import {ScreenshotImages, screenshotScheme} from './screenshot-images.mjs'
 import {startBridge} from './bridge.mjs'
 import {BackendSupervisor} from './backend-supervisor.mjs'
@@ -41,6 +42,7 @@ async function startDesktop() {
   let bridge
   let fastCapture
   let voice
+  const systemPermissions = new SystemPermissions({systemPreferences, desktopCapturer, shell})
   const quit = desktopQuit({app, getWindow: () => window,
     cleanup: async () => {
       downloads?.close()
@@ -52,7 +54,7 @@ async function startDesktop() {
       }}
     }, onError: error => console.error('Desktop cleanup failed:', error)})
   let downloads
-  const browser = createBrowserRuntime({app, WebContentsView, ipcMain, session, shell, Menu, clipboard, getWindow:() => window, getDownloads:() => downloads, getBackend:() => backend, getOrigin:() => origin, getMenuText:() => menuText})
+  const browser = createBrowserRuntime({app, WebContentsView, ipcMain, session, shell, Menu, clipboard, systemPermissions, getWindow:() => window, getDownloads:() => downloads, getBackend:() => backend, getOrigin:() => origin, getMenuText:() => menuText})
   await app.whenReady()
   const brandIcon = fileURLToPath(new URL(process.platform === 'darwin' ? './assets/harness-macos.png' : './assets/harness.png', import.meta.url))
   if (process.platform === 'darwin') app.dock?.setIcon(brandIcon)
@@ -83,7 +85,7 @@ async function startDesktop() {
   downloads = new BrowserDownloads(() => path.join(app.getPath('downloads'), 'Harness'), () => browser.publish())
   window = new BrowserWindow({width: 1440, height: 960, minWidth: 800, minHeight: 600, title: 'Harness', icon: brandIcon, ...windowChrome(), webPreferences: {preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true}})
   instanceReady()
-  voice = new DesktopVoice({app, BrowserWindow, globalShortcut, clipboard, screen, systemPreferences, shell,
+  voice = new DesktopVoice({app, BrowserWindow, globalShortcut, clipboard, screen, systemPreferences, shell, systemPermissions,
     getWindow:() => window, getURL:() => applicationURL, preload:fileURLToPath(new URL('./preload.cjs', import.meta.url)),
     nativePath:app.isPackaged ? path.join(process.resourcesPath, 'runtime/voice', process.platform === 'win32' ? 'voice-native.ps1' : 'voice-native')
       : fileURLToPath(new URL(process.platform === 'win32' ? './voice-native.ps1' : './voice-native.swift', import.meta.url))})
@@ -106,6 +108,11 @@ async function startDesktop() {
     throw Error('Unknown voice capture action')
   }))
   await voice.initialize()
+  ipcMain.handle('system-permission', (event, capability) => voiceReply(async () => {
+    if (!voice.trusted(event, window) && !voice.trusted(event, voice.window)) throw Error('Untrusted system permission request')
+    if (capability !== 'microphone') throw Error('Invalid system permission request')
+    return systemPermissions.request(capability)
+  }))
   let menuReady = false
   const metadata = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
   const updates = metadata.harnessUpdateSource?.provider === 'github'
@@ -190,14 +197,15 @@ async function startDesktop() {
   const screenshotImages=new ScreenshotImages(origin)
   protocol.handle('harness-screenshot', request=>screenshotImages.response(request))
   const screenshot = new ScreenshotSession({window, screen, desktopCapturer,
+    authorize:() => systemPermissions.request('screen'),
     publishImage:(bytes,type)=>screenshotImages.publish(bytes,type),releaseImage:()=>screenshotImages.clear(),
     captureScreen:fastCapture ? (display, screen) => fastCapture.capture(display, screen) : undefined,
     suspend: () => browser.suspend(),
     resume: () => browser.resume()})
   ipcMain.handle('screenshot', async (event, action, hideWindow) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) throw Error('Untrusted screenshot request')
-    if (action === 'capture') return screenshot.capture(hideWindow)
-    if (action === 'finish') {screenshot.finish(); return null}
+    if (action === 'capture') return screenshotReply(() => screenshot.capture(hideWindow), action)
+    if (action === 'finish') return screenshotReply(() => {screenshot.finish(); return null}, action)
     throw Error('Unknown screenshot action')
   })
   window.webContents.on('render-process-gone', () => screenshot.finish())

@@ -1,7 +1,10 @@
 import {afterEach, expect, it, vi} from 'vitest'
 import {createVoiceRecorder, encodeVoiceWav} from '../voiceRecorder'
+import {failureText} from '../resourceError'
+import {noticeText} from '../noticeText'
+import {setLocale, t} from '@/i18n'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(async () => {vi.unstubAllGlobals(); await setLocale('en')})
 it('encodes signed PCM16 mono audio with a truthful 16 kHz WAV header', () => {
   const audio = encodeVoiceWav(new Float32Array([-2, -1, 0, 1, 2]))
   const data = new DataView(audio)
@@ -53,4 +56,45 @@ it('feeds the real captured audio into the level meter without changing its samp
   expect(port.onmessage).toBeNull()
   expect(stop).toHaveBeenCalledOnce()
   expect(close).toHaveBeenCalledOnce()
+})
+
+it('rechecks native microphone access on every attempt and keeps denial localized', async () => {
+  const permission = vi.fn(async () => ({ok:true, data:{granted:false, copy:{key:'ui.systemPermission.microphone.settings'}}}))
+  const getUserMedia = vi.fn()
+  vi.stubGlobal('window', {harnessDesktop:{requestSystemPermission:permission}})
+  vi.stubGlobal('navigator', {mediaDevices:{getUserMedia}})
+  let failure:unknown
+  try {await createVoiceRecorder(vi.fn()).ready} catch (error) {failure = error}
+  expect(failureText(failure)).toEqual({key:'ui.systemPermission.microphone.settings'})
+  for (const locale of ['en','zh-CN','en'] as const) {
+    await setLocale(locale)
+    expect(noticeText(failureText(failure))).toBe(t('ui.systemPermission.microphone.settings'))
+  }
+  expect(permission).toHaveBeenCalledOnce()
+  await expect(createVoiceRecorder(vi.fn()).ready).rejects.toBeInstanceOf(Error)
+  expect(permission).toHaveBeenCalledTimes(2)
+  expect(getUserMedia).not.toHaveBeenCalled()
+})
+
+it('never opens a device if a system grant arrives after disposal', async () => {
+  let resolve!:(value:unknown) => void
+  const getUserMedia = vi.fn()
+  vi.stubGlobal('window', {harnessDesktop:{requestSystemPermission:() => new Promise(done => {resolve = done})}})
+  vi.stubGlobal('navigator', {mediaDevices:{getUserMedia}})
+  const recording = createVoiceRecorder(vi.fn())
+  recording.dispose()
+  resolve({ok:true, data:{granted:true}})
+  await expect(recording.ready).rejects.toMatchObject({name:'AbortError'})
+  expect(getUserMedia).not.toHaveBeenCalled()
+})
+
+it('allows a browser microphone retry after denial and supplies actionable translated guidance', async () => {
+  const getUserMedia = vi.fn(async () => {throw new DOMException('browser denied', 'NotAllowedError')})
+  vi.stubGlobal('navigator', {mediaDevices:{getUserMedia}})
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let failure:unknown
+    try {await createVoiceRecorder(vi.fn()).ready} catch (error) {failure = error}
+    expect(failureText(failure)).toEqual({key:'ui.systemPermission.microphone.browser'})
+  }
+  expect(getUserMedia).toHaveBeenCalledTimes(2)
 })

@@ -1,4 +1,6 @@
 import {createVoiceLevelMeter} from './voiceLevel'
+import {authorizeMicrophone} from './systemPermissions'
+import {ResourceError} from './resourceError'
 
 export const MAX_RECORDING_SECONDS = 60
 const TARGET_RATE = 16000
@@ -50,6 +52,10 @@ export function createVoiceRecorder(onLimit: () => void, onLevel?: (level: numbe
   const check = () => {if (disposed) throw new DOMException('Aborted', 'AbortError')}
   const ready = (async (): Promise<VoiceRecorder> => {
     try {
+      if (typeof window !== 'undefined' && (window as unknown as {harnessDesktop?: {requestSystemPermission?: unknown}}).harnessDesktop?.requestSystemPermission) {
+        await authorizeMicrophone()
+        check()
+      }
       stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}})
       check()
       context = new AudioContext()
@@ -96,6 +102,7 @@ export function createVoiceRecorder(onLimit: () => void, onLevel?: (level: numbe
       }
     } catch (error) {
       dispose()
+      if (error instanceof DOMException && error.name === 'NotAllowedError') throw new ResourceError({key:'ui.systemPermission.microphone.browser'})
       throw error
     }
   })()

@@ -16,7 +16,7 @@ import {websiteURL, viewBounds} from './browser-policy.mjs'
 import {fileURLToPath} from 'node:url'
 
 // 浏览器状态随主进程存活；原生监听在窗口可用后由 attach 一次性注册。
-export function createBrowserRuntime({app, WebContentsView, ipcMain, session, shell, Menu, clipboard, getWindow, getDownloads, getBackend, getOrigin, getMenuText = () => null}) {
+export function createBrowserRuntime({app, WebContentsView, ipcMain, session, shell, Menu, clipboard, systemPermissions, getWindow, getDownloads, getBackend, getOrigin, getMenuText = () => null}) {
   let activeSession = 'desktop'
   const owners = new Map()
   const controllers = new Map()
@@ -33,6 +33,7 @@ export function createBrowserRuntime({app, WebContentsView, ipcMain, session, sh
   let bounds = null
   let visible = false
   let screenshotActive = false
+  let permissionRevision = 0
   const dialogs = new NativeDialogs(() => publish())
   const permissions = new WebsitePermissions(() => publish())
   function pageViewport(view) {
@@ -44,7 +45,7 @@ export function createBrowserRuntime({app, WebContentsView, ipcMain, session, sh
   function selectTab(id) {
     const owner = owners.get(id)
     selections.set(owner, id)
-    if (owner === activeSession) selected = id
+    if (owner === activeSession) {if (selected !== id) permissionRevision++; selected = id}
     readiness.changed()
   }
   function forgetTab(id) {
@@ -257,12 +258,40 @@ export function createBrowserRuntime({app, WebContentsView, ipcMain, session, sh
     })
     browserSession.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
       if (!wc || wc.isDestroyed() || !tabs.has(String(wc.id))) return false
+      if (permission === 'media' && systemPermissions && (details.mediaTypes || [details.mediaType]).some(type => systemPermissions.status(type === 'audio' ? 'microphone' : 'camera') !== 'granted')) return false
       return permissions.check(String(wc.id), wc.getURL(), details.requestingUrl || requestingOrigin, permission, details)
     })
     browserSession.setPermissionRequestHandler((wc, permission, callback, details) => {
       const id = String(wc?.id)
       if (!wc || wc.isDestroyed() || id !== selected || !visible || owners.get(id) !== activeSession) {callback(false); return}
-      permissions.request(id, wc.getURL(), permission, callback, details)
+      const owner = activeSession
+      const revision = permissionRevision
+      let current = true, finished = false
+      const invalidate = () => {current = false}
+      const events = ['did-start-navigation','render-process-gone','destroyed']
+      events.forEach(name => wc.on(name, invalidate))
+      const valid = () => current && revision === permissionRevision && !screenshotActive && !wc.isDestroyed() && tabs.has(id) && id === selected && visible && owners.get(id) === activeSession && owner === activeSession
+      const finish = allowed => {if (finished) return; finished = true; events.forEach(name => wc.removeListener(name, invalidate)); callback(allowed)}
+      const report = (copy, cause) => {
+        if (!valid()) return
+        const error = new NativeBrowserError('systemPermission', {}, {cause})
+        error.copy = copy ?? error.copy
+        publishError(owner, error)
+      }
+      permissions.request(id, wc.getURL(), permission, allow => {
+        if (!allow || !valid() || permission !== 'media' || !systemPermissions) {finish(allow && valid()); return}
+        void (async () => {
+          for (const type of details.mediaTypes || [details.mediaType]) {
+            if (!valid()) {finish(false); return}
+            const result = await systemPermissions.request(type === 'audio' ? 'microphone' : 'camera')
+            if (!result.granted) {
+              report(result.copy)
+              finish(false); return
+            }
+          }
+          finish(valid())
+        })().catch(error => {report(error.copy, error); finish(false)})
+      }, details)
     })
     ipcMain.on('website-viewport-changed', event => {
       const id = String(event.sender.id)
@@ -330,12 +359,12 @@ export function createBrowserRuntime({app, WebContentsView, ipcMain, session, sh
       case 'service_state': return {status:getBackend().status}
       case 'restart_backend': await getBackend().start(); return {status:getBackend().status}
       case 'control': if (!['user', 'agent'].includes(args.owner)) throw new NativeBrowserError('invalidOwner'); controllers.set(activeSession, args.owner); publish(); return state()
-      case 'bind': if (!/^[a-zA-Z0-9_-]+$/.test(args.session_id || '')) throw new NativeBrowserError('invalidSession'); activeSession = args.session_id; selected = tabs.has(selections.get(activeSession)) ? selections.get(activeSession) : [...tabs.keys()].find(id => owners.get(id) === activeSession) ?? null; layout(); publish(); return state()
+      case 'bind': if (!/^[a-zA-Z0-9_-]+$/.test(args.session_id || '')) throw new NativeBrowserError('invalidSession'); if (activeSession !== args.session_id) permissionRevision++; activeSession = args.session_id; selected = tabs.has(selections.get(activeSession)) ? selections.get(activeSession) : [...tabs.keys()].find(id => owners.get(id) === activeSession) ?? null; layout(); publish(); return state()
       case 'download_action': {const destination = getDownloads().action(activeSession, args.id, args.action); if (destination) shell.showItemInFolder(destination); break}
       case 'permission_answer': permissions.answer(selected, wc?.getURL(), args.id, args.allow); break
-      case 'permission_reset': permissions.clear(selected); wc?.reload(); break
+      case 'permission_reset': permissionRevision++; permissions.clear(selected); wc?.reload(); break
       case 'state': return state()
-      case 'layout': bounds = viewBounds(args.bounds, getWindow().getContentSize()); visible = Boolean(args.visible); layout(); break
+      case 'layout': bounds = viewBounds(args.bounds, getWindow().getContentSize()); if (visible !== Boolean(args.visible)) permissionRevision++; visible = Boolean(args.visible); layout(); break
       case 'new_tab': {const result = await create(args.url); if (!args.url) focusAddress(); return result}
       case 'select_tab': if (!tabs.has(args.id) || owners.get(args.id) !== activeSession) throw new NativeBrowserError('tabMissing'); selectTab(args.id); layout(); break
       case 'close_tab': {
@@ -375,7 +404,7 @@ export function createBrowserRuntime({app, WebContentsView, ipcMain, session, sh
   }
   return {
     bridgeAction, attach, publish,
-    suspend() {screenshotActive = true; layout()},
+    suspend() {permissionRevision++; screenshotActive = true; layout()},
     resume() {screenshotActive = false; layout()},
     close() {
       for (const view of tabs.values()) if (!view.webContents.isDestroyed()) view.webContents.close()

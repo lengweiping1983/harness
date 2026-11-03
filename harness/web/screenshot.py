@@ -4,6 +4,7 @@ from __future__ import annotations
 from harness.i18n import tr
 
 from pathlib import Path
+import ctypes
 import re
 import subprocess
 import sys
@@ -52,6 +53,36 @@ def _script(source: str, *args: str) -> str:
     return result.stdout.strip()
 
 
+def _open_permission_settings(pane: str, code: str) -> None:
+    """仅从显式的本机功能入口打开固定系统设置，不重放捕获。"""
+    try:
+        subprocess.run(['/usr/bin/open', f'x-apple.systempreferences:com.apple.preference.security?Privacy_{pane}'],
+                       capture_output=True, timeout=8, check=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ServiceUnavailable(tr('ui.collaboration.error.screenshot/permission-settings-failed'),
+                                 code='screenshot/permission-settings-failed') from exc
+    raise ServiceUnavailable(tr('ui.collaboration.error.' + code), status=403, code=code)
+
+
+def _ensure_capture_permissions(hide_window: bool) -> None:
+    """本机网页捕获同样先申请权限，系统拒绝后直接打开对应设置。"""
+    graphics = ctypes.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
+    preflight = graphics.CGPreflightScreenCaptureAccess
+    request = graphics.CGRequestScreenCaptureAccess
+    for function in (preflight, request):
+        function.argtypes = []
+        function.restype = ctypes.c_bool
+    if not preflight() and not request():
+        _open_permission_settings('ScreenCapture', 'screenshot/permission-required')
+    if hide_window:
+        services = ctypes.CDLL('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
+        trusted = services.AXIsProcessTrusted
+        trusted.argtypes = []
+        trusted.restype = ctypes.c_bool
+        if not trusted():
+            _open_permission_settings('Accessibility', 'screenshot/accessibility-required')
+
+
 def capture_region(*, hide_window: bool = False, window_token: str = '') -> bytes | None:
     """返回 PNG，按 Escape 时返回 None，不保持屏幕共享流。"""
     if not native_available():
@@ -63,6 +94,7 @@ def capture_region(*, hide_window: bool = False, window_token: str = '') -> byte
         raise Conflict(tr('python.screenshot.e60984f813cf'), code='screenshot/busy')
     owner = None
     try:
+        _ensure_capture_permissions(hide_window)
         with tempfile.TemporaryDirectory(prefix='harness-screenshot-') as directory:
             target = Path(directory) / 'capture.png'
             primary = None

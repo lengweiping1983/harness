@@ -4899,5 +4899,20 @@
   "ui.desktop.menu.updateInvalidRelease": "更新源返回的发行信息有误，请查看发布页面。",
   "ui.desktop.menu.updateMetadataTooLarge": "发行信息超出读取上限，请查看发布页面。",
   "ui.desktop.menu.updateHttpFailure": "更新源返回 HTTP {status}，请查看发布页面或稍后重试。",
-  "ui.desktop.menu.openReleasePage": "打开发布页面"
+  "ui.desktop.menu.openReleasePage": "打开发布页面",
+  "ui.systemPermission.required": "需要授权",
+  "ui.systemPermission.requestFailed": "未能打开授权入口，请再次点击此功能申请权限。",
+  "ui.systemPermission.screen.request": "请在系统提示中允许屏幕录制，然后再次点击截图。",
+  "ui.systemPermission.microphone.request": "请在系统提示中允许使用麦克风，然后再次点击麦克风。",
+  "ui.systemPermission.camera.request": "请在系统提示中允许使用摄像头，然后再次点击此功能。",
+  "ui.systemPermission.screen.settings": "已打开屏幕录制设置。允许 Harness 后再次点击截图；如果 macOS 提示需要重启，请重启 Harness。",
+  "ui.systemPermission.microphone.settings": "已打开麦克风设置。允许 Harness（Windows 上允许桌面应用访问）后再次点击麦克风；如果系统提示需要重启，请重启 Harness。",
+  "ui.systemPermission.camera.settings": "已打开摄像头设置。允许 Harness（Windows 上允许桌面应用访问）后再次点击此功能；如果系统提示需要重启，请重启 Harness。",
+  "ui.systemPermission.accessibility.settings": "已打开辅助功能设置。允许 Harness 后再次按下听写快捷键。",
+  "ui.systemPermission.microphone.browser": "需要麦克风权限。点击地址栏旁的网站权限按钮，允许麦克风后再次点击；如果被系统阻止，请在系统麦克风设置中允许当前浏览器。",
+  "ui.systemPermission.screen.browser": "请再次点击截图，在选择窗口中允许屏幕共享；如果被系统阻止，请在系统屏幕录制设置中允许当前浏览器后返回。",
+  "ui.screenshot.captureFailed": "未能截取屏幕。请再次点击截图重试；缺少权限时会引导授权。",
+  "ui.collaboration.error.screenshot/permission-required": "已打开屏幕录制设置。允许用于运行 Harness 的应用后再次点击截图；如果 macOS 提示需要重启，请重启该应用。",
+  "ui.collaboration.error.screenshot/accessibility-required": "已打开辅助功能设置。允许用于运行 Harness 的应用后再次点击隐藏窗口截图。",
+  "ui.collaboration.error.screenshot/permission-settings-failed": "未能打开授权入口，请再次点击此功能申请权限。"
 }

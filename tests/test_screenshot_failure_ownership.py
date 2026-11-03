@@ -27,6 +27,7 @@ class ScreenshotFailureOwnershipTests(unittest.TestCase):
 
                     result = subprocess.CompletedProcess([], 0, stdout=b'', stderr=b'')
                     with current_language.set(language), patch.object(screenshot, 'native_available', return_value=True), \
+                            patch.object(screenshot, '_ensure_capture_permissions'), \
                             patch.object(screenshot, '_script', side_effect=script), \
                             patch.object(screenshot.time, 'sleep'), \
                             patch.object(screenshot.subprocess, 'run', side_effect=capture_error if capture_fails else None, return_value=result) as capture:

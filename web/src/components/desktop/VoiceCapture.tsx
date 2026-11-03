@@ -90,9 +90,9 @@ export function VoiceCapture() {
       if (current.disposed || active.current !== current) return
       if (!reply.ok) {current.dispose(); setError(reply.copy); setPhase('done'); return}
       if (current.recorder === recorder) setPhase('recording')
-    }).catch(() => {
+    }).catch(failure => {
       current.dispose()
-      if (!current.disposed && active.current === current) {setError({key:'ui.voice.micFailed'}); setPhase('done'); void bridge!.phase(current.id, 'done')}
+      if (!current.disposed && active.current === current) {setError(failure instanceof ResourceError ? failureText(failure) : {key:'ui.voice.micFailed'}); setPhase('done'); void bridge!.phase(current.id, 'done')}
     })
   }
   const stopRef = useRef(stop)

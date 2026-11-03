@@ -12,8 +12,8 @@ class VoiceError extends Error {
 
 /** 全局听写仅由 Harness 的主进程、录音窗口和所属操作共同拥有。 */
 export class DesktopVoice {
-  constructor({app, BrowserWindow, globalShortcut, clipboard, screen, systemPreferences, shell, getWindow, getURL, preload, nativePath, platform = process.platform}) {
-    Object.assign(this, {app, BrowserWindow, globalShortcut, clipboard, screen, systemPreferences, shell, getWindow, getURL, preload, nativePath, platform})
+  constructor({app, BrowserWindow, globalShortcut, clipboard, screen, systemPreferences, shell, systemPermissions, getWindow, getURL, preload, nativePath, platform = process.platform}) {
+    Object.assign(this, {app, BrowserWindow, globalShortcut, clipboard, screen, systemPreferences, shell, systemPermissions, getWindow, getURL, preload, nativePath, platform})
     this.preferences = {version:1, enabled:false, shortcut:DEFAULT_SHORTCUT}
     this.file = path.join(app.getPath('userData'), 'voice.json')
     this.window = null
@@ -169,6 +169,14 @@ export class DesktopVoice {
     this.captureFailure = null
     this.active = current
     try {
+      if (!current.own && this.systemPermissions) {
+        const permission = await this.systemPermissions.request('accessibility')
+        if (this.closed || this.active !== current) return
+        if (!permission.granted) {
+          const error = new Error('System input permission required'); error.copy = permission.copy
+          throw error
+        }
+      }
       current.target = await this.native('target')
       if (this.closed || this.active !== current) return
       const window = this.ensureWindow()
@@ -218,7 +226,8 @@ export class DesktopVoice {
     console.error('Global dictation failed:', error)
   }
   async requestPermission() {
-    if (this.platform === 'darwin') {
+    if (this.systemPermissions) await this.systemPermissions.request('accessibility')
+    else if (this.platform === 'darwin') {
       this.systemPreferences.isTrustedAccessibilityClient(true)
       await this.shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
     }
