@@ -78,8 +78,8 @@ Windows 原生顶栏显式验收入口为 `node desktop/tests/windows-titlebar-s
 npm --prefix model-runtime ci
 npm --prefix web ci
 npm --prefix desktop ci
-# 任选一个允许匿名读取的更新源，源码仓库可以继续保持私有
-export HARNESS_UPDATE_REPOSITORY='OWNER/PUBLIC_RELEASE_REPO'
+# 当前桌面安装包发布与更新仓库
+export HARNESS_UPDATE_REPOSITORY='lengweiping1983/SuperHarness'
 # 或 export HARNESS_UPDATE_URL='https://downloads.example.com/harness/stable/'
 npm --prefix desktop run package
 ```
@@ -107,6 +107,8 @@ npm --prefix desktop run package
 
 汇总器 `release-assets.mjs` 接受包含三个平台子目录的输入，要求同一稳定版本、Windows x64 的 EXE、Mac arm64／x64 的 DMG 和 ZIP，以及每个安装文件的 blockmap。核对清单中的大小、SHA-512 和复制后的字节，合并 Mac 双架构 `latest-mac.yml`，并生成覆盖安装文件与 blockmap 的 `SHA512SUMS`；缺失、冲突或混入其他版本立即失败。输出目录必须为空，不能覆盖旧发布目录。恢复工作流后，其 `Harness-release-assets` artifact 使用同一汇总器。
 
+当前项目的桌面安装包发布与更新仓库为 [lengweiping1983/SuperHarness](https://github.com/lengweiping1983/SuperHarness)，构建时设置 `HARNESS_UPDATE_REPOSITORY=lengweiping1983/SuperHarness`。源码仓库 `lengweiping1983/harness` 不作为下载与更新源。
+
 正式下载与更新源在构建时由 `electron-builder.config.cjs` 配置并写入安装包内部的 `app-update.yml`，不通过客户端环境变量更换服务器。必须二选一：
 
 - `HARNESS_UPDATE_REPOSITORY=OWNER/PUBLIC_RELEASE_REPO`：单独的公开 GitHub 下载仓库，源码可继续私有；Release 标签使用 `v<desktop/package.json 的版本>`，例如 `v0.2.0`。不能用 `desktop-v0.2.0` 作为更新仓库的 Release 标签。
@@ -123,7 +125,7 @@ npm --prefix desktop run package
 5. macOS 各自在目标机器执行 `npm --prefix desktop run package -- --arm64` 或 `--x64`。Windows PowerShell 示例（占位地址替换为实际来源，签名凭据已安全设置）：
 
    ```powershell
-   $env:HARNESS_UPDATE_REPOSITORY = 'OWNER/PUBLIC_RELEASE_REPO'
+   $env:HARNESS_UPDATE_REPOSITORY = 'lengweiping1983/SuperHarness'
    $env:HARNESS_RELEASE_BUILD = '1'
    npm --prefix model-runtime ci
    npm --prefix web ci
