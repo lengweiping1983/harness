@@ -388,7 +388,7 @@ class SuperagentMissions(SuperagentRouter):
     async def _capture(self, mission, job):
         row = self._worker_row(mission, job)
         manager = self.dispatcher.harness.worktrees
-        if job['data']['session_id'] in self.dispatcher.harness.jobs.active_owners():
+        if self._background_jobs_active(job):
             return
         checkpoint = None
         if job['role'] == 'work' and 'max_work_turns' in self.store.limits:
@@ -422,6 +422,53 @@ class SuperagentMissions(SuperagentRouter):
         except BaseException as original:
             self._recover_native(capturing, original)
         self._finish_capture(mission, self.store.job(job['id']))
+
+    def _background_jobs_active(self, job, record=None):
+        """按实时句柄、工具回执和归档三层证据判断后台作业是否仍未收尾。"""
+        host = self.harness if job['role'] == 'plan' else self.dispatcher.harness
+        owner = job['data'].get('session_id')
+        if not owner:
+            return False
+        if owner in host.jobs.active_owners():
+            return True
+        record = self._record(job) if record is None else record
+        if record is None:
+            return False
+        try:
+            calls = tool_invocations(turn_events(host.get_session(owner).events, run_id=record.id))
+        except ValueError as exc:
+            raise _error('corrupt') from exc
+        for call in calls:
+            start = call.get('_start_event')
+            arguments = start.data.get('input') if start is not None else None
+            display = call.get('display')
+            is_background = (isinstance(arguments, Mapping) and arguments.get('run_in_background') is True
+                             or isinstance(display, Mapping) and display.get('background') is True)
+            if not is_background:
+                continue
+            if not confirmed_tool_result(call):
+                return True
+            identity = display.get('job_id') if isinstance(display, Mapping) else None
+            if not isinstance(identity, str) or not identity:
+                return True
+            live = host.jobs._jobs.get(identity)
+            if live is not None:
+                if live.owner != owner or not live.is_settled:
+                    return True
+                continue
+            archive = host.jobs.archive
+            if archive is None:
+                return True
+            try:
+                archived = archive.output(owner, identity, limit=1)
+            except LookupError:
+                return True
+            except (ValueError, TypeError, KeyError, RuntimeError) as exc:
+                raise _error('corrupt') from exc
+            view = archived.get('job') if isinstance(archived, Mapping) else None
+            if not isinstance(view, Mapping) or view.get('status') not in {'completed', 'failed', 'killed'}:
+                return True
+        return False
 
     def _finish_capture(self, mission, job):
         if not self._control_allows(mission):
@@ -773,15 +820,8 @@ class SuperagentMissions(SuperagentRouter):
                 progress = run_progress(record, events[key])
                 item['run'] = progress
                 if job['state'] == 'accepted' and sid not in background:
-                    # 运行已结算但后台作业仍未交回时，原工具回执是比瞬时注册表更稳定的证据。
-                    try:
-                        calls = tool_invocations(turn_events(events[key], run_id=record.id))
-                    except ValueError as exc:
-                        raise _error('corrupt') from exc
                     background = set(background)
-                    if any((isinstance(call.get('display'), Mapping) and call['display'].get('background') is True)
-                           or (isinstance(call.get('input'), Mapping) and call['input'].get('run_in_background') is True)
-                           for call in calls):
+                    if self._background_jobs_active(job, record=record):
                         background.add(sid)
         unresolved = dependencies(mission, job, jobs)
         active = host.runtime.active.get(sid)
