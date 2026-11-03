@@ -376,10 +376,13 @@ class SuperagentService:
         while not stop.is_set() and not self.closed:
             status = await self.tick()
             scans += 1
-            active = any(host.runtime.records.active for host in self.hosts)
+            active = any(host.runtime.records.active or host.jobs.active_owners() for host in self.hosts)
             pending = any(status['inputs'].get(key,0) for key in ('waiting','pending'))
             pending |= any(status['results'].get(key,0) for key in ('waiting','ready','submitting','accepted'))
             pending |= self.results.uncollected()
+            pending |= bool(status.get('control', {}).get('states', {}).get('queued'))
+            if isinstance(self.router, SuperagentMissions) and self.router.control_runtime is not None:
+                pending |= self.router.control_runtime.pending()
             pending |= bool(self.results.drafts(after=self._draft_cursor, limit=1))
             pending |= bool(self.inbox.events(after=status['cursor'], limit=1)['events'])
             if self.guidance_files is not None:
@@ -395,6 +398,8 @@ class SuperagentService:
                 if self.guidance_files is not None:
                     self.guidance_files.publish(final=True)
                 return 2 if (status['input_errors'] or status['inputs'].get('unknown') or status['inputs'].get('rejected')
+                    or isinstance(self.router, SuperagentMissions) and self.router.control_runtime is not None
+                        and self.router.control_runtime.uncertain()
                     or self.guidance_files is not None and (status['guidance_files']['input_errors'] or
                         any(status['guidance']['states'].get(key, 0) for key in ('unknown', 'rejected')))
                     or any(counts.get('unknown') for counts in outgoing)
@@ -447,6 +452,12 @@ class SuperagentService:
         if self.guidance_files is not None:
             try:
                 await self.router.guidance.aclose()
+            except BaseException as exc:
+                if not any(exc is error for error in errors):
+                    errors.append(exc)
+        if isinstance(self.router, SuperagentMissions):
+            try:
+                await self.router.aclose()
             except BaseException as exc:
                 if not any(exc is error for error in errors):
                     errors.append(exc)

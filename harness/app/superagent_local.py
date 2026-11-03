@@ -146,18 +146,29 @@ def read_status(config_path):
 
 def control_local(config_path, action, mission_id, *, request_id=None):
     """在独立控制账本中公开一个幂等的暂停、继续或取消意图。"""
-    from .superagent_control import MissionControl
+    from .superagent_control import MissionControl, validate_request
     spec = read_config(config_path)
     if 'autonomy' not in spec:
         raise _error('guidance-unavailable')
-    _text(action, 'control_action')
-    _text(mission_id, 'mission_id', limit=256)
-    request_id = uuid.uuid4().hex if request_id is None else _text(request_id, 'request_id')
+    request_id = uuid.uuid4().hex if request_id is None else request_id
+    validate_request(request_id, mission_id, action)
     identity = json.dumps(spec, ensure_ascii=False, sort_keys=True)
     control = MissionControl(Path(spec['state_dir']) / 'control.sqlite3',
                              instance_id=spec['instance_id'], identity=identity)
-    return {'request_id': request_id, **control.enqueue(command_id=request_id, mission_id=mission_id, action=action),
-            'queued': True}
+    receipt = control.enqueue(command_id=request_id, mission_id=mission_id, action=action)
+    return {'request_id': request_id, **receipt, 'queued': receipt['status'] == 'queued'}
+
+
+def read_control_receipt(config_path, request_id):
+    """只读核对原控制回执；不创建目录、空库、模型宿主或新命令。"""
+    from .superagent_control import MissionControl
+    _text(request_id, 'request_id', limit=200)
+    spec = read_config(config_path)
+    if 'autonomy' not in spec:
+        raise _error('guidance-unavailable')
+    control = MissionControl(Path(spec['state_dir']) / 'control.sqlite3', instance_id=spec['instance_id'],
+        identity=json.dumps(spec, ensure_ascii=False, sort_keys=True), read_only=True)
+    return control.command(request_id)
 
 
 def _guidance_target(status, job_id, remote):

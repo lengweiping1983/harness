@@ -19,6 +19,7 @@ def add_arguments(parser):
     actions.add_argument('--superagent-status', action='store_true', help=tr('superagent.cli.status'))
     actions.add_argument('--superagent-steer', metavar='TEXT', help=tr('superagent.cli.steer'))
     actions.add_argument('--superagent-receipt', metavar='REQUEST_ID', help=tr('superagent.cli.receipt'))
+    actions.add_argument('--superagent-control-receipt', metavar='REQUEST_ID', help=tr('superagent.cli.control-receipt'))
     actions.add_argument('--superagent-pause', action='store_true', help=tr('superagent.cli.pause'))
     actions.add_argument('--superagent-resume', action='store_true', help=tr('superagent.cli.resume'))
     actions.add_argument('--superagent-cancel', action='store_true', help=tr('superagent.cli.cancel'))
@@ -34,9 +35,10 @@ def handle(args, parser):
     control_action = ('pause' if args.superagent_pause else 'resume' if args.superagent_resume else
                       'cancel' if args.superagent_cancel else None)
     local = (args.superagent_submit is not None or args.superagent_status or args.superagent_steer is not None
-             or args.superagent_receipt is not None or control_action is not None)
+             or args.superagent_receipt is not None or args.superagent_control_receipt is not None or control_action is not None)
     if args.superagent is None:
-        if args.superagent_once or local or args.superagent_job is not None or any(value is not None for value in selectors.values()):
+        if (args.superagent_once or local or args.superagent_job is not None or args.superagent_mission is not None
+                or any(value is not None for value in selectors.values())):
             parser.error(tr('superagent.cli.config_required'))
         return None
     if ((local and args.superagent_submit is None and control_action is None and args.superagent_once)
@@ -59,6 +61,9 @@ def handle(args, parser):
                 result = read_status(Path(args.superagent))
             elif args.superagent_receipt is not None:
                 result = read_guidance_receipt(Path(args.superagent), args.superagent_receipt)
+            elif args.superagent_control_receipt is not None:
+                from .app.superagent_local import read_control_receipt
+                result = read_control_receipt(Path(args.superagent), args.superagent_control_receipt)
             elif args.superagent_steer is not None:
                 result = steer_local(Path(args.superagent), args.superagent_steer, job_id=args.superagent_job,
                     source_id=selectors['source'], actor_id=selectors['actor'], thread_id=selectors['thread'], request_id=selectors['request-id'])
@@ -71,7 +76,12 @@ def handle(args, parser):
                                       actor_id=selectors['actor'], thread_id=selectors['thread'], request_id=selectors['request-id'])
             print(json.dumps(result, ensure_ascii=False, indent=2))
             if (args.superagent_submit is not None or control_action is not None) and args.superagent_once:
-                return asyncio.run(run(Path(args.superagent), once=True))
+                code = asyncio.run(run(Path(args.superagent), once=True))
+                if control_action is not None:
+                    from .app.superagent_local import read_control_receipt
+                    if read_control_receipt(Path(args.superagent), result['request_id'])['status'] != 'applied':
+                        return 2
+                return code
             return 0
         return asyncio.run(run(Path(args.superagent), once=args.superagent_once))
     except KeyboardInterrupt:

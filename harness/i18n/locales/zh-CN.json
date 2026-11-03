@@ -8472,5 +8472,7 @@
   "ui.collaboration.error.screenshot/accessibility-required": "已打开辅助功能设置。允许用于运行 Harness 的应用后再次点击隐藏窗口截图。",
   "ui.collaboration.error.screenshot/permission-settings-failed": "未能打开授权入口，请再次点击此功能申请权限。",
   "desktop.release.cameraUsage": "Harness 仅在你授权网站使用摄像头时访问摄像头。",
-  "ui.voice.backendMismatch": "当前后端缺少语音接口。请重启 Harness，并确认应用与后端使用相同版本。"
+  "ui.voice.backendMismatch": "当前后端缺少语音接口。请重启 Harness，并确认应用与后端使用相同版本。",
+  "superagent.cli.control-receipt": "只读核对原暂停、继续或取消回执，不启动运行器。",
+  "superagent.control-capacity": "Superagent 控制历史已达到 1024 条请求的上限。已有回执保持不变，本次未接受新的控制意图。"
 }

@@ -115,7 +115,7 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 6. **有限修正**：复核明确失败时，原集成对话在同一工作树中接收结构化反馈，形成新运行；随后建立新的复核对话和工作树。工作节点的历史不重放，旧复核不能替代本轮证据。集成与复核最多各运行 `max_attempts` 次；耗尽进入 `blocked`，原因 `budget/attempts-exhausted`。
 7. **完成与发布**：所有标准通过、最终回复有效且来源修订仍授权时，目标进入 `completed`，并在同一协调事务追加独立的完成序号。快慢目标反序结束不会漏掉后完成的旧目标。最终候选通过现有本地发布及已授权信道发送；中间节点和失败推测不自动广播。
 
-目标状态为 `planning/running/integrating/reviewing/completed/blocked/unknown/rejected/suppressed`。`max_missions` 限制活动目标，`max_workers` 仍限制保留的全部 Worker 创建记录；不会隐式删除旧工作树或释放历史容量。完整报告与逐项证据留在 `missions.sqlite3`，原工具日志、用量及轮次仍属于原宿主，协调账本不复制执行历史。只读监督的字段与边界见下节。
+目标状态为 `planning/running/integrating/reviewing/completed/blocked/unknown/rejected/suppressed/cancelled`。`max_missions` 限制活动目标，`max_workers` 仍限制保留的全部 Worker 创建记录；不会隐式删除旧工作树或释放历史容量。完整报告与逐项证据留在 `missions.sqlite3`，原工具日志、用量及轮次仍属于原宿主，协调账本不复制执行历史。只读监督的字段与边界见下节。
 
 运行提交、导入、捕获均先记录意图。丢失确认后只按原提交键或确切导入／交付树回查；不能确认则 `unknown`，不重放写入。原运行失败或重启中断进入 `blocked`，不会因为长时间没有文本重新执行原命令。来源撤销在创建、提交和最终完成前复核，已受理操作仍由原宿主收尾。
 
@@ -125,7 +125,7 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 
 ### 目标级控制与少关注运行
 
-自主模式会在 `control.sqlite3` 中维护独立的目标控制账本。它与 `missions.sqlite3` 分离，因此控制请求不会改写任务事实，也不会要求迁移已有目标账本。可信本机操作者可以用稳定请求身份提交暂停、继续或取消：
+自主模式在独立的 `control.sqlite3` 保存可信本机操作者的控制意图，不迁移已有目标账本。暂停、继续、取消和原回执核对均无需构造模型宿主或读取模型密钥：
 
 ```sh
 python -m harness.cli --superagent /path/to/superagent.json \
@@ -134,13 +134,27 @@ python -m harness.cli --superagent /path/to/superagent.json \
   --superagent-resume --superagent-mission MISSION_ID --superagent-request-id resume-1
 python -m harness.cli --superagent /path/to/superagent.json \
   --superagent-cancel --superagent-mission MISSION_ID --superagent-request-id cancel-1
+python -m harness.cli --superagent /path/to/superagent.json \
+  --superagent-control-receipt cancel-1
 ```
 
-请求先原子写入控制账本；运行器发现目标后才消费，因此目标尚在收件箱排队时不会丢失控制意图。同一请求身份只能对应相同的目标和动作，重复提交返回原回执，正文冲突明确拒绝。暂停不取消已经受理的运行，运行自然收尾后冻结后续阶段；继续只解除暂停；取消设为终态控制模式并停止仍活动的所属会话。取消不会重放或伪造未确认的工具结果，原运行和工具事实仍按原账本回查。
+返回 `queued=true` 只表示意图已完整保存。相同请求号、目标和动作返回原回执；已应用或拒绝的原请求返回 `queued=false`，冲突正文明确拒绝，不覆盖原件。回执 `status=applied` 表示控制模式已在同一控制事务应用，不证明工具副作用已撤销或所有进程已经停止。`--superagent-control-receipt` 只读原控制库，不建立目录、空库或新命令；已有 `--superagent-receipt` 仍只读取节点引导回执。
 
-状态快照中的 `missions.recent[].control` 给出目标控制模式与修订号，顶层 `control.commands` 给出最近命令的排队、应用或拒绝回执。`inputs.pending` 只统计仍允许调度的目标，单批运行在暂停或取消目标没有活动会话时可以收尾退出。取消后的目标不能通过继续命令复活；需要新尝试时应提交新的明确目标，以保留审计边界。
+动作按 SQLite 持久插入顺序处理，不依据可能回拨的系统时间或请求号排序。每次全局推进最多检查 64 条，并轮转未知目标；不存在的目标保持排队，不阻塞其他目标，单个目标的命令仍保持先后次序。工作树准备、合并预检、运行提交、交付捕获及结算的安全边界优先核对本目标的控制。新请求及现有回执均验证当前格式、重复 JSON 字段、原目标／动作、状态及结果身份；控制模式与其最后一条已应用原回执相符，修订和计数在一次读事务中核对。损坏时保留原件并明确报错，不用默认运行模式掩盖损坏。
 
-回归见 `tests/test_superagent_missions.py`：确定性模型通过真实文件、Shell、Git 和运行控制器核对依赖产物、独立复核、有限修正、伪造证据、候选变化、来源撤销、冻结基线、慢任务、丢回执、重启与双语实际消费。设计审查依据与待验证风险见 [Superagent 协调审查](superagent-review.md)。
+- 暂停使控制模式进入 `paused`，阻止后续调度和异步准备后迟到的新写入；已经受理的运行、Git 写入及后台作业仍由原所有者收尾，不将等待取消当作撤销。继续只解除暂停，不复活已经完成、失败或结果未知的目标。当前仍活动的节点可以接受原有本机执行指令。
+- 取消使控制模式进入终态 `cancelled`；仍在调度的目标也进入 `cancelled`，释放活动目标名额。已有完成、失败、未知和发布事实不改写。每个停止核对原任务、资源、稳定提交键及确切运行，复核到投递取消之间不让出执行权；不会因共用规划会话误停另一个目标。未提交的节点不会补造运行；排队节点按原运行移除。
+- 原工作会话仍拥有的后台作业各有一次独立停止收尾。慢停止不阻塞其他目标；控制层不重复执行已失败或未确认的停止。停止进度和原运行／作业的实际状态分开保存和呈现，失败原件在关闭时继续向上传播。后续又产生的所属后台作业继续进入原目标的停止收尾，服务关闭等待已经接受的停止。
+
+`missions.recent[].control` 给出模式及修订，取消后本次运行器观察到的 `stopping` 区分 `pending/settled/unknown`，并给出未收尾运行、后台会话、停止失败数量及未确认执行标记；`settled` 仅说明已核对的原运行与当前所属作业完成收尾，不等于撤销外部副作用。重启后未观察本次停止时该字段为 `null`。重启恢复只采用确切运行和原后台作业回执；旧后台回执仍不可用或原执行未确认时保持 `unknown`，不向旧 PID 发送信号，也不重放命令。已保存的完成候选不因后来取消被追溯撤回。
+
+顶层 `control` 提供全局命令状态计数、总量及摘要截断标记；命令或目标摘要不是完整清单。`inputs.pending` 统计全部仍允许调度的目标，不受最近 16 项展示限制；目标账本中的活动清单、游标、统计、目标及任务使用同一读事务，控制库与原运行仍是独立事实源。暂停或取消的未运行节点显示 `control-paused/control-cancelled`，已接受运行及后台作业仍显示真实等待，并标明调度已停止。
+
+单批模式等待已接受运行、后台作业、控制意图及所属停止收尾；未知目标的控制仍排队时可能达到 `once_timeout`，不提前声称已应用。控制与 `--superagent-once` 合用时需要正常运行器凭据，最终退出码还核对本条原请求是否实际应用；拒绝、未知执行或停止未确认不返回通过。取消后的目标不能通过继续命令复活，需要新尝试时提交新的明确目标。
+
+控制账本最多保留 1024 条命令，不隐式归档、删除或循环复用身份。达到上限明确拒绝新控制意图，旧请求和只读回查继续可用。SDK 调用方在原事件循环中关闭 `SuperagentMissions` 时须等待 `aclose()`，以收完控制层已经接受的所属停止；CLI 服务已装配此生命周期。
+
+回归见 `tests/test_superagent_control.py`、`tests/test_superagent_control_runtime.py` 与目标快照回归，覆盖共享规划会话隔离、取消释放容量、暂停期间禁止迟到导入、慢后台停止不阻塞独立目标、失败及未知不重放、重启回执、时钟回拨、未知目标轮转、并发相同请求、损坏保留、只读 CLI、语言消费及完整计数。确定性模型与本机进程证据不代表在线模型质量、远端操作者认证或跨平台进程实机验收。
 
 ### 长工作节点的阶段接续
 
@@ -170,7 +184,7 @@ python -m harness.cli --superagent /path/to/superagent.json \
 
 ### 自主目标的只读监督
 
-`status.json` 的 `missions.states` 统计全部目标；`recent` 最多展示 16 项，依次优先活动目标、`unknown/blocked/rejected`、`suppressed`、已完成目标，同类按接纳序号倒序。`total/shown/has_more` 明示总量与截断，不能把 `recent` 当成全部任务清单。每个目标含原来源、工作树、交付树、修正轮数、有界完成标准及复核摘要；`budget` 提供当前尝试、上限及 `planning/delivery` 阶段，尚无合法计划的终止目标仍归规划阶段。`work.total/delivered` 仅表示计划工作节点数与已冻结交付数，没有计划时总数为 `null`，这些数值不是业务完成百分比。
+`status.json` 的 `missions.states` 统计全部目标；`recent` 最多展示 16 项，依次优先活动目标、`unknown/blocked/rejected/cancelled`、`suppressed`、已完成目标，同类按接纳序号倒序。`total/shown/has_more` 明示总量与截断，不能把 `recent` 当成全部任务清单。每个目标含原来源、工作树、交付树、修正轮数、有界完成标准及复核摘要；`budget` 提供当前尝试、上限及 `planning/delivery` 阶段，尚无合法计划的终止目标仍归规划阶段。`work.total/delivered` 仅表示计划工作节点数与已冻结交付数，没有计划时总数为 `null`，这些数值不是业务完成百分比。
 
 任务的 `run` 按原稳定提交键核对运行身份，从该 `run_id` 的唯一轮次事件派生最后活动及工具计数。同一集成对话的下一轮不会覆盖上一轮进度。`run.turn` 是本运行的确切轮次，尚未开始时为 `null`；目标同时提供原 `revision/thread_ids`，用于绑定本机节点指令。创建、开始、结束时间保留原运行的 Unix 秒值，`last_activity.time` 保留原事件的 Unix 毫秒值；无本轮事件时为 `null`。`tools.started/completed/errors` 分别统计实际开始、具有唯一且身份匹配结果、已确认错误；`unconfirmed` 是已开始但缺少确切配对结果的总数，包含尚在执行与已中断的调用。`active` 只列当前仍执行的调用名称，最多 16 项，每项最多 128 字符，`active_truncated` 标记截断。轮次结束不能把缺失结果伪装为完成，停止也不证明未知副作用已撤销。运行正文、工具参数、输出和错误原文不进入该运行摘要。
 
@@ -178,6 +192,7 @@ python -m harness.cli --superagent /path/to/superagent.json \
 
 | 机器值 | 当前等待 |
 |---|---|
+| `control-paused`、`control-cancelled` | 目标控制已停止该节点的后续调度；已接受的运行及作业仍展示实际等待 |
 | `dependencies` | 前置未交付；`unresolved_dependencies` 列出确切节点、任务与状态，尚未创建时后两项为 `null` |
 | `worker-capacity`、`conversation-busy` | 工作宿主已满，或该对话的原运行尚未结束 |
 | `workspace-preparation`、`dispatch` | 工作资源准备或就绪任务待提交 |

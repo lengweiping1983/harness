@@ -15,6 +15,7 @@ from ..session.turn_scope import turn_events
 from .superagent_inbox import _error, _json, _page, _text
 from .superagent_mission_store import TERMINAL, digest, packed, validate_plan
 from .superagent_mission_status import dependencies, run_progress, waiting_reason
+from .superagent_mission_control import MissionControlRuntime
 from .superagent_checkpoints import validate_checkpoint, work_heads, status_jobs
 from .superagent_router import SuperagentRouter
 from .worktree_delivery import snapshot_tree
@@ -76,6 +77,7 @@ class SuperagentMissions(SuperagentRouter):
         self.store = store
         self.guidance = None
         self.control = control
+        self.control_runtime = MissionControlRuntime(self) if control is not None else None
         self.results = MissionResults(self, reply_limits)
         self._tick_task = None
 
@@ -97,7 +99,7 @@ class SuperagentMissions(SuperagentRouter):
             cursor = db.execute('SELECT cursor FROM coordinator WHERE instance=?', (self.inbox.instance_id,)).fetchone()[0]
             if type(cursor) is not int or cursor < 0:
                 raise _error('corrupt')
-            active = db.execute("SELECT count(*) FROM missions WHERE instance=? AND state NOT IN ('completed','blocked','unknown','rejected','suppressed')",
+            active = db.execute("SELECT count(*) FROM missions WHERE instance=? AND state NOT IN ('completed','blocked','unknown','rejected','suppressed','cancelled')",
                                 (self.inbox.instance_id,)).fetchone()[0]
             if active >= self.store.limits['max_missions']:
                 return
@@ -114,6 +116,9 @@ class SuperagentMissions(SuperagentRouter):
 
     def _stop_mission(self, mission, state, reason):
         self.store.update(mission['id'], before=mission['state'], state=state, reason=reason)
+
+    def _control_allows(self, mission):
+        return self.control_runtime is None or self.control_runtime.admit(mission)
 
     def _record(self, job):
         self._check_job_resource(job)
@@ -153,6 +158,8 @@ class SuperagentMissions(SuperagentRouter):
             return
         await host.ensure_started()
         self._open()
+        if not self._control_allows(self.store.mission(job['mission'])):
+            return
         self._check_job_resource(job)
         mission = self.store.mission(job['mission'])
         if not self._allowed(mission):
@@ -229,6 +236,8 @@ class SuperagentMissions(SuperagentRouter):
         return row
 
     async def _prepare_job(self, mission, job):
+        if not self._control_allows(mission):
+            return
         if job['role'] == 'plan':
             event = self.inbox.event(source_id=mission['source_id'], event_id=mission['event_id'])
             profiles = {key: {'description': value['description'], 'tools': value['tools'], 'repository_id': digest(value['repo'])[:24]}
@@ -251,6 +260,8 @@ class SuperagentMissions(SuperagentRouter):
                 'event_id': mission['event_id'], 'revision': mission['revision']}
         worker = await self.worker_factory.ensure(batch_id=job['resource'], item=item, profile_id=job['profile'])
         self._open()
+        if not self._control_allows(mission):
+            return
         if worker['state'] != 'ready':
             if worker['state'] in ('unknown', 'skipped'):
                 self._stop_mission(mission, 'unknown' if worker['state'] == 'unknown' else 'suppressed', 'worker/' + worker['state'])
@@ -266,6 +277,8 @@ class SuperagentMissions(SuperagentRouter):
             sources = [item['id'] for item in confirmed]
             plan = await self._native(lambda: self.dispatcher.harness.worktrees.plan_delivery_merge(worker['workspace_id'], sources))
             self._open()
+            if not self._control_allows(mission):
+                return
             if not self._allowed(mission):
                 self._stop_mission(mission, 'suppressed', 'source/revoked')
                 return
@@ -311,6 +324,8 @@ class SuperagentMissions(SuperagentRouter):
         self.store.change_job(job, 'ready', payload=self._payload(key, frame))
 
     def _finish_import(self, mission, job):
+        if not self._control_allows(mission):
+            return
         plan = job['data']['import_plan']
         if plan['sources'] != self._check_dependencies(self._dependency_jobs(mission, job),
                 continuation=job['role'] == 'work' and job['attempt'] > 1):
@@ -357,6 +372,8 @@ class SuperagentMissions(SuperagentRouter):
         workspace = manager.get(row['workspace_id'])
         tree = await self._native(lambda: snapshot_tree(manager, workspace)[1])
         self._open()
+        if not self._control_allows(mission):
+            return
         if not self._allowed(mission):
             self._stop_mission(mission, 'suppressed', 'source/revoked')
             return
@@ -374,6 +391,8 @@ class SuperagentMissions(SuperagentRouter):
         self._finish_capture(mission, self.store.job(job['id']))
 
     def _finish_capture(self, mission, job):
+        if not self._control_allows(mission):
+            return
         row = self._worker_row(mission, job)
         manager = self.dispatcher.harness.worktrees
         workspace = manager.get(row['workspace_id'])
@@ -563,6 +582,8 @@ class SuperagentMissions(SuperagentRouter):
         self.store.change_job(job, 'done')
 
     def _schedule(self, mission):
+        if not self._control_allows(mission):
+            return
         if not self._allowed(mission):
             self._stop_mission(mission, 'suppressed', 'source/revoked')
             return
@@ -621,16 +642,37 @@ class SuperagentMissions(SuperagentRouter):
         await join_cleanup(self._tick_task)
         return self.status() if include_status else None
 
+    async def aclose(self):
+        """停止调度准入，等待原推进及控制层已经接受的所属作业收尾。"""
+        self.close()
+        errors = []
+        if self._tick_task is not None:
+            try:
+                await join_cleanup(self._tick_task)
+            except HarnessError as exc:
+                if exc.code != 'superagent/closed':
+                    errors.append(exc)
+            except BaseException as exc:
+                errors.append(exc)
+        if self.control_runtime is not None:
+            try:
+                await self.control_runtime.aclose()
+            except BaseException as exc:
+                if not any(error is exc for error in errors):
+                    errors.append(exc)
+        raise_cleanup_errors(errors)
+
     async def _tick(self):
+        if self.control_runtime is not None:
+            self.control_runtime.sync(recover=True)
+        self._collect_missions()
+        if self.control_runtime is not None:
+            self.control_runtime.sync(recover=True)
         if self.guidance is not None:
             await self.guidance.tick()
-        self._collect_missions()
-        if self.control is not None:
-            self.control.reconcile(mission_exists=self._mission_exists)
-            await self._cancelled_runs()
         with self.store.db() as db:
             cursor = db.execute('SELECT scheduling_cursor FROM coordinator WHERE instance=?', (self.inbox.instance_id,)).fetchone()[0]
-            rows = db.execute("SELECT id,seq FROM missions WHERE instance=? AND state NOT IN ('completed','blocked','unknown','rejected','suppressed') ORDER BY (seq<=?),seq LIMIT 8",
+            rows = db.execute("SELECT id,seq FROM missions WHERE instance=? AND state NOT IN ('completed','blocked','unknown','rejected','suppressed','cancelled') ORDER BY (seq<=?),seq LIMIT 8",
                               (self.inbox.instance_id, cursor)).fetchall()
         for row in rows:
             self._open()
@@ -671,24 +713,7 @@ class SuperagentMissions(SuperagentRouter):
             raise
         return True
 
-    async def _cancelled_runs(self):
-        """取消只作用于仍活动的所属运行；已完成或未知运行只保留事实。"""
-        if self.control is None:
-            return
-        _, _, snapshots = self.store.status_snapshots(limit=100)
-        for mission, jobs in snapshots:
-            if self.control.mode(mission['id'])['mode'] != 'cancelled':
-                continue
-            for job in jobs:
-                session_id = job['data'].get('session_id')
-                if not session_id:
-                    continue
-                host = self.harness if job['role'] == 'plan' else self.dispatcher.harness
-                active = host.runtime.active.get(session_id)
-                if active is not None and not active.done():
-                    await host.cancel(session_id)
-
-    def _job_status(self, mission, job, jobs, *, events, background, at_capacity):
+    def _job_status(self, mission, job, jobs, *, events, background, at_capacity, control=None):
         item = {**{key: job[key] for key in ('id', 'role', 'node', 'attempt', 'state', 'dependencies')},
                 **{key: job['data'][key] for key in ('run_id', 'session_id', 'workspace_id', 'delivery') if key in job['data']}}
         host = self.harness if job['role'] == 'plan' else self.dispatcher.harness
@@ -712,6 +737,11 @@ class SuperagentMissions(SuperagentRouter):
             item['unresolved_dependencies'] = unresolved
         if mission['state'] in TERMINAL and job['state'] not in ('done', 'blocked', 'checkpointed'):
             item['scheduling_halted'] = True
+        if control is not None and control['mode'] != 'running' and job['state'] not in ('done', 'blocked', 'checkpointed'):
+            item['scheduling_halted'] = True
+            if reason not in ('run', 'run-stop', 'run-cleanup', 'background-jobs', 'delivery-reconciliation',
+                              'submission-reconciliation', 'result-reconciliation'):
+                item['waiting_for'] = 'control-' + control['mode']
         if job['role'] == 'work' and 'max_work_turns' in self.store.limits:
             item['max_work_turns'] = self.store.limits['max_work_turns']
         if 'checkpoint' in job['data']:
@@ -729,7 +759,7 @@ class SuperagentMissions(SuperagentRouter):
 
     def status(self):
         """状态与阻塞原因携明确运行引用；复核通过不表示已发布或已合并主分支。"""
-        cursor, counts, snapshots = self.store.status_snapshots()
+        cursor, counts, snapshots, active = self.store.status_snapshots(include_active=True)
         background = self.dispatcher.harness.jobs.active_owners()
         at_capacity = len(self.dispatcher.harness.runtime.records.active) >= self.dispatcher.max_active
         events = {}
@@ -737,6 +767,8 @@ class SuperagentMissions(SuperagentRouter):
         controls = self.control.modes([mission['id'] for mission, _ in snapshots]) if self.control is not None else {}
         for mission, jobs in snapshots:
             control = controls.get(mission['id'], {'mission_id': mission['id'], 'mode': 'running', 'reason': 'default', 'revision': 0, 'updated_at': None})
+            if self.control_runtime is not None and control['mode'] == 'cancelled':
+                control['stopping'] = self.control_runtime.stopping(mission['id'])
             visible = status_jobs(jobs) if 'max_work_turns' in self.store.limits else jobs
             recent.append({**{key: mission[key] for key in ('id', 'state', 'reason', 'round', 'base_commit', 'source_id', 'event_id', 'revision', 'thread_ids')},
                 'budget': {'attempt': mission['round'], 'max_attempts': self.store.limits['max_attempts'],
@@ -747,10 +779,11 @@ class SuperagentMissions(SuperagentRouter):
                 'acceptance': [{**check, 'criterion': check['criterion'][:512],
                                 'criterion_truncated': len(check['criterion']) > 512}
                                for check in mission['plan']['acceptance']] if mission['plan'] else [],
-                'jobs': [self._job_status(mission, job, jobs, events=events, background=background, at_capacity=at_capacity) for job in visible],
+                'jobs': [self._job_status(mission, job, jobs, events=events, background=background, at_capacity=at_capacity,
+                                          control=control) for job in visible],
                 'jobs_total': len(jobs), 'jobs_shown': len(visible), 'jobs_has_more': len(jobs) > len(visible)})
-        inputs = {'pending': sum(1 for mission, _ in snapshots
-                                 if mission['state'] not in TERMINAL and controls.get(mission['id'], {}).get('mode', 'running') == 'running'),
+        active_controls = self.control.modes([mission['id'] for mission in active]) if self.control is not None else {}
+        inputs = {'pending': sum(active_controls.get(mission['id'], {}).get('mode', 'running') == 'running' for mission in active),
                   'unknown': counts.get('unknown', 0),
                   'rejected': sum(counts.get(state, 0) for state in ('blocked', 'rejected', 'suppressed'))}
         return {'instance_id': self.inbox.instance_id, 'cursor': cursor, 'inputs': inputs, 'batches': [],

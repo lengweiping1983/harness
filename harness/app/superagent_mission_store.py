@@ -31,10 +31,10 @@ CREATE TABLE publications (seq INTEGER PRIMARY KEY, mission TEXT NOT NULL UNIQUE
 PRAGMA user_version=1;
 '''
 MISSION_STATES = {'planning', 'running', 'integrating', 'reviewing', 'completed',
-                  'blocked', 'unknown', 'rejected', 'suppressed'}
+                  'blocked', 'unknown', 'rejected', 'suppressed', 'cancelled'}
 JOB_STATES = {'pending', 'importing', 'ready', 'submitting', 'accepted', 'capturing', 'checkpointed',
               'done', 'blocked', 'unknown'}
-TERMINAL = {'completed', 'blocked', 'unknown', 'rejected', 'suppressed'}
+TERMINAL = {'completed', 'blocked', 'unknown', 'rejected', 'suppressed', 'cancelled'}
 
 
 def digest(value):
@@ -167,7 +167,7 @@ class MissionStore:
                 if (row['repo'] != self.profiles[result['plan']['steps'][0]['profile_id']]['repo']
                         or not isinstance(row['base_commit'], str) or not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', row['base_commit'])):
                     raise ValueError
-            elif row['state'] not in {'planning', 'blocked', 'unknown', 'rejected', 'suppressed'}:
+            elif row['state'] not in {'planning', 'blocked', 'unknown', 'rejected', 'suppressed', 'cancelled'}:
                 raise ValueError
             if row['state'] == 'completed':
                 _text(row['reply'], 'reply', limit=4096)
@@ -332,10 +332,12 @@ class MissionStore:
                     raise _error('corrupt')
         return mission, jobs
 
-    def status_snapshots(self, *, limit=16):
+    def status_snapshots(self, *, limit=16, include_active=False):
         """活动目标优先，有界显示及统计来自同一只读事务。"""
         if type(limit) is not int or not 1 <= limit <= 100:
             raise _error('invalid', field='limit')
+        if type(include_active) is not bool:
+            raise _error('invalid', field='include_active')
         with self.db() as db:
             db.execute('BEGIN')
             cursor = db.execute('SELECT cursor FROM coordinator WHERE instance=?', (self.inbox.instance_id,)).fetchone()[0]
@@ -344,10 +346,22 @@ class MissionStore:
                 raise _error('corrupt')
             ids = [row[0] for row in db.execute("""SELECT id FROM missions WHERE instance=? ORDER BY CASE
                 WHEN state IN ('planning','running','integrating','reviewing') THEN 0
-                WHEN state IN ('unknown','blocked','rejected') THEN 1 WHEN state='suppressed' THEN 2 ELSE 3 END,
+                WHEN state IN ('unknown','blocked','rejected','cancelled') THEN 1 WHEN state='suppressed' THEN 2 ELSE 3 END,
                 seq DESC LIMIT ?""", (self.inbox.instance_id, limit))]
             snapshots = [self._read_snapshot(db, identity) for identity in ids]
-        return cursor, counts, snapshots
+            if include_active:
+                known = {mission['id']: mission for mission, _ in snapshots}
+                active = [known[row['id']] if row['id'] in known else self._decode_mission(row)
+                    for row in db.execute('SELECT * FROM missions WHERE instance=? AND state NOT IN ('
+                        + ','.join('?' for _ in TERMINAL) + ') ORDER BY seq', (self.inbox.instance_id, *sorted(TERMINAL)))]
+        return (cursor, counts, snapshots, active) if include_active else (cursor, counts, snapshots)
+
+    def active_missions(self):
+        """调度计数读取全部活动目标，不从有截断的监督列表推断是否仍有工作。"""
+        with self.db() as db:
+            db.execute('BEGIN')
+            return [self._decode_mission(row) for row in db.execute('SELECT * FROM missions WHERE instance=? AND state NOT IN ('
+                + ','.join('?' for _ in TERMINAL) + ') ORDER BY seq', (self.inbox.instance_id, *sorted(TERMINAL)))]
 
     def scope(self, batch_id, profile):
         mission, job = self._job_snapshot(batch_id)

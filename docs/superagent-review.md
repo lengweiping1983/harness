@@ -10,6 +10,8 @@
 
 显式 `max_work_turns` 使工作节点采用阶段协议。`superagent_checkpoints.py::validate_checkpoint` 校验模型提议；`SuperagentMissions._capture/_confirmed_checkpoint` 核对原运行与工具证据后冻结文件；`_schedule/_dependency_jobs` 只采用逻辑节点的最终阶段。新阶段拥有独立资源、原提交键与本节点有界引导上下文，复用同一任务图和基线；不增加失败或未知副作用的重试。`status_jobs` 只隐藏已冻结的旧阶段，完整历史不删除。
 
+目标控制由 `MissionControl` 保存模式与原命令回执，`MissionControlRuntime` 只把已应用意图作用到确切原运行及当前所属后台作业。控制回执与进程收尾分开，`SuperagentService` 等待所属停止。相对于控制层初始提交 `44d45df`，本次核对了共享规划会话、命令顺序、活动容量、读事务和原回执链路；没有据此更新其他产品领域的审查结论。
+
 一手资料支持的工程取舍：
 
 - [OpenAI 多智能体编排](https://developers.openai.com/api/docs/guides/agents-api/multi-agent)：适合独立问题的子智能体拥有独立上下文，主协调者汇总结果。这里采用有界并行与最小依赖报告，不将所有工作历史混入每个 Worker。
@@ -17,6 +19,8 @@
 - [Anthropic 长期应用 Harness](https://www.anthropic.com/research/harness-design-long-running-apps) 与[长期智能体 Harness](https://www.anthropic.com/research/effective-harnesses-for-long-running-agents)：规划、生成和独立评估分工，明确完成清单，防止仅凭自评提前结束。这里将集成与复核分开，并限制修正预算。
 - [DeepSeek Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)：工具轮次的推理字段有明确提供方协议。新协调器继续使用既有模型传输，不复制另一套请求协议，也不将提供方回灌失败解释为“缺少自主性”。
 - [Codex App Server 的运行中引导](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn) 要求绑定确切活动轮次；[OpenAI Mid-turn steering](https://developers.openai.com/api/docs/guides/steering) 区分已受理与模型实际应用。这里据此选择原运行／轮次绑定、独立意图与原生回执分工；采用宿主原日志验证应用，不把排队或模型自述当成完成。
+
+[Codex App Server 中断协议](https://learn.chatgpt.com/docs/app-server#interrupt-a-turn) 用确切会话与轮次标识停止目标。控制层据此保留原任务与原运行核对，并在同一执行边界投递停止，避免把共用会话当作运行身份。
 
 [Codex 长任务实践](https://developers.openai.com/blog/run-long-horizon-tasks-with-codex) 强调工具反馈和外部化工作状态；前述 Anthropic 长期应用资料讨论新上下文与结构化交接。阶段接续据此采用新对话、冻结文件及显式剩余步骤，而预算和重复检查点判定由宿主控制。这是工程设计依据，没有据此推断本产品优于竞品。
 
@@ -64,6 +68,17 @@
 | 长节点持续请求继续或重复原报告 | 独立阶段预算、同树同检查点的明确停滞判定，不解锁依赖或发布候选 | `test_budget_exhaustion_and_repeated_unchanged_checkpoint_do_not_unlock_dependencies` |
 | 普通报告或损坏缓存冒充有效阶段交接 | 严格检查点协议，消费时重新核对原运行输出及工具证据 | `test_blocked_and_malformed_checkpoints_do_not_get_automatic_retries`、`test_corrupt_checkpoint_cache_cannot_supply_new_context_or_release_dependencies` |
 | 新上下文丢失本节点已应用指令，或将指令混入其他节点 | `applied_context(node=...)` 按原工作节点过滤，最终集成／复核仍获得目标上下文 | `test_node_guidance_is_carried_only_to_its_own_continuation_and_final_review` |
+| 取消旧目标时，共用规划会话已经在执行另一目标 | `MissionControlRuntime._cancel` 核对原任务资源、提交键和 `runtime.current`，只取消原操作句柄 | `test_cancelling_an_old_goal_never_interrupts_another_goal_in_the_shared_planner` |
+| 取消后仍计入活动目标上限，后续目标无法接纳 | 尚在调度的目标进入独立 `cancelled` 终态，保留原运行并释放目标名额 | `test_cancelled_goals_release_admission_capacity_without_replaying_the_old_goal` |
+| 超过百项目标时，最近列表漏掉需要停止的旧目标 | 控制采用原目标身份和完整活动清单，不从状态摘要选择停止对象 | `test_cancellation_finds_an_old_active_goal_beyond_a_hundred_recent_goals` |
+| 暂停在异步合并预检期间到达，随后仍导入文件 | `_control_allows` 在资源准备及写入边界采用原目标控制，继续后复用原资源 | `test_pause_during_import_preflight_blocks_late_write_and_resume_uses_original_resources` |
+| 控制队列前部都是未知目标，或时钟回拨改变动作顺序 | 持久插入顺序、有限轮转及每目标先后校验 | `test_unknown_targets_do_not_starve_later_valid_control_or_reorder_one_target`、`test_wall_clock_rollback_does_not_reorder_control_intent` |
+| 停止慢后台进程阻塞其他目标，或停止失败被自动重试 | 每个所属作业拥有单次停止任务，状态保留未知，关闭继续传播原失败 | `test_slow_background_cancellation_does_not_block_another_goal`、`test_failed_background_stop_stays_unknown_and_is_not_replayed_by_control` |
+| 原提交或重启后的后台进程未确认，被取消回执误称停止成功 | 控制模式与实际收尾分开；确切后台回执可核对，不可用保持未知，不向旧 PID 投递 | `test_cancel_does_not_resolve_or_replay_an_unknown_submission`、`test_restart_uses_exact_background_receipt_and_never_signals_an_old_process_id` |
+| 最近十六项目标全部暂停，隐藏的活动目标没有计入待执行 | 全部活动清单与展示统计来自同一目标读事务，再按原控制模式计数 | `test_pending_counts_include_active_goals_hidden_by_the_recent_list`、`test_full_active_inventory_and_display_counts_share_one_snapshot` |
+| 损坏控制 JSON、模式或修订被当作合法历史或默认运行 | 严格解析、模式关联原已应用回执、修订核对真实已结算命令数，失败保留原件 | `test_corrupt_command_is_rejected_on_read_duplicate_and_reconcile_without_repair`、`test_mode_and_meta_corruption_are_not_treated_as_default_running` |
+| 并发操作者重复控制、控制回执缺失或原动作被拒绝 | 稳定请求原子认领；独立只读回执入口，单批 CLI 按本条原回执核对退出码 | `test_concurrent_operators_share_one_stable_control_receipt`、`test_missing_receipt_is_read_only_and_known_receipts_keep_original_status`、`test_once_control_exit_code_comes_from_the_original_receipt` |
+| 多模板有效配置超过单个说明字段大小 | 控制配置身份允许完整已验证配置，不按单个说明的大小截断 | `test_large_valid_profile_configuration_opens_and_closes_without_model_requests` |
 
 这些回归均使用隔离临时数据和确定性模型传输。命令成功和调用配对能验证协调行为，不能验证在线模型的判断质量。
 
@@ -88,6 +103,7 @@
 - 自主目标已支持可信本机节点指令，但没有中途问答、跨来源目标续接、目标验收或依赖变更、动态重规划和人工未知结果核实界面。节点不订阅来源 Thread，不能把默认 Router 的跟进能力写成自主目标已支持；本机指令也不代表远端信道或工作台已经支持交互。
 - 合并冲突、失败或中断运行、未知操作和资源总容量耗尽保留明确状态；当前不自动解决冲突、迁移配置、清理历史资源或重放任务。
 - 长节点阶段接续为显式协议，真实模型的交接质量、是否过早选择 `ready`、上下文重建成本及长时负载仍需独立在线评估。同树同报告的停止条件不能识别所有语义停滞；新阶段也不能自动带走忽略文件、环境、进程或外部服务状态。
+- 目标控制仅限可信本机操作者，尚未提供远端控制认证或多人权限审批工作台。停止只作用于当前拥有的句柄；重启前外部进程没有确切终态回执时仍需核实，不能根据旧 PID 重放停止。控制历史有明确容量上限，当前不自动归档或迁移。
 - 状态只保存有界摘要；完整复核在账本，原报告、工具与用量在原运行。仍需要面向普通用户的工作台与分页读取接口。
 
 尚无统一在线任务集与独立业务判定的比较证据，不记录“世界最强”或“全面超过其他系统”的结论。

@@ -202,6 +202,10 @@ class SuperagentGuidance:
                     or spec['actor_id'] not in source['actors'] or spec['thread_id'] not in source['threads']
                     or spec['thread_id'] not in event['thread_ids']):
                 raise _error('guidance-unauthorized')
+            if coordinator.control_runtime is not None:
+                coordinator.control_runtime.sync(mission_id=mission['id'])
+                if coordinator.control.mode(mission['id'])['mode'] == 'cancelled':
+                    raise _error('guidance-unavailable')
             if mission['state'] in TERMINAL or job['state'] != 'accepted' or record.status != 'running':
                 raise _error('guidance-unavailable')
         return job, session, events

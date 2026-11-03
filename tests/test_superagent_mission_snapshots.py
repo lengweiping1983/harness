@@ -154,3 +154,38 @@ class MissionSnapshotTests(unittest.TestCase):
         for invalid in (True, 0, 101, '16'):
             with self.assertRaises(HarnessError):
                 self.store.status_snapshots(limit=invalid)
+
+    def test_full_active_inventory_and_display_counts_share_one_snapshot(self):
+        writing = threading.Event()
+        errors = []
+        writer = None
+        original = self.store._read_snapshot
+        def update():
+            try:
+                with self.store.db(write=True) as db:
+                    db.execute("UPDATE missions SET state='blocked' WHERE id=?", (self.identity,))
+                    writing.set()
+            except BaseException as exc:
+                errors.append(exc)
+                writing.set()
+        def snapshot(*args, **kwargs):
+            nonlocal writer
+            result = original(*args, **kwargs)
+            writer = threading.Thread(target=update)
+            writer.start()
+            if not writing.wait(3):
+                raise TimeoutError('活动目标快照屏障未到达。')
+            return result
+        try:
+            with patch.object(self.store, '_read_snapshot', side_effect=snapshot):
+                _, counts, visible, active = self.store.status_snapshots(include_active=True)
+        finally:
+            if writer is not None:
+                writer.join(5)
+                self.assertFalse(writer.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(counts, {'running': 1})
+        self.assertEqual([mission['id'] for mission in active], [self.identity])
+        self.assertEqual(visible[0][0]['state'], 'running')
+        self.assertEqual(self.store.active_missions(), [])
+        self.assertEqual(self.store.status_snapshots(include_active=True)[1], {'blocked': 1})
