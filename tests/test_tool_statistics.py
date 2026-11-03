@@ -3,6 +3,7 @@ import unittest
 from types import SimpleNamespace
 
 from harness.web.views import _event_stats
+from harness.session.tool_activity import confirmed_tool_result, tool_invocations
 from harness.web.execution_trace import project
 
 
@@ -57,3 +58,32 @@ class ToolStatisticsTests(unittest.TestCase):
             self.assertTrue(row['run_attribution_ambiguous'])
         row = project('session', [event(1, 'tool/call', {'call_id': 'call', 'name': 'read', 'status': 'done'})], [], [])[0]
         self.assertIsNone(row['run_id'])
+
+    def test_result_requires_current_identity_without_falling_back_to_call_id(self):
+        """旧别名或外层身份不能将缺少结果身份的记录配给正在执行的调用。"""
+        for payload in ({'call_id': 'call'}, {}):
+            with self.subTest(payload=payload):
+                events = [
+                    event(1, 'tool/call', {'call_id': 'call', 'name': 'read', 'status': 'running'}),
+                    event(2, 'tool/result', {'call_id': 'call', 'name': 'read',
+                        'results': [{**payload, 'is_error': False, 'content': 'unconfirmed'}]}),
+                ]
+                rows = tool_invocations(events)
+                self.assertEqual(rows[0]['call_id'], 'call')
+                self.assertEqual(rows[0]['status'], 'running')
+                self.assertIsNone(rows[0]['_result_event'])
+                self.assertFalse(any(confirmed_tool_result(row) for row in rows))
+
+    def test_result_uses_current_identity_and_checks_conflicting_envelope(self):
+        """结果自身身份用于配对，外层身份冲突仍不能提供成功证据。"""
+        for envelope in ({}, {'call_id': 'call'}, {'call_id': 'other'}):
+            with self.subTest(envelope=envelope):
+                events = [
+                    event(1, 'tool/call', {'call_id': 'call', 'name': 'read', 'status': 'running'}),
+                    event(2, 'tool/result', {**envelope, 'name': 'read',
+                        'results': [{'tool_use_id': 'call', 'is_error': False, 'content': 'result'}]}),
+                ]
+                rows = tool_invocations(events)
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]['status'], 'done')
+                self.assertEqual(confirmed_tool_result(rows[0]), envelope.get('call_id', 'call') == 'call')

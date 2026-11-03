@@ -33,7 +33,7 @@ def build_router(ctx):
             if not events:
                 raise NotFound(tr('ui.git.error.invalid'), code='agent/run-not-found')
             event = events[0]
-            active = getattr(ctx.harness, '_active_team_runs', set())
+            active = ctx.harness._active_team_runs
             data = team_event_view(event, session_id=session_id, active_runs=active)['data']
             if event.seq != body['expected_seq']:
                 raise Conflict(tr('agent.integration.run_changed'), code='agent/run-changed')
@@ -60,7 +60,7 @@ def build_router(ctx):
                 # 同一进程内串行核验与创建，避免重复点击绕过候选复用检查。
                 with service._mutex:
                     latest = next((item for item in latest_team_events(session.events) if item.data['run_id'] == run_id), None)
-                    if latest is None or latest.seq != event.seq or (session_id, run_id) in getattr(ctx.harness, '_active_team_runs', set()):
+                    if latest is None or latest.seq != event.seq or (session_id, run_id) in ctx.harness._active_team_runs:
                         raise Conflict(tr('agent.integration.run_changed'), code='agent/run-changed')
                     repository = Path(service.git(Path(session.header.cwd or ctx.workspace_root()), 'rev-parse', '--show-toplevel').strip()).resolve()
                     for wid, name, delivery in zip(ids, names, deliveries):

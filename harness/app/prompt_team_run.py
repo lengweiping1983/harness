@@ -373,7 +373,7 @@ class PromptTeamRun:
 
     async def close(self, reason):
         """多个关闭等待者共用同一收尾，重复取消不截断成员回收。"""
-        task = getattr(self, '_close_task', None)
+        task = self._close_task
         if task is None:
             task = self._close_task = asyncio.create_task(self._close(reason))
         await join_cleanup(task)

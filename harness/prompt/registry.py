@@ -44,8 +44,6 @@ ORDER_TOOLS = 5000            # 工具说明
 ORDER_CONTACT = 10000         # 本地路径等
 ORDER_PERSONA_SUFFIX = 10200  # 部署人格后缀
 
-#: 变量名语法
-VARIABLE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 #: 一个完整的 {{...}} 引用
 VARIABLE_REF_RE = re.compile(r"\{\{\s*([a-z][a-z0-9_]*)\s*\}\}")
 

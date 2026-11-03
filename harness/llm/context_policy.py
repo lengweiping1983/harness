@@ -1,6 +1,5 @@
 """本地工作预算与真实模型容量分开计算。"""
 DEFAULT_WORKING_BUDGET = 384_000
-DEFAULT_SUMMARY_BUDGET = 8_192
 
 
 def compact_threshold(window, working_budget=DEFAULT_WORKING_BUDGET, output_reserve=16_000):

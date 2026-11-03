@@ -68,7 +68,7 @@ def build_router(ctx):
             raise Conflict(tr('worktree.environment.busy'), code='git/running')
         if any(not state.settled and state.session is not None and inside(state.session) for state in harness.subagents.list_states()):
             raise Conflict(tr('worktree.environment.busy'), code='git/running')
-        if (row.get('owner_session_id'), row.get('team_run_id')) in getattr(harness, '_active_team_runs', set()):
+        if (row.get('owner_session_id'), row.get('team_run_id')) in harness._active_team_runs:
             raise Conflict(tr('agent.integration.run_active'), code='agent/run-active')
 
     def receipt_view(receipt):

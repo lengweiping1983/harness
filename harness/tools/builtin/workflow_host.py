@@ -35,8 +35,7 @@ from ...core.errors import ToolExecutionError
 from ..processes import ProcessCleanupError, start_process
 from ...i18n import tr
 
-#: guest 引擎与主入口脚本的位置（随包分发，不依赖 cwd）
-GUEST_ENGINE = Path(__file__).with_name("workflow_guest.mjs")
+#: guest 主入口脚本的位置（随包分发，不依赖 cwd）
 GUEST_ENTRY = Path(__file__).with_name("workflow_guest_main.mjs")
 
 #: 默认 provider

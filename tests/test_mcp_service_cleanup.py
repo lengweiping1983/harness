@@ -1,5 +1,6 @@
 """托管 MCP 逐项收尾，失败句柄保留供显式重试。"""
 import subprocess
+import tempfile
 import threading
 import unittest
 from unittest.mock import Mock
@@ -17,12 +18,11 @@ def process(*, failure=None):
 
 class McpServiceCleanupTests(unittest.TestCase):
     def manager(self, main, tunnel):
-        service = object.__new__(McpService)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        service = McpService(directory.name)
         service._process, service._tunnel = main, tunnel
-        service._lock = threading.RLock()
-        service._cancel = threading.Event()
-        service._thread = None
-        service._state = {'status': 'running', 'error': '', 'local_url': 'old', 'public_url': 'old'}
+        service._state.update(status='running', local_url='old', public_url='old')
         return service
 
     def test_failed_main_still_closes_tunnel_and_retains_only_failed_handle(self):

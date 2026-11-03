@@ -31,10 +31,6 @@ JsonValue: TypeAlias = Union[
     Mapping[str, "JsonValue"],
 ]
 
-# 原始 JSON 文本的类型别名，便于在需要处标注。
-JsonText: TypeAlias = str
-
-
 class JsonConversionError(TypeError):
     """无法把某个 Python 对象转换成 JSON 值。"""
 
@@ -106,24 +102,11 @@ def content_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
-def loads(text: str) -> JsonValue:
-    """解析 JSON 文本。"""
-    return json.loads(text)
-
-
-def dumps(value: Any, *, indent: int | None = None) -> str:
-    """序列化任意 JSON 友好值。"""
-    return json.dumps(to_jsonable(value), ensure_ascii=False, indent=indent)
-
-
 __all__ = [
     "JsonValue",
-    "JsonText",
     "JsonConversionError",
     "to_jsonable",
     "deep_freeze",
     "canonical_json",
     "content_hash",
-    "loads",
-    "dumps",
 ]

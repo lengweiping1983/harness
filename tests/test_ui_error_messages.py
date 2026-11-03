@@ -1,7 +1,6 @@
 """验证界面错误的可操作文案与服务端异常隔离。"""
 import json
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -184,7 +183,10 @@ class UiErrorMessageTests(unittest.TestCase):
         from harness.app.mcp_errors import McpServiceError
         original = McpServiceError('ui.mcpService.error.startTimeout')
         state = {'status': 'failed', 'error': original}
-        manager = SimpleNamespace(_state=state, _lock=threading.RLock())
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        manager = McpService(directory.name)
+        manager._state = state
         with current_language.set('en'):
             self.assertEqual(McpService.snapshot(manager)['error'], tr('ui.mcpService.error.startTimeout'))
         self.assertEqual(state['error'], original)

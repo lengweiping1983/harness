@@ -49,7 +49,7 @@ def tool_invocations(events: list[Any]) -> list[dict[str, Any]]:
         for result in results:
             if not isinstance(result, Mapping):
                 continue
-            call = str(result.get('tool_use_id') or result.get('call_id') or data.get('call_id') or '')
+            call = str((result.get('tool_use_id') if event.type == 'tool/result' else data.get('call_id')) or '')
             key = (scope, call)
             row = latest.get(key) if call else None
             running = event.type == 'tool/call' and data.get('status') == 'running'

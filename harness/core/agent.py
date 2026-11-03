@@ -1514,7 +1514,7 @@ class AgentLoop:
             text = "\n".join(b.text for b in outcome.content)
             from ..session.tool_projection import project_tool_result
             projection = project_tool_result(text, name=call.name, call_id=call.id,
-                max_chars=getattr(self, 'tool_result_max_chars', 12000))
+                max_chars=self.tool_result_max_chars)
             skill_loads = []
             if call.name == 'skill' and not outcome.is_error:
                 from ..skills.parser import SkillMetadata
@@ -2195,7 +2195,7 @@ class AgentLoop:
             measured = measured if measured is not None and measured.total_tokens > 0 else TokenUsage(
                 input_tokens=min(input_tokens, settled), output_tokens=max(0, settled - input_tokens))
             self._usage_total = self._usage_total + measured
-            self._compaction_usage = getattr(self, "_compaction_usage", TokenUsage()) + measured
+            self._compaction_usage = self._compaction_usage + measured
             if scope is not None:
                 await scope.settle(settled, cost.settlement_source(summary.usage if charge is not None else None), failure)
         self._check_cancelled()

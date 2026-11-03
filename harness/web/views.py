@@ -331,7 +331,7 @@ def session_detail(harness: Any, session_id: str, *, view: str = "full", limit: 
     # 重新计算模型上下文或序列化完整检查时间线。
     if view == "conversation-window" and cursor:
         from .conversation import project_page, turn_boundaries
-        messages, visible_events, history = project_page(session, events, limit=limit, cursor=cursor, active_turn=active_turn, active_team_runs=getattr(harness, "_active_team_runs", ()))
+        messages, visible_events, history = project_page(session, events, limit=limit, cursor=cursor, active_turn=active_turn, active_team_runs=harness._active_team_runs)
         return to_jsonable({"header": session_header_view(session.header), "messages": messages, "events": visible_events,
                            "turn_events": turn_boundaries(events, messages, visible_events, through=history['through']),
                            "events_view": "conversation-window", "history": history,
@@ -342,13 +342,13 @@ def session_detail(harness: Any, session_id: str, *, view: str = "full", limit: 
     history = None
     if view == "conversation-window":
         from .conversation import project_page
-        messages, visible_events, history = project_page(session, events, limit=limit, cursor=cursor, active_turn=active_turn, active_team_runs=getattr(harness, "_active_team_runs", ()))
+        messages, visible_events, history = project_page(session, events, limit=limit, cursor=cursor, active_turn=active_turn, active_team_runs=harness._active_team_runs)
     else:
         from .conversation import project_steering_messages
         messages = project_steering_messages(messages, events, active_turn=active_turn)
         from .team_history import latest_team_events, team_event_view
         team_latest = {event.seq for event in latest_team_events(events)}
-        visible_events = [team_event_view(event, session_id=session_id, active_runs=getattr(harness, "_active_team_runs", ())) if event.seq in team_latest else event.to_dict() for event in events if view != "conversation" or _conversation_event(event)]
+        visible_events = [team_event_view(event, session_id=session_id, active_runs=harness._active_team_runs) if event.seq in team_latest else event.to_dict() for event in events if view != "conversation" or _conversation_event(event)]
         from ..session.hook_runs import hook_results, hook_summary
         evidence = hook_results(events, active_turn=active_turn)
         for message in messages:

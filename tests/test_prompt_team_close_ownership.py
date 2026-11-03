@@ -10,6 +10,7 @@ class PromptTeamCloseOwnershipTests(unittest.IsolatedAsyncioTestCase):
     def run_fixture(self, interrupt):
         run = object.__new__(PromptTeamRun)
         run.closed = False
+        run._close_task = None
         run.states = {name: SimpleNamespace(id=name, _prompt_member=name, status='completed', error_message='') for name in ('one', 'two')}
         run.members = {name: {} for name in run.states}
         run.harness = SimpleNamespace(subagents=SimpleNamespace(interrupt=interrupt), bus=SimpleNamespace(off=Mock()), _active_team_runs={('owner', 'run')})

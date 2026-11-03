@@ -72,7 +72,6 @@ DEFAULT_IDLE_SILENCE = 3.0
 DEFAULT_HANDOFF_GRACE = 0.5
 DEFAULT_STARTUP_RESULT_BYTES = 8192
 DEFAULT_SEND_TIMEOUT = 30.0
-DEFAULT_DISPOSE_GRACE = 3.0
 DEFAULT_READ_LINES = 500
 
 #: 原 ``TerminalWaitReason``
@@ -366,7 +365,6 @@ class _TerminalConfig:
     poll_interval: float = DEFAULT_POLL_INTERVAL
     idle_silence: float = DEFAULT_IDLE_SILENCE
     send_timeout: float = DEFAULT_SEND_TIMEOUT
-    dispose_grace: float = DEFAULT_DISPOSE_GRACE
 
 
 class _TerminalSession:

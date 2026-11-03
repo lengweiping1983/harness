@@ -143,10 +143,10 @@ class McpService:
                 self._cleanup()
             error = self._state['error']
             copy = {'key': error.key, 'params': dict(error.values)} if isinstance(error, McpServiceError) else None
-            reconnecting = bool(self._state['status'] == 'running' and getattr(self, '_metrics_url', '')
+            reconnecting = bool(self._state['status'] == 'running' and self._metrics_url
                                 and not _connector_ready(self._metrics_url))
             try:
-                settings, _ = read_tunnel(self.home / 'tunnel.json') if hasattr(self, 'home') else (dict(DEFAULT_TUNNEL), None)
+                settings, _ = read_tunnel(self.home / 'tunnel.json')
             except McpServiceError as exc:
                 settings = getattr(self, '_launch_tunnel', dict(DEFAULT_TUNNEL))
                 if not error:
@@ -158,8 +158,8 @@ class McpService:
                 if password_path.exists():
                     password_mask = mask_api_key(json.loads(password_path.read_text(encoding='utf-8'))['password'])
             return {**self._state, 'error': _error_text(error), 'error_copy': copy, 'password_mask': password_mask,
-                    **({'companion': self.companion.snapshot(self._state['status'] == 'running')} if hasattr(self, 'companion') else {}),
-                    'tunnel': public_tunnel(settings), 'quick_retry_at': getattr(self, '_quick_retry_at', 0), 'reconnecting': reconnecting,
+                    'companion': self.companion.snapshot(self._state['status'] == 'running'),
+                    'tunnel': public_tunnel(settings), 'quick_retry_at': self._quick_retry_at, 'reconnecting': reconnecting,
                     'tunnel_diagnostic': getattr(self, '_tunnel_diagnostic', ''),
                     **({'error_details': _error_details(error)} if isinstance(error, BaseExceptionGroup) else {})}
 
@@ -169,9 +169,9 @@ class McpService:
             self.snapshot()
             if self._state['status'] in {'starting', 'running', 'stopping'}:
                 return self.snapshot()
-            if getattr(self, '_thread', None) is not None and self._thread.is_alive():
+            if self._thread is not None and self._thread.is_alive():
                 raise McpServiceError('ui.mcpService.error.cleanupPending')
-            if self._process is not None or self._tunnel is not None or getattr(self, '_quick_service', None) is not None or (getattr(self, '_drain_thread', None) is not None) or (hasattr(self, 'companion') and self.companion.server is not None):
+            if self._process is not None or self._tunnel is not None or self._quick_service is not None or self._drain_thread is not None or self.companion.server is not None:
                 raise McpServiceError('ui.mcpService.error.cleanupPending')
             if not isinstance(project_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', project_id):
                 raise ValueError(tr('python.catalog.validation.mcpProjectId'))
@@ -186,7 +186,7 @@ class McpService:
                 self._private_home()
                 self._save_config(self.home / 'tunnel.json', settings, raw)
             self._launch_tunnel = settings
-            if settings['mode'] == 'quick' and time.time() < getattr(self, '_quick_retry_at', 0):
+            if settings['mode'] == 'quick' and time.time() < self._quick_retry_at:
                 self._state.update(status='failed', error=McpServiceError('ui.mcpService.error.rateLimited'))
                 return self.snapshot()
             self._tunnel_diagnostic = ''
@@ -437,11 +437,10 @@ class McpService:
     def _cleanup(self):
         """逐项回收所属进程；失败句柄保留，只有成功项释放引用。"""
         errors = []
-        if hasattr(self, 'companion'):
-            try:
-                self.companion.stop()
-            except BaseException as exc:
-                errors.append(exc)
+        try:
+            self.companion.stop()
+        except BaseException as exc:
+            errors.append(exc)
         for attribute in ('_process', '_tunnel'):
             process = getattr(self, attribute)
             if process is None:
@@ -463,7 +462,7 @@ class McpService:
                 errors.append(exc)
             else:
                 setattr(self, attribute, None)
-        quick_service = getattr(self, '_quick_service', None)
+        quick_service = self._quick_service
         if quick_service is not None:
             try:
                 quick_service.stop()
@@ -471,7 +470,7 @@ class McpService:
                 errors.append(exc)
             else:
                 self._quick_service = None
-        drain = getattr(self, '_drain_thread', None)
+        drain = self._drain_thread
         if drain is not None and drain is not threading.current_thread():
             try:
                 drain.join(timeout=3)
@@ -500,12 +499,12 @@ class McpService:
             except BaseException as exc:
                 errors.append(exc)
         with self._lock:
-            drain = getattr(self, '_drain_thread', None)
-            pending = bool(thread and thread.is_alive() or drain and drain.is_alive() or self._process is not None or self._tunnel is not None or getattr(self, '_quick_service', None) is not None or (hasattr(self, 'companion') and self.companion.server is not None))
+            drain = self._drain_thread
+            pending = bool(thread and thread.is_alive() or drain and drain.is_alive() or self._process is not None or self._tunnel is not None or self._quick_service is not None or self.companion.server is not None)
             self._state.update(status='stopping' if pending or errors else 'stopped')
             if not errors:
                 self._state['error'] = ''
-            if not pending and not errors and getattr(self, '_exit_registered', False):
+            if not pending and not errors and self._exit_registered:
                 atexit.unregister(self.stop)
                 self._exit_registered = False
             result = self.snapshot()

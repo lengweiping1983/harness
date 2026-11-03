@@ -1,10 +1,8 @@
 """MCP 启动跨线程保存资源身份，外部诊断不依赖原文匹配。"""
 import json
 import tempfile
-import threading
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from harness.app.mcp_errors import McpServiceError
@@ -90,8 +88,11 @@ class McpServiceResourceIdentityTests(unittest.TestCase):
                 service.stop()
 
     def test_unexpected_exit_saves_key_and_cleans_owned_processes_once(self):
-        manager = SimpleNamespace(_state={'status': 'running', 'error': '', 'local_url': 'old', 'public_url': 'old'},
-            _lock=threading.RLock(), _process=None, _tunnel=None, _cancel=threading.Event(), _cleanup=Mock())
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        manager = McpService(directory.name)
+        manager._state.update(status='running', local_url='old', public_url='old')
+        manager._cleanup = Mock()
         for language in ('en', 'zh-CN', 'en'):
             with current_language.set(language):
                 snapshot = McpService.snapshot(manager)
