@@ -117,9 +117,9 @@ export function VoiceButton({editor, disabled, onTranscript}: {
   }, [editor])
   const rect = editor.current?.getBoundingClientRect()
   const feedbackStyle = rect ? {position: 'fixed' as const, left: Math.max(8, Math.min(rect.right - 256, window.innerWidth - 264)), bottom: Math.max(8, window.innerHeight - rect.top + 8)} : undefined
-  const label = t(phase === 'recording' ? 'ui.voice.stop' : phase === 'processing' ? 'ui.voice.processing' : 'ui.voice.start')
+  const label = t(phase === 'opening' ? 'ui.voice.opening' : phase === 'recording' ? 'ui.voice.stop' : phase === 'processing' ? 'ui.voice.processing' : 'ui.voice.start')
   return <div className="relative flex items-center">
-    <Tooltip content={<>{label}<br />{t('ui.voice.global')}</>}>
+    <Tooltip content={phase === 'idle' ? <>{label}<br />{t('ui.voice.global')}</> : label}>
       <Button size="sm" variant={phase === 'recording' ? 'subtle' : 'ghost'} className="w-8 p-0" aria-label={label} title={label}
         aria-pressed={phase === 'recording'} disabled={disabled || phase === 'opening' || phase === 'processing'} onClick={() => toggle()}>
         {phase === 'opening' || phase === 'processing' ? <Loader2 className="h-4 w-4 animate-spin" />
@@ -127,7 +127,7 @@ export function VoiceButton({editor, disabled, onTranscript}: {
       </Button>
     </Tooltip>
     {(phase !== 'idle' || error) && feedbackStyle && createPortal(<div role={error ? 'alert' : 'status'} style={feedbackStyle} className="z-50 w-64 max-w-screen rounded-xl border border-line bg-surface p-3 text-xs text-muted shadow-lg">
-      {error ? noticeText(error) : t(phase === 'recording' ? 'ui.voice.recording' : phase === 'processing' ? 'ui.voice.processing' : 'ui.voice.start')}
+      {error ? noticeText(error) : t(phase === 'opening' ? 'ui.voice.opening' : phase === 'recording' ? 'ui.voice.recording' : phase === 'processing' ? 'ui.voice.processing' : 'ui.voice.start')}
       {error && diagnostic && <details className="mt-2"><summary>{t('ui.voice.diagnostic')}</summary><pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{diagnostic}</pre></details>}
     </div>, document.body)}
   </div>

@@ -62,6 +62,23 @@ it('keeps the actual microphone localized through English, Chinese and English',
   expect(recording.create).not.toHaveBeenCalled()
 })
 
+it('shows a focused preparation prompt while microphone permission is pending', async () => {
+  let ready!: (value: {finish: () => Promise<ArrayBuffer>; dispose: () => void}) => void
+  recording.create.mockReturnValue({ready: new Promise(resolve => {ready = resolve}), dispose: vi.fn()})
+  void button(render()).props.onClick()
+  await vi.waitFor(() => expect(recording.create).toHaveBeenCalledOnce())
+  const pending = render()
+  expect(button(pending).props['aria-label']).toBe(t('ui.voice.opening'))
+  const content = (node: unknown): string => {
+    if (typeof node === 'string') return node
+    if (Array.isArray(node)) return node.map(content).join('')
+    return node && typeof node === 'object' ? content((node as ReactElement<{children?: unknown}>).props?.children) : ''
+  }
+  expect(content(pending)).toContain(t('ui.voice.opening'))
+  ready({finish: async () => new ArrayBuffer(48), dispose: vi.fn()})
+  await vi.waitFor(() => expect(button(render()).props['aria-label']).toBe(t('ui.voice.stop')))
+})
+
 it('serializes double clicks, appends the transcript once and never sends a message', async () => {
   const finish = vi.fn(async () => new ArrayBuffer(48)), dispose = vi.fn()
   recording.create.mockReturnValue({ready: Promise.resolve({finish, dispose}), dispose})
