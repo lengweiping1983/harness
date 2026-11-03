@@ -19,6 +19,10 @@ import {BackendSupervisor} from './backend-supervisor.mjs'
 import {availablePort} from './backend.mjs'
 
 protocol.registerSchemesAsPrivileged([screenshotScheme])
+/** 桌面文案占位符替换：{version} 为当前应用版本。 */
+function formatDesktopText(text, values = {version: app.getVersion()}) {
+  return text.replace(/\{(\w+)\}/g, (original, name) => Object.hasOwn(values, name) ? String(values[name]) : original)
+}
 async function startDesktop() {
   let window
   const instanceReady = claimDesktopInstance(app, () => window)
@@ -78,7 +82,7 @@ async function startDesktop() {
   async function showUpdates() {
     if (updateDialog) return
     updateDialog = true
-    const message = async key => dialog.showMessageBox(window, {type:'info', title:'Harness', message:menuText[key], buttons:[menuText.ok]})
+    const message = async key => dialog.showMessageBox(window, {type:'info', title:'Harness', message:formatDesktopText(menuText[key]), buttons:[menuText.ok]})
     async function showDownloaded() {
       if (window.isDestroyed()) return
       const choice = await dialog.showMessageBox(window, {type:'info', title:'Harness', message:menuText.updateDownloaded, detail:updates.version || '', buttons:[menuText.quitInstall, menuText.later], defaultId:1, cancelId:1})
