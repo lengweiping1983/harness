@@ -13,6 +13,24 @@ from tests.test_hex_tools import FakeHexServer
 
 
 class WindowsVoiceDiscoveryTests(unittest.TestCase):
+    def test_bundled_engine_is_independent_of_a_damaged_external_install(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(hex_tools.sys, 'platform', 'win32'), \
+             patch.object(hex_tools.platform, 'machine', return_value='AMD64'), \
+             patch.dict(os.environ, {'APPDATA': str(Path(tmp) / 'user-data')}), \
+             patch.object(hex_tools, '__file__', str(Path(tmp) / 'package/harness/tools/builtin/hex_tools.py')):
+            binary = Path(tmp) / 'package/harness/resources/hex/windows-x86_64/hex.exe'
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b'bundled fixture')
+            pointer = Path(tmp) / 'user-data/hex/current-version'
+            pointer.parent.mkdir(parents=True)
+            pointer.write_bytes(b'../../damaged-install')
+            self.assertEqual(hex_tools.hex_binary_path(), binary.resolve())
+            self.assertEqual(pointer.read_bytes(), b'../../damaged-install')
+            binary.unlink()
+            with self.assertRaises(hex_tools.HexToolError):
+                hex_tools.hex_binary_path()
+            self.assertEqual(pointer.read_bytes(), b'../../damaged-install')
+
     def test_installed_pointer_supports_x64_arm64_and_explicit_updates(self):
         for machine in ('AMD64', 'ARM64'):
             with self.subTest(machine=machine), tempfile.TemporaryDirectory() as tmp, \

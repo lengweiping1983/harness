@@ -33,6 +33,7 @@ export default defineConfig({
     target: 'es2022',
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
+      input: {app:fileURLToPath(new URL('./index.html', import.meta.url)), voice:fileURLToPath(new URL('./voice.html', import.meta.url))},
       // 这里刻意「少」做手动分包。
       //
       // mermaid 会和 unified/micromark/mdast 这一套共享大量依赖，早先按

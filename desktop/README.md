@@ -70,9 +70,9 @@ Windows 原生顶栏显式验收入口为 `node desktop/tests/windows-titlebar-s
 
 ## 安装包与更新
 
-安装版内置 CPython 3.14.10、锁定依赖、内置技能和前端，无需用户安装 Python、Node.js 或 npm；Git 与用户项目所需 SDK 由项目环境提供。应用更新不清理或迁移会话、凭据及用户设置。
+安装版内置 CPython 3.14.10、锁定依赖、内置技能、前端及 Hex 识别引擎，无需用户安装 Python、Node.js 或 npm；语音输入与全局听写由 Harness 自己管理，无需另行安装 Hex；入口及边界见[语音输入](../docs/hex-stt.md)。Git 与用户项目所需 SDK 由项目环境提供。应用更新不清理或迁移会话、凭据及用户设置。
 
-构建要求 Node.js 22+、npm、uv，并在目标系统和目标 CPU 架构上执行；保留的手动构建工作流使用 uv 0.13.6，本机 uv 0.11.5 也可读取仓库固定的下载清单，不依赖其内置目录是否包含 CPython 3.14.10：
+构建要求 Node.js 22+、npm、uv，并在目标系统和目标 CPU 架构上执行；macOS 另需 Swift 编译器构建原生输入辅助程序。先通过 `make hex-build` 准备本机识别引擎，或用 `HARNESS_HEX_BINARY` 指定匹配系统与 CPU 的合法预编译引擎。缺失或身份不匹配时拒绝打包，运行时不要求用户安装独立 Hex。保留的手动构建工作流使用 uv 0.13.6，本机 uv 0.11.5 也可读取仓库固定的下载清单，不依赖其内置目录是否包含 CPython 3.14.10：
 
 ```sh
 npm --prefix model-runtime ci
@@ -99,17 +99,21 @@ npm --prefix desktop run package
 
 发行准备与构建前运行时校验沿用[桌面语言选择和资源规则](../docs/internationalization.md)，`HARNESS_LANGUAGE=en` 或 `zh-CN` 可显式选择，否则按系统地区选择。自有拒绝与完成提示使用资源模板；路径、命令和外部诊断原样保留，失败不自动重放安装命令，也不自动删除已有暂存目录。
 
-启动时静默检查稳定版更新；帮助菜单提供检查更新，有新版时显示“有可用更新”，确认对话框展示目标版本。下载需要用户选择，帮助菜单显示整数百分比。等待完整下载与原生校验完成后才显示“更新已准备好”，不以 macOS 提前发出的下载事件作为成功依据。完成后可继续工作，或选择“退出并安装”；两者均沿现有窗口离开确认与后端关闭流程正常退出，不直接调用强制重启。下次启动使用更新后的版本。下载或签名失败保留错误，不报告完成；再次检查确认版本后允许显式重试。开发版不联网检查，稳定版不自动接收预发布或降级。
+启动时静默检查稳定版更新，帮助菜单支持手动检查。当前 GitHub 来源直接读取最新稳定 Release，按当前系统及 CPU 选择 DMG／EXE，不依赖 ZIP、blockmap 或 `latest-mac.yml`。已安装版本等于或高于公开版本时显示无较新版本；没有可读取的稳定发行、缺少对应平台安装包、发行数据异常及 HTTP／网络故障分别呈现，不将本地尚未发布的版本误报为网络失败。
+
+发现新版后由用户选择打开官方安装包下载地址，下载完成后手动安装。只报告已请求下载，不展示虚构进度或自动安装完成状态；项目、对话和设置不由更新检查清理或迁移。异常时保留原诊断，并可显式打开发布页面。开发版不联网检查，不接受预发布版本或自动降级。
+
+显式配置静态 HTTPS 更新源时仍使用原有清单及原生更新协议：用户确认下载，等待完整传输和原生校验后才报告准备完成；退出安装沿现有离开确认与后端关闭流程。它不是当前 GitHub 安装包发布流程。
 
 ## 自动构建与发布位置
 
-当前私有仓库暂停 Actions，不要求启用远端 CI。`.github/workflows/desktop-build.yml` 保留为未来恢复时的手动模板，只有 `workflow_dispatch` 入口，不由标签触发。Windows x64、macOS arm64 和 x64 分别使用原生 runner，构建流程保留构建前运行时校验，当前不再执行安装包冒烟。工作流只上传 Actions artifacts，不创建 Release 或发布外部资产。
+当前私有仓库暂停 Actions，不要求启用远端 CI。`.github/workflows/desktop-build.yml` 保留为未来恢复时的手动模板，只有 `workflow_dispatch` 入口，不由标签触发。Windows x64、macOS arm64 和 x64 分别使用原生 runner，构建流程先编译随包语音引擎，再执行构建前运行时校验；恢复执行前仍需准备 Rust、CMake 以及匹配 Hex 依赖的 Apple SDK／Windows 原生与 Vulkan 工具链。当前不执行安装包冒烟，模板未因此被视为跨平台实机验收。工作流只上传 Actions artifacts，不创建 Release 或发布外部资产。
 
-汇总器 `release-assets.mjs` 接受包含三个平台子目录的输入，要求同一稳定版本、Windows x64 的 EXE、Mac arm64／x64 的 DMG 和 ZIP，以及每个安装文件的 blockmap。核对清单中的大小、SHA-512 和复制后的字节，合并 Mac 双架构 `latest-mac.yml`，并生成覆盖安装文件与 blockmap 的 `SHA512SUMS`；缺失、冲突或混入其他版本立即失败。输出目录必须为空，不能覆盖旧发布目录。恢复工作流后，其 `Harness-release-assets` artifact 使用同一汇总器。
+汇总器 `release-assets.mjs` 接受包含三个平台子目录的输入，要求同一稳定版本、Windows x64 的 EXE、Mac arm64／x64 的 DMG 和 ZIP，以及每个安装文件的 blockmap。核对清单中的大小、SHA-512 和复制后的字节，合并 Mac 双架构 `latest-mac.yml`，并生成覆盖安装文件与 blockmap 的 `SHA512SUMS`；缺失、冲突或混入其他版本立即失败。输出目录必须为空，不能覆盖旧发布目录。恢复工作流后，其 `Harness-release-assets` artifact 使用同一汇总器。这些是本地／工作流核对产物；当前 GitHub 发布只上传安装包，客户端不依赖该汇总目录的清单或 ZIP。
 
 当前项目的桌面安装包发布与更新仓库为 [lengweiping1983/SuperHarness](https://github.com/lengweiping1983/SuperHarness)，构建时设置 `HARNESS_UPDATE_REPOSITORY=lengweiping1983/SuperHarness`。源码仓库 `lengweiping1983/harness` 不作为下载与更新源。
 
-正式下载与更新源在构建时由 `electron-builder.config.cjs` 配置并写入安装包内部的 `app-update.yml`，不通过客户端环境变量更换服务器。必须二选一：
+正式下载与更新源在构建时由 `electron-builder.config.cjs` 配置并写入安装包元数据及 `app-update.yml`，不通过客户端环境变量更换服务器。必须二选一：
 
 - `HARNESS_UPDATE_REPOSITORY=OWNER/PUBLIC_RELEASE_REPO`：单独的公开 GitHub 下载仓库，源码可继续私有；Release 标签使用 `v<desktop/package.json 的版本>`，例如 `v0.2.0`。不能用 `desktop-v0.2.0` 作为更新仓库的 Release 标签。
 - `HARNESS_UPDATE_URL=https://HOST/harness/stable/`：静态 HTTPS 更新目录。必须允许匿名读取，不能在 URL 中带凭据、查询参数或片段；安装包、blockmap 和两个 latest 清单同目录。
@@ -122,7 +126,7 @@ npm --prefix desktop run package
 2. 执行 `npm --prefix desktop version 0.2.0 --no-git-tag-version`（替换为实际递增的稳定版本），同步提交 `package.json` 与锁文件。桌面更新比较的是桌面版本，不是 Python 包版本。版本一旦发布，不覆盖同版本资产。
 3. 在三个独立且干净的原生构建检出中安装依赖：Mac Apple Silicon、Mac Intel、Windows x64。先配置相同的更新源，再运行打包。准备目录已有内容时按原错误指引处理，禁止清理用户数据。
 4. 正式构建设置 `HARNESS_RELEASE_BUILD=1`，强制代码签名；Mac 另要求 Apple 公证凭据。macOS 设置 `CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`；Windows 设置该平台的 `CSC_LINK`、`CSC_KEY_PASSWORD`。证书和密码只保存在构建机安全环境中。恢复 Actions 时使用下述平台 secrets，并在 repository variables 中配置一个更新源；不自动发布。
-5. macOS 各自在目标机器执行 `npm --prefix desktop run package -- --arm64` 或 `--x64`。Windows PowerShell 示例（占位地址替换为实际来源，签名凭据已安全设置）：
+5. macOS 各自在目标机器执行 `npm --prefix desktop run package -- --arm64` 或 `--x64`。Windows PowerShell 示例（本机引擎及签名凭据已准备）：
 
    ```powershell
    $env:HARNESS_UPDATE_REPOSITORY = 'lengweiping1983/SuperHarness'
@@ -133,20 +137,15 @@ npm --prefix desktop run package
    npm --prefix desktop run package -- --x64
    ```
 
-6. 只收集本轮 `.run/installers` 的安装文件、blockmap、latest 清单，分别放入 `.run/artifacts/mac-arm64`、`mac-x64`、`win-x64`。不要复制 unpacked 应用目录。执行：
+6. 核对本轮安装包的版本、系统、CPU、内置引擎、原生输入辅助程序及资源完整性。打包准备会在隔离临时数据中启动随包语音服务并完成认证健康检查，不下载模型或录音；这不等于真实麦克风及跨应用输入验收。
+7. 在 `lengweiping1983/SuperHarness` 建立草稿 Release，只上传本轮 DMG／EXE 安装包；不上传 ZIP、blockmap、更新清单或其他发行资产。核对后发布为普通稳定版，标签为 `v<桌面版本>`，不勾选 prerelease，不覆盖已发布的同版本资产。
+8. 在目标系统用上一正式版检查新版本、拒绝下载、接受下载、断网／源不可用、平台安装包缺失、手动安装及再次启动的版本；核对项目、对话、设置和凭据保持。语音另需验证麦克风、系统输入授权、全局快捷键与原应用输入。未执行的系统或专项不得标记通过；签名／公证和实机矩阵未完成前不宣称正式发行完成。
 
-   ```sh
-   node desktop/release-assets.mjs .run/artifacts .run/release-assets
-   ```
-
-7. GitHub 来源先建立草稿 Release，上传汇总目录全部文件，核对后一次发布为普通稳定版，不能勾选 prerelease。HTTPS 来源先上传版本化安装文件、blockmap 和校验文件，确认均可匿名下载后最后替换两个 latest 清单；清单禁止长时间缓存。保留旧版本资产，供旧客户端差分下载失败时回退完整下载。`SHA512SUMS` 是离线核对依据，不替代应用签名或客户端清单校验。
-8. 用上一正式版本真实升级到下一版：Mac arm64、Mac Intel、Windows x64 分别验证检查、拒绝下载、下载进度、断网及校验失败、退出确认取消、继续工作、正常退出安装、再次启动的版本号，以及项目、对话、设置、凭据保持。Mac 从 DMG 安装到 `/Applications` 后测试；Windows 使用 NSIS 安装版。签名／公证和实机矩阵未验收前不宣称发行完成。
-
-若新版本有缺陷，停止发布错误清单并发布更高版本的修复包；自动降级已关闭，不覆盖同版本文件或自动迁移用户数据。
+若新版本有缺陷，停止继续分发并发布更高版本的修复包；自动降级已关闭，不覆盖同版本文件或自动迁移用户数据。
 
 签名凭据按系统隔离：macOS 使用 `DESKTOP_MAC_CSC_LINK`、`DESKTOP_MAC_CSC_KEY_PASSWORD`，公证使用 `DESKTOP_APPLE_ID`、`DESKTOP_APPLE_APP_SPECIFIC_PASSWORD`、`DESKTOP_APPLE_TEAM_ID`；Windows 使用 `DESKTOP_WINDOWS_CSC_LINK`、`DESKTOP_WINDOWS_CSC_KEY_PASSWORD` 及可信 Authenticode 证书。
 
-无凭据可生成本机验收包，但不能据此宣称签名、公证、SmartScreen 信任或真实自动更新通过。macOS 自动更新需要签名，对外分发还应公证。参见 [更新说明](https://www.electron.build/v26/docs/features/auto-update/)、[macOS 签名](https://www.electron.build/v26/docs/code-signing-mac/)和 [Windows 签名](https://www.electron.build/v26/docs/code-signing-win/)。
+无凭据可生成本机验收包，但不能据此宣称签名、公证、SmartScreen 信任或真实自动更新通过。当前 GitHub 流程通过官方安装包手动更新；macOS 原生自动更新需要签名，对外分发还应公证。参见 [更新说明](https://www.electron.build/v26/docs/features/auto-update/)、[macOS 签名](https://www.electron.build/v26/docs/code-signing-mac/)和 [Windows 签名](https://www.electron.build/v26/docs/code-signing-win/)。
 
 后续发布先更新 `desktop/package.json` 版本及 npm 锁文件，再构建；旧运行时会被版本闸拒绝。更新 Python 依赖锁的命令：
 

@@ -7,6 +7,27 @@ if (['darwin', 'win32'].includes(process.platform)) {
 }
 contextBridge.exposeInMainWorld('harnessDesktop', {
   platform: process.platform,
+  voice: {
+    context: value => ipcRenderer.invoke('desktop-voice', 'context', value),
+    receipt: (id, accepted) => ipcRenderer.invoke('desktop-voice', 'receipt', {id, accepted}),
+    onInsert: listener => {
+      const handler = (_event, value) => listener(value)
+      ipcRenderer.on('voice-insert', handler)
+      return () => ipcRenderer.removeListener('voice-insert', handler)
+    },
+    status: () => ipcRenderer.invoke('desktop-voice', 'status'),
+    configure: value => ipcRenderer.invoke('desktop-voice', 'configure', value),
+    permission: () => ipcRenderer.invoke('desktop-voice', 'permission'),
+    ready: () => ipcRenderer.invoke('voice-capture', 'ready'),
+    phase: (id, phase) => ipcRenderer.invoke('voice-capture', 'phase', {id, phase}),
+    complete: (id, transcript) => ipcRenderer.invoke('voice-capture', 'complete', {id, transcript}),
+    cancel: id => ipcRenderer.invoke('voice-capture', 'cancel', {id}),
+    onAction: listener => {
+      const handler = (_event, value) => listener(value)
+      ipcRenderer.on('voice-action', handler)
+      return () => ipcRenderer.removeListener('voice-action', handler)
+    },
+  },
   popupMenu: request => ipcRenderer.invoke('desktop-menu-popup', request),
   setTitleBarAppearance: value => ipcRenderer.invoke('desktop-titlebar-appearance', value),
   notifyTask: payload => ipcRenderer.invoke('task-notification', payload),

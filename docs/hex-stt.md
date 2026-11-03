@@ -1,90 +1,69 @@
 # 语音输入与全局听写
 
-Harness 复用 `vendor/hex` 的本地语音引擎，提供输入框录音、智能体文件转录及原生跨应用听写。源码来自本地 Hex 项目；对应上游版本与许可证分别以 `vendor/hex/Cargo.toml` 和 `vendor/hex/LICENSE` 为准。集成不修改 Hex 的识别、快捷键及系统粘贴实现。
+Harness 将 Hex 作为内部语音识别引擎；录音、输入框草稿、全局听写设置与浮窗由 Harness 自己管理。桌面安装包必须包含本机引擎，不要求用户另行安装或打开 Hex。引擎源码与许可证位于 `vendor/hex`；运行时不隐式编译、安装独立应用或修改已有 Hex 配置。
 
-## 输入框
+## 输入框与模型
 
-默认麦克风图标位于发送按钮左侧。点击开始录音，再次点击结束并转写；录音时五条声波线根据实际麦克风音量伸缩，静音时回落，不播放循环动画。音量在浏览器按 50 毫秒窗口计算均方根并去除直流偏置，采用快速响应、缓慢回落的包络；只更新图标，不触发整个输入区重新渲染，也不更改转写音频。焦点在输入区时也可用 `Ctrl+Shift+Space`。按键自动重复、输入法组合事件及键码 229 不触发操作。录音最长 60 秒，达到限制自动结束并转写。浏览器需要支持 AudioWorklet，并处于 localhost 或 HTTPS 等允许麦克风的环境。拒绝麦克风权限或设备不可用会显示错误。引擎缺失单独说明二进制路径；转写失败可展开技术详情查看原始后端诊断。
+麦克风位于发送按钮左侧，点击开始录音，再次点击结束并转写；输入框聚焦时也可用 `Ctrl+Shift+Space`。按键自动重复、输入法组合事件及键码 229 不触发操作。声波使用真实麦克风音量，静音回落，不播放循环动画，也不改变转写音频。录音最多 60 秒，达到上限自动结束。
 
-音频由当前浏览器采集，在内存中转成单声道、16 kHz、PCM16 WAV，结束录音后交给本机 Harness。识别文字追加到当前草稿，不自动发送，不清空原文。切换对话、重建新对话草稿、隐藏页面、禁用入口或卸载组件均释放录音资源；已受理的后端转写继续收尾，迟到结果不写入其他对话。切走再切回也不会接收旧结果。未识别到语音时保留草稿并提示。
+浏览器在内存中生成单声道、16 kHz、PCM16 WAV，再交给本机后端。文字追加到当前草稿，不清空原文或自动发送。切换对话、切走再切回、重建草稿、隐藏页面、禁用入口及卸载都会释放所属录音资源；已受理的转写继续收尾，迟到结果不进入替换对话。浏览器需支持 AudioWorklet，并允许麦克风及安全来源访问。
 
-默认模型为 `whisper_large_v3_turbo`，语音语言为 `auto`，支持自动识别中英文等语言，不跟随界面语言切换。首次使用从 HuggingFace 下载模型；后续推理在本机完成。模型体积与语言能力以 Hex 当前模型目录为准。界面提示和错误独立支持英文→中文→英文切换。
+默认模型为 `whisper_large_v3_turbo`，语音语言为 `auto`，独立于界面语言。模型未准备时按需下载，已下载内容由引擎复用，推理在本机完成。转写期间显示通用处理状态，不因开始新一次录音就宣称首次使用或正在重新下载。麦克风失败、缺少引擎、无语音及后端失败分别显示资源型错误，技术详情保留原诊断；同一实例切换英文→中文→英文不重放录音或转写。
 
-## 其他应用与快捷键
+## Harness 全局听写
 
-在 Harness 中打开“设置 → 语音输入”，点击“打开听写”。入口仅允许本机界面使用；首次在 Hex 中准备多语言模型、授予系统权限并确认全局快捷键，随后切到目标输入框，按住快捷键说话、松开输入文字。后续可从同一入口唤起原生应用，无需记忆命令。缺少引擎时提供对应系统的安装入口，安装完成后点击刷新。设置页按需加载，只检查安装，不自动启动、下载模型或改写已有设置。
+在桌面应用打开“设置 → 语音输入”，选择启用状态与全局快捷键，再点击保存。默认 `Control+Alt+Space`：按一次开始录音，再按一次结束并转写。打开设置只读取状态，不注册新快捷键、录音、下载模型或开启其他应用。普通浏览器保留输入框录音，并说明跨应用听写需要 Harness 桌面应用，不提供独立 Hex 安装入口。
 
-“已请求打开”只代表系统接受打开请求，不代表模型、麦克风或辅助功能权限已就绪；这些状态以 Hex 实际界面为准。打开请求的回执无法确认时先只读检查安装，提示检查原生窗口，不自动重试。读取失败、缺少安装与不支持的平台分别提示；页面隐藏或关闭后丢弃旧回包，已受理打开请求继续收尾。同一浏览器中关闭重开设置仍共享在途打开请求。
+全局录音使用独立、不可夺取前台焦点的 Harness 浮窗，与输入框复用 WAV 编码、真实音量及本机转写接口。浮窗支持停止和取消；转写已被后端受理后，关闭观察只使结果失效，不宣称撤回后端操作。新操作以独立 id 管理，旧结果不能覆盖新的录音。浮窗重新加载、崩溃或关闭会撤销其录音归属，不重放音频或插入。
 
-也可使用独立入口：
+转写文字先复制到剪贴板，再按原目标处理：
 
-```sh
-make voice PYTHON=.venv/bin/python
-# 同等模块入口，无需重新安装 console script：
-.venv/bin/python -m harness.voice
-# 安装当前项目后也可使用：
-harness-voice
-```
+- 原目标为 Harness 输入框时，经主窗口回执直接追加草稿，不模拟系统粘贴，不发送消息。校验输入框实例、对话、草稿修订、操作代次、焦点及组合输入状态；切换后再返回原对话也不能接收旧结果。同一插入 id 不重复追加。
+- 原目标为其他应用时，macOS 核对前台应用 PID，Windows 核对前台窗口句柄；结束时目标与起始目标不一致，或仍有修饰键按下时只保留剪贴板，不注入按键。macOS 自动粘贴需要允许 Harness 使用辅助功能；未授权时仍可手动粘贴。
+- 系统发送粘贴按键只报告已请求，不能证明目标应用已插入文字。回执未知或原生失败保留剪贴板结果与诊断，不自动重试粘贴或草稿插入。
 
-macOS 可双击源码目录的 `scripts/voice.command`，Windows 可双击 `scripts\voice.cmd`。无参数的模块或命令入口与设置页共用原生启动实现：macOS 安装的完整应用包经 LaunchServices 打开，保留签名身份并唤起已有窗口，同时显式传递 `HEX_*` 环境选择；Windows 经 ShellExecute 传入 `app`，复用 Hex 原生单实例唤起。macOS 源码二进制通过独立会话启动，保留标准输出与错误诊断，由等待线程回收退出码；所属进程仍存活时不重复创建。Linux 命令行仍运行 `hex app`，设置页不提供原生启动按钮。
+快捷键偏好保存在 Electron 用户目录的 `voice.json`，仅保存开关与组合键，不保存录音或转写正文。只接受当前格式；损坏原件保留并明确报错。保存核对原字节，拒绝已观察到的外部修改；更换快捷键失败保留原注册，文件写入失败撤销本次新注册。该检查不保证与无锁外部编辑器之间的原子 CAS。关闭页面不撤回已接受保存；结果未知时只回查状态，不重放写入。
 
-两平台都是按住全局快捷键录音、松开后转写并粘贴到前台输入框，因此也能在 Harness 中使用。Hex 原生默认键为 macOS 的 Option、Windows 的 Ctrl+Space；若需按键本身也一致，在两端原生设置中选用相同组合，例如 Ctrl+Alt+Space（macOS 的 Alt 对应 Option）。已有用户快捷键不被静默覆盖。输入框的 Ctrl+Shift+Space 在两平台均为开始／结束切换，声波显示、转写、草稿追加及错误呈现共用同一实现。
-
-全局听写是用户显式启动的独立原生进程，退出 Harness 不会关闭它。通过 Hex 的原生界面退出；Harness 不自动设置开机启动或修改快捷键。`harness-voice` 后的参数仍原样交给 Hex，例如 `harness-voice settings list` 或 `harness-voice dictation toggle`，具体可用命令由 Hex CLI 决定。浏览器快捷键只在当前输入区工作；跨应用使用原生全局快捷键。
-
-Harness 优先复用已有的、通过认证健康检查的本机 API。没有可用原生 API 时，使用 `hex service --embedded` 启动私有端点，通过 stdout 握手取得身份、以 stdin 租约绑定所属进程。嵌入端点不发布 discovery，也不占用原生应用的本地 API 锁，因此网页转写与原生全局听写无需固定启动顺序。它们同时运行时可能各自加载模型，不承诺只占用一份模型内存。
+退出 Harness 会停止快捷键准入，等待已开始的插入收尾，释放浮窗，再关闭后端所属服务。它不停止用户独立运行的其他 Hex 实例，也不设置开机启动或改写其快捷键。
 
 ## 构建与分发
 
-推荐安装对应系统的官方原生应用，避免要求使用者准备完整编译环境：
+桌面准备由 `desktop/prepare-voice.mjs` 核对真实 Mach-O／PE 文件头、操作系统和 CPU，复制识别引擎及许可证，再编译 macOS 粘贴辅助程序或包含 Windows 辅助脚本。麦克风用途说明使用双语资源，写入应用元数据及本地化 `InfoPlist.strings`。引擎、辅助程序及独立录音页面都属于安装包必需资源。
 
-| 系统 | 安装与发现 |
-| --- | --- |
-| macOS Apple Silicon | [官方签名应用](https://anoma.ly/hex/download/macos-arm64-dmg)，保留完整应用包，放入 `~/Applications/Hex.app` 或 `/Applications/Hex.app`。 |
-| Windows x64 | [官方安装器](https://anoma.ly/hex/download/windows-x64-setup)。 |
-| Windows ARM64 | [官方安装器](https://anoma.ly/hex/download/windows-arm64-setup)。 |
-
-随包二进制存在时优先使用；否则 macOS 按表中顺序查找应用，Windows 读取官方安装器写入的 `%APPDATA%\hex\current-version`，使用 `versions\<当前版本>\hex.exe`。Windows 更新后按新指针定位，不遍历挑选旧版本。安装指针的读取有大小上限并验证版本名和路径边界；损坏、越界或程序缺失均明确报错，保留原件，不修复安装或阻止 Harness 基础实例创建。数据目录覆盖变量独立于安装目录，不因隔离转录数据而找不到已安装程序。
-
-两平台接入都验证 API 版本，使用相同的 WAV、SSE 和私有 stdin 租约。Windows 进程探活通过 `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` 与 `GetExitCodeProcess` 只读查询，并归还句柄；不使用会终止 Windows 进程的 `os.kill(pid, 0)`。原生应用与私有转写进程的启动、复用和停止所有权保持一致，没有自动下载、重装、迁移或覆盖应用的运行时副作用。
+源码引擎的构建入口：
 
 ```sh
 make hex-build PYTHON=.venv/bin/python
-# 可选：明确指定缓存目录及并行度
+# 可选：指定本次拥有的缓存目录及并行度
 .venv/bin/python scripts/build-hex.py --target-dir /path/to/new/hex-cache -j 2
-make hex-clean PYTHON=.venv/bin/python
 ```
 
-构建需要 Rust、C/C++ 编译工具链及 CMake，并联网获取 Cargo 固定依赖。macOS 还需要满足 Hex 当前 Metal/Swift 依赖的 Apple SDK；只有 Command Line Tools 不一定具备所需接口。源码构建失败不能被描述为转录服务已可用，可改用上述完整签名应用。脚本在 Hex 源目录运行 `cargo build --locked --release`，读取其 `.cargo/config.toml`，产物复制到 `harness/resources/hex/<平台>-<架构>/hex`（Windows 为 `hex.exe`）。二进制不进入 Git，但在构建后进入本机平台 wheel；没有二进制的安装包会明确报告缺失，不在运行时隐式编译。sdist 包含 vendored 源码及构建入口。构建缓存可能很大，应事先确认磁盘空间；没有本机实测数据不承诺构建时长。
+构建需 Rust、C/C++ 编译器、CMake 及匹配 Hex 原生依赖的 Apple SDK／Windows 工具链。仅有 Command Line Tools 不一定足以重建完整 Hex。已有合法的匹配引擎时，可显式选择构建输入：
 
-清理只删除本脚本创建并标记为本项目所有的缓存目录，拒绝删除预先存在的共享 Cargo 目录。`CARGO_TARGET_DIR`、`--target-dir` 仅选择构建目录，不自动授予删除其原有内容的权限。
+```sh
+HARNESS_HEX_BINARY=/absolute/path/to/hex \
+HARNESS_UPDATE_REPOSITORY=lengweiping1983/SuperHarness \
+npm --prefix desktop run package -- --arm64
+```
 
-应用数据默认遵循 Hex：macOS 为 `~/Library/Application Support/hex`，Windows 为 `%APPDATA%/hex`，Linux 为 `${XDG_DATA_HOME:-~/.local/share}/hex`。`HEX_APPLICATION_SUPPORT_DIR` 可显式覆盖。用户数据、模型、历史及损坏 discovery 均不自动清理或迁移。自启服务日志位于该目录的 `logs/harness-hex-service.log`。
+引擎写入 `harness/resources/hex/<平台>-<架构>/` 后进入本机 wheel；桌面运行时记录相对路径、系统、CPU 和 SHA-256。打包前重新核对实际文件身份与内容。准备阶段还在临时数据目录中直接启动随包 `hex service --embedded`，完成带认证的健康检查并关闭，不访问用户 discovery、下载模型或录音。这证明随包服务可以启动，不能代替麦克风、识别质量或系统粘贴验收。
 
-## 接口与生命周期
+SDK／源码未携带引擎时仍可显式复用已有 Hex 安装。Windows 指针读取有界，拒绝损坏版本及越界路径；有随包引擎时不读取外部安装指针。用户模型、历史、配置和损坏 discovery 均不自动清理或迁移。默认数据位置仍遵循 Hex，`HEX_APPLICATION_SUPPORT_DIR` 可显式覆盖。源码构建缓存只允许通过 `make hex-clean` 删除本项目创建并标记的目录，不清理共享缓存。
 
-`GET /api/v1/voice/dictation` 只读返回 `available`（是否发现可启动的本机安装）、`platform`、`download_url` 及可空的 `reason` 资源身份，不宣称听写就绪。`POST /api/v1/voice/dictation/open` 显式请求打开原生应用，成功返回 `{"requested":true}`。两者均拒绝非回环来源与共享身份，返回不缓存响应；公开 OpenAPI、浏览器类型和响应校验由协议源生成。它们不代替 Hex 的模型与权限检查。
+## 本机接口与服务所有权
 
-`POST /api/v1/voice/transcriptions` 接收原始 `audio/wav`，限制为 2 MiB、单声道 PCM16、16 kHz、最多 60 秒，返回 `{"transcript":"原文"}`，不保存录音或自动提交消息。仅允许本机回环请求，拒绝共享身份；沿用服务器的来源校验。前端使用共享 HTTP 传输与生成响应契约。
+输入框与全局录音浮窗共用 `POST /api/v1/voice/transcriptions`：原始 `audio/wav`，最多 2 MiB、单声道 PCM16、16 kHz、60 秒，返回原文 `transcript`，不自动提交消息。接口拒绝非回环来源和共享身份，响应不缓存。公开契约、生成浏览器类型与响应验证沿用协议源。
 
-内置工具 `transcribe_audio` 接收 `audio_path`、可选 `model`、`language`，默认与输入框相同。绝对路径直接读取；相对路径必须具有工具调用工作目录。文件最多 64 MiB，实际读取有界。返回原文、模型、语音语言、路径和耗时；执行效果为 `execute`，首次准备会下载模型。
+`GET /api/v1/voice/dictation` 只读报告是否找到引擎及平台，不宣称模型或权限就绪。显式原生适配入口 `POST /api/v1/voice/dictation/open` 和 `harness-voice` 仍供源码／SDK 使用，调用 Hex 自身的应用与命令树；Harness 桌面全局听写不使用这些启动入口。它们保留系统应用身份、显式命令参数、未知打开结果只读回查及不重复启动的边界。
 
-Harness 的服务管理器串行拥有完整准备／转写操作；首次使用按需启动 `hex service --embedded`。复用已有服务前核对 discovery 字段类型、唯一性、API 版本、进程存活与带认证的健康响应；不将存活 PID 当成 API 可用证据。HTTP 不读取代理设置，不跟随重定向，不自动重放失败请求，响应读取有大小限制。关闭先拒绝新操作，等待所属线程，再回收自启进程；失败保留句柄和错误，不停止用户另行启动的 Hex。
+智能体工具 `transcribe_audio` 接收 `audio_path`、可选 `model` 和 `language`，默认与界面相同。相对路径必须具有调用工作目录，读取最多 64 MiB，效果为 `execute`。服务管理器串行拥有完整准备与转写，取消等待仍等待已开始的线程收尾。
 
-Hex 当前本地协议使用 Bearer token，监听回环随机端口：
-
-- `GET /health`：核对 `apiVersion`。
-- `POST /models/{model}/prepare`：SSE，`data: {"type":"ok"}` 表示完成；错误事件、损坏事件或缺少终态均明确失败。
-- `POST /transcriptions?model=<id>&language=<language>`：原始 WAV，JSON 响应必须具有文本 `transcript`。
+没有可复用认证端点时，管理器启动 `hex service --embedded`，通过 stdout 接收 API 版本、进程、随机回环地址和 token，以 stdin 租约绑定所属进程；不发布 discovery 或占用其他应用的本地 API 锁。复用前核对进程及认证健康响应。HTTP 不读取代理、不跟随重定向、不重放失败请求，响应读取有界；关闭先拒绝新操作，等待所属线程，再收回自启进程和读取线程，失败保留句柄与原错误。
 
 ## 回归依据与验收边界
 
-原生启动链为设置目录与延迟页面 → 共享 HTTP 传输及生成响应校验 → 本机语音路由 → `harness.voice.open_dictation` → 系统应用入口或源码二进制；CLI 无参数复用同一实现，显式参数继续分发到原生命令树。macOS 完整应用包直接执行 `hex app` 会再次争用 listener 锁；当前通过 LaunchServices 打开完整包，回归核对不传入创建新实例的参数，并保留 `HEX_*` 数据目录选择。
+`VoiceButton.test.tsx` 覆盖录音、真实音量归属、重复操作、组合输入、跨对话及全局草稿回执；固定每次转写显示首次下载提示、往返对话接收旧结果及重复插入等触发条件。`VoiceCapture.test.tsx` 经真实浮窗组件覆盖就绪与开始竞争、单次提交、取消／替换／卸载后的迟到结果、延迟麦克风授权及未确认插入。`VoiceInputPage.test.tsx` 使用真实页面验证只读打开、显式保存、英中英切换、无独立安装入口、未知保存只回查及迟到读取隔离。
 
-转录链依据 Hex 的 `src/local_api.rs`、`packaging/windows/hex.iss`、`src/windows.rs` 及 Harness 服务管理器：准备响应按真实 SSE 解析；同步工作在线程中拥有；默认使用多语言模型；discovery 与转写正文严格校验；文件与响应读取有界；嵌入握手不占用原生应用 API 锁。日志句柄及失败收尾由所属管理器保留。
+`tests/test_hex_tools.py`、`tests/test_voice_api.py` 与 `tests/test_voice_windows.py` 保留本机边界、音频准入、认证、SSE、取消及失败收尾，并验证随包引擎不被损坏的外部安装覆盖。桌面目录保留安装包完整性与更新状态回归；新的全局听写主进程、快捷键及原生输入链路仍需显式桌面专项和实机验收，不能以组件单测代替。
 
-`tests/test_hex_tools.py` 覆盖认证探活、私有握手与租约收尾、真实 SSE 格式、模型准备、结果类型、输入参数、英中英错误资源、取消等待及失败收尾；`tests/test_voice_api.py` 覆盖本机与共享边界、WAV 准入、原文返回、错误资源、只读安装检查、系统启动分发与原生 CLI 参数。`tests/test_voice_windows.py` 覆盖 x64／ARM64 安装发现、版本切换、损坏指针原件保留、只读进程探活及失败收尾。`VoiceInputPage.test.tsx` 经真实页面和共享 HTTP 验证安装指引、在途请求复用、未知回执只读回查、英中英切换及隐藏／卸载隔离。其他前端用例覆盖真实音量包络、静音回落、PCM16 编码、迟到权限释放、Mac／Windows 同一按钮和快捷键、重复操作及跨对话／隐藏／卸载结果隔离，实际 Composer 静态呈现核对麦克风位于发送之前。
-
-Windows 原生分支目前使用替身在 macOS 回归，尚未完成 Windows 实机验收。两平台全局听写仍需各自系统允许麦克风及输入访问；Windows 原生应用需要其安装器要求的 Vulkan 图形驱动，浏览器麦克风需要允许桌面应用访问。
-
-上述替身和静态呈现回归不能证明麦克风硬件、真实模型识别质量、原生权限、前台应用粘贴或明暗主题与窄屏实机布局通过。真实录音与跨应用听写还需可运行的 Hex 二进制、已准备模型和系统授权；常规 Web 生产构建也不替代已签名的原生应用分发。桌面与浏览器专项仅在明确要求时运行。
+常规验证不启动桌面或浏览器专项，也不证明麦克风硬件、前台应用粘贴、辅助功能授权、真实模型质量或跨平台实机布局通过。Windows 原生分支仍须在 Windows 实机核验；macOS 本地无签名包不能被描述为已签名或公证发行。

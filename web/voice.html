@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Harness</title>
+    <script>
+      try {
+        var theme = localStorage.getItem('harness.ui-theme')
+        document.documentElement.classList.toggle('dark', theme === 'dark' || theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        var size = Number(localStorage.getItem('harness.ui-font-size'))
+        if (size >= 10 && size <= 22) document.documentElement.style.fontSize = Math.round(size) + 'px'
+      } catch (error) {}
+    </script>
+  </head>
+  <body><div id="root"></div><script type="module" src="/src/voice-bootstrap.ts"></script></body>
+</html>

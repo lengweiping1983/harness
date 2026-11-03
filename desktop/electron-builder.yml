@@ -11,6 +11,7 @@ files:
   - '*.mjs'
   - '*.cjs'
   - '!prepare-release.mjs'
+  - '!prepare-voice.mjs'
   - '!verify-runtime.mjs'
   - '!release-assets.mjs'
   - '!electron-builder.config.cjs'
@@ -24,6 +25,11 @@ extraResources:
   - from: ../.run/desktop-release/resources
     to: runtime
 mac:
+  extraResources:
+    - from: ../.run/desktop-release/resources/voice/en.lproj
+      to: en.lproj
+    - from: ../.run/desktop-release/resources/voice/zh-Hans.lproj
+      to: zh-Hans.lproj
   icon: assets/harness.icns
   category: public.app-category.developer-tools
   target:

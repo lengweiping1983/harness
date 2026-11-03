@@ -7,11 +7,14 @@ import {claimDesktopInstance} from './single-instance.mjs'
 import {desktopQuit} from './quit.mjs'
 import updaterPackage from 'electron-updater'
 import {DesktopUpdates} from './updates.mjs'
+import {InstallerUpdates} from './installer-updates.mjs'
+import {readFileSync} from 'node:fs'
+import {DesktopVoice, voiceReply} from './voice.mjs'
 import {applicationMenu, attachMenuLifecycle, configureMenuDefaults} from './application-menu.mjs'
 import {attachMenuShortcutGuard} from './shortcuts.mjs'
 import {windowChrome, attachWindowChrome} from './window-chrome.mjs'
 import {configureAboutPanel} from './about-panel.mjs'
-import {autoUpdater as nativeAutoUpdater, app, BrowserWindow, WebContentsView, ipcMain, session, shell, clipboard, dialog, Menu, screen, desktopCapturer, protocol, Notification, systemPreferences} from 'electron'
+import {autoUpdater as nativeAutoUpdater, app, BrowserWindow, WebContentsView, ipcMain, session, shell, clipboard, dialog, Menu, screen, desktopCapturer, protocol, Notification, systemPreferences, globalShortcut} from 'electron'
 import {ScreenshotSession} from './screenshot.mjs'
 import {FastScreenCapture} from './fast-screen-capture.mjs'
 import {ScreenshotImages, screenshotScheme} from './screenshot-images.mjs'
@@ -37,14 +40,16 @@ async function startDesktop() {
   let backend
   let bridge
   let fastCapture
+  let voice
   const quit = desktopQuit({app, getWindow: () => window,
     cleanup: async () => {
       downloads?.close()
-      try {await backend?.close()}
+      try {await voice?.close()}
+      finally {try {await backend?.close()}
       finally {
         try {await bridge?.close()}
         finally {fastCapture?.close()}
-      }
+      }}
     }, onError: error => console.error('Desktop cleanup failed:', error)})
   let downloads
   const browser = createBrowserRuntime({app, WebContentsView, ipcMain, session, shell, Menu, clipboard, getWindow:() => window, getDownloads:() => downloads, getBackend:() => backend, getOrigin:() => origin, getMenuText:() => menuText})
@@ -67,7 +72,7 @@ async function startDesktop() {
   const allowsApplicationAudio = (webContents, permission, requestingOrigin, details = {}) => {
     let requestOrigin = requestingOrigin
     try {requestOrigin = new URL(requestingOrigin).origin} catch {}
-    if (webContents !== window?.webContents || permission !== 'media' || requestOrigin !== origin) return false
+    if (![window?.webContents, voice?.window?.webContents].includes(webContents) || !webContents || permission !== 'media' || requestOrigin !== origin) return false
     const mediaTypes = details.mediaTypes || (details.mediaType ? [details.mediaType] : [])
     return mediaTypes.length === 1 && mediaTypes[0] === 'audio'
   }
@@ -78,8 +83,34 @@ async function startDesktop() {
   downloads = new BrowserDownloads(() => path.join(app.getPath('downloads'), 'Harness'), () => browser.publish())
   window = new BrowserWindow({width: 1440, height: 960, minWidth: 800, minHeight: 600, title: 'Harness', icon: brandIcon, ...windowChrome(), webPreferences: {preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true}})
   instanceReady()
+  voice = new DesktopVoice({app, BrowserWindow, globalShortcut, clipboard, screen, systemPreferences, shell,
+    getWindow:() => window, getURL:() => applicationURL, preload:fileURLToPath(new URL('./preload.cjs', import.meta.url)),
+    nativePath:app.isPackaged ? path.join(process.resourcesPath, 'runtime/voice', process.platform === 'win32' ? 'voice-native.ps1' : 'voice-native')
+      : fileURLToPath(new URL(process.platform === 'win32' ? './voice-native.ps1' : './voice-native.swift', import.meta.url))})
+  ipcMain.handle('desktop-voice', (event, action, value) => voiceReply(async () => {
+    if (!voice.trusted(event, window)) throw Error('Untrusted voice settings request')
+    if (action === 'status') return voice.snapshot()
+    if (action === 'context') {voice.setContext(value); return null}
+    if (action === 'receipt') {voice.receive(value); return null}
+    if (action === 'configure') return voice.configure(value)
+    if (action === 'permission') return voice.requestPermission()
+    throw Error('Unknown voice settings action')
+  }))
+  ipcMain.handle('voice-capture', (event, action, value = {}) => voiceReply(async () => {
+    if (!voice.trusted(event, voice.window)) throw Error('Untrusted voice capture request')
+    if (action === 'ready') return voice.ready()
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value.id !== undefined && typeof value.id !== 'string') throw Error('Invalid voice capture request')
+    if (action === 'phase') {voice.phase(value.id, value.phase); return null}
+    if (action === 'complete') return voice.complete(value.id, value.transcript)
+    if (action === 'cancel') {voice.cancel(value.id); return null}
+    throw Error('Unknown voice capture action')
+  }))
+  await voice.initialize()
   let menuReady = false
-  const updates = new DesktopUpdates({updater:updaterPackage.autoUpdater, nativeUpdater:process.platform === 'darwin' ? nativeAutoUpdater : null, packaged:app.isPackaged, notify:() => installMenu(menuReady)})
+  const metadata = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+  const updates = metadata.harnessUpdateSource?.provider === 'github'
+    ? new InstallerUpdates({source:metadata.harnessUpdateSource, version:app.getVersion(), packaged:app.isPackaged, notify:() => installMenu(menuReady)})
+    : new DesktopUpdates({updater:updaterPackage.autoUpdater, nativeUpdater:process.platform === 'darwin' ? nativeAutoUpdater : null, packaged:app.isPackaged, notify:() => installMenu(menuReady)})
   let updateDialog = false
   async function showUpdates() {
     if (updateDialog) return
@@ -94,11 +125,26 @@ async function startDesktop() {
       const result = await updates.check()
       if (window.isDestroyed()) return
       if (result.state === 'available') {
-        const choice = await dialog.showMessageBox(window, {type:'info', title:'Harness', message:menuText.updateAvailable, detail:result.version, buttons:[menuText.downloadUpdate, menuText.later], defaultId:0, cancelId:1})
-        if (choice.response === 0) {await updates.download(); await showDownloaded()}
+        const detail = result.mode === 'installer' ? formatDesktopText(menuText.updateInstallerDetail, {version:result.version}) : result.version
+        const choice = await dialog.showMessageBox(window, {type:'info', title:'Harness', message:menuText.updateAvailable, detail, buttons:[menuText.downloadUpdate, menuText.later], defaultId:0, cancelId:1})
+        if (choice.response === 0) {
+          if (result.mode === 'installer') await shell.openExternal(result.downloadUrl)
+          else {await updates.download(); await showDownloaded()}
+        }
       } else if (result.state === 'downloaded') await showDownloaded()
+      else if (result.state === 'unavailable') await message(result.reason === 'platform' ? 'updatePlatformUnavailable' : 'updateUnpublished')
       else await message(result.state === 'development' ? 'updateDevelopment' : 'updateCurrent')
-    } catch (error) {console.error('Update failed:', error.message); if (!window.isDestroyed()) await message('updateFailed')}
+    } catch (error) {
+      console.error('Update failed:', error.message)
+      if (!window.isDestroyed()) {
+        const repository = metadata.harnessUpdateSource
+        const known = ['updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure'].includes(error.menuKey)
+        const message = known ? formatDesktopText(menuText[error.menuKey], error.params) : menuText[['ERR_UPDATER_CHANNEL_FILE_NOT_FOUND','ERR_UPDATER_LATEST_VERSION_NOT_FOUND'].includes(error.code) ? 'updateSourceUnavailable' : 'updateFailed']
+        const choice = await dialog.showMessageBox(window, {type:'warning', title:'Harness', message, detail:known ? error.cause?.message || '' : error.message,
+          buttons:repository?.provider === 'github' ? [menuText.openReleasePage, menuText.ok] : [menuText.ok], cancelId:repository?.provider === 'github' ? 1 : 0})
+        if (repository?.provider === 'github' && choice.response === 0) await shell.openExternal(`https://github.com/${repository.owner}/${repository.repo}/releases`)
+      }
+    }
     finally {updateDialog = false}
   }
   let menuText = null
@@ -121,7 +167,7 @@ async function startDesktop() {
   attachWindowChrome({window, ipcMain, Menu, origin})
   ipcMain.handle('desktop-menu', (event, labels) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) throw Error('Untrusted menu request')
-    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','screenshot','screenshotHidden','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
+    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','screenshot','screenshotHidden','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','updateInstallerDetail','updateUnpublished','updatePlatformUnavailable','updateSourceUnavailable','updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure','openReleasePage','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
     if (!labels || keys.some(key => typeof labels[key] !== 'string' || !labels[key].trim() || labels[key].length > 120)) throw Error('Invalid menu labels')
     menuText = Object.fromEntries(keys.map(key => [key, labels[key]]))
     installMenu(true)

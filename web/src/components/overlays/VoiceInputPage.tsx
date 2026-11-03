@@ -2,31 +2,32 @@ import {useEffect, useRef, useState} from 'react'
 import {Mic} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import {api} from '@/lib/api'
-import {isUnconfirmedWrite, type ApiFailure} from '@/lib/http'
 import {noticeText} from '@/lib/noticeText'
+import {failureText} from '@/lib/resourceError'
+import {desktopVoice, type DesktopVoiceStatus} from '@/lib/desktopVoice'
 import {usePageVisible} from '@/hooks/usePageVisible'
 import {Button, RefreshButton} from '@/components/ui/primitives'
 import type {ResourceText} from '@/types'
 import type {VoiceDictationCapabilities} from '@/lib/protocol.generated'
 
-function failureCopy(result: ApiFailure): ResourceText {
-  if (result.code === 'voice/local-only') return {key: 'ui.voice.localOnly'}
-  if (result.code === 'voice/unavailable') return {key: 'ui.voice.dictation.launchFailed'}
-  return result.copy ?? result.message
-}
-
 export function VoiceInputPage() {
   useLocale()
   const visible = usePageVisible()
-  const [capabilities, setCapabilities] = useState<VoiceDictationCapabilities | null>(null)
+  const bridge = desktopVoice()
+  const [engine, setEngine] = useState<VoiceDictationCapabilities | null>(null)
+  const [status, setStatus] = useState<DesktopVoiceStatus | null>(null)
+  const [enabled, setEnabled] = useState(false)
+  const [shortcut, setShortcut] = useState('Control+Alt+Space')
   const [reading, setReading] = useState(false)
-  const [opening, setOpening] = useState(false)
+  const [writing, setWriting] = useState(false)
   const [error, setError] = useState<ResourceText>('')
   const [notice, setNotice] = useState<ResourceText>('')
+  const [diagnostic, setDiagnostic] = useState('')
   const generation = useRef(0)
+  const edits = useRef(0)
   const working = useRef(false)
-  const reader = useRef<AbortController | null>(null)
   const mounted = useRef(false)
+  const reader = useRef<AbortController | null>(null)
 
   useEffect(() => {
     mounted.current = true
@@ -35,75 +36,113 @@ export function VoiceInputPage() {
 
   async function refresh() {
     if (working.current || document.hidden) return
-    const current = ++generation.current
+    const current = ++generation.current, edit = edits.current
     reader.current?.abort()
     const controller = new AbortController()
     reader.current = controller
     setReading(true)
-    const result = await api.voiceDictation(controller.signal)
-    if (!mounted.current || current !== generation.current || controller.signal.aborted) return
-    if (result.ok) {setCapabilities(result.data); setError('')}
-    else {setCapabilities(null); setError(failureCopy(result))}
-    setReading(false)
+    try {
+      const [capabilities, desktop] = await Promise.all([api.voiceDictation(controller.signal), bridge?.status()])
+      if (!mounted.current || current !== generation.current || controller.signal.aborted) return
+      if (capabilities.ok) setEngine(capabilities.data)
+      else {setEngine(null); setError((capabilities.details as {copy?: ResourceText} | undefined)?.copy ?? capabilities.copy ?? capabilities.message)}
+      if (desktop?.ok) {
+        setStatus(desktop.data)
+        if (edits.current === edit) {setEnabled(desktop.data.enabled); setShortcut(desktop.data.shortcut)}
+        if (capabilities.ok) setError(desktop.data.error ?? '')
+      } else if (desktop && !desktop.ok) setError(desktop.copy)
+      else if (capabilities.ok) setError('')
+    } catch (failure) {
+      if (mounted.current && current === generation.current && !controller.signal.aborted) setError(failureText(failure))
+    } finally {if (mounted.current && current === generation.current) setReading(false)}
   }
-
   useEffect(() => {
     if (visible) void refresh()
     return () => {generation.current++; reader.current?.abort()}
   }, [visible])
 
-  async function open() {
-    if (working.current || !capabilities?.available || document.hidden) return
+  async function save() {
+    if (!bridge || working.current || document.hidden || !engine?.available) return
     working.current = true
     reader.current?.abort()
-    const current = ++generation.current
-    setReading(false); setOpening(true); setError(''); setNotice('')
+    const current = ++generation.current, edit = edits.current
+    setReading(false); setWriting(true); setError(''); setNotice(''); setDiagnostic('')
     try {
-      const result = await api.openVoiceDictation()
-      if (!mounted.current || current !== generation.current) return
-      if (result.ok) setNotice({key: 'ui.voice.dictation.requested'})
-      else {
-        // 打开回执不明时只回查安装状态，不能据此补发打开请求或宣称听写就绪。
-        setError(isUnconfirmedWrite(result) ? {key: 'ui.voice.dictation.unconfirmed'} : failureCopy(result))
-        const controller = new AbortController()
-        reader.current = controller
-        const status = await api.voiceDictation(controller.signal)
-        if (!mounted.current || current !== generation.current) return
-        if (status.ok) setCapabilities(status.data)
+      const result = await bridge.configure({enabled, shortcut})
+      if (!mounted.current || current !== generation.current || document.hidden) return
+      if (result.ok) {
+        setStatus(result.data)
+        if (edits.current === edit) {setEnabled(result.data.enabled); setShortcut(result.data.shortcut)}
+        setNotice({key:'ui.voice.global.saved'})
+      } else {
+        setError(result.copy)
+        if (result.copy.key === 'ui.voice.global.saveUnconfirmed') {
+          const checked = await bridge.status()
+          if (mounted.current && current === generation.current && !document.hidden && checked.ok) setStatus(checked.data)
+        }
       }
-    } finally {
-      working.current = false
-      if (mounted.current) setOpening(false)
-    }
+    } catch {
+      if (mounted.current && current === generation.current && !document.hidden) {
+        setError({key:'ui.voice.global.saveUnconfirmed'})
+        // 保存可能已接受，只读回查，不重放开关或快捷键写入。
+        try {
+          const result = await bridge.status()
+          if (mounted.current && current === generation.current && result.ok) setStatus(result.data)
+        } catch (failure) {if (mounted.current && current === generation.current) setDiagnostic(failure instanceof Error ? failure.message : String(failure))}
+      }
+    } finally {working.current = false; if (mounted.current) {setWriting(false); if (current !== generation.current && !document.hidden) void refresh()}}
+  }
+  async function permission() {
+    if (!bridge || working.current || document.hidden) return
+    working.current = true
+    const current = ++generation.current
+    setWriting(true); setError('')
+    try {
+      const result = await bridge.permission()
+      if (!mounted.current || current !== generation.current || document.hidden) return
+      if (result.ok) setStatus(result.data)
+      else setError(result.copy)
+    } catch (failure) {if (mounted.current && current === generation.current) setError(failureText(failure))}
+    finally {working.current = false; if (mounted.current) {setWriting(false); if (current !== generation.current && !document.hidden) void refresh()}}
   }
 
-  const unavailable = capabilities && !capabilities.available
   return <section className="space-y-5">
     <div>
       <h3 className="ui-section-title">{t('ui.voice.dictation.title')}</h3>
-      <p className="mt-2 text-sm leading-relaxed text-muted">{t('ui.voice.dictation.description')}</p>
+      <p className="mt-2 text-sm leading-reading text-muted">{t('ui.voice.global.description')}</p>
+    </div>
+    <div className="space-y-3">
+      <h4 className="ui-card-title">{t('ui.voice.dictation.inHarness')}</h4>
+      <p className="text-xs leading-reading text-muted">{t('ui.voice.dictation.composer')}</p>
+      <p className="text-xs leading-reading text-faint">{t('ui.voice.global.model')}</p>
     </div>
     <div className="space-y-4 rounded-xl border border-line p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h4 className="ui-card-title">{t('ui.voice.dictation.otherApps')}</h4>
-        <RefreshButton size="sm" label={t('ui.voice.dictation.refresh')} spinning={reading} disabled={reading || opening} onClick={() => void refresh()} />
+        <h4 className="ui-card-title">{t('ui.voice.global.title')}</h4>
+        <RefreshButton size="sm" label={t('ui.voice.dictation.refresh')} spinning={reading} disabled={reading || writing} onClick={() => void refresh()} />
       </div>
-      <p className="text-xs leading-relaxed text-muted">{t('ui.voice.dictation.setup')}</p>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button size="sm" variant="primary" icon={<Mic aria-hidden className="h-4 w-4" />} disabled={!capabilities?.available || reading || opening}
-          loading={opening} onClick={open}>{t('ui.voice.dictation.open')}</Button>
-        {unavailable && capabilities.download_url && <a href={capabilities.download_url} target="_blank" rel="noreferrer" className="text-xs text-brand underline">{t('ui.voice.dictation.install')}</a>}
-      </div>
+      {!bridge ? <p className="text-xs leading-reading text-muted">{t('ui.voice.global.desktopRequired')}</p> : <>
+        <p role="status" className="text-xs text-muted">{t(status?.enabled ? 'ui.voice.global.enabled' : 'ui.voice.global.disabled')}</p>
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={enabled} disabled={reading || writing || !status?.supported}
+          onChange={event => {edits.current++; setEnabled(event.target.checked); setNotice('')}} />{t('ui.voice.global.enable')}</label>
+        <label className="block space-y-2 text-xs">
+          <span>{t('ui.voice.global.shortcut')}</span>
+          <input className="ui-input w-full" value={shortcut} maxLength={100} disabled={writing || reading} spellCheck={false}
+            onChange={event => {edits.current++; setShortcut(event.target.value); setNotice('')}} />
+        </label>
+        <p className="text-xs leading-reading text-faint">{t('ui.voice.global.toggleHelp')}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="primary" icon={<Mic aria-hidden className="h-4 w-4" />} loading={writing} disabled={reading || !engine?.available || !status?.supported} onClick={() => void save()}>{t('ui.voice.global.save')}</Button>
+          {status && !status.accessibility && <Button size="sm" disabled={writing || reading} onClick={() => void permission()}>{t('ui.voice.global.permission')}</Button>}
+        </div>
+        {status && !status.accessibility && <p className="text-xs leading-reading text-warn">{t('ui.voice.global.permissionHelp')}</p>}
+        <p className="text-xs leading-reading text-faint">{t('ui.voice.global.lifecycle')}</p>
+      </>}
       {reading && <p role="status" className="text-xs text-muted">{t('ui.voice.dictation.checking')}</p>}
-      {unavailable && capabilities.reason && <p role="status" className="break-words text-xs text-warn">{noticeText(capabilities.reason)}</p>}
+      {engine && !engine.available && engine.reason && <p role="status" className="text-xs text-warn">{noticeText(engine.reason)}</p>}
       {error && <p role="alert" className="break-words text-xs text-danger">{noticeText(error)}</p>}
+      {diagnostic && <details className="text-xs text-muted"><summary>{t('ui.voice.diagnostic')}</summary><pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono">{diagnostic}</pre></details>}
       {notice && <p role="status" className="text-xs text-muted">{noticeText(notice)}</p>}
-      {capabilities?.available && <p className="text-xs leading-relaxed text-muted">{t(capabilities.platform === 'macos' ? 'ui.voice.dictation.useMac' : 'ui.voice.dictation.useWindows')}</p>}
-      <p className="text-xs leading-relaxed text-faint">{t('ui.voice.dictation.lifecycle')}</p>
-    </div>
-    <div className="space-y-2">
-      <h4 className="ui-card-title">{t('ui.voice.dictation.inHarness')}</h4>
-      <p className="text-xs leading-relaxed text-muted">{t('ui.voice.dictation.composer')}</p>
     </div>
   </section>
 }

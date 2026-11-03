@@ -10,6 +10,7 @@ import {createVoiceRecorder, type VoiceRecorder} from '@/lib/voiceRecorder'
 import {VoiceWaveform, updateVoiceWaveform} from './VoiceWaveform'
 import {useAppStore} from '@/store/app'
 import type {NoticeText} from '@/types'
+import {desktopVoice} from '@/lib/desktopVoice'
 
 type Phase = 'idle' | 'opening' | 'recording' | 'processing'
 interface Operation {disposed: boolean; dispose(): void; recorder?: VoiceRecorder}
@@ -27,6 +28,7 @@ export function VoiceButton({editor, disabled, onTranscript}: {
   const callback = useRef(onTranscript)
   callback.current = onTranscript
   const disabledRef = useRef(disabled)
+  const globalPublish = useRef(() => {})
   disabledRef.current = disabled
   const invalidate = () => {
     const current = operation.current
@@ -43,7 +45,56 @@ export function VoiceButton({editor, disabled, onTranscript}: {
     document.addEventListener('visibilitychange', hidden)
     return () => {mounted.current = false; unsubscribe(); document.removeEventListener('visibilitychange', hidden); invalidate()}
   }, [])
-  useEffect(() => {if (disabled) {invalidate(); setPhase('idle')}}, [disabled])
+  useEffect(() => {if (disabled) {invalidate(); setPhase('idle')}; globalPublish.current()}, [disabled])
+  useEffect(() => {
+    const voice = desktopVoice()
+    if (!voice) return
+    const id = crypto.randomUUID()
+    let live = true
+    let focused = false
+    let generation = 0, composing = false
+    const seen = new Map<string, boolean>()
+    const publish = () => {
+      const current = document.activeElement === editor.current && !document.hidden && !disabledRef.current
+      if (!current && !focused) return
+      if (current !== focused) generation++
+      focused = current
+      const state = useAppStore.getState()
+      void voice.context({id, sessionId:state.activeSessionId, revision:state.newSessionRevision, generation, composing, editor:current}).catch(failure => console.error('Voice context failed:', failure))
+    }
+    const unsubscribe = useAppStore.subscribe((next, previous) => {
+      if (next.activeSessionId !== previous.activeSessionId || next.newSessionRevision !== previous.newSessionRevision) {generation++; publish()}
+    })
+    const insert = voice.onInsert(value => {
+      if (!live || !value?.context || value.context.id !== id || typeof value.id !== 'string' || typeof value.transcript !== 'string' || value.transcript.length > 16000) return
+      const state = useAppStore.getState()
+      let accepted = seen.get(value.id)
+      if (accepted === undefined) {
+        accepted = !disabledRef.current && !document.hidden && document.activeElement === editor.current
+          && !composing && generation === value.context.generation && state.activeSessionId === value.context.sessionId && state.newSessionRevision === value.context.revision
+        if (accepted) callback.current(value.transcript)
+        seen.set(value.id, accepted)
+        if (seen.size > 64) seen.delete(seen.keys().next().value!)
+      }
+      void voice.receipt(value.id, accepted).catch(failure => console.error('Voice insertion receipt failed:', failure))
+    })
+    document.addEventListener('focusin', publish)
+    document.addEventListener('focusout', publish)
+    document.addEventListener('visibilitychange', publish)
+    const compositionStart = () => {composing = true; generation++; publish()}
+    const compositionEnd = () => {composing = false; generation++; publish()}
+    document.addEventListener('compositionstart', compositionStart)
+    document.addEventListener('compositionend', compositionEnd)
+    globalPublish.current = publish
+    publish()
+    return () => {
+      live = false; globalPublish.current = () => {}
+      unsubscribe(); insert()
+      document.removeEventListener('focusin', publish); document.removeEventListener('focusout', publish); document.removeEventListener('visibilitychange', publish)
+      document.removeEventListener('compositionstart', compositionStart); document.removeEventListener('compositionend', compositionEnd)
+      if (focused) void voice.context({id, sessionId:useAppStore.getState().activeSessionId, revision:useAppStore.getState().newSessionRevision, generation, composing, editor:false}).catch(failure => console.error('Voice context release failed:', failure))
+    }
+  }, [editor])
 
   const toggle = async () => {
     const existing = operation.current

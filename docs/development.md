@@ -614,6 +614,8 @@ workflow 的 Node 子进程由 Python 为本次启动设置 `HARNESS_WORKFLOW_LA
 
 ## 桌面准备、原生桥与静态资源
 
+语音输入与全局听写的当前入口、模型及打包约束统一见[语音输入](hex-stt.md)。常规 Web 单测包含 `VoiceButton`、`VoiceInputPage` 和独立录音浮窗 `VoiceCapture` 的真实组件逻辑回归；原生快捷键、系统粘贴及桌面打包分支由桌面目录的显式专项覆盖，不随常规入口启动。GitHub 安装包更新的状态回归位于 `desktop/tests/installer-updates.test.mjs`，也属于桌面专项。
+
 `node web/tests/native-browser-feedback-smoke.mjs` 使用真实 BrowserPanel 和受控桌面桥验证非法地址提示的中英文往返、主题尺寸变化、外部原文及地址草稿保留，并断言没有导航请求和重复bind；不替代Electron实机回归。
 
 `process-group-smoke.mjs` 同时验证真实对话流式光标和底部扫光在英中英、明暗/窄宽配对矩阵中的实时减少动效偏好；检查伪元素计算动画、静态指示仍存在及原回答保持。展开过程组后，各条思考仍收起，键盘可独立展开完整原文并再次收起。

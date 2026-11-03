@@ -113,27 +113,17 @@ python -m harness.cli --ui --share http://192.168.1.20:8766
 
 ## 语音输入
 
-输入框发送按钮左侧的麦克风支持点击开始／结束录音，或在输入区使用
-`Ctrl+Shift+Space`。转写结果追加到草稿，由用户确认后发送。默认使用
-Hex 的多语言模型自动识别中英文；首次准备模型需要联网，推理在本机执行。
+输入框的麦克风将录音交给 Harness 内置的 Hex 识别引擎，文字追加到草稿，不自动发送。
+多语言模型按需准备，已下载模型会复用，推理在本机完成；转写时显示当前处理状态。
 
-macOS 可直接安装 [Hex 官方签名应用](https://anoma.ly/hex/download/macos-arm64-dmg)，
-放入 `~/Applications/Hex.app` 或 `/Applications/Hex.app`，Harness 会自动复用。
-Windows 安装 [x64 版](https://anoma.ly/hex/download/windows-x64-setup) 或
-[ARM64 版](https://anoma.ly/hex/download/windows-arm64-setup) 后同样自动发现；
-两平台输入框及录音声波共用相同交互。
-也可从源码构建（需要 Rust、C/C++ 编译器、CMake，以及支持其 Metal 依赖的 Apple SDK）：
+桌面安装包包含识别引擎，无需另外安装 Hex。打开“设置 → 语音输入”，保存全局听写开关和快捷键；
+默认 `Control+Alt+Space`，按一次开始录音，再按一次结束并转写。Harness 内直接追加到原对话草稿；
+其他应用先复制文字，再在原应用仍处于前台时请求粘贴。macOS 自动粘贴需要允许 Harness 使用辅助功能。
+退出 Harness 后全局快捷键、录音窗口及所属语音服务一起收尾。
 
-```sh
-make hex-build PYTHON=.venv/bin/python
-```
-
-其他应用听写：打开“设置 → 语音输入”，点击“打开听写”。首次在 Hex 中准备
-多语言模型、授予系统权限并确认快捷键；切到目标输入框，按住快捷键说话，松开输入文字。
-默认键为 macOS 的 Option、Windows 的 Ctrl+Space，已修改时以 Hex 设置为准。
-也可双击 `scripts/voice.command`（macOS）或 `scripts\voice.cmd`（Windows），
-或运行 `make voice PYTHON=.venv/bin/python`。听写独立运行，用完后从 Hex 退出。
-详细行为、构建与验收限制见 [语音输入](docs/hex-stt.md)。
+源码构建可运行 `make hex-build PYTHON=.venv/bin/python`，或在打包时通过 `HARNESS_HEX_BINARY`
+提供匹配本机系统和 CPU 的已编译 Hex 引擎。缺少引擎会拒绝生成桌面安装包。
+详细行为、构建与验收边界见 [语音输入](docs/hex-stt.md)。
 
 ## 开发与验证
 

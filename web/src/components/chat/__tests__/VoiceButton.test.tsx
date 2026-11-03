@@ -184,3 +184,54 @@ it.each(['MacIntel', 'Win32'])('preserves the microphone and the same record/sto
   await button(render()).props.onClick()
   expect(onTranscript).toHaveBeenCalledExactlyOnceWith('same speech')
 })
+
+it('global dictation appends only to its original focused draft and never replays a delivered insertion', async () => {
+  let insert!: (value: any) => void
+  const context = vi.fn(async (_value: unknown) => ({ok:true,data:null})), receipt = vi.fn(async () => ({ok:true,data:null}))
+  Object.assign(window, {harnessDesktop:{voice:{context,receipt,onInsert:(listener:(value:any) => void) => {insert=listener; return vi.fn()}}}})
+  vi.stubGlobal('crypto', {randomUUID:() => 'voice-editor-identity'})
+  render()
+  const original=context.mock.calls.at(-1)![0]
+  const value={id:'owned-dictation',context:original,transcript:'original speech'}
+  insert(value); insert(value)
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('original speech')
+  expect(receipt).toHaveBeenCalledTimes(2)
+  expect(receipt).toHaveBeenLastCalledWith('owned-dictation',true)
+  expect(recording.create).not.toHaveBeenCalled()
+  expect(recording.request).not.toHaveBeenCalled()
+})
+
+it.each(['switch','round-trip','composition','disabled','unmount'] as const)('global dictation rejects a stale draft after %s', async kind => {
+  let insert!: (value:any) => void
+  const context=vi.fn(async (_value:unknown) => ({ok:true,data:null})), receipt=vi.fn(async () => ({ok:true,data:null}))
+  Object.assign(window,{harnessDesktop:{voice:{context,receipt,onInsert:(listener:(value:any) => void) => {insert=listener; return vi.fn()}}}})
+  vi.stubGlobal('crypto',{randomUUID:() => 'voice-editor-identity'})
+  render()
+  const original=context.mock.calls.at(-1)![0]
+  if (kind==='switch' || kind==='round-trip') useAppStore.setState({activeSessionId:'voice-b'})
+  if (kind==='round-trip') useAppStore.setState({activeSessionId:'voice-a'})
+  if (kind==='composition') hooks.events.get('compositionstart')!({})
+  if (kind==='disabled') render(true)
+  if (kind==='unmount') hooks.cleanups.splice(0).reverse().forEach(cleanup => cleanup())
+  insert({id:'late-dictation',context:original,transcript:'stale speech'})
+  expect(onTranscript).not.toHaveBeenCalled()
+  if (kind==='unmount') expect(receipt).not.toHaveBeenCalled()
+  else expect(receipt).toHaveBeenLastCalledWith('late-dictation',false)
+})
+
+it('processing feedback stays generic on every recording through English, Chinese, English', async () => {
+  const dispose=vi.fn()
+  recording.create.mockReturnValue({ready:Promise.resolve({finish:async () => new ArrayBuffer(48),dispose}),dispose})
+  let respond!: (result:unknown) => void
+  recording.request.mockReturnValue(new Promise(resolve => {respond=resolve}))
+  await button(render()).props.onClick()
+  const stopping=button(render()).props.onClick()
+  await vi.waitFor(() => expect(recording.request).toHaveBeenCalledOnce())
+  for (const locale of ['en','zh-CN','en'] as const) {
+    await setLocale(locale)
+    expect(button(render()).props['aria-label']).toBe(t('ui.voice.processing'))
+    expect(t('ui.voice.processing')).not.toMatch(/first|首次|download/i)
+  }
+  respond({ok:true,data:{transcript:'speech'}})
+  await stopping
+})
