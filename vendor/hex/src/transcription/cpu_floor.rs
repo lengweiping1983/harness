@@ -1,9 +1,7 @@
-//! The x86_64 CPU floor. Linux and Windows x86_64 releases build ggml for
-//! x86-64-v3 (AVX2, BMI2, FMA, F16C; `.github/release/check-x86-baseline.sh`),
-//! so on an older processor the first transcription would die with an
-//! illegal instruction (issue #592). `main` calls [`require`] first, before
-//! anything that could reach ggml; Hex's own Rust is compiled for the
-//! baseline x86-64, so this check itself runs anywhere.
+//! The optional x86_64 CPU floor used by the Linux x86-64-v3 release. The
+//! Harness Windows build uses transcribe.cpp's conservative generic CPU
+//! backend, so Windows does not reject a machine before the voice service can
+//! start.
 //!
 //! `--version` and `--help` stay available on any CPU: installers and the
 //! updater run `hex --version` to check what they install.

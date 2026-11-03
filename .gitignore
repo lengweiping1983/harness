@@ -6,6 +6,7 @@ __pycache__/
 
 # 打包 / 构建
 build/
+dist_build/
 dist/
 *.egg-info/
 .eggs/

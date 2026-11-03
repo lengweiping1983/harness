@@ -4,7 +4,7 @@ pub(crate) mod background_priority;
 pub(crate) mod benchmark;
 #[cfg(all(
     target_arch = "x86_64",
-    any(target_os = "linux", target_os = "windows")
+    target_os = "linux"
 ))]
 pub(crate) mod cpu_floor;
 pub(crate) mod custom_models;

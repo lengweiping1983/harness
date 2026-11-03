@@ -35,10 +35,10 @@ onnx-benchmark = ["dep:transcribe-rs"]
 [profile.release]
 strip = true
 
-# transcribe.cpp 0.4.1 plus one ggml patch that builds only the Vulkan
-# shaders Hex's models use (see `CMAKE_ARGS` in .cargo/config.toml) and
-# Parakeet's vocabulary rescoring (branch hex/parakeet-vocabulary). Drop this
-# once a transcribe.cpp release carries both.
+# transcribe.cpp 0.4.1 plus one ggml patch that carries the model support Hex
+# needs (see `CMAKE_ARGS` in .cargo/config.toml) and Parakeet's vocabulary
+# rescoring (branch hex/parakeet-vocabulary). Drop this once a transcribe.cpp
+# release carries both.
 [patch.crates-io]
 transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "7045d1c0fe7cee37747b2792977421d435e75fca" }
 transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "7045d1c0fe7cee37747b2792977421d435e75fca" }
@@ -156,11 +156,12 @@ windows-sys = { version = "0.61.2", features = [
 windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foundation_Collections", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_UI_Accessibility"] }
 windows-future = "0.3.2"
 
-# x64 Windows decodes on the GPU through Vulkan. ARM64 Windows stays CPU-only,
-# as Handy ships it: ggml's ARM CPU backend needs clang-cl, and Vulkan drivers
-# on Windows-on-ARM are not a dependable target yet.
+# Windows builds keep the CPU backend available on every supported machine.
+# Vulkan remains an optional acceleration path for environments that provide the
+# SDK and driver, but packaging the desktop app must not require an elevated SDK
+# installation just to enable voice transcription.
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
-transcribe-cpp = { version = "=0.4.1", features = ["vulkan"] }
+transcribe-cpp = "=0.4.1"
 
 [workspace.lints.rust]
 # shared-lints begin

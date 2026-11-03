@@ -76,14 +76,8 @@ def hex_binary_path() -> Path:
     name = "hex.exe" if sys.platform == "win32" else "hex"
     resources = Path(__file__).resolve().parents[2] / "resources" / "hex"
     bundled = resources / _platform_tag() / name
-    if bundled.is_file():
-        return bundled
-    if sys.platform == 'darwin':
-        # 保留完整签名应用包，复用其权限、辅助程序与资源。
-        for app in (Path.home() / 'Applications' / 'Hex.app', Path('/Applications/Hex.app')):
-            installed = app / 'Contents' / 'MacOS' / 'hex'
-            if installed.is_file():
-                return installed
+    # Windows 安装器的 current-version 指针必须先经过完整校验；不能让
+    # 随包二进制把损坏指针静默遮住，否则更新后会继续运行错误版本。
     if sys.platform == 'win32':
         appdata = os.environ.get('APPDATA')
         root = (Path(appdata) if appdata else Path.home() / 'AppData' / 'Roaming') / 'hex'
@@ -105,6 +99,14 @@ def hex_binary_path() -> Path:
             return installed
         except (OSError, ValueError, RuntimeError) as error:
             raise _installation_error(pointer) from error
+    if bundled.is_file():
+        return bundled
+    if sys.platform == 'darwin':
+        # 保留完整签名应用包，复用其权限、辅助程序与资源。
+        for app in (Path.home() / 'Applications' / 'Hex.app', Path('/Applications/Hex.app')):
+            installed = app / 'Contents' / 'MacOS' / 'hex'
+            if installed.is_file():
+                return installed
     return bundled
 
 

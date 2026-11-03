@@ -861,8 +861,6 @@ fn main() -> Result<()> {
     // DLL search hardening first: the CPU check's message box loads DLLs.
     windows::restrict_dll_search();
     windows::gpu_fallback::choose();
-    #[cfg(target_arch = "x86_64")]
-    transcription::cpu_floor::require();
     windows::run(&SHUTDOWN)
 }
 
