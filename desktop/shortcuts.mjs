@@ -1,3 +1,10 @@
+/** 原生菜单加速键同样遵守组合输入和长按保护。 */
+export function attachMenuShortcutGuard(contents) {
+  const guard = (_event, input) => contents.setIgnoreMenuShortcuts(Boolean(input.isComposing || input.isAutoRepeat))
+  contents.on('before-input-event', guard)
+  contents.once('destroyed', () => contents.off('before-input-event', guard))
+}
+
 export function browserShortcut(input, platform = process.platform) {
   if (input.type !== 'keyDown' || input.alt || input.isComposing) return null
   const key = input.key.toLowerCase()

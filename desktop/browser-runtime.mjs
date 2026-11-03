@@ -10,7 +10,7 @@ import {WebsitePermissions} from './permissions.mjs'
 import {NativeDialogs} from './dialogs.mjs'
 import {NativeBrowserError} from './browser-errors.mjs'
 import {PageFind} from './find.mjs'
-import {browserShortcut} from './shortcuts.mjs'
+import {browserShortcut, attachMenuShortcutGuard} from './shortcuts.mjs'
 import {TabHealth} from './tab-health.mjs'
 import {websiteURL, viewBounds} from './browser-policy.mjs'
 import {fileURLToPath} from 'node:url'
@@ -107,6 +107,7 @@ export function createBrowserRuntime({app, WebContentsView, ipcMain, session, sh
       getWindow().contentView.addChildView(view)
       if (!options.background) selectTab(id)
       const takeControl = () => {if (!automation.has(owner)) {controllers.set(owner, 'user'); publish()}}
+      attachMenuShortcutGuard(wc)
       wc.on('before-input-event', (event, input) => {if (id === selected && owner === activeSession) handleShortcut(event, input, true)})
       wc.on('before-input-event', (_event, input) => {if (input.type === 'keyDown') takeControl()})
       wc.on('before-mouse-event', (_event, mouse) => {if (['mouseDown', 'mouseWheel'].includes(mouse.type)) takeControl()})

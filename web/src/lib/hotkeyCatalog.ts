@@ -20,6 +20,8 @@ export const HOTKEYS = {
   todos: 'Mod+2',
   context: 'Mod+3',
   exportSession: 'Mod+Shift+E',
+  screenshot: 'Mod+Shift+S',
+  screenshotHidden: 'Mod+Shift+H',
 } as const
 
 export function formatHotkey(keys: string, mac = isMac()): string {
@@ -27,7 +29,11 @@ export function formatHotkey(keys: string, mac = isMac()): string {
 }
 
 export function matchesNewSessionHotkey(event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>): boolean {
-  const keys = HOTKEYS.newSession.split('+')
+  return matchesHotkey(event, HOTKEYS.newSession)
+}
+
+export function matchesHotkey(event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>, chord: string): boolean {
+  const keys = chord.split('+')
   return event.key.toLowerCase() === keys[keys.length - 1].toLowerCase() &&
     (isMac() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
     event.shiftKey === keys.includes('Shift') && !event.altKey
@@ -59,6 +65,8 @@ export const HOTKEY_ROWS: HotkeyRow[] = [
   { get group() { return t("ui.desktop.menu.view") }, get label() { return t("ui.inspector.plansAndTodos") }, keys: HOTKEYS.todos },
   { get group() { return t("ui.desktop.menu.view") }, get label() { return t("ui.lib.hotkeyCatalog.6fc38ef3602f") }, keys: HOTKEYS.context },
   { get group() { return t("ui.lib.hotkeyCatalog.2087c777c06f") }, get label() { return t("ui.lib.hotkeyCatalog.edecf0ae6e51") }, keys: 'Enter' },
+  { get group() { return t("ui.lib.hotkeyCatalog.2087c777c06f") }, get label() { return t('ui.components.chat.ScreenshotButton.c95dc99afe57') }, keys: HOTKEYS.screenshot },
+  { get group() { return t("ui.lib.hotkeyCatalog.2087c777c06f") }, get label() { return t('ui.components.chat.ScreenshotButton.092645d6b89a') }, keys: HOTKEYS.screenshotHidden },
   { get group() { return t("ui.lib.hotkeyCatalog.2087c777c06f") }, get label() { return t("ui.lib.hotkeyCatalog.bd609a8e2d40") }, keys: 'Shift+Enter' },
   { get group() { return t("ui.lib.hotkeyCatalog.2087c777c06f") }, get label() { return t("ui.lib.hotkeyCatalog.fc1013035d3c") }, keys: '@/ /' },
   { get group() { return t("ui.lib.hotkeyCatalog.1ad1463fe16f") }, get label() { return t("ui.lib.hotkeyCatalog.9ad0aac32ea3") }, keys: 'Esc' },

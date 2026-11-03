@@ -1,6 +1,7 @@
 import {useEffect} from 'react'
 import {t, useLocale} from '@/i18n'
 import {useAppStore} from '@/store/app'
+import {requestScreenshot} from '@/lib/screenshotCommand'
 
 type DesktopMenu = {
   setMenu: (labels: Record<string, string>) => Promise<void>
@@ -13,7 +14,7 @@ export function useDesktopMenu() {
   useEffect(() => {
     const desktop = (window as unknown as {harnessDesktop?: DesktopMenu}).harnessDesktop
     if (!desktop?.setMenu || !booted) return
-    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
+    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','screenshot','screenshotHidden','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
     void desktop.setMenu(Object.fromEntries(keys.map(key => [key, t('ui.desktop.menu.' + key)]))).catch(error => console.error(t('ui.desktop.menuSyncFailed'), error))
   }, [locale, booted])
   useEffect(() => {
@@ -30,6 +31,8 @@ export function useDesktopMenu() {
         case 'inspector': state.toggleInspector(); break
         case 'files': case 'terminal': case 'browser': state.setInspectorTab(action); break
         case 'shortcuts': state.setShortcutsOpen(true); break
+        case 'screenshot': requestScreenshot(); break
+        case 'screenshot-hidden': requestScreenshot(true); break
       }
     })
   }, [])

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { hasModifier, isEditableTarget } from '@/lib/utils'
-import { matchesNewSessionHotkey } from '@/lib/hotkeyCatalog'
+import { HOTKEYS, matchesHotkey, matchesNewSessionHotkey } from '@/lib/hotkeyCatalog'
+import { requestScreenshot } from '@/lib/screenshotCommand'
 import { useAppStore } from '@/store/app'
 import type { InspectorTab } from '@/types'
 
@@ -51,6 +52,10 @@ export function useHotkeys(handlers: HotkeyHandlers = {}) {
       const mod = hasModifier(event)
       const editable = isEditableTarget(event.target)
       const overlayOpen = Boolean(lightboxSrc || commandOpen || shortcutsOpen || settingsOpen || conversationSearchOpen || quickOpen)
+      if (matchesHotkey(event, HOTKEYS.screenshot) || matchesHotkey(event, HOTKEYS.screenshotHidden)) {
+        if (!event.repeat && !overlayOpen && requestScreenshot(matchesHotkey(event, HOTKEYS.screenshotHidden))) event.preventDefault()
+        return
+      }
       if (mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'g' && !overlayOpen && useAppStore.getState().activeSessionId) {
         event.preventDefault()
         useAppStore.getState().setInspectorTab('git')

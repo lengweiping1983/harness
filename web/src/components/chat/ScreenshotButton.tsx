@@ -13,6 +13,8 @@ import { useAppStore } from '@/store/app'
 import { Tooltip } from '@/components/ui/primitives'
 import { useAnchoredMenu } from '@/hooks/useAnchoredMenu'
 import { ScreenshotCrop } from './ScreenshotCrop'
+import {formatHotkey, HOTKEYS} from '@/lib/hotkeyCatalog'
+import {registerScreenshotCommand} from '@/lib/screenshotCommand'
 
 export function ScreenshotButton({ addFiles, focusEditor }: { addFiles: (files: File[]) => Promise<void>; focusEditor: () => void }) {
   useLocale()
@@ -40,9 +42,8 @@ export function ScreenshotButton({ addFiles, focusEditor }: { addFiles: (files: 
   const canHide = Boolean(desktop?.screenshot || capabilities?.hideWindow)
   useLayoutEffect(() => {
     mounted.current = true
-    let sessionId = useAppStore.getState().activeSessionId
-    const unsubscribe = useAppStore.subscribe(state => {
-      if (state.activeSessionId !== sessionId) { sessionId = state.activeSessionId; scope.current++ }
+    const unsubscribe = useAppStore.subscribe((state, previous) => {
+      if (state.activeSessionId !== previous.activeSessionId || state.newSessionRevision !== previous.newSessionRevision) scope.current++
     })
     void api.screenshotCapabilities().then((result) => { if (mounted.current) setCapabilities(result.ok ? result.data : { native: false, hideWindow: false, reason: {key: "ui.components.chat.ScreenshotButton.a0db5328de97"} }) })
     return () => { unsubscribe(); scope.current++; mounted.current = false; if (active.current) void finish() }
@@ -72,7 +73,7 @@ export function ScreenshotButton({ addFiles, focusEditor }: { addFiles: (files: 
     return operation
   }
   const start = async (hideWindow: boolean) => {
-    if (active.current) return
+    if (active.current || cleanupFailed || !mounted.current) return
     active.current = true; setBusy(true); setOpen(false)
     setInitialFullSelection(false)
     // Preserve the destination even if the user changes chats during capture.
@@ -112,9 +113,17 @@ export function ScreenshotButton({ addFiles, focusEditor }: { addFiles: (files: 
       if (!cropping) finish()
     }
   }
+  useLayoutEffect(() => registerScreenshotCommand(hideWindow => {
+    const state = useAppStore.getState()
+    if (document.hidden || document.querySelector('[role="dialog"][aria-modal="true"]')
+        || state.settingsOpen || state.shortcutsOpen || state.commandOpen || state.conversationSearchOpen || state.quickOpen || state.lightboxSrc || state.workspacePickerOpen
+        || active.current || cleanupFailed || !supported || hideWindow && !canHide) return false
+    void start(hideWindow)
+    return true
+  }))
   return <>
     <div className="inline-flex h-7 shrink-0 items-center rounded-xl bg-raised text-muted">
-      <Tooltip content={supported ? t("ui.components.chat.ScreenshotButton.96d8ffa2dd7e") : t("ui.components.chat.ScreenshotButton.81cbec2af613")}>
+      <Tooltip content={supported ? t('ui.screenshot.shortcutHint', {shortcut: formatHotkey(HOTKEYS.screenshot)}) : t("ui.components.chat.ScreenshotButton.81cbec2af613")}>
         <button type="button" aria-label={busy ? t("ui.components.chat.ScreenshotButton.aca98bb4fefc") : t("ui.components.chat.ScreenshotButton.c95dc99afe57")} disabled={busy || cleanupFailed || !supported} onClick={() => void start(false)}
           className="inline-flex h-7 w-8 items-center justify-center rounded-l-xl hover:bg-line hover:text-ink disabled:opacity-50">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Scissors className="h-4 w-4" />}
@@ -139,7 +148,7 @@ export function ScreenshotButton({ addFiles, focusEditor }: { addFiles: (files: 
           if (canHide) void start(true)
           else toast({ title: {key: "ui.components.chat.ScreenshotButton.e3dd73a43278"}, description: capabilities?.reason || {key: "ui.components.chat.ScreenshotButton.ed68c8f2a5d8"}, tone: 'warn' })
         }} className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-raised focus-visible:bg-raised focus-visible:outline-none aria-disabled:opacity-50">
-          <Scissors className="h-4 w-4" />{t("ui.components.chat.ScreenshotButton.092645d6b89a")}</button>
+          <Scissors className="h-4 w-4" /><span className="flex-1">{t("ui.components.chat.ScreenshotButton.092645d6b89a")}</span><kbd className="text-xs text-faint">{formatHotkey(HOTKEYS.screenshotHidden)}</kbd></button>
       </div>
       <p className="px-3 pb-1 text-xs leading-relaxed text-faint">{canHide ? t("ui.components.chat.ScreenshotButton.d4c0a1179986") : capabilities?.reason ? noticeText(capabilities.reason) : t("ui.components.chat.ScreenshotButton.ed68c8f2a5d8")}</p>
     </div>, document.body) : null}

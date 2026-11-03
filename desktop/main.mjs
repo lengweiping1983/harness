@@ -7,10 +7,11 @@ import {claimDesktopInstance} from './single-instance.mjs'
 import {desktopQuit} from './quit.mjs'
 import updaterPackage from 'electron-updater'
 import {DesktopUpdates} from './updates.mjs'
-import {applicationMenu} from './application-menu.mjs'
+import {applicationMenu, attachMenuLifecycle, configureMenuDefaults} from './application-menu.mjs'
+import {attachMenuShortcutGuard} from './shortcuts.mjs'
 import {windowChrome, attachWindowChrome} from './window-chrome.mjs'
 import {configureAboutPanel} from './about-panel.mjs'
-import {autoUpdater as nativeAutoUpdater, app, BrowserWindow, WebContentsView, ipcMain, session, shell, clipboard, dialog, Menu, screen, desktopCapturer, protocol, Notification} from 'electron'
+import {autoUpdater as nativeAutoUpdater, app, BrowserWindow, WebContentsView, ipcMain, session, shell, clipboard, dialog, Menu, screen, desktopCapturer, protocol, Notification, systemPreferences} from 'electron'
 import {ScreenshotSession} from './screenshot.mjs'
 import {FastScreenCapture} from './fast-screen-capture.mjs'
 import {ScreenshotImages, screenshotScheme} from './screenshot-images.mjs'
@@ -27,6 +28,7 @@ async function startDesktop() {
   let window
   const instanceReady = claimDesktopInstance(app, () => window)
   if (!instanceReady) return
+  configureMenuDefaults(systemPreferences)
   const debugPort = await availablePort()
   app.commandLine.appendSwitch('remote-debugging-port', String(debugPort))
   app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
@@ -119,7 +121,7 @@ async function startDesktop() {
   attachWindowChrome({window, ipcMain, Menu, origin})
   ipcMain.handle('desktop-menu', (event, labels) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) throw Error('Untrusted menu request')
-    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
+    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','screenshot','screenshotHidden','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
     if (!labels || keys.some(key => typeof labels[key] !== 'string' || !labels[key].trim() || labels[key].length > 120)) throw Error('Invalid menu labels')
     menuText = Object.fromEntries(keys.map(key => [key, labels[key]]))
     installMenu(true)
@@ -135,7 +137,8 @@ async function startDesktop() {
     taskNotifications.clear(sessionId)
   })
   window.on('closed', () => taskNotifications.close())
-  window.webContents.on('did-start-loading', () => installMenu(false))
+  attachMenuLifecycle(window, installMenu)
+  attachMenuShortcutGuard(window.webContents)
   window.webContents.setWindowOpenHandler(() => ({action: 'deny'}))
   window.webContents.on('will-navigate', (event, url) => {if (new URL(url).origin !== origin) event.preventDefault()})
   const screenshotImages=new ScreenshotImages(origin)
