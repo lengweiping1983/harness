@@ -8,6 +8,8 @@
 
 `MissionStore` 仅保存协调事实；运行与工具事实仍来自 `RunController.find_submission`、原对话和 `tool_invocations`。`SuperagentWorkers` 在自主模式从账本取得共同资源组和冻结提交，不订阅节点 Thread。工作结果经已有 `capture_delivery` → `plan_delivery_merge` → `apply_delivery_merge` 交接，最终集成节点负责修正；每轮复核创建独立资源。现有 `worktree_delivery.py` 的共同组、基线和交付谱系约束均保留。
 
+显式 `max_work_turns` 使工作节点采用阶段协议。`superagent_checkpoints.py::validate_checkpoint` 校验模型提议；`SuperagentMissions._capture/_confirmed_checkpoint` 核对原运行与工具证据后冻结文件；`_schedule/_dependency_jobs` 只采用逻辑节点的最终阶段。新阶段拥有独立资源、原提交键与本节点有界引导上下文，复用同一任务图和基线；不增加失败或未知副作用的重试。`status_jobs` 只隐藏已冻结的旧阶段，完整历史不删除。
+
 一手资料支持的工程取舍：
 
 - [OpenAI 多智能体编排](https://developers.openai.com/api/docs/guides/agents-api/multi-agent)：适合独立问题的子智能体拥有独立上下文，主协调者汇总结果。这里采用有界并行与最小依赖报告，不将所有工作历史混入每个 Worker。
@@ -15,6 +17,8 @@
 - [Anthropic 长期应用 Harness](https://www.anthropic.com/research/harness-design-long-running-apps) 与[长期智能体 Harness](https://www.anthropic.com/research/effective-harnesses-for-long-running-agents)：规划、生成和独立评估分工，明确完成清单，防止仅凭自评提前结束。这里将集成与复核分开，并限制修正预算。
 - [DeepSeek Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)：工具轮次的推理字段有明确提供方协议。新协调器继续使用既有模型传输，不复制另一套请求协议，也不将提供方回灌失败解释为“缺少自主性”。
 - [Codex App Server 的运行中引导](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn) 要求绑定确切活动轮次；[OpenAI Mid-turn steering](https://developers.openai.com/api/docs/guides/steering) 区分已受理与模型实际应用。这里据此选择原运行／轮次绑定、独立意图与原生回执分工；采用宿主原日志验证应用，不把排队或模型自述当成完成。
+
+[Codex 长任务实践](https://developers.openai.com/blog/run-long-horizon-tasks-with-codex) 强调工具反馈和外部化工作状态；前述 Anthropic 长期应用资料讨论新上下文与结构化交接。阶段接续据此采用新对话、冻结文件及显式剩余步骤，而预算和重复检查点判定由宿主控制。这是工程设计依据，没有据此推断本产品优于竞品。
 
 用户提供的文章把强依赖任务协作列为开放问题；参考原型的 Ticket／Assignment 主要承接独立任务。这些是选择目标依赖图与真实产物交接的背景，不构成质量或吞吐优于其他系统的证据。
 
@@ -54,6 +58,12 @@
 | 关闭或重启后文件仍显示等待应用 | 原生回执按实际活动运行解析；宿主关闭后统一刷新最终投影 | `test_accepted_instruction_survives_revocation_and_close_flushes_unapplied_receipt`、`test_restart_keeps_original_unapplied_receipt_without_new_model_or_submission`、`test_close_before_queued_tick_enters_guidance_is_normal_shutdown` |
 | 展示原文冒充真正模型指令，或异步准入未实际执行 | 接受与应用事件均核对真实正文及原运行；同步检查拒绝 awaitable 返回 | `test_original_display_text_cannot_replace_model_instruction_identity`、`test_async_acceptance_guards_are_rejected_and_existing_receipts_skip_new_guard` |
 | 旧指令占满上下文，或截断清单误判唯一目标 | 有界上下文优先保留最近接纳内容；截断时要求显式任务，损坏投影保留并拒绝 | `test_recent_applied_guidance_retains_newest_correction_with_global_budget`、`test_ambiguous_and_truncated_status_require_exact_job`、`test_corrupt_target_snapshot_is_rejected_without_creating_or_rewriting_state` |
+| 长节点阶段结束被误当作逻辑任务完成 | `checkpointed` 不解锁依赖，新阶段导入累计文件，最终阶段才参与集成 | `test_fresh_stages_preserve_files_and_unlock_only_the_final_delivery` |
+| 检查点后重启或冻结回执丢失导致重做工作 | 原阶段保持原提交身份，捕获与导入按原交付只读回查，新阶段独立派工 | `test_restart_after_checkpoint_continues_without_replaying_the_previous_stage`、`test_lost_checkpoint_capture_confirmation_uses_original_frozen_delivery` |
+| 没有结束的后台写入或未确认工具结果进入接续 | 原运行收尾、后台作业及原轮工具配对均进入准入；未确认保持未知 | `test_background_work_finishes_before_checkpoint_or_next_stage`、`test_unknown_tool_result_prevents_capture_and_continuation` |
+| 长节点持续请求继续或重复原报告 | 独立阶段预算、同树同检查点的明确停滞判定，不解锁依赖或发布候选 | `test_budget_exhaustion_and_repeated_unchanged_checkpoint_do_not_unlock_dependencies` |
+| 普通报告或损坏缓存冒充有效阶段交接 | 严格检查点协议，消费时重新核对原运行输出及工具证据 | `test_blocked_and_malformed_checkpoints_do_not_get_automatic_retries`、`test_corrupt_checkpoint_cache_cannot_supply_new_context_or_release_dependencies` |
+| 新上下文丢失本节点已应用指令，或将指令混入其他节点 | `applied_context(node=...)` 按原工作节点过滤，最终集成／复核仍获得目标上下文 | `test_node_guidance_is_carried_only_to_its_own_continuation_and_final_review` |
 
 这些回归均使用隔离临时数据和确定性模型传输。命令成功和调用配对能验证协调行为，不能验证在线模型的判断质量。
 
@@ -77,6 +87,7 @@
 - 现有测试在本机运行；没有取得 Windows／Linux 实机、多设备、外部账号、长期负载或模型成本对比证据。
 - 自主目标已支持可信本机节点指令，但没有中途问答、跨来源目标续接、目标验收或依赖变更、动态重规划和人工未知结果核实界面。节点不订阅来源 Thread，不能把默认 Router 的跟进能力写成自主目标已支持；本机指令也不代表远端信道或工作台已经支持交互。
 - 合并冲突、失败或中断运行、未知操作和资源总容量耗尽保留明确状态；当前不自动解决冲突、迁移配置、清理历史资源或重放任务。
+- 长节点阶段接续为显式协议，真实模型的交接质量、是否过早选择 `ready`、上下文重建成本及长时负载仍需独立在线评估。同树同报告的停止条件不能识别所有语义停滞；新阶段也不能自动带走忽略文件、环境、进程或外部服务状态。
 - 状态只保存有界摘要；完整复核在账本，原报告、工具与用量在原运行。仍需要面向普通用户的工作台与分页读取接口。
 
 尚无统一在线任务集与独立业务判定的比较证据，不记录“世界最强”或“全面超过其他系统”的结论。

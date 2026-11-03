@@ -125,7 +125,7 @@ class MissionWorkerTransport(RecordingTransport):
         yield b'data: [DONE]\n\n'
 
 
-class SuperagentMissionTests(unittest.IsolatedAsyncioTestCase):
+class SuperagentMissionFixture(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -187,6 +187,8 @@ class SuperagentMissionTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0)
         self.fail('目标在有界推进内没有到达预期状态。')
 
+
+class SuperagentMissionTests(SuperagentMissionFixture):
     async def test_dependency_files_are_imported_and_candidate_is_independently_verified(self):
         service = await self.open()
         receipt = self.receive()

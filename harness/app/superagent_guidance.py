@@ -311,7 +311,7 @@ class SuperagentGuidance:
         return {'states': states, 'recent': [self.receipt(identity) for identity in ids],
                 'total': sum(states.values()), 'shown': len(ids), 'has_more': sum(states.values()) > len(ids)}
 
-    def applied_context(self, mission_id):
+    def applied_context(self, mission_id, *, node=None):
         """新节点只接收有确切应用证据的有界上下文，不改原任务正文或验收。"""
         budget, result, total, targets = 8192, [], 0, {}
         with self.db() as db:
@@ -320,6 +320,9 @@ class SuperagentGuidance:
                 key = tuple(row['spec'][name] for name in ('mission_id', 'job_id', 'run_id', 'turn', 'source_id', 'revision'))
                 if key not in targets:
                     targets[key] = self._target(row)
+                job = targets[key][0]
+                if node is not None and (job['role'] != 'work' or job['node'] != node):
+                    continue
                 receipt = self._original(row, target=targets[key])
                 if receipt is None:
                     raise _error('corrupt')

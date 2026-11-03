@@ -157,6 +157,8 @@ def _guidance_target(status, job_id, remote):
             if (not isinstance(mission, dict) or mission['state'] not in MISSION_STATES
                     or not isinstance(mission['jobs'], list) or type(mission['revision']) is not int or mission['revision'] < 1):
                 raise ValueError
+            if 'jobs_has_more' in mission and type(mission['jobs_has_more']) is not bool:
+                raise ValueError
             for key in ('id', 'source_id'):
                 _text(mission[key], key)
             _names(mission['thread_ids'], 'thread_ids', nonempty=True)
@@ -183,7 +185,7 @@ def _guidance_target(status, job_id, remote):
                     targets.append((mission, job))
     except (ValueError, TypeError, KeyError, HarnessError) as exc:
         raise _error('corrupt') from exc
-    if len(targets) != 1 or job_id is None and missions['has_more']:
+    if len(targets) != 1 or job_id is None and (missions['has_more'] or any(mission.get('jobs_has_more') for mission in missions['recent'])):
         raise _error('guidance-unavailable')
     return targets[0]
 

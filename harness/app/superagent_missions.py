@@ -15,6 +15,7 @@ from ..session.turn_scope import turn_events
 from .superagent_inbox import _error, _json, _page, _text
 from .superagent_mission_store import TERMINAL, digest, packed, validate_plan
 from .superagent_mission_status import dependencies, run_progress, waiting_reason
+from .superagent_checkpoints import validate_checkpoint, work_heads, status_jobs
 from .superagent_router import SuperagentRouter
 from .worktree_delivery import snapshot_tree
 
@@ -175,11 +176,14 @@ class SuperagentMissions(SuperagentRouter):
 
     def _dependency_jobs(self, mission, job):
         jobs = self.store.jobs(mission['id'])
+        heads = work_heads(jobs)
         if job['role'] == 'work':
-            return [next(item for item in jobs if item['role'] == 'work' and item['node'] == name)
-                    for name in job['dependencies']]
+            if job['attempt'] > 1:
+                return [next(item for item in jobs if item['role'] == 'work' and item['node'] == job['node']
+                             and item['attempt'] == job['attempt'] - 1)]
+            return [heads[name] for name in job['dependencies']]
         if job['role'] == 'integrate':
-            return [item for item in jobs if item['role'] == 'work'] if job['attempt'] == 1 else []
+            return list(heads.values()) if job['attempt'] == 1 else []
         if job['role'] == 'review':
             return [next(item for item in jobs if item['role'] == 'integrate' and item['attempt'] == job['attempt'])]
         return []
@@ -190,13 +194,16 @@ class SuperagentMissions(SuperagentRouter):
                 'workspace_id': job['data'].get('workspace_id'), 'delivery': job['data'].get('delivery'),
                 'output': record.output[:8192], 'output_chars': len(record.output), 'output_truncated': len(record.output) > 8192}
 
-    def _check_dependencies(self, dependencies):
+    def _check_dependencies(self, dependencies, *, continuation=False):
         """导入之前核对原运行、所属资源及当前冻结交付，不能先写入再检查。"""
         sources = []
         for job in dependencies:
             record = self._record(job)
-            if job['state'] != 'done' or record.status != 'completed' or not record.settled:
+            expected = 'checkpointed' if continuation else 'done'
+            if job['state'] != expected or record.status != 'completed' or not record.settled:
                 raise _error('corrupt')
+            if job['role'] == 'work' and 'max_work_turns' in self.store.limits:
+                self._confirmed_checkpoint(job)
             workspace = self.dispatcher.harness.worktrees.get(job['data']['workspace_id'])
             if workspace.get('delivery') != job['data']['delivery']:
                 raise _error('conflict')
@@ -229,11 +236,13 @@ class SuperagentMissions(SuperagentRouter):
                 'profiles': profiles, 'max_steps': self.store.limits['max_steps'],
                 'integrator_profile': self.store.limits['integrator_profile'],
                 'reviewer_profile': self.store.limits['reviewer_profile'],
+                **({'max_work_turns': self.store.limits['max_work_turns']} if 'max_work_turns' in self.store.limits else {}),
                 'attempt': job['attempt'], 'previous_plan_error': mission['reason']})
             self.store.change_job(job, 'ready', payload=payload, session_id=self.session_id)
             return
         dependencies = self._dependency_jobs(mission, job)
-        if any(item['state'] != 'done' for item in dependencies):
+        continuation = job['role'] == 'work' and job['attempt'] > 1
+        if any(item['state'] != ('checkpointed' if continuation else 'done') for item in dependencies):
             return
         if len(self.dispatcher.harness.runtime.records.active) >= self.dispatcher.max_active:
             return
@@ -252,7 +261,7 @@ class SuperagentMissions(SuperagentRouter):
             self._stop_mission(mission, 'suppressed', 'source/revoked')
             return
         if dependencies:
-            confirmed = self._check_dependencies(dependencies)
+            confirmed = self._check_dependencies(dependencies, continuation=continuation)
             sources = [item['id'] for item in confirmed]
             plan = await self._native(lambda: self.dispatcher.harness.worktrees.plan_delivery_merge(worker['workspace_id'], sources))
             self._open()
@@ -284,16 +293,26 @@ class SuperagentMissions(SuperagentRouter):
             frame['applied_guidance'] = self.guidance.applied_context(mission['id'])
         if job['role'] == 'work':
             frame['instruction'] = next(step['instruction'] for step in mission['plan']['steps'] if step['id'] == job['node'])
+            if 'max_work_turns' in self.store.limits:
+                del frame['max_attempts']
+                frame['max_work_turns'] = self.store.limits['max_work_turns']
+                if job['attempt'] > 1:
+                    previous = self._dependency_jobs(mission, job)[0]
+                    frame['checkpoint'] = self._confirmed_checkpoint(previous)
+                    if self.guidance is not None:
+                        frame['applied_guidance'] = self.guidance.applied_context(mission['id'], node=job['node'])
         if job['role'] == 'integrate' and job['attempt'] > 1:
             previous = next(item for item in self.store.jobs(mission['id'])
                             if item['role'] == 'review' and item['attempt'] == job['attempt'] - 1)
             frame['feedback'] = previous['data']['verdict']
-        key = 'superagent.mission.review' if job['role'] == 'review' else 'superagent.mission.work'
+        key = ('superagent.mission.checkpoint' if job['role'] == 'work' and 'max_work_turns' in self.store.limits
+               else 'superagent.mission.review' if job['role'] == 'review' else 'superagent.mission.work')
         self.store.change_job(job, 'ready', payload=self._payload(key, frame))
 
     def _finish_import(self, mission, job):
         plan = job['data']['import_plan']
-        if plan['sources'] != self._check_dependencies(self._dependency_jobs(mission, job)):
+        if plan['sources'] != self._check_dependencies(self._dependency_jobs(mission, job),
+                continuation=job['role'] == 'work' and job['attempt'] > 1):
             raise _error('corrupt')
         row = self._worker_row(mission, job)
         workspace = self.dispatcher.harness.worktrees.get(row['workspace_id'])
@@ -322,6 +341,18 @@ class SuperagentMissions(SuperagentRouter):
         manager = self.dispatcher.harness.worktrees
         if job['data']['session_id'] in self.dispatcher.harness.jobs.active_owners():
             return
+        checkpoint = None
+        if job['role'] == 'work' and 'max_work_turns' in self.store.limits:
+            progress = self._checkpoint_progress(job)
+            if progress['tools']['unconfirmed']:
+                self.store.change_job(job, 'unknown')
+                self._stop_mission(mission, 'unknown', 'work/effects-unconfirmed')
+                return
+            checkpoint = self._read_checkpoint(job)
+            if checkpoint is None or checkpoint['status'] == 'blocked':
+                self.store.change_job(job, 'blocked', **({'checkpoint': checkpoint} if checkpoint else {}))
+                self._stop_mission(mission, 'blocked', 'work/blocked' if checkpoint else 'work/checkpoint-invalid')
+                return
         workspace = manager.get(row['workspace_id'])
         tree = await self._native(lambda: snapshot_tree(manager, workspace)[1])
         self._open()
@@ -332,7 +363,7 @@ class SuperagentMissions(SuperagentRouter):
             self._stop_mission(mission, 'blocked', 'review/input-changed')
             return
         capturing = self.store.change_job(job, 'capturing', tree=tree,
-                                        capture_before=(workspace.get('delivery') or {}).get('ref'))
+            capture_before=(workspace.get('delivery') or {}).get('ref'), **({'checkpoint': checkpoint} if checkpoint else {}))
         if capturing is None:
             return
         try:
@@ -362,7 +393,44 @@ class SuperagentMissions(SuperagentRouter):
                 return
             self.store.change_job(job, 'done', delivery=delivery, verdict=verdict)
         else:
-            self.store.change_job(job, 'done', delivery=delivery)
+            state = 'done'
+            if job['role'] == 'work' and 'max_work_turns' in self.store.limits:
+                checkpoint = self._confirmed_checkpoint(job)
+                if checkpoint['status'] == 'continue':
+                    state = 'checkpointed'
+                    earlier = [item for item in self.store.jobs(mission['id']) if item['role'] == 'work'
+                               and item['node'] == job['node'] and item['attempt'] < job['attempt']]
+                    for previous in earlier:
+                        if self._confirmed_checkpoint(previous) == checkpoint and previous['data']['tree'] == delivery['tree']:
+                            self.store.change_job(job, 'blocked', delivery=delivery)
+                            self._stop_mission(mission, 'blocked', 'work/no-progress')
+                            return
+            self.store.change_job(job, state, delivery=delivery)
+
+    def _checkpoint_progress(self, job):
+        """接续只采用确切已完成且已收尾的原运行，不推测失败命令可以重试。"""
+        record = self._record(job)
+        if record.status != 'completed' or not record.settled:
+            raise _error('corrupt')
+        session = self.dispatcher.harness.get_session(job['data']['session_id'])
+        progress = run_progress(record, session.events)
+        if progress['turn'] is None:
+            raise _error('corrupt')
+        return progress
+
+    def _read_checkpoint(self, job):
+        try:
+            return validate_checkpoint(_json(_text(self._record(job).output, 'checkpoint', limit=65536)))
+        except (ValueError, TypeError, KeyError, RecursionError, HarnessError):
+            return None
+
+    def _confirmed_checkpoint(self, job):
+        """消费前回查原正文及工具配对，修改缓存哈希不能把中间阶段提升为就绪。"""
+        checkpoint = self._read_checkpoint(job)
+        if (checkpoint is None or checkpoint != job['data'].get('checkpoint')
+                or self._checkpoint_progress(job)['tools']['unconfirmed']):
+            raise _error('corrupt')
+        return checkpoint
 
     def _verdict(self, mission, job):
         """逐条引用当前复核轮的真实结果，命令证据额外核对前台退出和编码。"""
@@ -504,7 +572,15 @@ class SuperagentMissions(SuperagentRouter):
         if mission['state'] == 'running':
             for step in mission['plan']['steps']:
                 self.store.add_job(mission, role='work', node=step['id'], profile=step['profile_id'], dependencies=step['depends_on'])
-            work = [job for job in self.store.jobs(mission['id']) if job['role'] == 'work']
+            work = list(work_heads(self.store.jobs(mission['id'])).values())
+            for job in work:
+                if job['state'] == 'checkpointed':
+                    self._confirmed_checkpoint(job)
+                    if job['attempt'] >= self.store.limits['max_work_turns']:
+                        self._stop_mission(mission, 'blocked', 'budget/work-turns-exhausted')
+                        return
+                    self.store.add_job(mission, role='work', node=job['node'], attempt=job['attempt'] + 1,
+                                       profile=job['profile'], dependencies=job['dependencies'])
             if all(job['state'] == 'done' for job in work):
                 self.store.update(mission['id'], before='running', state='integrating')
         elif mission['state'] == 'integrating':
@@ -563,7 +639,7 @@ class SuperagentMissions(SuperagentRouter):
                 mission = self.store.mission(mission['id'])
                 if mission['state'] in TERMINAL:
                     break
-                if job['state'] in ('done', 'blocked'):
+                if job['state'] in ('done', 'blocked', 'checkpointed'):
                     continue
                 try:
                     await self._advance_job(mission, job)
@@ -585,7 +661,7 @@ class SuperagentMissions(SuperagentRouter):
         host = self.harness if job['role'] == 'plan' else self.dispatcher.harness
         sid = job['data'].get('session_id')
         progress = None
-        if sid and 'payload' in job['data'] and job['state'] in ('submitting', 'accepted', 'capturing', 'done', 'blocked', 'unknown'):
+        if sid and 'payload' in job['data'] and job['state'] in ('submitting', 'accepted', 'capturing', 'done', 'blocked', 'unknown', 'checkpointed'):
             record = self._submission(job)
             if record is not None:
                 key = (id(host), sid)
@@ -601,8 +677,17 @@ class SuperagentMissions(SuperagentRouter):
             item['waiting_for'] = reason
         if unresolved:
             item['unresolved_dependencies'] = unresolved
-        if mission['state'] in TERMINAL and job['state'] not in ('done', 'blocked'):
+        if mission['state'] in TERMINAL and job['state'] not in ('done', 'blocked', 'checkpointed'):
             item['scheduling_halted'] = True
+        if job['role'] == 'work' and 'max_work_turns' in self.store.limits:
+            item['max_work_turns'] = self.store.limits['max_work_turns']
+        if 'checkpoint' in job['data']:
+            checkpoint = job['data']['checkpoint']
+            item['checkpoint'] = {'status': checkpoint['status'], 'summary': checkpoint['summary'][:512],
+                'summary_truncated': len(checkpoint['summary']) > 512,
+                'next_steps': [step[:256] for step in checkpoint['next_steps'][:4]],
+                'next_steps_total': len(checkpoint['next_steps']), 'next_steps_has_more': len(checkpoint['next_steps']) > 4,
+                'next_steps_truncated': any(len(step) > 256 for step in checkpoint['next_steps'][:4])}
         if 'verdict' in job['data']:
             verdict = job['data']['verdict']
             item['review'] = {'summary': verdict['summary'][:512], 'summary_truncated': len(verdict['summary']) > 512,
@@ -617,15 +702,17 @@ class SuperagentMissions(SuperagentRouter):
         events = {}
         recent = []
         for mission, jobs in snapshots:
+            visible = status_jobs(jobs) if 'max_work_turns' in self.store.limits else jobs
             recent.append({**{key: mission[key] for key in ('id', 'state', 'reason', 'round', 'base_commit', 'source_id', 'event_id', 'revision', 'thread_ids')},
                 'budget': {'attempt': mission['round'], 'max_attempts': self.store.limits['max_attempts'],
                            'phase': 'planning' if mission['plan'] is None else 'delivery'},
                 'work': {'total': len(mission['plan']['steps']) if mission['plan'] else None,
-                         'delivered': sum(job['role'] == 'work' and job['state'] == 'done' for job in jobs)},
+                         'delivered': sum(job['state'] == 'done' for job in work_heads(jobs).values())},
                 'acceptance': [{**check, 'criterion': check['criterion'][:512],
                                 'criterion_truncated': len(check['criterion']) > 512}
                                for check in mission['plan']['acceptance']] if mission['plan'] else [],
-                'jobs': [self._job_status(mission, job, jobs, events=events, background=background, at_capacity=at_capacity) for job in jobs]})
+                'jobs': [self._job_status(mission, job, jobs, events=events, background=background, at_capacity=at_capacity) for job in visible],
+                'jobs_total': len(jobs), 'jobs_shown': len(visible), 'jobs_has_more': len(jobs) > len(visible)})
         inputs = {'pending': sum(count for state, count in counts.items() if state not in TERMINAL),
                   'unknown': counts.get('unknown', 0),
                   'rejected': sum(counts.get(state, 0) for state in ('blocked', 'rejected', 'suppressed'))}

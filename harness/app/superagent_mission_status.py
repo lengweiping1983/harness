@@ -5,6 +5,7 @@ from ..session.tool_activity import confirmed_tool_result, tool_invocations
 from ..session.turn_scope import turn_events
 from .superagent_inbox import _error
 from .superagent_mission_store import TERMINAL
+from .superagent_checkpoints import work_heads
 
 
 def run_progress(record, events):
@@ -33,10 +34,12 @@ def run_progress(record, events):
 
 def dependencies(mission, job, jobs):
     """显示计划中的真实前置及是否已创建，不用缺失记录补造完成状态。"""
+    heads = work_heads(jobs)
     if job['role'] == 'work':
-        expected = [('work', name, 1) for name in job['dependencies']]
+        expected = [('work', job['node'], job['attempt'] - 1)] if job['attempt'] > 1 else [
+            ('work', name, heads.get(name, {}).get('attempt', 1)) for name in job['dependencies']]
     elif job['role'] == 'integrate' and job['attempt'] == 1:
-        expected = [('work', step['id'], 1) for step in mission['plan']['steps']]
+        expected = [('work', step['id'], heads.get(step['id'], {}).get('attempt', 1)) for step in mission['plan']['steps']]
     elif job['role'] == 'review':
         expected = [('integrate', 'goal', job['attempt'])]
     else:
@@ -45,7 +48,8 @@ def dependencies(mission, job, jobs):
     result = []
     for key in expected:
         item = index.get(key)
-        if item is None or item['state'] != 'done':
+        resolved = 'checkpointed' if job['role'] == 'work' and job['attempt'] > 1 else 'done'
+        if item is None or item['state'] != resolved:
             result.append({'node': key[1], 'job_id': item['id'] if item else None,
                            'state': item['state'] if item else None})
     return result
@@ -54,7 +58,7 @@ def dependencies(mission, job, jobs):
 def waiting_reason(mission, job, *, progress, unresolved, background, conversation_busy, at_capacity):
     """等待分类来自确定事实，任务终态不能继承复用会话的新等待。"""
     state = job['state']
-    if state in ('done', 'blocked'):
+    if state in ('done', 'blocked', 'checkpointed'):
         return None
     if state == 'unknown':
         return 'result-reconciliation'

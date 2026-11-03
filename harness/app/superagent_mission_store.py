@@ -11,6 +11,7 @@ from pathlib import Path
 from ..core.errors import HarnessError
 from ..core.sqlite import prepare_database
 from .superagent_inbox import _error, _json, _text
+from .superagent_checkpoints import validate_checkpoint
 
 
 SCHEMA = '''
@@ -31,7 +32,7 @@ PRAGMA user_version=1;
 '''
 MISSION_STATES = {'planning', 'running', 'integrating', 'reviewing', 'completed',
                   'blocked', 'unknown', 'rejected', 'suppressed'}
-JOB_STATES = {'pending', 'importing', 'ready', 'submitting', 'accepted', 'capturing',
+JOB_STATES = {'pending', 'importing', 'ready', 'submitting', 'accepted', 'capturing', 'checkpointed',
               'done', 'blocked', 'unknown'}
 TERMINAL = {'completed', 'blocked', 'unknown', 'rejected', 'suppressed'}
 
@@ -46,8 +47,8 @@ def packed(value):
 
 def validate_autonomy(value, profiles):
     """配置必须显式选择集成与复核模板，不由模型扩大工具权限。"""
-    if (not isinstance(value, dict) or set(value) !=
-            {'max_steps', 'max_attempts', 'max_missions', 'integrator_profile', 'reviewer_profile'}):
+    required = {'max_steps', 'max_attempts', 'max_missions', 'integrator_profile', 'reviewer_profile'}
+    if (not isinstance(value, dict) or required - set(value) or set(value) - required - {'max_work_turns'}):
         raise _error('invalid', field='autonomy')
     for name, maximum in (('max_steps', 8), ('max_attempts', 5), ('max_missions', 128)):
         if type(value[name]) is not int or not 1 <= value[name] <= maximum:
@@ -55,6 +56,8 @@ def validate_autonomy(value, profiles):
     for name in ('integrator_profile', 'reviewer_profile'):
         if not isinstance(value[name], str) or value[name] not in profiles:
             raise _error('invalid', field='autonomy.' + name)
+    if 'max_work_turns' in value and (type(value['max_work_turns']) is not int or not 1 <= value['max_work_turns'] <= 32):
+        raise _error('invalid', field='autonomy.max_work_turns')
     if profiles[value['integrator_profile']]['repo'] != profiles[value['reviewer_profile']]['repo']:
         raise _error('invalid', field='autonomy.profiles')
     return dict(value)
@@ -211,7 +214,14 @@ class MissionStore:
             if original is None:
                 raise _error('corrupt')
             mission = self._decode_mission(original)
-            return mission, self._decode_job(row, mission)
+            job = self._decode_job(row, mission)
+            if job['role'] == 'work':
+                for attempt in range(1, job['attempt']):
+                    previous = db.execute('SELECT * FROM jobs WHERE id=?',
+                        (mission['id'] + '/work:' + job['node'] + ':' + str(attempt),)).fetchone()
+                    if previous is None or self._decode_job(previous, mission)['state'] != 'checkpointed':
+                        raise _error('corrupt')
+            return mission, job
 
     def job(self, identity):
         return self._job_snapshot(identity)[1]
@@ -224,20 +234,21 @@ class MissionStore:
                     or row['data_hash'] != digest(row['data']) or row['state'] not in JOB_STATES
                     or not isinstance(spec, dict) or set(spec) != {'role', 'node', 'attempt', 'profile', 'dependencies', 'resource'}
                     or spec['role'] not in ('plan', 'work', 'integrate', 'review')
-                    or type(spec['attempt']) is not int or not 1 <= spec['attempt'] <= self.limits['max_attempts']
+                    or type(spec['attempt']) is not int or not 1 <= spec['attempt'] <= (
+                        self.limits.get('max_work_turns', 1) if spec['role'] == 'work' else self.limits['max_attempts'])
                     or not isinstance(spec['node'], str) or not isinstance(spec['dependencies'], list)
                     or any(not isinstance(item, str) for item in spec['dependencies'])
                     or len(set(spec['dependencies'])) != len(spec['dependencies'])
                     or row['id'] != mission['id'] + '/' + spec['role'] + ':' + spec['node'] + ':' + str(spec['attempt'])
                     or not isinstance(data, dict) or set(data) - {'payload', 'payload_hash', 'session_id', 'workspace_id', 'run_id',
-                        'import_plan', 'delivery', 'capture_before', 'tree', 'verdict', 'feedback'}):
+                        'import_plan', 'delivery', 'capture_before', 'tree', 'verdict', 'feedback', 'checkpoint'}):
                 raise ValueError
             if spec['role'] != 'plan':
                 if mission['plan'] is None or not isinstance(spec['profile'], str) or spec['profile'] not in self.profiles:
                     raise ValueError
                 if spec['role'] == 'work':
                     step = next(item for item in mission['plan']['steps'] if item['id'] == spec['node'])
-                    if spec['profile'] != step['profile_id'] or spec['dependencies'] != step['depends_on'] or spec['attempt'] != 1:
+                    if spec['profile'] != step['profile_id'] or spec['dependencies'] != step['depends_on']:
                         raise ValueError
                 elif spec['profile'] != self.limits['reviewer_profile' if spec['role'] == 'review' else 'integrator_profile']:
                     raise ValueError
@@ -245,12 +256,21 @@ class MissionStore:
                 _text(data['payload'], 'mission_payload', limit=524288)
                 if data.get('payload_hash') != digest(data['payload']):
                     raise ValueError
-            if row['state'] in ('ready', 'submitting', 'accepted', 'capturing', 'done'):
+            if 'checkpoint' in data:
+                if spec['role'] != 'work' or 'max_work_turns' not in self.limits:
+                    raise ValueError
+                validate_checkpoint(data['checkpoint'])
+            if row['state'] == 'checkpointed' and data.get('checkpoint', {}).get('status') != 'continue':
+                raise ValueError
+            if (spec['role'] == 'work' and 'max_work_turns' in self.limits and row['state'] == 'done'
+                    and data.get('checkpoint', {}).get('status') != 'ready'):
+                raise ValueError
+            if row['state'] in ('ready', 'submitting', 'accepted', 'capturing', 'done', 'checkpointed'):
                 _text(data.get('payload'), 'mission_payload', limit=524288)
                 _text(data.get('session_id'), 'session_id')
-            if row['state'] in ('accepted', 'capturing', 'done'):
+            if row['state'] in ('accepted', 'capturing', 'done', 'checkpointed'):
                 _text(data.get('run_id'), 'run_id')
-            if row['state'] in ('importing', 'capturing') or row['state'] == 'done' and spec['role'] != 'plan':
+            if row['state'] in ('importing', 'capturing', 'checkpointed') or row['state'] == 'done' and spec['role'] != 'plan':
                 _text(data.get('workspace_id'), 'workspace_id')
             if row['state'] == 'importing':
                 plan = data.get('import_plan')
@@ -259,7 +279,7 @@ class MissionStore:
                         or any(not isinstance(plan.get(key), str) or not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', plan[key])
                                for key in ('tree', 'target_tree'))):
                     raise ValueError
-            if row['state'] == 'done' and spec['role'] != 'plan':
+            if row['state'] in ('done', 'checkpointed') and spec['role'] != 'plan':
                 delivery = data.get('delivery')
                 if (not isinstance(delivery, dict) or set(delivery) != {'commit', 'tree', 'ref', 'head', 'base_commit'}
                         or delivery['base_commit'] != mission['base_commit'] or delivery['tree'] != data.get('tree')):
@@ -304,6 +324,12 @@ class MissionStore:
             return None, []
         mission = self._decode_mission(row)
         jobs = [self._decode_job(item, mission) for item in db.execute('SELECT * FROM jobs WHERE mission=? ORDER BY rowid', (identity,))]
+        for job in jobs:
+            if job['role'] == 'work' and job['attempt'] > 1:
+                previous = next((item for item in jobs if item['role'] == 'work' and item['node'] == job['node']
+                                 and item['attempt'] == job['attempt'] - 1), None)
+                if previous is None or previous['state'] != 'checkpointed':
+                    raise _error('corrupt')
         return mission, jobs
 
     def status_snapshots(self, *, limit=16):
