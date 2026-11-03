@@ -29,6 +29,7 @@ from .superagent_mission_store import MissionStore, validate_autonomy
 from .superagent_missions import SuperagentMissions
 from .superagent_guidance import SuperagentGuidance
 from .superagent_guidance_files import GuidanceFiles
+from .superagent_control import MissionControl
 from .superagent_github import SuperagentGitHub, github_credentials, validate_github
 from .superagent_feishu import SuperagentFeishu, feishu_credentials, validate_feishu
 
@@ -195,13 +196,16 @@ class SuperagentService:
             mission_store = (MissionStore(service.root / 'missions.sqlite3', service.inbox,
                 identity={'config': spec, 'session_id': session_id}, profiles=spec['profiles'], limits=spec['autonomy'])
                 if 'autonomy' in spec else None)
+            service.control = (MissionControl(service.root / 'control.sqlite3', instance_id=spec['instance_id'],
+                identity=identity) if mission_store is not None else None)
             service.factory = SuperagentWorkers(service.worker_host, service.inbox,
                 owner_session_id=session_id, profiles=profiles, max_workers=spec['max_workers'], mission_store=mission_store)
             service.dispatcher = SuperagentDispatcher(service.worker_host, service.inbox, max_active=spec['max_active'])
             reply_limits = {spec['feishu']['source_id']:99} if 'feishu' in spec else None
             if mission_store is not None:
                 service.router = SuperagentMissions(service.dispatcher, service.router_host,
-                    session_id=session_id, worker_factory=service.factory, store=mission_store, reply_limits=reply_limits)
+                    session_id=session_id, worker_factory=service.factory, store=mission_store, reply_limits=reply_limits,
+                    control=service.control)
                 service.results = service.router.results
                 remote_sources = {spec[name]['source_id'] for name in ('github', 'feishu') if name in spec}
                 service.router.guidance = SuperagentGuidance(service.router, sources=set(spec['sources']) - remote_sources)

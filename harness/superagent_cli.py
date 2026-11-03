@@ -19,7 +19,11 @@ def add_arguments(parser):
     actions.add_argument('--superagent-status', action='store_true', help=tr('superagent.cli.status'))
     actions.add_argument('--superagent-steer', metavar='TEXT', help=tr('superagent.cli.steer'))
     actions.add_argument('--superagent-receipt', metavar='REQUEST_ID', help=tr('superagent.cli.receipt'))
+    actions.add_argument('--superagent-pause', action='store_true', help=tr('superagent.cli.pause'))
+    actions.add_argument('--superagent-resume', action='store_true', help=tr('superagent.cli.resume'))
+    actions.add_argument('--superagent-cancel', action='store_true', help=tr('superagent.cli.cancel'))
     parser.add_argument('--superagent-job', metavar='JOB_ID', help=tr('superagent.cli.job'))
+    parser.add_argument('--superagent-mission', metavar='MISSION_ID', help=tr('superagent.cli.mission'))
     for name in ('source', 'actor', 'thread', 'request-id'):
         parser.add_argument('--superagent-' + name, help=tr('superagent.cli.' + name))
 
@@ -27,14 +31,20 @@ def add_arguments(parser):
 def handle(args, parser):
     selectors = {key: getattr(args, 'superagent_' + key.replace('-', '_'))
                  for key in ('source', 'actor', 'thread', 'request-id')}
-    local = args.superagent_submit is not None or args.superagent_status or args.superagent_steer is not None or args.superagent_receipt is not None
+    control_action = ('pause' if args.superagent_pause else 'resume' if args.superagent_resume else
+                      'cancel' if args.superagent_cancel else None)
+    local = (args.superagent_submit is not None or args.superagent_status or args.superagent_steer is not None
+             or args.superagent_receipt is not None or control_action is not None)
     if args.superagent is None:
         if args.superagent_once or local or args.superagent_job is not None or any(value is not None for value in selectors.values()):
             parser.error(tr('superagent.cli.config_required'))
         return None
-    if ((local and args.superagent_submit is None and args.superagent_once)
-            or args.superagent_submit is None and args.superagent_steer is None and any(value is not None for value in selectors.values())
-            or args.superagent_job is not None and args.superagent_steer is None):
+    if ((local and args.superagent_submit is None and control_action is None and args.superagent_once)
+            or args.superagent_submit is None and args.superagent_steer is None and control_action is None and any(value is not None for value in selectors.values())
+            or args.superagent_job is not None and args.superagent_steer is None
+            or args.superagent_mission is not None and control_action is None
+            or control_action is not None and (args.superagent_mission is None or args.superagent_job is not None
+                                               or any(value is not None for value in (selectors['source'], selectors['actor'], selectors['thread'])))):
         parser.error(tr('superagent.cli.conflict'))
     if (args.prompt or args.ui or args.share or args.status or args.list_sessions or args.cwd or args.model
             or args.reasoning or args.no_shell or args.no_fs or args.dist or args.host != '127.0.0.1' or args.port != 8765
@@ -52,11 +62,15 @@ def handle(args, parser):
             elif args.superagent_steer is not None:
                 result = steer_local(Path(args.superagent), args.superagent_steer, job_id=args.superagent_job,
                     source_id=selectors['source'], actor_id=selectors['actor'], thread_id=selectors['thread'], request_id=selectors['request-id'])
+            elif control_action is not None:
+                from .app.superagent_local import control_local
+                result = control_local(Path(args.superagent), control_action, args.superagent_mission,
+                                       request_id=selectors['request-id'])
             else:
                 result = submit_local(Path(args.superagent), args.superagent_submit, source_id=selectors['source'],
                                       actor_id=selectors['actor'], thread_id=selectors['thread'], request_id=selectors['request-id'])
             print(json.dumps(result, ensure_ascii=False, indent=2))
-            if args.superagent_submit is not None and args.superagent_once:
+            if (args.superagent_submit is not None or control_action is not None) and args.superagent_once:
                 return asyncio.run(run(Path(args.superagent), once=True))
             return 0
         return asyncio.run(run(Path(args.superagent), once=args.superagent_once))

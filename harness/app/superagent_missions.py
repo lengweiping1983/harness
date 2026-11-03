@@ -71,10 +71,11 @@ class MissionResults:
 class SuperagentMissions(SuperagentRouter):
     """确定性调度拥有资源、预算和代次，模型只提出计划与复核结论。"""
 
-    def __init__(self, dispatcher, router_harness, *, session_id, worker_factory, store, reply_limits=None):
+    def __init__(self, dispatcher, router_harness, *, session_id, worker_factory, store, reply_limits=None, control=None):
         super().__init__(dispatcher, router_harness, session_id=session_id, workers={}, worker_factory=worker_factory)
         self.store = store
         self.guidance = None
+        self.control = control
         self.results = MissionResults(self, reply_limits)
         self._tick_task = None
 
@@ -624,6 +625,9 @@ class SuperagentMissions(SuperagentRouter):
         if self.guidance is not None:
             await self.guidance.tick()
         self._collect_missions()
+        if self.control is not None:
+            self.control.reconcile(mission_exists=self._mission_exists)
+            await self._cancelled_runs()
         with self.store.db() as db:
             cursor = db.execute('SELECT scheduling_cursor FROM coordinator WHERE instance=?', (self.inbox.instance_id,)).fetchone()[0]
             rows = db.execute("SELECT id,seq FROM missions WHERE instance=? AND state NOT IN ('completed','blocked','unknown','rejected','suppressed') ORDER BY (seq<=?),seq LIMIT 8",
@@ -631,6 +635,8 @@ class SuperagentMissions(SuperagentRouter):
         for row in rows:
             self._open()
             mission = self.store.mission(row['id'])
+            if self.control is not None and self.control.mode(mission['id'])['mode'] != 'running':
+                continue
             if not self._allowed(mission):
                 self._stop_mission(mission, 'suppressed', 'source/revoked')
                 continue
@@ -654,6 +660,33 @@ class SuperagentMissions(SuperagentRouter):
         if rows:
             with self.store.db(write=True) as db:
                 db.execute('UPDATE coordinator SET scheduling_cursor=? WHERE instance=?', (rows[-1]['seq'], self.inbox.instance_id))
+
+    def _mission_exists(self, mission_id):
+        """控制请求只在目标已写入任务账本后才消费。"""
+        try:
+            self.store.mission(mission_id)
+        except HarnessError as exc:
+            if exc.code == 'superagent/event-unavailable':
+                return False
+            raise
+        return True
+
+    async def _cancelled_runs(self):
+        """取消只作用于仍活动的所属运行；已完成或未知运行只保留事实。"""
+        if self.control is None:
+            return
+        _, _, snapshots = self.store.status_snapshots(limit=100)
+        for mission, jobs in snapshots:
+            if self.control.mode(mission['id'])['mode'] != 'cancelled':
+                continue
+            for job in jobs:
+                session_id = job['data'].get('session_id')
+                if not session_id:
+                    continue
+                host = self.harness if job['role'] == 'plan' else self.dispatcher.harness
+                active = host.runtime.active.get(session_id)
+                if active is not None and not active.done():
+                    await host.cancel(session_id)
 
     def _job_status(self, mission, job, jobs, *, events, background, at_capacity):
         item = {**{key: job[key] for key in ('id', 'role', 'node', 'attempt', 'state', 'dependencies')},
@@ -701,23 +734,28 @@ class SuperagentMissions(SuperagentRouter):
         at_capacity = len(self.dispatcher.harness.runtime.records.active) >= self.dispatcher.max_active
         events = {}
         recent = []
+        controls = self.control.modes([mission['id'] for mission, _ in snapshots]) if self.control is not None else {}
         for mission, jobs in snapshots:
+            control = controls.get(mission['id'], {'mission_id': mission['id'], 'mode': 'running', 'reason': 'default', 'revision': 0, 'updated_at': None})
             visible = status_jobs(jobs) if 'max_work_turns' in self.store.limits else jobs
             recent.append({**{key: mission[key] for key in ('id', 'state', 'reason', 'round', 'base_commit', 'source_id', 'event_id', 'revision', 'thread_ids')},
                 'budget': {'attempt': mission['round'], 'max_attempts': self.store.limits['max_attempts'],
                            'phase': 'planning' if mission['plan'] is None else 'delivery'},
                 'work': {'total': len(mission['plan']['steps']) if mission['plan'] else None,
                          'delivered': sum(job['state'] == 'done' for job in work_heads(jobs).values())},
+                'control': control,
                 'acceptance': [{**check, 'criterion': check['criterion'][:512],
                                 'criterion_truncated': len(check['criterion']) > 512}
                                for check in mission['plan']['acceptance']] if mission['plan'] else [],
                 'jobs': [self._job_status(mission, job, jobs, events=events, background=background, at_capacity=at_capacity) for job in visible],
                 'jobs_total': len(jobs), 'jobs_shown': len(visible), 'jobs_has_more': len(jobs) > len(visible)})
-        inputs = {'pending': sum(count for state, count in counts.items() if state not in TERMINAL),
+        inputs = {'pending': sum(1 for mission, _ in snapshots
+                                 if mission['state'] not in TERMINAL and controls.get(mission['id'], {}).get('mode', 'running') == 'running'),
                   'unknown': counts.get('unknown', 0),
                   'rejected': sum(counts.get(state, 0) for state in ('blocked', 'rejected', 'suppressed'))}
         return {'instance_id': self.inbox.instance_id, 'cursor': cursor, 'inputs': inputs, 'batches': [],
                 'workers': self.worker_factory.status(), 'results': {'draft': counts['completed']} if counts.get('completed') else {},
                 'missions': {'states': counts, 'recent': recent, 'total': sum(counts.values()),
                              'shown': len(recent), 'has_more': sum(counts.values()) > len(recent)},
+                **({'control': self.control.status()} if self.control is not None else {}),
                 **({'guidance': self.guidance.status()} if self.guidance is not None else {})}

@@ -144,6 +144,22 @@ def read_status(config_path):
         raise _error('corrupt') from exc
 
 
+def control_local(config_path, action, mission_id, *, request_id=None):
+    """在独立控制账本中公开一个幂等的暂停、继续或取消意图。"""
+    from .superagent_control import MissionControl
+    spec = read_config(config_path)
+    if 'autonomy' not in spec:
+        raise _error('guidance-unavailable')
+    _text(action, 'control_action')
+    _text(mission_id, 'mission_id', limit=256)
+    request_id = uuid.uuid4().hex if request_id is None else _text(request_id, 'request_id')
+    identity = json.dumps(spec, ensure_ascii=False, sort_keys=True)
+    control = MissionControl(Path(spec['state_dir']) / 'control.sqlite3',
+                             instance_id=spec['instance_id'], identity=identity)
+    return {'request_id': request_id, **control.enqueue(command_id=request_id, mission_id=mission_id, action=action),
+            'queued': True}
+
+
 def _guidance_target(status, job_id, remote):
     """仅从完整合法的当前投影选目标；截断不能作为全局唯一的依据。"""
     from .superagent_inbox import _names

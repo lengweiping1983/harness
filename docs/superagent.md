@@ -123,6 +123,23 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 
 自主模式的工作节点不订阅原 Thread，防止一句跟进广播到全部依赖节点。每个明确事件建立一个独立目标，普通非明确跟进不会续接目标；默认 Router 的单任务 Thread 续接继续保留，但两种协调方式不混用。运行中的工作和集成节点可通过下述本机入口接收执行指令。目标依赖图与验收标准的中途变更、跨来源目标关联、用户问答、动态重规划和未知状态的人工核实界面尚未提供。失败目标保留状态与全部资源供检查，当前不能通过自动重试命令强行恢复未知副作用。
 
+### 目标级控制与少关注运行
+
+自主模式会在 `control.sqlite3` 中维护独立的目标控制账本。它与 `missions.sqlite3` 分离，因此控制请求不会改写任务事实，也不会要求迁移已有目标账本。可信本机操作者可以用稳定请求身份提交暂停、继续或取消：
+
+```sh
+python -m harness.cli --superagent /path/to/superagent.json \
+  --superagent-pause --superagent-mission MISSION_ID --superagent-request-id pause-1
+python -m harness.cli --superagent /path/to/superagent.json \
+  --superagent-resume --superagent-mission MISSION_ID --superagent-request-id resume-1
+python -m harness.cli --superagent /path/to/superagent.json \
+  --superagent-cancel --superagent-mission MISSION_ID --superagent-request-id cancel-1
+```
+
+请求先原子写入控制账本；运行器发现目标后才消费，因此目标尚在收件箱排队时不会丢失控制意图。同一请求身份只能对应相同的目标和动作，重复提交返回原回执，正文冲突明确拒绝。暂停不取消已经受理的运行，运行自然收尾后冻结后续阶段；继续只解除暂停；取消设为终态控制模式并停止仍活动的所属会话。取消不会重放或伪造未确认的工具结果，原运行和工具事实仍按原账本回查。
+
+状态快照中的 `missions.recent[].control` 给出目标控制模式与修订号，顶层 `control.commands` 给出最近命令的排队、应用或拒绝回执。`inputs.pending` 只统计仍允许调度的目标，单批运行在暂停或取消目标没有活动会话时可以收尾退出。取消后的目标不能通过继续命令复活；需要新尝试时应提交新的明确目标，以保留审计边界。
+
 回归见 `tests/test_superagent_missions.py`：确定性模型通过真实文件、Shell、Git 和运行控制器核对依赖产物、独立复核、有限修正、伪造证据、候选变化、来源撤销、冻结基线、慢任务、丢回执、重启与双语实际消费。设计审查依据与待验证风险见 [Superagent 协调审查](superagent-review.md)。
 
 ### 长工作节点的阶段接续
