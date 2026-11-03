@@ -27,8 +27,9 @@ class ExecutorCatalogLanguageTests(unittest.TestCase):
                 if contract is None:
                     contract = actual
                 self.assertEqual(actual, contract)
-                self.assertEqual(len(entries),24)
-                self.assertEqual(len({entry[0] for entry in entries}), 24)
+                self.assertEqual(len(entries),25)
+                self.assertEqual(len({entry[0] for entry in entries}), 25)
+                self.assertIn('load_workspace_dependencies', {entry[0] for entry in entries})
                 for name, description, *_ in entries:
                     with self.subTest(language=language, name=name):
                         self.assertEqual(any('\u4e00' <= char <= '\u9fff' for char in description),language=='zh-CN')

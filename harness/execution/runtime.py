@@ -22,6 +22,7 @@ from ..skills.registry import build_default_registry
 from ..skills.tool import render_catalog
 from ..tools.builtin.fs_tools import build_fs_tools
 from ..tools.builtin.job_tools import JobRegistry
+from ..tools.builtin.workspace_tools import collect_workspace_dependencies
 from ..core.text_encoding import output_encoding, utf8_env
 from ..tools.builtin.pwsh_tools import _build_argv, _build_script, _resolve_powershell
 from ..tools.job_archive import JobArchive
@@ -89,6 +90,7 @@ class ExecutionRuntime(PipelineRuntime):
                                       data={"error": exc.to_dict()})
 
             self.registry.register(ToolDefinition(schema={"name": name, "description": description, "parameters": parameters,
+                **({"description_key": "execution.catalog.load_workspace_dependencies"} if name == "load_workspace_dependencies" else {}),
                 **({"parameter_keys": {("properties", "output_encoding", "description"): "encoding.parameter"}} if name == "harness_exec" else {})},
                                                  execute=execute, effect=effect, timeout=None,
                                                  idempotent=effect == "read"))
@@ -96,6 +98,7 @@ class ExecutionRuntime(PipelineRuntime):
             if effect == "read" and method in {
                 "context", "session_resume", "image_get", "read", "search",
                 "git_status", "git_diff", "skill_list", "skill_load", "pipeline_get", "request_get",
+                "workspace_dependencies",
             }:
                 self._shared_reads[name] = self.registry.get(name)
         self.store.event('', 'runtime/start', {'instance_id': uuid.uuid4().hex})
@@ -116,6 +119,21 @@ class ExecutionRuntime(PipelineRuntime):
     def _policy(self, args, ctx):
         session, project = self._session(args["session_id"], ctx.services["principal"])
         return session, project, PathPolicy(project.root, self.config.home)
+
+    def _dependency_project(self, args, principal):
+        """只选择当前身份可访问的工作区，不根据服务进程目录或上次调用猜测。"""
+        if 'session_id' in args and 'project_id' in args:
+            fail('execution/workspace-selection-invalid', tr('execution.workspace.selection_invalid'))
+        if 'session_id' in args:
+            session, project = self._session(args['session_id'], principal)
+            return session['project_id'], project
+        if 'project_id' in args:
+            return args['project_id'], self._project(args['project_id'], principal)
+        candidates = [(key, project) for key, project in self.config.projects.items()
+                      if principal in project.principals]
+        if len(candidates) != 1:
+            fail('execution/workspace-selection-required', tr('execution.workspace.selection_required'))
+        return candidates[0]
 
     def _skills(self, project):
         """按项目根构建技能目录：项目技能覆盖用户与内置技能，停用的不暴露。"""
@@ -153,7 +171,11 @@ class ExecutionRuntime(PipelineRuntime):
             args = validate_or_raise(arguments, definition.schema.parameters)
             sid = args.get("session_id", "")
             root = None
-            if sid:
+            dependency_project_id = None
+            if name == "load_workspace_dependencies":
+                dependency_project_id, project = self._dependency_project(args, principal)
+                root = project.root
+            elif sid:
                 session, project = self._session(sid, principal)
                 root = project.root
             elif name == "harness_session_open":
@@ -184,6 +206,7 @@ class ExecutionRuntime(PipelineRuntime):
                 call_id = "call_" + uuid.uuid4().hex
                 ctx = ToolRunContext(call_id=call_id, session_id=sid, cwd=str(root) if root else None, turn=0, step=0,
                                      services={"principal": principal, "jobs": self.jobs, "registry": self.registry,
+                                               "dependency_project_id": dependency_project_id,
                                                "workspace_write_root": str(root) if root else None})
                 if sid:
                     self.store.event(sid, "tool/call", {"name": name, "call_id": call_id, "request_id": request_id,
@@ -209,10 +232,7 @@ class ExecutionRuntime(PipelineRuntime):
         for key, value in self.config.projects.items():
             if principal not in value.principals:
                 continue
-            projects.append({"project_id": key, "name": value.display_name or value.root.name, "root": str(value.root), "writable": value.writable,
-                             "commands": value.commands, "commits": value.commits,
-                             "verification": list(value.verification),
-                             "skills": self._skill_entries(self._skills(value))})
+            projects.append(self._project_capabilities(key, value))
         recent = []
         for row in self.store.db.execute('SELECT id,project FROM sessions WHERE principal=? ORDER BY rowid DESC LIMIT 20', (principal,)):
             project = self.config.projects.get(row['project'])
@@ -227,6 +247,28 @@ class ExecutionRuntime(PipelineRuntime):
                 "tools": self.registry.names(), "instructions": tr('execution.runtime.9a9c30bb2f0d'),
                   "execution_environment": self.execution_environment.capabilities().to_dict(),
                   "limitations": [tr('execution.runtime.5ff6418f2110'), tr('execution.runtime.02720b8fb338'), tr('execution.runtime.5310d15abd23'), tr('execution.runtime.bf2de15695f7')]}
+
+    def _project_capabilities(self, project_id, project):
+        """发现入口与上下文使用相同的技能启停、覆盖和权限事实。"""
+        return {"project_id": project_id, "name": project.display_name or project.root.name, "root": str(project.root),
+                "writable": project.writable, "commands": project.commands, "commits": project.commits,
+                "verification": list(project.verification), "skills": self._skill_entries(self._skills(project))}
+
+    async def _workspace_dependencies(self, args, ctx):
+        """在所属线程探测真实环境，工作区能力仍按本次已授权项目装配。"""
+        project_id = ctx.services['dependency_project_id']
+        project = self._project(project_id, ctx.services['principal'])
+        if str(project.root) != ctx.cwd:
+            fail('execution/project-changed', tr('execution.runtime.73db6e7068e2'))
+        workspace = self._project_capabilities(project_id, project)
+        try:
+            reading = asyncio.create_task(asyncio.to_thread(collect_workspace_dependencies,
+                include_packages=args.get('include_packages', True), cwd=project.root))
+            data = await join_cleanup(reading)
+        except Exception as exc:
+            fail('execution/dependency-probe-failed', tr('python.workspace_tools.484acd7994ec', p0=str(exc)))
+        return {**data, "project": workspace, "tools": self.registry.names(),
+                "execution_environment": self.execution_environment.capabilities().to_dict()}
 
     async def _session_open(self, args, ctx):
         project = self._project(args["project_id"], ctx.services["principal"])

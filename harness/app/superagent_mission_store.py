@@ -151,6 +151,7 @@ class MissionStore:
         result = dict(row)
         try:
             event = self.inbox.event(source_id=row['source_id'], event_id=row['event_id'])
+            result['thread_ids'] = list(event['thread_ids'])
             if (row['trigger_id'] != event['id'] or row['id'] != self.mission_id(event['id'])
                     or row['state'] not in MISSION_STATES or type(row['revision']) is not int or row['revision'] < 1
                     or row['revision'] != event['policy_revision']

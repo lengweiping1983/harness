@@ -73,6 +73,7 @@ class SuperagentMissions(SuperagentRouter):
     def __init__(self, dispatcher, router_harness, *, session_id, worker_factory, store, reply_limits=None):
         super().__init__(dispatcher, router_harness, session_id=session_id, workers={}, worker_factory=worker_factory)
         self.store = store
+        self.guidance = None
         self.results = MissionResults(self, reply_limits)
         self._tick_task = None
 
@@ -279,6 +280,8 @@ class SuperagentMissions(SuperagentRouter):
                  'request': event['text'], 'acceptance': mission['plan']['acceptance'],
                  'attempt': job['attempt'], 'max_attempts': self.store.limits['max_attempts'],
                  'predecessors': [self._report_frame(item) for item in self._dependency_jobs(mission, job)]}
+        if self.guidance is not None and job['role'] in ('integrate', 'review'):
+            frame['applied_guidance'] = self.guidance.applied_context(mission['id'])
         if job['role'] == 'work':
             frame['instruction'] = next(step['instruction'] for step in mission['plan']['steps'] if step['id'] == job['node'])
         if job['role'] == 'integrate' and job['attempt'] > 1:
@@ -542,6 +545,8 @@ class SuperagentMissions(SuperagentRouter):
         return self.status() if include_status else None
 
     async def _tick(self):
+        if self.guidance is not None:
+            await self.guidance.tick()
         self._collect_missions()
         with self.store.db() as db:
             cursor = db.execute('SELECT scheduling_cursor FROM coordinator WHERE instance=?', (self.inbox.instance_id,)).fetchone()[0]
@@ -612,7 +617,7 @@ class SuperagentMissions(SuperagentRouter):
         events = {}
         recent = []
         for mission, jobs in snapshots:
-            recent.append({**{key: mission[key] for key in ('id', 'state', 'reason', 'round', 'base_commit', 'source_id', 'event_id')},
+            recent.append({**{key: mission[key] for key in ('id', 'state', 'reason', 'round', 'base_commit', 'source_id', 'event_id', 'revision', 'thread_ids')},
                 'budget': {'attempt': mission['round'], 'max_attempts': self.store.limits['max_attempts'],
                            'phase': 'planning' if mission['plan'] is None else 'delivery'},
                 'work': {'total': len(mission['plan']['steps']) if mission['plan'] else None,
@@ -627,4 +632,5 @@ class SuperagentMissions(SuperagentRouter):
         return {'instance_id': self.inbox.instance_id, 'cursor': cursor, 'inputs': inputs, 'batches': [],
                 'workers': self.worker_factory.status(), 'results': {'draft': counts['completed']} if counts.get('completed') else {},
                 'missions': {'states': counts, 'recent': recent, 'total': sum(counts.values()),
-                             'shown': len(recent), 'has_more': sum(counts.values()) > len(recent)}}
+                             'shown': len(recent), 'has_more': sum(counts.values()) > len(recent)},
+                **({'guidance': self.guidance.status()} if self.guidance is not None else {})}

@@ -1,9 +1,11 @@
 """真实隔离解释器验证版本探测的输出上限及后代回收。"""
 import asyncio
+import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +13,36 @@ from harness.tools.runtime_probe import OUTPUT_LIMIT, probe_version
 
 
 class RuntimeProbeOwnershipTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_version_command_reports_unknown_after_supervisor_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(await probe_version([str(Path(directory) / 'missing-runtime')], 2), '')
+
+    async def test_public_entry_preserves_temporary_directory_cleanup_failure(self):
+        from harness.tools import runtime_probe
+        from harness.tools.builtin.workspace_tools import _version_of
+        original = PermissionError('Original temporary directory cleanup failure')
+        with tempfile.TemporaryDirectory() as directory:
+            @contextmanager
+            def broken_directory(**kwargs):
+                yield directory
+                raise original
+            with patch.object(runtime_probe.tempfile, 'TemporaryDirectory', broken_directory):
+                with self.assertRaises(PermissionError) as caught:
+                    await asyncio.to_thread(_version_of, sys.executable)
+            self.assertIs(caught.exception, original)
+
+    async def test_version_probe_uses_temporary_directory_and_disables_corepack_installation(self):
+        original_cwd = os.getcwd()
+        keys = ('COREPACK_ENABLE_NETWORK', 'COREPACK_ENABLE_AUTO_PIN', 'COREPACK_ENABLE_PROJECT_SPEC')
+        code = f"import json,os;print(json.dumps({{'cwd':os.getcwd(),'flags':[os.environ.get(key) for key in {keys!r}]}}))"
+        with patch.dict(os.environ, {key: '1' for key in keys}):
+            value = json.loads(await probe_version([sys.executable, '-c', code], 2))
+            self.assertEqual([os.environ[key] for key in keys], ['1', '1', '1'])
+        self.assertEqual(value['flags'], ['0', '0', '0'])
+        self.assertNotEqual(value['cwd'], original_cwd)
+        self.assertFalse(Path(value['cwd']).exists())
+        self.assertEqual(os.getcwd(), original_cwd)
+
     async def test_original_unicode_first_line_and_stderr_fallback(self):
         for code in ("print('Original 版本');print('second')", "import sys;print('Original 版本',file=sys.stderr)"):
             self.assertEqual(await probe_version([sys.executable,'-X','utf8','-c',code],2),'Original 版本')

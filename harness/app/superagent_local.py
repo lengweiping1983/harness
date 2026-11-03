@@ -141,3 +141,86 @@ def read_status(config_path):
         return value
     except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
         raise _error('corrupt') from exc
+
+
+def steer_local(config_path, text, *, job_id=None, source_id=None, actor_id=None, thread_id=None, request_id=None):
+    """绑定最后投影中的原运行；只排队，不猜测进程存活或把迟到输入投给新轮次。"""
+    from .superagent_guidance import command_id, validate_command
+    from .superagent_guidance_files import read_file
+    spec = read_config(config_path)
+    _text(text, 'text', limit=65536)
+    request_id = uuid.uuid4().hex if request_id is None else _text(request_id, 'request_id')
+    identity = command_id(spec['instance_id'], request_id)
+    directory = Path(spec['state_dir']) / 'guidance' / 'incoming'
+    if any(path.is_symlink() or path.is_junction() for path in (directory.parent, directory)):
+        raise _error('conflict')
+    target = directory / (identity + '.json')
+    def queued(value, duplicate):
+        return {'request_id': request_id, 'job_id': value['job_id'], 'run_id': value['run_id'], 'turn': value['turn'],
+                'path': str(target), 'duplicate': duplicate, 'queued': True}
+    if target.exists() or target.is_symlink():
+        original = validate_command(read_file(target, 524288))
+        if (original['instance_id'] != spec['instance_id'] or original['request_id'] != request_id or original['text'] != text
+                or any(value is not None and original[key] != value for key, value in
+                       (('job_id', job_id), ('source_id', source_id), ('actor_id', actor_id), ('thread_id', thread_id)))):
+            raise _error('event-conflict')
+        return queued(original, True)
+    status = read_status(config_path)
+    if job_id is None and status.get('missions', {}).get('has_more'):
+        raise _error('guidance-unavailable')
+    if 'autonomy' not in spec or status['runtime_state'] != 'running':
+        raise _error('guidance-unavailable')
+    remote = {spec[name]['source_id'] for name in ('github', 'feishu') if name in spec}
+    targets = []
+    for mission in status.get('missions', {}).get('recent', []):
+        for job in mission['jobs']:
+            progress = job.get('run')
+            if (job['role'] in ('work', 'integrate') and job['state'] == 'accepted' and progress
+                    and progress['status'] == 'running' and progress.get('turn') is not None
+                    and not job.get('scheduling_halted') and mission['source_id'] not in remote
+                    and (job_id is None or job['id'] == job_id)):
+                targets.append((mission, job))
+    if len(targets) != 1:
+        raise _error('guidance-unavailable')
+    mission, job = targets[0]
+    source_id = mission['source_id'] if source_id is None else source_id
+    if source_id != mission['source_id'] or source_id not in spec['sources']:
+        raise _error('guidance-unauthorized')
+    source = spec['sources'][source_id]
+    if source['mode'] == 'ignore':
+        raise _error('guidance-unauthorized')
+    def choose(value, options, field):
+        if value is None and len(options) == 1:
+            value = next(iter(options))
+        if not isinstance(value, str) or value not in options:
+            raise _error('invalid', field=field)
+        return value
+    actor_id = choose(actor_id, source['actors'], 'actor_id')
+    thread_id = choose(thread_id, set(source['threads']) & set(mission['thread_ids']), 'thread_id')
+    value = validate_command({'version': 1, 'instance_id': spec['instance_id'], 'request_id': request_id,
+        'mission_id': mission['id'], 'job_id': job['id'], 'run_id': job['run']['id'], 'turn': job['run']['turn'],
+        'source_id': source_id, 'revision': mission['revision'], 'actor_id': actor_id, 'thread_id': thread_id, 'text': text})
+    directory.mkdir(parents=True, exist_ok=True)
+    if any(path.is_symlink() or path.is_junction() for path in (directory.parent, directory)):
+        raise _error('conflict')
+    duplicate = _publish(directory, identity + '.json', (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + '\n').encode('utf-8'))
+    return queued(value, duplicate)
+
+
+def read_guidance_receipt(config_path, request_id):
+    """只读单条持久回执；排队、原生受理与应用分别呈现。"""
+    from .superagent_guidance import command_id, validate_receipt
+    from .superagent_guidance_files import read_file
+    spec = read_config(config_path)
+    _text(request_id, 'request_id')
+    identity = command_id(spec['instance_id'], request_id)
+    root = Path(spec['state_dir']) / 'guidance'
+    if any(path.is_symlink() or path.is_junction() for path in (root, root / 'receipts')):
+        raise _error('conflict')
+    path = root / 'receipts' / (identity + '.json')
+    if not path.exists():
+        raise _error('status-unavailable')
+    value = validate_receipt(read_file(path, 65536))
+    if value['instance_id'] != spec['instance_id'] or value['id'] != identity or value['request_id'] != request_id:
+        raise _error('corrupt')
+    return value

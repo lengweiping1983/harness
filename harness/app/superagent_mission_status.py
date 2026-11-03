@@ -21,6 +21,7 @@ def run_progress(record, events):
               and record.status in ('running', 'stopping')]
     last = scoped[-1] if scoped else None
     return {'id': record.id, 'status': record.status, 'settled': record.settled,
+            'turn': scoped[0].data['turn'] if scoped else None,
             'created_at': record.created_at, 'started_at': record.started_at, 'finished_at': record.finished_at,
             'last_activity': {'seq': last.seq, 'time': last.time, 'type': last.type} if last else None,
             'tools': {'started': len(started), 'completed': len(completed),
