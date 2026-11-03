@@ -21,6 +21,26 @@ test('menu readiness follows main-document replacement, not iframe or same-docum
   assert.equal(window.webContents.listenerCount('render-process-gone'), 0)
 })
 
+test('menu lifecycle releases its listeners after the window has been destroyed', () => {
+  const window = new EventEmitter(), contents = new EventEmitter(), changes = []
+  let destroyed = false
+  Object.defineProperty(window, 'webContents', {get() {
+    if (destroyed) throw new TypeError('Object has been destroyed')
+    return contents
+  }})
+  const otherNavigation = () => {}, otherCrash = () => {}
+  contents.on('did-start-navigation', otherNavigation)
+  contents.on('render-process-gone', otherCrash)
+  attachMenuLifecycle(window, ready => changes.push(ready))
+  destroyed = true
+  assert.doesNotThrow(() => window.emit('closed'))
+  assert.deepEqual(contents.listeners('did-start-navigation'), [otherNavigation])
+  assert.deepEqual(contents.listeners('render-process-gone'), [otherCrash])
+  contents.emit('did-start-navigation', {isMainFrame:true, isSameDocument:false})
+  contents.emit('render-process-gone')
+  assert.deepEqual(changes, [])
+})
+
 test('native actions stay available during reload while page commands recover with their shortcuts', () => {
   for (const platform of ['darwin', 'win32', 'linux']) for (const language of ['en', 'zh-CN', 'en']) {
     const copy = setupCopy(language), text = key => copy('ui.desktop.menu.' + key)

@@ -18,15 +18,17 @@ export function applicationMenu({platform = process.platform, text, command, rea
 
 /** 只有主文档替换才撤销页面菜单的就绪状态，内嵌预览加载不影响工作台。 */
 export function attachMenuLifecycle(window, installMenu) {
+  // closed 触发时窗口已销毁，清理使用注册时保存的页面引用。
+  const contents = window.webContents
   const navigating = details => {
     if (details.isMainFrame && !details.isSameDocument) installMenu(false)
   }
   const crashed = () => installMenu(false)
-  window.webContents.on('did-start-navigation', navigating)
-  window.webContents.on('render-process-gone', crashed)
+  contents.on('did-start-navigation', navigating)
+  contents.on('render-process-gone', crashed)
   window.once('closed', () => {
-    window.webContents.off('did-start-navigation', navigating)
-    window.webContents.off('render-process-gone', crashed)
+    contents.off('did-start-navigation', navigating)
+    contents.off('render-process-gone', crashed)
   })
 }
 
