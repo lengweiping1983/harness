@@ -62,7 +62,14 @@ export async function prepareRelease({root = fileURLToPath(new URL('../', import
   const metadata = JSON.parse(new TextDecoder('utf-8', {fatal:true}).decode(await readFile(path.join(root, 'desktop', 'package.json'))))
   await writeFile(path.join(staging, 'runtime.json'), JSON.stringify({version:metadata.version, platform, arch, python:'3.14.10', bundledSkills, voice}, null, 2) + '\n')
   await run(python, ['-c', 'import harness.cli, mcp, uvicorn, PIL; from playwright.async_api import BrowserType; import inspect; assert "no_defaults" in inspect.signature(BrowserType.connect_over_cdp).parameters'], {cwd:staging, env:{...process.env, PYTHONPATH:path.join(staging, 'site'), PYTHONNOUSERSITE:'1'}})
-  await run(python, ['-c', 'from pathlib import Path; from tempfile import TemporaryDirectory; from harness.tools.builtin.hex_tools import HexServiceManager; root = Path.cwd();\nwith TemporaryDirectory(prefix="harness-voice-check-") as temporary:\n service = HexServiceManager(binary=root / "site" / ' + JSON.stringify(voice.path) + ', discovery=Path(temporary) / "local-api.json")\n try:\n  service.ensure_running()\n finally:\n  service.stop()'], {cwd:staging, env:{...process.env, PYTHONPATH:path.join(staging, 'site'), PYTHONNOUSERSITE:'1'}})
+  // 官方 3.3.0 Windows 引擎要求 AVX2（Intel Haswell / AMD Excavator 及以后）。
+  // 构建机 CPU 不支持时进程启动即退出，握手必然失败；此时可设
+  // HARNESS_SKIP_VOICE_SMOKE=1 跳过引擎动态冒烟——引擎身份/版本/sha256 的静态
+  // 校验仍由 verify-runtime.mjs 在 beforePack 全量执行，只是不再要求构建机
+  // 能实际运行该引擎（产物面向支持 AVX2 的目标机器）。
+  if (!process.env.HARNESS_SKIP_VOICE_SMOKE) {
+    await run(python, ['-c', 'from pathlib import Path; from tempfile import TemporaryDirectory; from harness.tools.builtin.hex_tools import HexServiceManager; root = Path.cwd();\nwith TemporaryDirectory(prefix="harness-voice-check-") as temporary:\n service = HexServiceManager(binary=root / "site" / ' + JSON.stringify(voice.path) + ', discovery=Path(temporary) / "local-api.json")\n try:\n  service.ensure_running()\n finally:\n  service.stop()'], {cwd:staging, env:{...process.env, PYTHONPATH:path.join(staging, 'site'), PYTHONNOUSERSITE:'1'}})
+  }
   log(copy('desktop.release.staged', {path:staging}))
 }
 
