@@ -27,7 +27,7 @@ class GuidanceLocalTests(unittest.TestCase):
         self.save()
         self.job = {'id': 'mission/work:first:1', 'role': 'work', 'state': 'accepted', 'run_id': 'original',
                     'run': {'id': 'original', 'status': 'running', 'turn': 1}}
-        self.mission = {'id': 'mission', 'source_id': 'local', 'revision': 1, 'thread_ids': ['project'], 'jobs': [self.job]}
+        self.mission = {'id': 'mission', 'state': 'running', 'source_id': 'local', 'revision': 1, 'thread_ids': ['project'], 'jobs': [self.job]}
         self.status = {'instance_id': 'local-instance', 'runtime_state': 'running',
                        'missions': {'recent': [self.mission], 'has_more': False}}
         self.status_path = self.root / 'state' / 'status.json'
@@ -100,6 +100,22 @@ class GuidanceLocalTests(unittest.TestCase):
         with self.assertRaises(HarnessError):
             steer_local(self.path, 'hint')
         self.assertEqual(list(outside.iterdir()), [])
+
+    def test_corrupt_target_snapshot_is_rejected_without_creating_or_rewriting_state(self):
+        variants = [None, {'has_more': False, 'recent': None},
+                    {'has_more': 'false', 'recent': [self.mission]},
+                    {'has_more': False, 'recent': [{**self.mission, 'revision': True}]},
+                    {'has_more': False, 'recent': [{**self.mission, 'jobs': [{**self.job, 'run_id': 'other'}]}]}]
+        for value in variants:
+            with self.subTest(value=value):
+                self.status['missions'] = value
+                self.write_status()
+                before = self.status_path.read_bytes()
+                with self.assertRaises(HarnessError) as caught:
+                    steer_local(self.path, 'hint')
+                self.assertEqual(caught.exception.code, 'superagent/corrupt')
+                self.assertEqual(self.status_path.read_bytes(), before)
+                self.assertFalse((self.root / 'state' / 'guidance').exists())
 
     def test_cli_and_receipt_reading_keep_model_host_unconstructed(self):
         for language in ('en', 'zh-CN', 'en'):

@@ -2169,7 +2169,7 @@ class Harness:
         if owner is not None and owner.is_running() and owner is not asyncio.get_running_loop():
             return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.steer(session_id, text, expected_turn=expected_turn, request_id=request_id, attachments=attachments, original_text=original_text, before_accept=before_accept), owner))
         if before_accept is not None and (not callable(before_accept) or inspect.iscoroutinefunction(before_accept)):
-            raise HarnessError(tr('web.input.invalid_text'), code='run/invalid')
+            raise HarnessError(tr('runtime.steering.invalid_guard'), code='run/invalid')
         if original_text is not None and not isinstance(original_text, str):
             raise HarnessError(tr('web.input.invalid_text'), code='run/invalid')
         agent = self._agents.get(session_id)
@@ -2209,7 +2209,7 @@ class Harness:
                     if checked is not None:
                         if inspect.iscoroutine(checked) or inspect.isgenerator(checked):
                             checked.close()
-                        raise HarnessError(tr('web.input.invalid_text'), code='run/invalid')
+                        raise HarnessError(tr('runtime.steering.invalid_guard'), code='run/invalid')
                 await session.append('note', {'kind': 'steering/accepted', 'request_id': request_id,
                     'turn': expected_turn, 'text': text, **({'original_text': original_text} if original_text is not None else {}), **({'attachments': attachments} if attachments else {}), 'run_id': getattr(agent, 'run_id', None)}, ignorable=True)
             receipt = self.steering_receipt(session_id, request_id, summary=False)

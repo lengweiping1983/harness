@@ -1,6 +1,7 @@
 """工作区发现绑定调用目录，模型正文保留可用路径和包名。"""
 import json
 import os
+import threading
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -11,10 +12,46 @@ from harness.core.errors import ToolExecutionError
 from harness.core.language import current_language
 from harness.i18n import tr
 from harness.tools.builtin import workspace_tools as module
+from harness.tools.processes import ProcessCleanupError
 from tests.filesystem_links import directory_link
 
 
 class WorkspaceDependencyDiscoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_parallel_versions_keep_each_call_language_in_real_tool_errors(self):
+        tool = module.build_workspace_dependency_tools()[0]
+        with tempfile.TemporaryDirectory() as directory, patch.object(module, '_cached', side_effect=lambda key, produce: produce()), \
+                patch.object(module.shutil, 'which', side_effect=lambda name: '/fixture/' + name if name in ('node', 'npm') else None):
+            for language in ('en', 'zh-CN', 'en'):
+                observed, barrier = [], threading.Barrier(2)
+                def fail(path):
+                    barrier.wait(5)
+                    observed.append(current_language.get())
+                    if path.endswith('/node'):
+                        raise ProcessCleanupError(tr('python.processes.d0d6da778004'))
+                    return 'fixture version'
+                with current_language.set(language), patch.object(module, '_version_of', side_effect=fail):
+                    with self.assertRaises(ToolExecutionError) as caught:
+                        await tool.execute({'include_packages': False}, SimpleNamespace(cwd=directory))
+                    self.assertEqual(caught.exception.message, tr('python.workspace_tools.484acd7994ec',
+                        p0=str(ProcessCleanupError(tr('python.processes.d0d6da778004')))))
+                    self.assertIsInstance(caught.exception.__cause__, ProcessCleanupError)
+                    self.assertEqual(caught.exception.__cause__.message, tr('python.processes.d0d6da778004'))
+                self.assertEqual(observed, [language, language])
+
+    async def test_parallel_probe_failures_preserve_every_original_cleanup_cause(self):
+        errors = {name: ProcessCleanupError('Original ' + name + ' cleanup') for name in ('node', 'npm')}
+        def fail(path):
+            raise errors[Path(path).name]
+        tool = module.build_workspace_dependency_tools()[0]
+        with tempfile.TemporaryDirectory() as directory, patch.object(module, '_cached', side_effect=lambda key, produce: produce()), \
+                patch.object(module.shutil, 'which', side_effect=lambda name: '/fixture/' + name if name in errors else None), \
+                patch.object(module, '_version_of', side_effect=fail):
+            with self.assertRaises(ToolExecutionError) as caught:
+                await tool.execute({'include_packages': False}, SimpleNamespace(cwd=directory))
+        group = caught.exception.__cause__
+        self.assertIsInstance(group, ExceptionGroup)
+        self.assertEqual(group.exceptions, (errors['node'], errors['npm']))
+
     async def test_same_tool_uses_each_workspace_and_exposes_packages_to_model(self):
         tool = module.build_workspace_dependency_tools()[0]
         process_cwd = os.getcwd()

@@ -31,10 +31,11 @@ import sys
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from typing import Any
 
 from ...core.errors import ToolExecutionError
-from ...core.cleanup import join_cleanup
+from ...core.cleanup import join_cleanup, raise_cleanup_errors
 from ...llm.types import TextBlock
 from ..registry import ToolDefinition, ToolRunContext, ToolResult
 from ..runtime_probe import probe_version
@@ -94,7 +95,16 @@ def _probe_node_runtimes() -> list[dict[str, Any]]:
     if not candidates:
         return []
     with ThreadPoolExecutor(max_workers=min(4, len(candidates)), thread_name_prefix='harness-runtime-version') as pool:
-        versions = pool.map(_version_of, (path for _, path in candidates))
+        # 每个并行探测拥有独立上下文；进程清理错误须保留本次调用语言。
+        futures = [pool.submit(copy_context().run, _version_of, path) for _, path in candidates]
+        versions, errors = [], []
+        for future in futures:
+            try:
+                versions.append(future.result())
+            except Exception as exc:
+                errors.append(exc)
+        # 所有已开始的探测均须收尾，不能只保留第一个线程的清理失败。
+        raise_cleanup_errors(errors)
         return [{'command': name, 'path': path, 'version': version}
                 for (name, path), version in zip(candidates, versions)]
 
