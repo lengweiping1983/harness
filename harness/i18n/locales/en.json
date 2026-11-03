@@ -1,4 +1,5 @@
 {
+  "runtime.steering.invalid_guard": "The before_accept check must be a synchronous callable returning None.",
   "superagent.guidance-unavailable": "No unique active work or integration node matches this guidance. Read the current status and select its exact job; a late request cannot target a later run.",
   "superagent.guidance-unauthorized": "The guidance source, actor, thread or policy revision is no longer authorized for this objective.",
   "superagent.cli.steer": "Queue an instruction for an active work or integration node without changing the objective graph or acceptance criteria.",

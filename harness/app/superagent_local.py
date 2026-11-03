@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 
 from ..core.cleanup import raise_cleanup_errors
+from ..core.errors import HarnessError
 from .superagent_inbox import _error, _json, _text
 from .superagent_service import read_config
 
@@ -143,6 +144,50 @@ def read_status(config_path):
         raise _error('corrupt') from exc
 
 
+def _guidance_target(status, job_id, remote):
+    """仅从完整合法的当前投影选目标；截断不能作为全局唯一的依据。"""
+    from .superagent_inbox import _names
+    from .superagent_mission_store import JOB_STATES, MISSION_STATES, TERMINAL
+    targets = []
+    try:
+        missions = status['missions']
+        if not isinstance(missions, dict) or type(missions['has_more']) is not bool or not isinstance(missions['recent'], list):
+            raise ValueError
+        for mission in missions['recent']:
+            if (not isinstance(mission, dict) or mission['state'] not in MISSION_STATES
+                    or not isinstance(mission['jobs'], list) or type(mission['revision']) is not int or mission['revision'] < 1):
+                raise ValueError
+            for key in ('id', 'source_id'):
+                _text(mission[key], key)
+            _names(mission['thread_ids'], 'thread_ids', nonempty=True)
+            for job in mission['jobs']:
+                if not isinstance(job, dict) or job['role'] not in ('plan', 'work', 'integrate', 'review') or job['state'] not in JOB_STATES:
+                    raise ValueError
+                _text(job['id'], 'job_id')
+                if 'scheduling_halted' in job and type(job['scheduling_halted']) is not bool:
+                    raise ValueError
+                progress = job.get('run')
+                if progress is not None:
+                    if not isinstance(progress, dict) or not isinstance(progress['status'], str):
+                        raise ValueError
+                    _text(progress['id'], 'run_id')
+                    if progress['turn'] is not None and (type(progress['turn']) is not int or not 1 <= progress['turn'] <= 2**53 - 1):
+                        raise ValueError
+                if (job['role'] in ('work', 'integrate') and job['state'] == 'accepted' and progress
+                        and progress['status'] == 'running' and progress['turn'] is not None
+                        and mission['state'] not in TERMINAL
+                        and not job.get('scheduling_halted') and mission['source_id'] not in remote
+                        and (job_id is None or job['id'] == job_id)):
+                    if job['run_id'] != progress['id']:
+                        raise ValueError
+                    targets.append((mission, job))
+    except (ValueError, TypeError, KeyError, HarnessError) as exc:
+        raise _error('corrupt') from exc
+    if len(targets) != 1 or job_id is None and missions['has_more']:
+        raise _error('guidance-unavailable')
+    return targets[0]
+
+
 def steer_local(config_path, text, *, job_id=None, source_id=None, actor_id=None, thread_id=None, request_id=None):
     """绑定最后投影中的原运行；只排队，不猜测进程存活或把迟到输入投给新轮次。"""
     from .superagent_guidance import command_id, validate_command
@@ -166,23 +211,10 @@ def steer_local(config_path, text, *, job_id=None, source_id=None, actor_id=None
             raise _error('event-conflict')
         return queued(original, True)
     status = read_status(config_path)
-    if job_id is None and status.get('missions', {}).get('has_more'):
-        raise _error('guidance-unavailable')
     if 'autonomy' not in spec or status['runtime_state'] != 'running':
         raise _error('guidance-unavailable')
     remote = {spec[name]['source_id'] for name in ('github', 'feishu') if name in spec}
-    targets = []
-    for mission in status.get('missions', {}).get('recent', []):
-        for job in mission['jobs']:
-            progress = job.get('run')
-            if (job['role'] in ('work', 'integrate') and job['state'] == 'accepted' and progress
-                    and progress['status'] == 'running' and progress.get('turn') is not None
-                    and not job.get('scheduling_halted') and mission['source_id'] not in remote
-                    and (job_id is None or job['id'] == job_id)):
-                targets.append((mission, job))
-    if len(targets) != 1:
-        raise _error('guidance-unavailable')
-    mission, job = targets[0]
+    mission, job = _guidance_target(status, job_id, remote)
     source_id = mission['source_id'] if source_id is None else source_id
     if source_id != mission['source_id'] or source_id not in spec['sources']:
         raise _error('guidance-unauthorized')

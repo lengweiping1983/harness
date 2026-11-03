@@ -235,12 +235,12 @@ class SuperagentGuidance:
         original = self._original(row) if row['state'] in ('submitting', 'accepted', 'unknown') else None
         if row['state'] == 'accepted' and original is None:
             raise _error('corrupt')
-        return {'version': 1, 'instance_id': self.instance_id, 'id': row['id'],
+        return validate_receipt({'version': 1, 'instance_id': self.instance_id, 'id': row['id'],
                 **{key: row['spec'][key] for key in ('request_id', 'mission_id', 'job_id', 'run_id', 'turn')},
                 'state': row['state'], 'reason': row['reason'],
                 'application': original['status'] if original is not None else None,
                 'accepted_seq': original['accepted_seq'] if original is not None else None,
-                'applied_seq': original['applied_seq'] if original is not None else None}
+                'applied_seq': original['applied_seq'] if original is not None else None})
 
     async def tick(self):
         coordinator = self.coordinator

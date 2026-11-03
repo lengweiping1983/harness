@@ -463,6 +463,7 @@ class SuperagentMissionTests(unittest.IsolatedAsyncioTestCase):
         service = await self.open()
         for index, language in enumerate(('en', 'zh-CN', 'en')):
             service.router_host.config.language = language
+            service.worker_host.config.language = language
             event = self.receive(str(index))
             service.router._collect_missions()
             mission = service.router.store.mission(service.router.store.mission_id(event['id']))
@@ -480,6 +481,20 @@ class SuperagentMissionTests(unittest.IsolatedAsyncioTestCase):
                 content = ''.join(part.get('text', '') for part in content)
             self.assertEqual(content, expected)
             self.assertFalse(request.get('tools'))
+            previous = len(self.worker.requests)
+            self.assertEqual(await service.serve(asyncio.Event(), once=True), 0)
+            requests = self.worker.requests[previous:]
+            self.assertTrue(any(frame_of(request)['role'] == 'review' for request in requests))
+            for request in requests:
+                frame = frame_of(request)
+                key = 'superagent.mission.review' if frame['role'] == 'review' else 'superagent.mission.work'
+                with current_language.set(language):
+                    expected = tr(key, frame=json.dumps(frame, ensure_ascii=False, sort_keys=True))
+                user = next(message for message in reversed(request['messages']) if message['role'] == 'user')
+                content = user['content']
+                if isinstance(content, list):
+                    content = ''.join(part.get('text', '') for part in content)
+                self.assertEqual(content, expected)
 
     async def test_service_builds_one_fresh_snapshot_per_tick(self):
         service = await self.open()

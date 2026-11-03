@@ -16,6 +16,8 @@ Superagent 已有默认事件路由和显式自主目标两种协调方式，工
 
 `app/superagent_mission_store.py` 保存自主目标、有限依赖图、冻结基线、操作意图和完成流，并在单次读事务中提供目标与任务快照；`app/superagent_missions.py` 在显式 `autonomy` 配置下替代默认 Router 的决策循环。它复用 `RunController`、受管理 Worker 和既有工作树交付原语，组合并行工作、真实依赖导入、集成、独立复核和有限修正；目标节点不订阅外部 Thread。`app/superagent_mission_status.py` 从原运行和轮次事件只读派生进度与等待原因，不参与执行或结算。`app/superagent_local.py` 提供不构造宿主的可信本机提交与状态读取。状态含义、证据保证和恢复边界只在模式文档维护。
 
+`app/superagent_guidance.py` 以独立意图账本把节点执行指令接到原生 `Harness.steer`，不替代原轮次的受理与应用事实；`app/superagent_guidance_files.py` 提供有界本机输入和回执投影，CLI 复用原子发布入口。后续集成与复核只消费有原日志证据的有界上下文，依赖图、验收和工具权限仍由原协调层约束。
+
 `app/superagent_github.py` 提供可选的签名来源核验、持久接收队列及评论发件箱；`app/superagent_github_http.py` 固定 GitHub 请求头、专用路径和成功状态。`app/superagent_feishu.py` 负责飞书加密事件、租户令牌和原消息回复，两个信道共用 `app/superagent_http.py` 的本机监听器、请求大小限制、禁止重定向及所属网络线程收尾。发送意图只来自核验身份的原事件及 Router 候选，目标由固定来源和原对象推导；未知写入只查回，不自动重发。具体配置、授权和凭据边界统一见 [Superagent 信道](superagent.md#github-webhook-与评论信道)。
 
 ## 源码与修改入口

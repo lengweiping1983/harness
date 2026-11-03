@@ -8,6 +8,8 @@ from unittest.mock import patch
 from harness.app.superagent_guidance import command_id, validate_command, validate_receipt
 from harness.app.superagent_local import read_guidance_receipt, steer_local
 from harness.core.errors import HarnessError
+from harness.core.language import current_language
+from harness.i18n import tr
 from tests.test_superagent_missions import (
     MissionWorkerTransport, frame_of, stream_delta,
 )
@@ -171,8 +173,13 @@ class SuperagentGuidanceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(service.worker_host, 'steer', side_effect=AssertionError('未知意图不得重新执行')) as attempted:
             await self.guidance.tick()
             before = self.guidance.path.read_bytes()
+            log_path = service.worker_host.sessions.events_path(self.job['session_id'])
+            events_before = log_path.read_bytes()
             await self.guidance.tick()
+            self.guidance.receipt(identity)
+            self.guidance.status()
             self.assertEqual(self.guidance.path.read_bytes(), before)
+            self.assertEqual(log_path.read_bytes(), events_before)
             receipt = self.guidance.receipt(identity)
             self.assertEqual((receipt['state'], receipt['application']), ('unknown', None))
             self.assertEqual(attempted.call_count, 0)
@@ -224,11 +231,14 @@ class SuperagentGuidanceTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError('异步授权不能作为同步检查执行')
         def hidden_asynchronous_guard():
             return asynchronous_guard()
-        for guard in (asynchronous_guard, hidden_asynchronous_guard):
-            with self.subTest(guard=guard.__name__), self.assertRaises(HarnessError) as caught:
-                await host.steer(self.job['session_id'], 'guidance: extra context', expected_turn=self.job['run']['turn'],
-                                 request_id='native', before_accept=guard)
-            self.assertEqual(caught.exception.code, 'run/invalid')
+        for language in ('en', 'zh-CN', 'en'):
+            with current_language.set(language):
+                for guard in (asynchronous_guard, hidden_asynchronous_guard):
+                    with self.subTest(language=language, guard=guard.__name__), self.assertRaises(HarnessError) as caught:
+                        await host.steer(self.job['session_id'], 'guidance: extra context', expected_turn=self.job['run']['turn'],
+                                         request_id='native', before_accept=guard)
+                    self.assertEqual(caught.exception.code, 'run/invalid')
+                    self.assertEqual(caught.exception.message, tr('runtime.steering.invalid_guard'))
         self.assertEqual(self.accepted_events(), [])
         receipt = await host.steer(self.job['session_id'], 'guidance: extra context', expected_turn=self.job['run']['turn'], request_id='native')
         def rejected_guard():
@@ -237,6 +247,37 @@ class SuperagentGuidanceTests(unittest.IsolatedAsyncioTestCase):
                                      request_id='native', before_accept=rejected_guard)
         self.assertEqual(duplicate['receipt']['accepted_seq'], receipt['receipt']['accepted_seq'])
         self.assertEqual(len(self.accepted_events()), 1)
+
+    async def test_repeated_waiter_cancellation_keeps_one_owned_acceptance(self):
+        service = await self.begin()
+        identity, spec = self.issue()
+        self.guidance.enqueue(spec)
+        agent = service.worker_host._agents[self.job['session_id']]
+        claimed = asyncio.Event()
+        change = self.guidance._change
+        def track(row, state, reason=None):
+            result = change(row, state, reason)
+            if state == 'submitting':
+                claimed.set()
+            return result
+        await agent.steering_lock.acquire()
+        try:
+            with patch.object(self.guidance, '_change', side_effect=track):
+                waiting = asyncio.create_task(self.guidance.tick())
+                await asyncio.wait_for(claimed.wait(), 5)
+                waiting.cancel()
+                await asyncio.sleep(0)
+                waiting.cancel()
+                agent.steering_lock.release()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(waiting, 5)
+        finally:
+            if agent.steering_lock.locked():
+                agent.steering_lock.release()
+        self.assertEqual(self.guidance.receipt(identity)['state'], 'accepted')
+        self.assertEqual(len(self.accepted_events()), 1)
+        with patch.object(service.worker_host, 'steer', side_effect=AssertionError('取消等待不能导致重放')):
+            await self.guidance.tick()
 
     async def test_original_display_text_cannot_replace_model_instruction_identity(self):
         service = await self.begin()
@@ -283,6 +324,44 @@ class SuperagentGuidanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.guidance.receipt(rejected['id'])['state'], 'rejected')
         self.assertEqual(self.guidance.receipt(identity)['state'], 'accepted')
         self.assertEqual(len(self.accepted_events()), 1)
+
+    async def test_new_requests_with_wrong_target_or_authority_never_reach_native_steering(self):
+        service = await self.begin()
+        _, spec = self.issue()
+        requests = []
+        for index, (key, value) in enumerate((('mission_id', 'other'), ('run_id', 'other'), ('revision', 2),
+                                             ('source_id', 'other'), ('actor_id', 'other'), ('thread_id', 'other'))):
+            requests.append(self.guidance.enqueue({**spec, key: value, 'request_id': 'invalid-' + str(index)})['id'])
+        planner = next(job for job in service.router.store.jobs(spec['mission_id']) if job['role'] == 'plan')
+        requests.append(self.guidance.enqueue({**spec, 'request_id': 'planner-target',
+                                               'job_id': planner['id'], 'run_id': planner['data']['run_id']})['id'])
+        with patch.object(service.worker_host, 'steer', side_effect=AssertionError('错误归属不得发起原生引导')) as attempted:
+            await self.guidance.tick()
+            self.assertEqual(attempted.call_count, 0)
+        self.assertTrue(all(self.guidance.receipt(identity)['state'] == 'rejected' for identity in requests))
+        self.assertEqual(self.accepted_events(), [])
+
+    async def test_late_original_turn_does_not_redirect_to_new_run_in_same_conversation(self):
+        service = await self.begin()
+        _, spec = self.issue()
+        self.worker.work_gate.set()
+        await self.settle()
+        original = service.router.store.job(self.job['id'])
+        self.worker.work_gate = asyncio.Event()
+        self.worker.work_entered.clear()
+        newer = service.worker_host.runtime.submit(self.job['session_id'], original['data']['payload'],
+                                                   key='next-run', request_id='next-run')
+        await asyncio.wait_for(self.worker.work_entered.wait(), 5)
+        self.assertNotEqual(newer.id, spec['run_id'])
+        self.assertNotEqual(service.worker_host.get_session(self.job['session_id']).open_turn, spec['turn'])
+        late = self.guidance.enqueue({**spec, 'request_id': 'late'})
+        with patch.object(service.worker_host, 'steer', side_effect=AssertionError('迟到指令不得送到新运行')) as attempted:
+            await self.guidance.tick()
+            self.assertEqual(attempted.call_count, 0)
+        self.assertEqual(self.guidance.receipt(late['id'])['state'], 'rejected')
+        self.assertEqual(self.accepted_events(), [])
+        self.worker.work_gate.set()
+        await self.settle()
 
     async def test_recent_applied_guidance_retains_newest_correction_with_global_budget(self):
         service = await self.begin()

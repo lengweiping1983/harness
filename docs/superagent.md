@@ -121,7 +121,7 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 
 `completed` 表示**模型逐项复核通过，宿主核对了引用工具事实和候选交付树**。它不证明模型选取的完成标准覆盖了全部意图，也不证明任意 Shell 正文实际测试了所声明语义；例如命令内部仍可自行 `cd`。它不是可信宿主 `VerificationCapture`、操作系统隔离、人工业务验收、已发布或已合并主分支的替代。真实在线模型质量、长期负载及跨平台实机仍须分别取得证据。
 
-自主模式的工作节点不订阅原 Thread，防止一句跟进广播到全部依赖节点。每个明确事件建立一个独立目标，普通非明确跟进不会续接目标；默认 Router 的单任务 Thread 续接继续保留，但两种协调方式不混用。目标中途引导、跨来源目标关联、用户问答、动态重规划和未知状态的人工核实界面尚未提供。失败目标保留状态与全部资源供检查，当前不能通过自动重试命令强行恢复未知副作用。
+自主模式的工作节点不订阅原 Thread，防止一句跟进广播到全部依赖节点。每个明确事件建立一个独立目标，普通非明确跟进不会续接目标；默认 Router 的单任务 Thread 续接继续保留，但两种协调方式不混用。运行中的工作和集成节点可通过下述本机入口接收执行指令。目标依赖图与验收标准的中途变更、跨来源目标关联、用户问答、动态重规划和未知状态的人工核实界面尚未提供。失败目标保留状态与全部资源供检查，当前不能通过自动重试命令强行恢复未知副作用。
 
 回归见 `tests/test_superagent_missions.py`：确定性模型通过真实文件、Shell、Git 和运行控制器核对依赖产物、独立复核、有限修正、伪造证据、候选变化、来源撤销、冻结基线、慢任务、丢回执、重启与双语实际消费。设计审查依据与待验证风险见 [Superagent 协调审查](superagent-review.md)。
 
@@ -129,7 +129,7 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 
 `status.json` 的 `missions.states` 统计全部目标；`recent` 最多展示 16 项，依次优先活动目标、`unknown/blocked/rejected`、`suppressed`、已完成目标，同类按接纳序号倒序。`total/shown/has_more` 明示总量与截断，不能把 `recent` 当成全部任务清单。每个目标含原来源、工作树、交付树、修正轮数、有界完成标准及复核摘要；`budget` 提供当前尝试、上限及 `planning/delivery` 阶段，尚无合法计划的终止目标仍归规划阶段。`work.total/delivered` 仅表示计划工作节点数与已冻结交付数，没有计划时总数为 `null`，这些数值不是业务完成百分比。
 
-任务的 `run` 按原稳定提交键核对运行身份，从该 `run_id` 的唯一轮次事件派生最后活动及工具计数。同一集成对话的下一轮不会覆盖上一轮进度。创建、开始、结束时间保留原运行的 Unix 秒值，`last_activity.time` 保留原事件的 Unix 毫秒值；无本轮事件时为 `null`。`tools.started/completed/errors` 分别统计实际开始、具有唯一且身份匹配结果、已确认错误；`unconfirmed` 是已开始但缺少确切配对结果的总数，包含尚在执行与已中断的调用。`active` 只列当前仍执行的调用名称，最多 16 项，每项最多 128 字符，`active_truncated` 标记截断。轮次结束不能把缺失结果伪装为完成，停止也不证明未知副作用已撤销。运行正文、工具参数、输出和错误原文不进入该运行摘要。
+任务的 `run` 按原稳定提交键核对运行身份，从该 `run_id` 的唯一轮次事件派生最后活动及工具计数。同一集成对话的下一轮不会覆盖上一轮进度。`run.turn` 是本运行的确切轮次，尚未开始时为 `null`；目标同时提供原 `revision/thread_ids`，用于绑定本机节点指令。创建、开始、结束时间保留原运行的 Unix 秒值，`last_activity.time` 保留原事件的 Unix 毫秒值；无本轮事件时为 `null`。`tools.started/completed/errors` 分别统计实际开始、具有唯一且身份匹配结果、已确认错误；`unconfirmed` 是已开始但缺少确切配对结果的总数，包含尚在执行与已中断的调用。`active` 只列当前仍执行的调用名称，最多 16 项，每项最多 128 字符，`active_truncated` 标记截断。轮次结束不能把缺失结果伪装为完成，停止也不证明未知副作用已撤销。运行正文、工具参数、输出和错误原文不进入该运行摘要。
 
 `waiting_for` 来自当前事实，不依据沉默时长猜测卡死：
 
@@ -147,6 +147,40 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 已接受的运行在目标停止调度后仍展示其真实执行／收尾状态；已 `done/blocked` 的节点不继承同一会话后续修正轮次的后台等待。状态读取不创建资源、不探测 Git、不推进结算、不发模型请求，也不重放未知操作。目标账本的游标、统计、目标及任务在一次 SQLite 读事务内读取，逐项保留原有哈希与身份验证；原收件箱、运行和后台作业属于独立事实源，不宣称跨库或跨运行的原子快照，也不跨调用缓存授权。
 
 `tests/test_superagent_mission_status.py` 覆盖轮次隔离、工具配对、隐私、截断及等待矩阵；`tests/test_superagent_mission_snapshots.py` 覆盖只读快照、损坏拒绝和并发更新一致性；实际协调器的零写入、未知不推进及原提交身份回归在 `tests/test_superagent_missions.py`。`--superagent-status` 读取最后保存的投影，不证明进程仍存活；完整任务分页和普通用户工作台尚未提供。
+
+### 运行中的节点执行指令
+
+运行服务保持开启时，可向当前 `work` 或 `integrate` 节点补充执行指令，无需停止任务或重新提交整个目标：
+
+```bash
+python -m harness.cli --superagent /path/to/superagent.json --superagent-steer "保留现有接口，先核对已有回归再继续实现" --superagent-job 'mission_…/work:first:1' --superagent-request-id guide-1
+python -m harness.cli --superagent /path/to/superagent.json --superagent-receipt guide-1
+```
+
+只有状态清单未截断、且恰有一个合法活动节点时，`--superagent-job` 才可省略；多节点或 `missions.has_more=true` 时必须指定当前可见的确切任务。只有本机非远端绑定的来源可使用此入口；来源从原目标取得，操作者和原 Thread 范围只有一个合法选项时自动选择，否则分别传 `--superagent-actor`、`--superagent-thread`。这些选项不扩大配置白名单，`ignore` 来源不能提交。规划、独立复核、排队或结束的运行不能接收节点指令；该入口不修改目标依赖图、冻结验收标准或模板权限。
+
+命令只读取最后的状态投影，将不可变输入原子公开到 `guidance/incoming/`，不构造模型宿主、不读取模型凭据，也不能与 `--superagent-once` 合用。返回 `queued=true` 只表示本机输入文件完整公开，不证明服务仍存活、模型已经收到或任务已完成。输入绑定实例、来源修订、操作者、Thread、目标、任务、原 `run_id` 与 `turn`。同一请求身份的相同内容返回原输入，即使运行已经结束也不会转向新节点；任何显式身份或正文变化均报冲突并保留原件。省略请求身份会建立新的请求，跨调用核实时应保留该身份。
+
+服务在独立的 `missions.guidance.sqlite3` 保存操作意图。每次新提交在认领前和等待原生引导锁后复核当前任务、原运行、原轮次及来源授权；锁内检查到接受事件写入之间不让出事件循环。接受后来源撤销不抹去原事实，也不撤销已经接受的输入。受理与应用仍以原会话的唯一轮次、`steering/accepted` 及 `source=steer` 用户事件为事实来源，原始模型正文须与输入相同，不能用展示原文或附件替代。
+
+`--superagent-receipt` 只读 `guidance/receipts/` 中对应身份的最后投影；`status.json` 的 `guidance` 提供计数、最近回执和截断信息，`guidance_files.input_errors` 报告输入文件错误。回执不包含指令正文或工具输出：
+
+| 字段 | 含义 |
+|---|---|
+| `state=pending/submitting` | 意图等待处理，或已记录一次提交意图 |
+| `state=accepted` | 原会话已经持久接受输入 |
+| `state=unknown` | 缺少确切原回执；后续只读回查，不重新提交 |
+| `state=rejected` | 新提交在明确准入边界被拒绝；`reason` 保留机器原因 |
+| `application=pending/applied/unapplied` | 原生输入等待应用、已经进入原轮模型上下文、或该轮结束而未应用；没有原接受事实时为 `null` |
+| `accepted_seq/applied_seq` | 原会话中的确切事件序号，缺少对应事实时为 `null` |
+
+`applied` 仅证明指令已进入原轮次的用户消息，不证明模型遵循、工具执行或验收完成。返回或确认丢失时先查原稳定请求；不能确认则保持未知，原异常仍向调用方传播。重启不会把未应用的旧指令投给新运行。服务在应用变化、一次性消费结束和关闭原宿主后刷新回执；关闭前的 `pending` 投影不能替代关闭后的最终核对。
+
+后续集成和独立复核的 `applied_guidance` 只纳入同一目标、原日志确认已应用的上下文；独立工作节点不会收到其他节点的引导。按本实例意图接纳序号优先保留最近内容，再按顺序呈现，最多 16 条、每条 2048 字符、全局 8192 字符，包含 `text_chars/text_truncated` 及 `total/shown/has_more`。它不修改已有运行的 payload、计划哈希或验收标准，也不是通过证据。全目标需求变更需要新的明确目标，动态重规划仍未实现。
+
+引导账本和输入目录各最多保留 1024 条记录，不隐式删除历史或循环复用身份。每轮有界轮转，未知记录不阻塞新输入。已有文件损坏时保留原件并明确报错，不迁移或补造接受事实。SDK 宿主可显式构造 `SuperagentGuidance(coordinator, sources=...)` 并赋给 `coordinator.guidance`，通过 `enqueue(command)` 保存完整协议输入；协调器的 `tick()` 会推进引导，也可显式调用引导器的 `tick()`。构造器不创建后台任务，宿主关闭时须停止准入并等待 `aclose()`。
+
+`tests/test_superagent_guidance.py` 使用真实 Harness、工作树和受控模型验证受理／应用、锁等待撤销、丢失确认、未知零重放、重开、关闭、错误归属及下游上下文；`tests/test_superagent_guidance_local.py` 核对并发原子公开、过期投影、明确目标选择、只读回执、损坏保留和无宿主 CLI。它们不证明在线模型质量或远端信道的交互能力；当前引导未接入 GitHub／飞书或工作台。
 
 ## GitHub Webhook 与评论信道
 
