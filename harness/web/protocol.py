@@ -21,6 +21,13 @@ PERSONALITY_CODE = {'anyOf': [{'type': 'string', 'enum': list(STYLE_CODES)}, {'t
 SCHEMAS: dict[str, dict[str, Any]] = {
     'VoiceTranscript': {'type': 'object', 'required': ['transcript'], 'additionalProperties': False,
                         'properties': {'transcript': {'type': 'string'}}},
+    'VoiceDictationCapabilities': {'type': 'object', 'additionalProperties': False,
+        'required': ['available', 'platform', 'download_url', 'reason'], 'properties': {
+            'available': {'type': 'boolean'}, 'platform': {'type': 'string', 'enum': ['macos', 'windows', 'unsupported']},
+            'download_url': {'type': ['string', 'null']},
+            'reason': {'anyOf': [{'type': 'null'}, {'$ref': '#/components/schemas/ResourceCopy'}]}}},
+    'VoiceDictationOpen': {'type': 'object', 'additionalProperties': False, 'required': ['requested'],
+        'properties': {'requested': {'const': True}}},
     'ConversationProject': {'type': 'object', 'additionalProperties': False, 'required': ['workspace_id', 'mode'], 'properties': {
         'workspace_id': {'type': 'string', 'minLength': 1}, 'mode': {'type': 'string', 'enum': ['local', 'worktree']},
         'ref': {'type': 'string', 'minLength': 1}, 'expected_head': {'type': ['string', 'null']},
@@ -1433,6 +1440,9 @@ def openapi(templates: list[str]) -> dict[str, Any]:
         if path == '/api/v1/voice/transcriptions':
             operation['requestBody'] = {'required': True, 'content': {'audio/wav': {'schema': {'type': 'string', 'format': 'binary'}}}}
             operation['responses']['200']['content'] = {'application/json': {'schema': {'$ref': '#/components/schemas/VoiceTranscript'}}}
+        if path in {'/api/v1/voice/dictation', '/api/v1/voice/dictation/open'}:
+            schema = 'VoiceDictationCapabilities' if method == 'GET' else 'VoiceDictationOpen'
+            operation['responses']['200']['content'] = {'application/json': {'schema': {'$ref': '#/components/schemas/' + schema}}}
         if path == '/api/v1/screenshot/capabilities':
             operation['responses']['200']['content'] = {'application/json': {'schema': {'$ref': '#/components/schemas/ScreenshotCapabilities'}}}
         if path == '/api/v1/terminal/types':

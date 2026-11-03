@@ -12,6 +12,12 @@ Harness 复用 `vendor/hex` 的本地语音引擎，提供输入框录音、智�
 
 ## 其他应用与快捷键
 
+在 Harness 中打开“设置 → 语音输入”，点击“打开听写”。入口仅允许本机界面使用；首次在 Hex 中准备多语言模型、授予系统权限并确认全局快捷键，随后切到目标输入框，按住快捷键说话、松开输入文字。后续可从同一入口唤起原生应用，无需记忆命令。缺少引擎时提供对应系统的安装入口，安装完成后点击刷新。设置页按需加载，只检查安装，不自动启动、下载模型或改写已有设置。
+
+“已请求打开”只代表系统接受打开请求，不代表模型、麦克风或辅助功能权限已就绪；这些状态以 Hex 实际界面为准。打开请求的回执无法确认时先只读检查安装，提示检查原生窗口，不自动重试。读取失败、缺少安装与不支持的平台分别提示；页面隐藏或关闭后丢弃旧回包，已受理打开请求继续收尾。同一浏览器中关闭重开设置仍共享在途打开请求。
+
+也可使用独立入口：
+
 ```sh
 make voice PYTHON=.venv/bin/python
 # 同等模块入口，无需重新安装 console script：
@@ -20,9 +26,11 @@ make voice PYTHON=.venv/bin/python
 harness-voice
 ```
 
-入口在 macOS 和 Windows 都启动 `hex app`。Windows 可直接执行 `scripts\voice.cmd`，或运行 `.venv\Scripts\python.exe -m harness.voice`；macOS 继续使用 `make voice` 或模块入口。在原生 Hex 界面中选择适合语音语言的模型、准备模型、授予麦克风与辅助功能等系统要求的权限，并设置全局快捷键。两平台都是按住全局快捷键录音、松开后转写并粘贴到前台输入框，因此也能在 Harness 中使用。Hex 原生默认键为 macOS 的 Option、Windows 的 Ctrl+Space；若需按键本身也一致，在两端原生设置中选用相同组合，例如 Ctrl+Alt+Space（macOS 的 Alt 对应 Option）。已有用户快捷键不被静默覆盖。输入框的 Ctrl+Shift+Space 在两平台均为开始／结束切换，声波显示、转写、草稿追加及错误呈现共用同一实现。
+macOS 可双击源码目录的 `scripts/voice.command`，Windows 可双击 `scripts\voice.cmd`。无参数的模块或命令入口与设置页共用原生启动实现：macOS 安装的完整应用包经 LaunchServices 打开，保留签名身份并唤起已有窗口，同时显式传递 `HEX_*` 环境选择；Windows 经 ShellExecute 传入 `app`，复用 Hex 原生单实例唤起。macOS 源码二进制通过独立会话启动，保留标准输出与错误诊断，由等待线程回收退出码；所属进程仍存活时不重复创建。Linux 命令行仍运行 `hex app`，设置页不提供原生启动按钮。
 
-全局听写是用户显式启动的独立原生进程，退出 Harness 不会关闭它。通过 Hex 的原生界面退出；不会自动设置开机启动或修改快捷键。`harness-voice` 后的参数原样交给 Hex，例如 `harness-voice settings list` 或 `harness-voice dictation toggle`，具体可用命令由 Hex CLI 决定。浏览器快捷键只在当前输入区工作；跨应用使用原生全局快捷键。
+两平台都是按住全局快捷键录音、松开后转写并粘贴到前台输入框，因此也能在 Harness 中使用。Hex 原生默认键为 macOS 的 Option、Windows 的 Ctrl+Space；若需按键本身也一致，在两端原生设置中选用相同组合，例如 Ctrl+Alt+Space（macOS 的 Alt 对应 Option）。已有用户快捷键不被静默覆盖。输入框的 Ctrl+Shift+Space 在两平台均为开始／结束切换，声波显示、转写、草稿追加及错误呈现共用同一实现。
+
+全局听写是用户显式启动的独立原生进程，退出 Harness 不会关闭它。通过 Hex 的原生界面退出；Harness 不自动设置开机启动或修改快捷键。`harness-voice` 后的参数仍原样交给 Hex，例如 `harness-voice settings list` 或 `harness-voice dictation toggle`，具体可用命令由 Hex CLI 决定。浏览器快捷键只在当前输入区工作；跨应用使用原生全局快捷键。
 
 Harness 优先复用已有的、通过认证健康检查的本机 API。没有可用原生 API 时，使用 `hex service --embedded` 启动私有端点，通过 stdout 握手取得身份、以 stdin 租约绑定所属进程。嵌入端点不发布 discovery，也不占用原生应用的本地 API 锁，因此网页转写与原生全局听写无需固定启动顺序。它们同时运行时可能各自加载模型，不承诺只占用一份模型内存。
 
@@ -55,6 +63,8 @@ make hex-clean PYTHON=.venv/bin/python
 
 ## 接口与生命周期
 
+`GET /api/v1/voice/dictation` 只读返回 `available`（是否发现可启动的本机安装）、`platform`、`download_url` 及可空的 `reason` 资源身份，不宣称听写就绪。`POST /api/v1/voice/dictation/open` 显式请求打开原生应用，成功返回 `{"requested":true}`。两者均拒绝非回环来源与共享身份，返回不缓存响应；公开 OpenAPI、浏览器类型和响应校验由协议源生成。它们不代替 Hex 的模型与权限检查。
+
 `POST /api/v1/voice/transcriptions` 接收原始 `audio/wav`，限制为 2 MiB、单声道 PCM16、16 kHz、最多 60 秒，返回 `{"transcript":"原文"}`，不保存录音或自动提交消息。仅允许本机回环请求，拒绝共享身份；沿用服务器的来源校验。前端使用共享 HTTP 传输与生成响应契约。
 
 内置工具 `transcribe_audio` 接收 `audio_path`、可选 `model`、`language`，默认与输入框相同。绝对路径直接读取；相对路径必须具有工具调用工作目录。文件最多 64 MiB，实际读取有界。返回原文、模型、语音语言、路径和耗时；执行效果为 `execute`，首次准备会下载模型。
@@ -69,9 +79,11 @@ Hex 当前本地协议使用 Bearer token，监听回环随机端口：
 
 ## 回归依据与验收边界
 
-本次审查修复：真实准备响应为 SSE 而原实现按 NDJSON 读取；无头启动阻塞事件循环；默认模型仅支持英文；discovery、转写正文存在类型强转；文件／响应读取无界；进程日志句柄和失败收尾未完整管理。另使用嵌入握手避免占用原生应用的 API 锁。对应证据为 Hex 的 `src/local_api.rs`、`packaging/windows/hex.iss`、`src/windows.rs`、Harness 服务管理器与浏览器实际消费链。Windows 安装路径及进程只读查询另有专门回归。
+原生启动链为设置目录与延迟页面 → 共享 HTTP 传输及生成响应校验 → 本机语音路由 → `harness.voice.open_dictation` → 系统应用入口或源码二进制；CLI 无参数复用同一实现，显式参数继续分发到原生命令树。macOS 完整应用包直接执行 `hex app` 会再次争用 listener 锁；当前通过 LaunchServices 打开完整包，回归核对不传入创建新实例的参数，并保留 `HEX_*` 数据目录选择。
 
-`tests/test_hex_tools.py` 覆盖认证探活、私有握手与租约收尾、真实 SSE 格式、模型准备、结果类型、输入参数、英中英错误资源、取消等待及失败收尾；`tests/test_voice_api.py` 覆盖本机与共享边界、WAV 准入、原文返回、错误资源及原生 CLI 分发。`tests/test_voice_windows.py` 覆盖 x64／ARM64 安装发现、版本切换、损坏指针原件保留、只读进程探活及失败收尾。前端用例覆盖真实音量包络、静音回落、PCM16 编码、迟到权限释放、Mac／Windows 同一按钮和快捷键、重复操作及跨对话／隐藏／卸载结果隔离，实际 Composer 静态呈现核对麦克风位于发送之前。
+转录链依据 Hex 的 `src/local_api.rs`、`packaging/windows/hex.iss`、`src/windows.rs` 及 Harness 服务管理器：准备响应按真实 SSE 解析；同步工作在线程中拥有；默认使用多语言模型；discovery 与转写正文严格校验；文件与响应读取有界；嵌入握手不占用原生应用 API 锁。日志句柄及失败收尾由所属管理器保留。
+
+`tests/test_hex_tools.py` 覆盖认证探活、私有握手与租约收尾、真实 SSE 格式、模型准备、结果类型、输入参数、英中英错误资源、取消等待及失败收尾；`tests/test_voice_api.py` 覆盖本机与共享边界、WAV 准入、原文返回、错误资源、只读安装检查、系统启动分发与原生 CLI 参数。`tests/test_voice_windows.py` 覆盖 x64／ARM64 安装发现、版本切换、损坏指针原件保留、只读进程探活及失败收尾。`VoiceInputPage.test.tsx` 经真实页面和共享 HTTP 验证安装指引、在途请求复用、未知回执只读回查、英中英切换及隐藏／卸载隔离。其他前端用例覆盖真实音量包络、静音回落、PCM16 编码、迟到权限释放、Mac／Windows 同一按钮和快捷键、重复操作及跨对话／隐藏／卸载结果隔离，实际 Composer 静态呈现核对麦克风位于发送之前。
 
 Windows 原生分支目前使用替身在 macOS 回归，尚未完成 Windows 实机验收。两平台全局听写仍需各自系统允许麦克风及输入访问；Windows 原生应用需要其安装器要求的 Vulkan 图形驱动，浏览器麦克风需要允许桌面应用访问。
 

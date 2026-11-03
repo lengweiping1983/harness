@@ -121,17 +121,19 @@ macOS 可直接安装 [Hex 官方签名应用](https://anoma.ly/hex/download/mac
 放入 `~/Applications/Hex.app` 或 `/Applications/Hex.app`，Harness 会自动复用。
 Windows 安装 [x64 版](https://anoma.ly/hex/download/windows-x64-setup) 或
 [ARM64 版](https://anoma.ly/hex/download/windows-arm64-setup) 后同样自动发现；
-全局听写可运行 `scripts\voice.cmd`。两平台输入框及录音声波共用相同交互。
+两平台输入框及录音声波共用相同交互。
 也可从源码构建（需要 Rust、C/C++ 编译器、CMake，以及支持其 Metal 依赖的 Apple SDK）：
 
 ```sh
 make hex-build PYTHON=.venv/bin/python
 ```
 
-其他应用也可使用同一引擎的原生全局听写：运行
-`make voice PYTHON=.venv/bin/python`，在 Hex 中准备模型、授予系统权限并设置快捷键；
-macOS 默认按住 Option 说话、松开后粘贴到前台应用。它是独立原生进程，
-不随 Harness 网页关闭。详细行为、构建与验收限制见 [语音输入](docs/hex-stt.md)。
+其他应用听写：打开“设置 → 语音输入”，点击“打开听写”。首次在 Hex 中准备
+多语言模型、授予系统权限并确认快捷键；切到目标输入框，按住快捷键说话，松开输入文字。
+默认键为 macOS 的 Option、Windows 的 Ctrl+Space，已修改时以 Hex 设置为准。
+也可双击 `scripts/voice.command`（macOS）或 `scripts\voice.cmd`（Windows），
+或运行 `make voice PYTHON=.venv/bin/python`。听写独立运行，用完后从 Hex 退出。
+详细行为、构建与验收限制见 [语音输入](docs/hex-stt.md)。
 
 ## 开发与验证
 

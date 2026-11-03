@@ -1,4 +1,4 @@
-"""本机浏览器录音转写；不接受远程触发宿主麦克风。"""
+"""本机录音转写与显式原生听写入口。"""
 from __future__ import annotations
 
 from typing import Any
@@ -6,6 +6,7 @@ import io
 import wave
 
 from harness.i18n import tr
+from ... import voice
 from ...tools.builtin.hex_tools import HexToolError, run_hex_owned
 from ..errors import BadRequest, ServiceUnavailable
 from ..responses import json_response
@@ -16,14 +17,43 @@ MAX_VOICE_BYTES = 2 * 1024 * 1024
 
 
 def build_router(ctx: Any) -> Router:
-    """语音录制发生在调用浏览器，本接口只接收有限的 WAV。"""
+    """浏览器转写与原生应用启动分别准入，均拒绝远程及共享身份。"""
     router = Router()
 
-    @router.post('/api/v1/voice/transcriptions')
-    def transcribe(request):
+    def require_local(request):
+        """原生听写和转写共用本机及非共享身份边界。"""
         if request.subject is not None or not _local(request):
             raise BadRequest(tr('ui.voice.localOnly'), status=403, code='voice/local-only',
                              details={'copy': {'key': 'ui.voice.localOnly'}})
+
+    @router.get('/api/v1/voice/dictation')
+    def dictation(request):
+        require_local(request)
+        return json_response(voice.dictation_capabilities()).with_header('Cache-Control', 'no-store')
+
+    @router.post('/api/v1/voice/dictation/open')
+    def open_dictation(request):
+        require_local(request)
+        capabilities = voice.dictation_capabilities()
+        if not capabilities['available']:
+            copy = capabilities['reason']
+            raise BadRequest(tr(copy['key'], **copy.get('params', {})), code='voice/unavailable',
+                             details={'copy': copy})
+        async def run():
+            return await run_hex_owned(voice.open_dictation)
+
+        try:
+            ctx.call(run(), timeout=15)
+        except HexToolError as error:
+            # 超时异常可能带有启动参数，不将 HEX_* 环境值写入公开诊断。
+            reason = str(error.__cause__) if isinstance(error.__cause__, OSError) else str(error)
+            raise ServiceUnavailable(str(error), code='voice/open-failed',
+                                     details={'copy': error.copy, 'reason': reason}) from error
+        return json_response({'requested': True}).with_header('Cache-Control', 'no-store')
+
+    @router.post('/api/v1/voice/transcriptions')
+    def transcribe(request):
+        require_local(request)
         try:
             if (request.header('Content-Type').split(';')[0].strip() != 'audio/wav'
                     or not 44 < len(request.body) <= MAX_VOICE_BYTES):

@@ -15,6 +15,7 @@ import {
   GitBranch,
   Keyboard,
   Monitor,
+  Mic,
   Moon,
   Puzzle,
   RotateCw,
@@ -32,6 +33,7 @@ import { Button, Kbd, Overlay } from '@/components/ui/primitives'
 import { HOTKEY_ROWS, formatHotkey } from '@/lib/hotkeyCatalog'
 
 const pageModules = {
+  VoiceInputPage: () => import('./VoiceInputPage').then(module => ({default: module.VoiceInputPage})),
   CapabilitiesPanel: () => import('./CapabilitiesPanel').then(module => ({default: module.CapabilitiesPanel})),
   BuiltinToolsPage: () => import('./BuiltinToolsPage').then(module => ({default: module.BuiltinToolsPage})),
   PluginsPage: () => import('./PluginsPage').then(module => ({default: module.PluginsPage})),
@@ -47,6 +49,7 @@ const pageModules = {
   ConnectorsPage: () => import('./EscPanel').then(module => ({default: module.ConnectorsPage})),
 }
 const CapabilitiesPanel = lazy(pageModules.CapabilitiesPanel)
+const VoiceInputPage = lazy(pageModules.VoiceInputPage)
 const BuiltinToolsPage = lazy(pageModules.BuiltinToolsPage)
 const PluginsPage = lazy(pageModules.PluginsPage)
 const ModelConnections = lazy(pageModules.ModelConnections)
@@ -74,10 +77,11 @@ const ConnectorsPage = lazy(pageModules.ConnectorsPage)
 
 type Page = SettingsPage
 
-const PAGE_ICONS = {SlidersHorizontal, BrainCircuit, ShieldCheck, Keyboard, Puzzle, Users, Blocks, Wrench, Layers3, Plug, Package, Server, GitBranch, Clock3}
+const PAGE_ICONS = {SlidersHorizontal, BrainCircuit, ShieldCheck, Keyboard, Mic, Puzzle, Users, Blocks, Wrench, Layers3, Plug, Package, Server, GitBranch, Clock3}
 
 /** 只预取导航意图指向的模块，不挂载页面或启动页面的数据观察。 */
 const pagePreloads: Partial<Record<Page, () => Promise<unknown>>> = {
+  voice: pageModules.VoiceInputPage,
   models: pageModules.ModelConnections, permissions: pageModules.CapabilitiesPanel,
   tools: pageModules.BuiltinToolsPage, plugins: pageModules.PluginsPage,
   automations: pageModules.AutomationsPage, hooks: pageModules.ProjectHooksPage,
@@ -214,6 +218,7 @@ export function SettingsDialog() {
         <section ref={contentRef} id="settings-content" data-page={page} role="region" aria-label={t("ui.components.overlays.SettingsDialog.ed39c8a121d7")} className="min-h-0 min-w-0 overflow-y-auto overscroll-contain p-4">
           <SettingsPageBoundary key={page}><Suspense fallback={<SettingsPageLoading />} >
           {page === 'general' ? <GeneralPage /> : null}
+          {page === 'voice' ? <VoiceInputPage /> : null}
           {page === 'models' ? <ModelConnections /> : null}
           {page === 'shortcuts' ? <ShortcutsPage query={shortcutQuery} setQuery={setShortcutQuery} /> : null}
           {page === 'automations' ? <AutomationsPage /> : null}

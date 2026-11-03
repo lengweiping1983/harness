@@ -64,7 +64,16 @@ const patchMethod = <T,>(path: string, body: unknown) =>
   request<T>(path, { method: 'PATCH', body: JSON.stringify(body) })
 const del = <T,>(path: string) => request<T>(path, { method: 'DELETE' })
 
+let dictationOpening: ReturnType<typeof post<import('./protocol.generated').VoiceDictationOpen>> | null = null
+function openVoiceDictation() {
+  // 页面关闭重开仍共用已接受的打开请求，不重复唤起原生应用。
+  return dictationOpening ??= post<import('./protocol.generated').VoiceDictationOpen>('/api/v1/voice/dictation/open', {}, {timeout: 20_000})
+    .finally(() => {dictationOpening = null})
+}
+
 export const api = {
+  voiceDictation: (signal?: AbortSignal) => request<import('./protocol.generated').VoiceDictationCapabilities>('/api/v1/voice/dictation', {signal}),
+  openVoiceDictation,
   accessStatus: () => request<import('./protocol.generated').BrowserAccessStatus>('/api/v1/access/status'),
   accessLogin: (token: string) => request<import('./protocol.generated').BrowserAccessSession>('/api/v1/access/login', {method: 'POST', body: JSON.stringify({token})}),
   accessLogout: () => request<import('./protocol.generated').BrowserAccessLogout>('/api/v1/access/logout', {method: 'POST', body: '{}'}),

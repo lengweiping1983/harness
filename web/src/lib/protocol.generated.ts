@@ -2,6 +2,15 @@
 export interface VoiceTranscript {
   transcript: string
 }
+export interface VoiceDictationCapabilities {
+  available: boolean
+  platform: 'macos' | 'windows' | 'unsupported'
+  download_url: string | null
+  reason: null | ResourceCopy
+}
+export interface VoiceDictationOpen {
+  requested: true
+}
 export interface ConversationProject {
   workspace_id: string
   mode: 'local' | 'worktree'

@@ -78,16 +78,16 @@ class VoiceApiTests(unittest.TestCase):
 
 
 class VoiceCommandTests(unittest.TestCase):
-    def test_default_app_and_explicit_native_commands_are_forwarded(self):
+    def test_explicit_native_commands_are_forwarded(self):
         with tempfile.TemporaryDirectory() as tmp:
             binary = Path(tmp) / 'hex'
             binary.touch()
-            for args in ([], ['settings', 'set', 'dictation.shortcut', 'option+space']):
+            for args in (['app'], ['settings', 'set', 'dictation.shortcut', 'option+space']):
                 with patch.object(voice, 'hex_binary_path', return_value=binary), \
                      patch.object(voice.sys, 'argv', ['harness-voice', *args]), \
                      patch.object(voice.os, 'execv') as execute:
                     self.assertEqual(voice.main(), 0)
-                    execute.assert_called_once_with(str(binary), [str(binary), *(args or ['app'])])
+                    execute.assert_called_once_with(str(binary), [str(binary), *args])
 
     def test_native_command_has_same_arguments_on_windows_and_macos(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -97,12 +97,128 @@ class VoiceCommandTests(unittest.TestCase):
                 with patch.object(voice.sys, 'platform', platform), \
                      patch.object(voice, 'hex_binary_path', return_value=binary), \
                      patch.object(voice.sys, 'argv', ['harness-voice']), \
-                     patch.object(voice.os, 'execv') as execute:
+                     patch.object(voice, 'open_dictation') as execute:
                     self.assertEqual(voice.main(), 0)
-                    execute.assert_called_once_with(str(binary), [str(binary), 'app'])
+                    execute.assert_called_once_with()
 
     def test_missing_binary_does_not_launch(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(voice, 'hex_binary_path', return_value=Path(tmp)/'missing'), \
              patch.object(voice.os, 'execv') as execute, patch.object(voice.sys, 'stderr', io.StringIO()):
             self.assertEqual(voice.main(), 2)
             execute.assert_not_called()
+
+
+class VoiceDictationTests(unittest.TestCase):
+    def test_capabilities_do_not_launch_or_claim_readiness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / 'hex'
+            for system, machine, platform, suffix in (
+                    ('darwin', 'arm64', 'macos', 'macos-arm64-dmg'),
+                    ('win32', 'AMD64', 'windows', 'windows-x64-setup'),
+                    ('win32', 'ARM64', 'windows', 'windows-arm64-setup')):
+                with self.subTest(system=system, machine=machine), \
+                     patch.object(voice.sys, 'platform', system), \
+                     patch.object(voice.platform, 'machine', return_value=machine), \
+                     patch.object(voice, 'hex_binary_path', return_value=binary), \
+                     patch.object(voice, 'open_dictation') as launch:
+                    missing = voice.dictation_capabilities()
+                    self.assertFalse(missing['available'])
+                    self.assertEqual(missing['reason'], {'key': 'ui.voice.dictation.missing'})
+                    binary.touch()
+                    available = voice.dictation_capabilities()
+                    self.assertTrue(available['available'])
+                    self.assertIsNone(available['reason'])
+                    self.assertEqual(available['platform'], platform)
+                    self.assertTrue(available['download_url'].endswith(suffix))
+                    self.assertNotIn('ready', available)
+                    launch.assert_not_called()
+                    binary.unlink()
+
+    def test_macos_uses_bundle_identity_and_does_not_request_duplicate_instance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / 'Hex.app'
+            binary = bundle / 'Contents' / 'MacOS' / 'hex'
+            binary.parent.mkdir(parents=True)
+            binary.touch()
+            with patch.object(voice.sys, 'platform', 'darwin'), \
+                 patch.object(voice, 'hex_binary_path', return_value=binary), \
+                 patch.dict(voice.os.environ, {'HEX_APPLICATION_SUPPORT_DIR': str(Path(tmp) / 'isolated data')}, clear=True), \
+                 patch.object(voice.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as launch:
+                voice.open_dictation()
+                voice.open_dictation()
+            self.assertEqual(launch.call_count, 2)
+            self.assertEqual(launch.call_args.args[0], ['/usr/bin/open', '--env',
+                f'HEX_APPLICATION_SUPPORT_DIR={Path(tmp) / "isolated data"}', str(bundle)])
+            self.assertEqual(launch.call_args.kwargs['timeout'], 10)
+
+    def test_windows_uses_shell_and_preserves_native_arguments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / 'hex.exe'
+            binary.touch()
+            shell = SimpleNamespace(startfile=Mock())
+            with patch.object(voice.sys, 'platform', 'win32'), \
+                 patch.object(voice, 'hex_binary_path', return_value=binary), patch.object(voice, 'os', shell):
+                voice.open_dictation()
+            shell.startfile.assert_called_once_with(str(binary), arguments='app')
+
+    def test_source_binary_is_detached_and_reaped_without_duplicate_launch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / 'hex'
+            binary.touch()
+            process = Mock()
+            process.poll.return_value = None
+            with patch.object(voice.sys, 'platform', 'darwin'), \
+                 patch.object(voice, 'hex_binary_path', return_value=binary), \
+                 patch.object(voice, '_app_process', None), \
+                 patch.object(voice.subprocess, 'Popen', return_value=process) as launch, \
+                 patch.object(voice.threading, 'Thread') as waiter:
+                voice.open_dictation()
+                voice.open_dictation()
+                launch.assert_called_once_with([str(binary), 'app'], stdin=voice.subprocess.DEVNULL, start_new_session=True)
+                self.assertEqual(waiter.call_args.kwargs['target'], process.wait)
+                waiter.return_value.start.assert_called_once_with()
+
+    def test_open_failure_keeps_bilingual_copy_and_original_cause(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / 'Hex.app' / 'Contents' / 'MacOS' / 'hex'
+            binary.parent.mkdir(parents=True)
+            binary.touch()
+            for language in ('en', 'zh-CN', 'en'):
+                for failure, key in ((OSError('OS 原文'), 'launchFailed'),
+                                     (voice.subprocess.TimeoutExpired('open', 10), 'unconfirmed')):
+                    with current_language.set(language), patch.object(voice.sys, 'platform', 'darwin'), \
+                         patch.object(voice, 'hex_binary_path', return_value=binary), \
+                         patch.object(voice.subprocess, 'run', side_effect=failure), \
+                         self.assertRaises(HexToolError) as caught:
+                        voice.open_dictation()
+                    self.assertEqual(caught.exception.copy, {'key': 'ui.voice.dictation.' + key})
+                    self.assertIs(caught.exception.__cause__, failure)
+
+    def test_routes_reject_remote_and_shared_requests_before_installation_read(self):
+        ctx = SimpleNamespace(call=lambda coro, **kwargs: asyncio.run(coro))
+        router = build_router(ctx)
+        for method, path in (('GET', '/api/v1/voice/dictation'), ('POST', '/api/v1/voice/dictation/open')):
+            handler, _ = router.resolve(method, path)
+            for ip, host, subject in (('203.0.113.3', 'localhost', None),
+                                      ('127.0.0.1', '203.0.113.3', None), ('127.0.0.1', 'localhost', 'guest')):
+                with patch.object(voice, 'dictation_capabilities') as inspect, \
+                     patch.object(voice, 'open_dictation') as launch, self.assertRaises(BadRequest):
+                    handler(Request(method, path, {}, {'Host': host}, b'', client_ip=ip, subject=subject))
+                inspect.assert_not_called()
+                launch.assert_not_called()
+
+    def test_routes_launch_only_on_explicit_post_and_report_acceptance(self):
+        ctx = SimpleNamespace(call=lambda coro, **kwargs: asyncio.run(coro))
+        router = build_router(ctx)
+        with patch.object(voice, 'dictation_capabilities', return_value={'available': True}) as inspect, \
+             patch.object(voice, 'open_dictation') as launch:
+            for method, path in (('GET', '/api/v1/voice/dictation'), ('POST', '/api/v1/voice/dictation/open')):
+                handler, _ = router.resolve(method, path)
+                response = handler(Request(method, path, {}, {'Host': 'localhost'}, b'', client_ip='::1'))
+                self.assertEqual(response.headers['Cache-Control'], 'no-store')
+                if method == 'GET':
+                    launch.assert_not_called()
+                else:
+                    self.assertEqual(json.loads(response.body), {'requested': True})
+            self.assertEqual(inspect.call_count, 2)
+            launch.assert_called_once_with()

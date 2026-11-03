@@ -12,6 +12,7 @@ export const SETTINGS_PAGES = [
   {id: 'models', group: 'basic', labelKey: 'ui.components.overlays.SettingsDialog.c98e118e0a43', keywordsKey: 'ui.settings.keywords.models', icon: 'BrainCircuit'},
   {id: 'permissions', group: 'basic', labelKey: 'ui.components.overlays.SettingsDialog.cec99e7fda96', keywordsKey: 'ui.settings.keywords.permissions', icon: 'ShieldCheck'},
   {id: 'shortcuts', group: 'basic', labelKey: 'ui.components.overlays.SettingsDialog.ee2638183d3e', keywordsKey: 'ui.settings.keywords.shortcuts', icon: 'Keyboard'},
+  {id: 'voice', group: 'basic', labelKey: 'ui.voice.dictation.title', keywordsKey: 'ui.voice.dictation.keywords', icon: 'Mic'},
   {id: 'personality', group: 'agents', labelKey: 'ui.personality.heading', keywordsKey: 'ui.settings.keywords.personality', icon: 'Puzzle'},
   {id: 'agents', group: 'agents', labelKey: 'ui.agents.directory', keywordsKey: 'ui.settings.keywords.agents', icon: 'Users'},
   {id: 'skills', group: 'agents', labelKey: 'ui.extensions.skills', keywordsKey: 'ui.extensions.skillsKeywords', icon: 'Blocks'},

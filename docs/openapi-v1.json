@@ -1726,6 +1726,98 @@
         ]
       }
     },
+    "/api/v1/voice/dictation": {
+      "get": {
+        "operationId": "get_api_v1_voice_dictation",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceDictationCapabilities"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/voice/dictation/open": {
+      "post": {
+        "operationId": "post_api_v1_voice_dictation_open",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceDictationOpen"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/voice/transcriptions": {
       "post": {
         "operationId": "post_api_v1_voice_transcriptions",
@@ -19082,6 +19174,57 @@
         "properties": {
           "transcript": {
             "type": "string"
+          }
+        }
+      },
+      "VoiceDictationCapabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "available",
+          "platform",
+          "download_url",
+          "reason"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "macos",
+              "windows",
+              "unsupported"
+            ]
+          },
+          "download_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResourceCopy"
+              }
+            ]
+          }
+        }
+      },
+      "VoiceDictationOpen": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requested"
+        ],
+        "properties": {
+          "requested": {
+            "const": true
           }
         }
       },
