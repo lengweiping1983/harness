@@ -26,7 +26,7 @@ await browserScenario(async ({server, browser}) => {
   await search.waitFor()
   await search.fill('快捷键')
   await page.getByRole('button', {name: '快捷键', exact: true}).waitFor()
-  assert.equal(await page.locator('nav button[data-page]:visible').count(), 1)
+  assert.deepEqual(await page.locator('nav button[data-page]:visible').evaluateAll(nodes => nodes.map(node => node.dataset.page)), ['shortcuts', 'voice'])
   await search.press('Escape')
   assert.equal(await search.evaluate(element => element.value), '')
   assert.ok(await page.locator('nav button[data-page]:visible').count() > 1)

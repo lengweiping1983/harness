@@ -5,7 +5,7 @@ const resources=Object.fromEntries(['en','zh-CN'].map(locale=>[locale,JSON.parse
 const source=readFileSync(new URL('../src/lib/settingsCatalog.ts',import.meta.url),'utf8')
 const pages=[...source.matchAll(/id: '([^']+)', group: '[^']+', labelKey: '([^']+)', keywordsKey: '([^']+)'/g)].map(([,id,key,keyword])=>({id,key,keyword}))
 const keywords=Object.fromEntries(pages.map(({id,keyword})=>[id,keyword]))
-assert.deepEqual(pages.map(page=>page.id),['general','models','permissions','shortcuts','personality','agents','skills','tools','memory','connectors','plugins','mcpServer','hooks','automations'])
+assert.deepEqual(pages.map(page=>page.id),['general','models','permissions','shortcuts','voice','personality','agents','skills','tools','memory','connectors','plugins','mcpServer','hooks','automations'])
 const entry=`
 import React from 'react'
 import {createRoot} from 'react-dom/client'

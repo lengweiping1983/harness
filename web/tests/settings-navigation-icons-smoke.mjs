@@ -23,17 +23,17 @@ for(const group of ['agents','connections','advanced']){
   await page.setViewportSize({width,height:1000})
   await page.evaluate(async({language,dark})=>{await window.language(language);document.documentElement.classList.toggle('dark',dark)},{language,dark})
   const buttons=page.locator('nav button[data-page]:visible')
-  assert.equal(await buttons.count(),14)
+  assert.equal(await buttons.count(),15)
   assert.equal(await page.locator('nav button[data-page="context"]').count(),0)
   const icons=await buttons.evaluateAll(elements=>elements.map(button=>{
    const svg=button.querySelector('svg'),rect=svg.getBoundingClientRect()
    return {page:button.dataset.page,label:button.textContent.trim(),drawing:svg.innerHTML,width:rect.width,height:rect.height}
   }))
-  assert.equal(new Set(icons.map(icon=>icon.drawing)).size,14,'Every settings page has a distinct rendered icon')
+  assert.equal(new Set(icons.map(icon=>icon.drawing)).size,15,'Every settings page has a distinct rendered icon')
   for(const icon of icons){assert.ok(icon.label);assert.ok(Math.abs(icon.width-14)<0.5);assert.ok(Math.abs(icon.height-14)<0.5)}
   assert.equal(await page.getByRole('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth),true)
   if(language==='zh-CN'&&!dark&&width===1440&&process.env.HARNESS_TEST_SETTINGS_ICONS_SCREENSHOT)await page.screenshot({path:process.env.HARNESS_TEST_SETTINGS_ICONS_SCREENSHOT})
  }
  assert.deepEqual(errors,[])
- console.log('Settings navigation: all 14 rendered icons are distinct, labeled and consistently sized across bilingual themes and widths')
+ console.log('Settings navigation: all 15 rendered icons are distinct, labeled and consistently sized across bilingual themes and widths')
 },{entry:entryPath,vite:{plugins:[{name:'settings-icons-fixture',resolveId(id){if(id===entryPath)return id},load(id){if(id===entryPath)return entry},configureServer(server){server.middlewares.use('/__settings-icons',async(_req,res,next)=>{try{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__settings-icons','<html><body><div id="root"></div><script type="module" src="'+entryPath+'"></script></body></html>'))}catch(error){next(error)}})}}]}})

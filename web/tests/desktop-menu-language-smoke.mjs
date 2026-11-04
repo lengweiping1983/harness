@@ -27,7 +27,7 @@ await browserScenario(async({server,browser})=>{
   const labels=await page.evaluate(()=>window.menus.at(-1))
   const resources=JSON.parse(readFileSync(new URL('../../harness/i18n/locales/'+locale+'.json',import.meta.url)))
   const expectedLabels=Object.fromEntries(Object.entries(resources).filter(([key])=>key.startsWith('ui.desktop.menu.')).map(([key,value])=>[key.slice('ui.desktop.menu.'.length),value]))
-  assert.equal(Object.keys(labels).length,50)
+  assert.equal(Object.keys(labels).length,Object.keys(expectedLabels).length)
   assert.equal(Object.hasOwn(labels,'close'),false)
   assert.deepEqual(labels,expectedLabels)
   assert.deepEqual([labels.contextOpenLink,labels.contextCopyLink,labels.contextInspect],expected)
