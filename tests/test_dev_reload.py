@@ -38,7 +38,9 @@ class DevReloadTests(unittest.TestCase):
             for name in ('tests/test_agent.py', 'harness/tests/helper.py',
                          'harness/core/test_agent.py', 'harness/core/agent_test.py',
                          'harness/core/agent.test.json', 'harness/__tests__/data.md',
-                         'harness/core/__pycache__/agent.py', 'examples/task.md'):
+                         'harness/core/__pycache__/agent.py', 'examples/task.md',
+                         'desktop/package.json', 'desktop/package-lock.json',
+                         'docs/development.md', 'web/src/main.ts'):
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('测试变更\n')

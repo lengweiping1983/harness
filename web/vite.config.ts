@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import postcssConfig from './postcss.config.js'
 
 const backendUrl = process.env.HARNESS_BACKEND_URL || 'http://127.0.0.1:8765'
@@ -8,7 +9,19 @@ const backendUrl = process.env.HARNESS_BACKEND_URL || 'http://127.0.0.1:8765'
 // 前端与 Python 后端完全解耦：开发期代理到 HARNESS_BACKEND_URL，默认本地 8765，
 // 生产期由 harness.web.static_assets 直接托管 dist/。
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), {
+    name: 'harness-web-watch-boundary',
+    config(config) {
+      const root = resolve(config.root ?? '.')
+      return { server: { watch: { ignored: [(file: string) => {
+        const path = resolve(file)
+        // 允许遍历根目录的祖先，但插件额外注册的目录外文件不能触发热更新。
+        if (path === root || root.startsWith(path.endsWith(sep) ? path : path + sep)) return false
+        const fromRoot = relative(root, path)
+        return isAbsolute(fromRoot) || fromRoot === '..' || fromRoot.startsWith('..' + sep)
+      }] } } }
+    },
+  }],
   // 将样式配置纳入 Vite 配置依赖，变更时重载，避免常驻进程复用旧的 Tailwind 配置。
   css: { postcss: postcssConfig },
   resolve: {

@@ -26,18 +26,26 @@ afterEach(async () => {
 // Windows 继续沿正式单测入口使用轮询，其他平台同时核对默认监听和轮询。
 it.each(process.platform === 'win32' ? [true] : [undefined, true])('tracks application changes while ignoring test directories and test modules (polling: %s)', async usePolling => {
   root = await mkdtemp(join(tmpdir(), 'harness-dev-watch-'))
-  const src = join(root, 'src')
-  const tests = join(root, 'tests')
+  const web = join(root, 'web')
+  const src = join(web, 'src')
+  const tests = join(web, 'tests')
   const nested = join(src, '__tests__')
-  await Promise.all([mkdir(nested, { recursive: true }), mkdir(tests)])
+  const desktop = join(root, 'desktop')
+  const publicDir = join(web, 'public')
+  await Promise.all([mkdir(nested, { recursive: true }), mkdir(tests, { recursive: true }), mkdir(desktop), mkdir(publicDir, { recursive: true })])
   const application = join(src, 'main.ts')
-  const ignored = [join(tests, 'browser.mjs'), join(nested, 'helper.ts'), join(src, 'main.test.ts'), join(src, 'main.spec.ts')]
-  await Promise.all([writeFile(join(root, 'index.html'), '<html></html>'), writeFile(application, 'export const value = 1'),
+  const webFiles = [application, join(src, 'style.css'), join(web, 'index.html'), join(publicDir, 'icon.svg')]
+  const outside = [join(desktop, 'package.json'), join(desktop, 'package-lock.json'), join(root, 'README.md')]
+  const ignored = [join(tests, 'browser.mjs'), join(nested, 'helper.ts'), join(src, 'main.test.ts'), join(src, 'main.spec.ts'), ...outside]
+  await Promise.all([...webFiles.map(file => writeFile(file, 'initial')),
     ...ignored.map(file => writeFile(file, 'export const value = 1'))])
   // 此处只验收监听，不启动 HTTP、WebSocket 或无关的依赖预构建。
-  server = await createServer({ configFile: false, root, logLevel: 'silent',
+  server = await createServer({ configFile: false, root: web, logLevel: 'silent',
+    plugins: config.plugins?.filter(plugin => plugin && !Array.isArray(plugin) && 'name' in plugin && plugin.name === 'harness-web-watch-boundary'),
     optimizeDeps: { noDiscovery: true, include: [] },
     server: { middlewareMode: true, hmr: false, watch: { ...config.server?.watch, usePolling } } })
+  // 模拟插件显式扩大监听范围，目录边界仍必须生效。
+  server.watcher.add(outside)
   const changes: string[] = []
   server.watcher.on('change', file => changes.push(file))
   // getWatched 反映扫描结果，不能证明底层监听已完成初始化。
@@ -51,12 +59,16 @@ it.each(process.platform === 'win32' ? [true] : [undefined, true])('tracks appli
   })
   await ready
   await vi.waitFor(() => expect(server!.watcher.getWatched()[src]).toContain('main.ts'))
-  await Promise.all([writeFile(application, 'export const value = 200'),
+  await Promise.all([...webFiles.map(file => writeFile(file, 'updated content')),
     ...ignored.map(file => writeFile(file, 'export const value = 200'))])
-  await vi.waitFor(() => expect(changes).toContain(application))
+  await vi.waitFor(() => {
+    for (const file of webFiles) expect(changes).toContain(file)
+  })
   expect(changes.filter(file => ignored.includes(file))).toEqual([])
   expect(server.watcher.getWatched()[nested]).toBeUndefined()
   expect(server.watcher.getWatched()[tests]).toBeUndefined()
+  expect(server.watcher.getWatched()[desktop]).toBeUndefined()
+  expect(server.watcher.getWatched()[root] ?? []).not.toContain('README.md')
   expect(server.watcher.getWatched()[src]).not.toContain('main.test.ts')
   expect(server.watcher.getWatched()[src]).not.toContain('main.spec.ts')
 })
