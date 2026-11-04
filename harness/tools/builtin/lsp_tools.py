@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from harness.i18n import tr
-from harness.core.text_encoding import utf8_env
+from ..process_env import execution_env
 
 import asyncio
 import json
@@ -227,7 +227,7 @@ class LspClient:
     async def start(
         cls, command: list[str], cwd: str
     ) -> "LspClient":
-        env = utf8_env()
+        env = execution_env()
         async def stop(proc):
             await cls(proc).close()
 

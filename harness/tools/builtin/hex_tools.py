@@ -372,7 +372,8 @@ class HexServiceManager:
         log_file = log_dir / "harness-hex-service.log"
         try:
             with log_file.open("ab") as output:
-                env = {**os.environ, "HEX_APPLICATION_SUPPORT_DIR": str(self.discovery_path.parent)}
+                from ..process_env import execution_env
+                env = execution_env({"HEX_APPLICATION_SUPPORT_DIR": str(self.discovery_path.parent)})
                 self._process = subprocess.Popen(
                     [str(binary), "service", "--embedded"], stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE, stderr=output,
