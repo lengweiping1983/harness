@@ -3,9 +3,42 @@ import {test} from 'node:test'
 import {mkdtemp, rm, writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import path from 'node:path'
-import {browserOptions, isInfrastructureError, runScenarios, startWorker} from './browser-runner.mjs'
+import {execFileSync} from 'node:child_process'
+import {mkdir} from 'node:fs/promises'
+import {browserOptions, inputIdentity, isInfrastructureError, runScenarios, startWorker} from './browser-runner.mjs'
 
 const available = ['a-smoke.mjs', 'b-smoke.mjs', 'c-smoke.mjs']
+
+test('input identity distinguishes a dirty precommit baseline from identical committed contents', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'harness-browser-identity-'))
+  const git = (...args) => execFileSync('git', args, {cwd: directory, encoding: 'utf8'})
+  try {
+    git('init', '-q'); git('config', 'user.name', 'fixture'); git('config', 'user.email', 'fixture@example.invalid')
+    git('config', 'core.autocrlf', 'false'); git('config', 'core.eol', 'lf')
+    await mkdir(path.join(directory, '.git', 'no-hooks'))
+    const commit = message => git('-c', 'core.hooksPath=' + path.join(directory, '.git', 'no-hooks'),
+      '-c', 'commit.gpgsign=false', 'commit', '-qm', message)
+    await writeFile(path.join(directory, 'scene.mjs'), 'before\n')
+    git('add', '.'); commit('baseline')
+    const clean = inputIdentity(directory)
+    assert.deepEqual(clean.changed, [])
+    await writeFile(path.join(directory, 'scene.mjs'), 'after\n')
+    await writeFile(path.join(directory, 'untracked.mjs'), 'untracked\n')
+    const dirty = inputIdentity(directory)
+    assert.equal(dirty.revision, clean.revision)
+    assert.deepEqual(dirty.changed, ['scene.mjs', 'untracked.mjs'])
+    assert.notEqual(dirty.fingerprint, clean.fingerprint)
+    git('add', '.'); commit('same contents')
+    const committed = inputIdentity(directory)
+    assert.notEqual(committed.revision, dirty.revision)
+    assert.notEqual(committed.fingerprint, dirty.fingerprint)
+    assert.deepEqual(committed.changed, [])
+    // 任意层级的研究目录都不读取正文，也不改变已核实输入身份。
+    await mkdir(path.join(directory, 'nested', 'research'), {recursive: true})
+    await writeFile(path.join(directory, 'nested', 'research', 'ignored.txt'), 'excluded\n')
+    assert.deepEqual(inputIdentity(directory), committed)
+  } finally {await rm(directory, {recursive: true, force: true})}
+})
 
 test('runner controls preserve complete selections and shards, rejecting malformed or duplicate limits', () => {
   assert.deepEqual(browserOptions(available, ['--jobs=2', '--shard=1/2']).scenarios, ['a-smoke.mjs', 'c-smoke.mjs'])

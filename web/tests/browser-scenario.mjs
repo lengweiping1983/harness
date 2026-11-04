@@ -5,13 +5,14 @@ import {chromium} from 'playwright-core'
 import {resolveBrowserExecutable} from './browser-executable.mjs'
 import {browserRuntime, createFixtureServer, infrastructureFailure, prepareEntry, webRoot} from './browser-runtime.mjs'
 import {withDeadline} from './fixture-cleanup.mjs'
+import {observeAcademyExecutions} from './academy-diagnostics.mjs'
 
 export {webRoot}
 
-export function launchBrowser(options = {}) {
-  if (browserRuntime() && !Object.keys(options).length) return browserRuntime().connect()
+export async function launchBrowser(options = {}) {
+  if (browserRuntime() && !Object.keys(options).length) return observeAcademyExecutions(await browserRuntime().connect())
   const executablePath = options.executablePath || (options.channel ? undefined : resolveBrowserExecutable())
-  return chromium.launch({headless: true, ...options, executablePath})
+  return observeAcademyExecutions(await chromium.launch({headless: true, ...options, executablePath}))
 }
 
 /** 异步入口的 load 事件不代表夹具正文已执行，导航后等待显式就绪证据。 */

@@ -1,7 +1,7 @@
 import {readdirSync} from 'node:fs'
 import path from 'node:path'
 import {resolveBrowserExecutable} from './browser-executable.mjs'
-import {browserOptions, buildFingerprint, inputFingerprint, runScenarios, startWorker, writeBrowserReport} from './browser-runner.mjs'
+import {browserOptions, buildFingerprint, inputFingerprint, inputIdentity, runScenarios, startWorker, writeBrowserReport} from './browser-runner.mjs'
 
 const scripts = readdirSync(import.meta.dirname).filter(name => name.endsWith('-smoke.mjs')).sort()
 const options = browserOptions(scripts, process.argv.slice(2))
@@ -12,7 +12,8 @@ const report = {started: started.toISOString(), platform: process.platform, node
 const logs = path.resolve(import.meta.dirname, '../../output/browser-logs', started.toISOString().replace(/[:.]/g, '-'))
 await writeBrowserReport(options.report, report)
 try {
-  report.input = inputFingerprint()
+  report.source = inputIdentity()
+  report.input = report.source.fingerprint
   report.build = buildFingerprint()
   report.executablePath = resolveBrowserExecutable()
   console.log(`Core browser executable: ${report.executablePath}`)

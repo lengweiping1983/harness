@@ -289,6 +289,8 @@ try{
   }
   // 只控制已完成课程的目录投影；当前课仍使用真实检查证据，不改写后端进度。
   let finishedProjection=false,projectionWrites=0
+  // 关闭前撤销拦截并等待已进入的回调，不能让 route.fetch 在浏览器关闭后收尾。
+  releases.push(()=>page.unrouteAll({behavior:'wait'}))
   const completedCourse=(await get('/courses/llm-foundations')).course
   const originalProgress=(await get('/projects/'+llmProject.id)).project.progress
   await page.route('**/api/v1/academy/projects/'+llmProject.id,async route=>{

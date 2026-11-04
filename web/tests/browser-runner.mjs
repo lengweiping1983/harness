@@ -29,24 +29,33 @@ export function isInfrastructureError(error) {
   return Boolean(error && (error.infrastructure || isInfrastructureError(error.cause) || error.errors?.some(isInfrastructureError)))
 }
 
-export function inputFingerprint() {
+export function inputIdentity(directory = root) {
+  const git = args => execFileSync('git', args, {cwd: directory})
+  const included = file => file && !file.split('/').includes('research')
   const hash = createHash('sha256')
-  hash.update(execFileSync('git', ['rev-parse', 'HEAD'], {cwd: root}))
-  const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {cwd: root})
-    .toString('utf8').split('\0').filter(file => file && !file.split('/').includes('research'))
+  const revision = git(['rev-parse', 'HEAD'])
+  hash.update(revision)
+  const files = git(['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
+    .toString('utf8').split('\0').filter(included)
   for (const file of [...new Set(files)].sort()) {
     hash.update(file + '\0')
     try {
-      const entry = lstatSync(path.join(root, file))
+      const entry = lstatSync(path.join(directory, file))
       if (!entry.isFile() || entry.isSymbolicLink()) throw Error('Browser input is not a regular file: ' + file)
-      hash.update(readFileSync(path.join(root, file)))
+      hash.update(readFileSync(path.join(directory, file)))
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
       hash.update('deleted')
     }
   }
-  return hash.digest('hex')
+  const changed = [...new Set([
+    ...git(['diff', 'HEAD', '--name-only', '-z']).toString('utf8').split('\0'),
+    ...git(['ls-files', '--others', '--exclude-standard', '-z']).toString('utf8').split('\0'),
+  ].filter(included))].sort()
+  return {revision: revision.toString('utf8').trim(), changed, fingerprint: hash.digest('hex')}
 }
+
+export function inputFingerprint() {return inputIdentity().fingerprint}
 
 export function buildFingerprint(directory = path.join(root, 'web/dist')) {
   const hash = createHash('sha256')

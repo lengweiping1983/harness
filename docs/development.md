@@ -95,6 +95,12 @@ Web 单测入口也执行 `model-runtime/tests` 的桥接转录回归；Python �
 
 课程执行场景通过 `academy-environment.mjs` 核对真实项目回执中的 `sandbox`。明确的 `unavailable` 记录为基础设施失败，停止后续调度；缺失或非法字段仍是业务断言失败，不能靠错误正文推断环境。课程设计和概念学习场景不因不执行代码而被整体排除。Windows 只运行可验收场景时，必须明确列出尚受沙箱阻塞的执行场景，不能报告完整浏览器套件通过。
 
+`seatbelt`／`bubblewrap` 只表示检测到对应程序，不证明当前宿主允许启动沙箱。`launchBrowser` 被动记录课程执行的原始 POST 响应；场景失败时，`cleanupFixture` 在关闭浏览器前最多等待 3 秒，并将最近 8 条 `/run`／`check` 回执写入所属场景日志，每条正文最多 65536 个字符，截断与读取失败明确标记。诊断不新增请求、不重放执行、不替换原断言或根据 stderr 自动改变失败分类；没有捕获到直接证据的场景仍须独立定位。`academy-diagnostics-smoke.mjs` 以受控失败响应核对真实浏览器的两个上下文创建入口、回执原文、原异常身份、零重放与监听清理，不作为真实沙箱拒绝的验收。
+
+`academy-curriculum-smoke.mjs` 的课程完成投影使用真实读取后改写夹具响应。结束时须先以 `unrouteAll({behavior: 'wait'})` 撤销拦截并等待在途回调，再关闭浏览器；否则 `route.fetch()` 可能在最后的界面断言完成后仍未收尾，关闭会造成未处理的 `TargetClosedError` 并中断工作进程。诊断 smoke 用屏障固定这一时序，验证关闭发生在路由完成之后，不通过忽略路由异常消除失败。
+
+浏览器 JSON 报告的 `source` 保存本轮 `revision`、排除任意 `research` 目录后的 `changed` 路径和 `fingerprint`，`input` 保持同一指纹。指纹包含 HEAD 及实际文件内容；相同内容从未提交状态变为提交状态后，指纹也会变化。复验须比较实际输入身份及前后不变标记，不能把提交前回执写成提交态通过，或把旧的 `output/verification.json` 当作当前定点复验结果。提交后需要正式提交态证据时，重新执行所需的针对性用例；定点复验不代表完整套件通过。
+
 `context-empty-smoke.mjs` 复用共享夹具清理入口；浏览器关闭失败或超时仍尝试回收后端，场景错误与清理错误一起保留。空上下文的八组语言、主题和尺寸断言保持完整。
 
 `question-key-language-smoke.mjs` 在语言切换、明暗主题和窗口宽度矩阵中，同时核对问题标题的原始文本与计算样式 `text-transform: none`，防止路径和代码片段被 CSS 强制转换大小写。

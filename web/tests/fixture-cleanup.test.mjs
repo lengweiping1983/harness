@@ -3,6 +3,32 @@ import {EventEmitter, once} from 'node:events'
 import {spawn} from 'node:child_process'
 import {test} from 'node:test'
 import {cleanupFixture, diagnoseFailure} from './fixture-cleanup.mjs'
+import {observeAcademyExecutions, academyDiagnostics} from './academy-diagnostics.mjs'
+
+test('a pending execution body cannot block cleanup, replace the assertion or revive diagnostics later', async () => {
+  const browser = new EventEmitter(), context = new EventEmitter(), backend = child()
+  const original = Error('original output assertion'), messages = [], report = console.error
+  let release, closed = false
+  Object.assign(browser, {contexts: () => [context], newContext: async () => context, newPage: async () => ({}),
+    close: async () => {closed = true; browser.emit('disconnected')}})
+  observeAcademyExecutions(browser)
+  const collector = academyDiagnostics(browser)
+  context.emit('response', {request: () => ({method: () => 'POST'}),
+    url: () => 'http://127.0.0.1/api/v1/academy/projects/fixture/run', status: () => 200,
+    text: () => new Promise(resolve => {release = resolve})})
+  try {
+    console.error = (...args) => messages.push(args)
+    await assert.rejects(cleanupFixture({error: original, browser, backend, diagnosticMs: 5}), error => error === original)
+    assert.ok(closed)
+    assert.deepEqual(backend.signals, ['SIGINT'])
+    assert.match(messages[0][1].message, /diagnostics timed out/)
+    assert.equal(JSON.parse(messages[1][1])[0].state, 'pending')
+    release('late raw output')
+    await collector.wait()
+    assert.equal(collector.snapshot()[0].state, 'pending')
+    assert.equal(context.listenerCount('response'), 0)
+  } finally {console.error = report; release?.('cleanup')}
+})
 
 function child({unresponsive = false} = {}) {
   const process = new EventEmitter()
