@@ -1,10 +1,35 @@
 import {existsSync, statSync} from 'node:fs'
-import {cp, mkdir, readdir, readFile, writeFile} from 'node:fs/promises'
+import {cp, mkdir, readdir, readFile, readlink, symlink, unlink, writeFile} from 'node:fs/promises'
 import {fileURLToPath, pathToFileURL} from 'node:url'
 import path from 'node:path'
 import {runCommand} from './setup.mjs'
 import {setupCopy} from './setup-copy.mjs'
 import {prepareVoice} from './prepare-voice.mjs'
+
+// uv 托管的 CPython 用绝对链接指向安装目录；原样复制到暂存后，链接仍指向应用包外的
+// 构建目录。codesign --strict 把这种链接判为非法目标并拒绝封签，因此按源目录换算成
+// 包内相对链接；指向源目录外的链接无法安全映射，直接拒绝打包。
+export async function relativizeStagedLinks(stagedRoot, sourceRoot, {copy = setupCopy()} = {}) {
+  const walk = async directory => {
+    for (const entry of await readdir(directory, {withFileTypes:true})) {
+      const entryPath = path.join(directory, entry.name)
+      if (entry.isSymbolicLink()) {
+        const target = await readlink(entryPath)
+        if (!path.isAbsolute(target)) continue
+        const relative = path.relative(sourceRoot, target)
+        if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+          throw Error(copy('desktop.release.linkOutside', {path:entryPath}))
+        }
+        const mapped = path.join(stagedRoot, relative)
+        await unlink(entryPath)
+        await symlink(path.relative(path.dirname(entryPath), mapped), entryPath)
+      } else if (entry.isDirectory()) {
+        await walk(entryPath)
+      }
+    }
+  }
+  await walk(stagedRoot)
+}
 
 // 导入时不安装或写入；命令行与隔离回归调用同一准备流程。
 export async function prepareRelease({root = fileURLToPath(new URL('../', import.meta.url)),
@@ -52,6 +77,7 @@ export async function prepareRelease({root = fileURLToPath(new URL('../', import
   // 因此不生效，pywintypes 无法导入。让暂存 site 目录按 site 语义加载自身，保证打包运行时与构建自检一致。
   await writeFile(path.join(staging, 'site', 'sitecustomize.py'), 'import os, site\nsite.addsitedir(os.path.dirname(os.path.abspath(__file__)))\n')
   await cp(pythonRoot, path.join(staging, 'python'), {recursive:true, dereference:false})
+  await relativizeStagedLinks(path.join(staging, 'python'), pythonRoot, {copy})
   await cp(path.join(root, 'web', 'dist'), path.join(staging, 'web'), {recursive:true})
   // 系统技能目录可选：当前检出允许不附带预装技能，目录缺失或非目录时跳过而不是失败。
   const systemSkills = path.join(root, '.harness', 'skills')

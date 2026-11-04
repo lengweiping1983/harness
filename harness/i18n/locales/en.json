@@ -8485,6 +8485,7 @@
   "ui.desktop.menu.updateIntegrityFailed": "Update verification failed or the release has no SHA-256 digest. The installed application has not been replaced.",
   "ui.desktop.menu.updateInstallLocation": "Move Harness to a writable Applications folder and reopen it before updating.",
   "desktop.release.signatureInvalid": "The macOS app bundle is not fully sealed. Packaging stopped; see the original code-signing error.",
+  "desktop.release.linkOutside": "The bundled Python runtime contains a symbolic link pointing outside the app bundle: {path}. Rebuild with a fresh .run/desktop-release.",
   "ui.desktop.menu.updateCurrentSignatureInvalid": "The installed app signature is damaged. Download and reinstall the official DMG, then check for updates again.",
   "ui.imageActions.clipboardDeniedDesktop": "Harness could not write to the clipboard. Focus the Harness window and click Copy again. If it still fails, save the image as a file; no Screen Recording or Accessibility permission is needed for copying.",
   "ui.imageActions.clipboardDeniedBrowser": "Clipboard access was denied. Keep this page focused, open the site controls beside the address bar and allow Clipboard if available, then click Copy again. Use HTTPS or localhost; you can also save the image as a file."

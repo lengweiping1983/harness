@@ -8485,6 +8485,7 @@
   "ui.desktop.menu.updateIntegrityFailed": "更新校验失败，或发行资产缺少 SHA-256 摘要。当前应用尚未替换。",
   "ui.desktop.menu.updateInstallLocation": "请将 Harness 移至可写的应用程序目录，重新打开后再更新。",
   "desktop.release.signatureInvalid": "macOS 应用未完成完整封签，已停止打包；请查看原始签名错误。",
+  "desktop.release.linkOutside": "内置 Python 运行时包含指向应用包外的符号链接：{path}。请使用全新的 .run/desktop-release 重新打包。",
   "ui.desktop.menu.updateCurrentSignatureInvalid": "当前应用的签名已损坏。请下载官方 DMG 重新安装，再检查更新。",
   "ui.imageActions.clipboardDeniedDesktop": "Harness 无法写入剪贴板。请切回 Harness 窗口，再点击“复制”；仍失败时可将图片另存为文件。复制图片不需要授予屏幕录制或辅助功能权限。",
   "ui.imageActions.clipboardDeniedBrowser": "剪贴板访问被拒绝。请保持页面在前台，在地址栏旁的站点设置中允许剪贴板权限（若有该选项），再点击“复制”。请使用 HTTPS 或 localhost，也可将图片另存为文件。"
