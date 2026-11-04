@@ -129,7 +129,7 @@ class SubagentBatchWaitTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(getattr(state, '_wait_consumed', False))
 
     async def test_finalization_original_errors_are_not_observation_timeouts(self):
-        for error in (ValueError('original value'), TimeoutError('original timeout')):
+        for error in (ValueError('original value'), TimeoutError('original timeout'), KeyError('original lookup')):
             future = asyncio.get_running_loop().create_future()
             future.set_exception(error)
             state = self.member('failed-finalization', status='completed')
@@ -139,6 +139,39 @@ class SubagentBatchWaitTests(unittest.IsolatedAsyncioTestCase):
                     await self.tool.execute({'agent_ids': [state.id], 'timeout': timeout}, self.context)
                 self.assertIs(caught.exception, error)
                 self.assertFalse(getattr(state, '_wait_consumed', False))
+
+    async def test_single_wait_preserves_cleanup_lookup_error(self):
+        original = KeyError('original cleanup lookup')
+        future = asyncio.get_running_loop().create_future()
+        future.set_exception(original)
+        state = self.member('lookup-failed', status='completed')
+        state.finalization_task = future
+        tool = next(tool for tool in build_subagent_tools(self.manager) if tool.schema.name == 'wait_agent')
+        session = Mock()
+        session.agent_messages.pending.return_value = []
+        session.agent_messages.wait_pending = asyncio.Event().wait
+        for inbox in (None, session):
+            self.manager.session_for = lambda _: inbox
+            for timeout in (0, 1):
+                with self.subTest(inbox=inbox is not None, timeout=timeout), self.assertRaises(KeyError) as caught:
+                    await tool.execute({'agent_id': state.id, 'timeout': timeout}, self.context)
+                self.assertIs(caught.exception, original)
+                self.assertFalse(getattr(state, '_wait_consumed', False))
+
+    async def test_missing_targets_still_use_the_localized_unavailable_error(self):
+        single = next(tool for tool in build_subagent_tools(self.manager) if tool.schema.name == 'wait_agent')
+        self.manager.wait = AsyncMock(wraps=self.manager.wait)
+        self.manager.wait_many = AsyncMock(wraps=self.manager.wait_many)
+        for language in ('en', 'zh-CN', 'en'):
+            with current_language.set(language):
+                for tool, arguments in ((single, {'agent_id': 'missing'}),
+                                        (self.tool, {'agent_ids': ['missing']})):
+                    with self.subTest(language=language, tool=tool.schema.name), self.assertRaises(ToolExecutionError) as caught:
+                        await tool.execute(arguments, self.context)
+                    self.assertEqual(caught.exception.message,
+                                     tr('python.subagent_tools.aebb26001e55', agent_id='missing'))
+        self.manager.wait.assert_not_awaited()
+        self.manager.wait_many.assert_not_awaited()
 
     async def test_interrupted_execution_with_confirmed_cleanup_is_a_failed_snapshot(self):
         task = asyncio.create_task(asyncio.sleep(1))

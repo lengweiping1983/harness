@@ -153,24 +153,21 @@ def build_subagent_tools(manager: SubagentManager, *, agent_persona: Any = None,
             data = {'incoming_messages': len(receipts), 'receipts': receipts}
             return ToolResult(content=[TextBlock(text=tr('agent.message.pending_count', count=len(receipts)))],
                               display=data, data=data)
-        try:
-            target(agent_id, ctx)
-            session = manager.session_for(ctx.session_id)
-            if session is None:
-                state = await manager.wait(agent_id, timeout=wait)
-            else:
-                waiting = asyncio.create_task(manager.wait(agent_id, timeout=wait))
-                incoming = asyncio.create_task(session.agent_messages.wait_pending())
-                try:
-                    await asyncio.wait((waiting, incoming), return_when=asyncio.FIRST_COMPLETED)
-                    state = waiting.result() if waiting.done() else manager.get(agent_id)
-                finally:
-                    for pending in (waiting, incoming):
-                        if not pending.done():
-                            pending.cancel()
-                    await asyncio.gather(waiting, incoming, return_exceptions=True)
-        except KeyError:
-            raise ToolExecutionError(tr('python.subagent_tools.aebb26001e55', agent_id=agent_id)) from None
+        target(agent_id, ctx)
+        session = manager.session_for(ctx.session_id)
+        if session is None:
+            state = await manager.wait(agent_id, timeout=wait)
+        else:
+            waiting = asyncio.create_task(manager.wait(agent_id, timeout=wait))
+            incoming = asyncio.create_task(session.agent_messages.wait_pending())
+            try:
+                await asyncio.wait((waiting, incoming), return_when=asyncio.FIRST_COMPLETED)
+                state = waiting.result() if waiting.done() else manager.get(agent_id)
+            finally:
+                for pending in (waiting, incoming):
+                    if not pending.done():
+                        pending.cancel()
+                await asyncio.gather(waiting, incoming, return_exceptions=True)
         raise_cleanup_errors(manager._wait_errors(state))
         data = state.to_dict()
         data['settled'] = state.settled
@@ -200,12 +197,9 @@ def build_subagent_tools(manager: SubagentManager, *, agent_persona: Any = None,
             wait = min(validate_wait_timeout(args.get('timeout', DEFAULT_WAIT_TIMEOUT)), MAX_WAIT_TIMEOUT)
         except ValueError as exc:
             raise ToolExecutionError(str(exc)) from exc
-        try:
-            for agent_id in agent_ids:
-                target(agent_id, ctx)
-            states = await manager.wait_many(agent_ids, timeout=wait)
-        except KeyError as exc:
-            raise ToolExecutionError(tr('python.subagent_tools.aebb26001e55', agent_id=str(exc.args[0]))) from None
+        for agent_id in agent_ids:
+            target(agent_id, ctx)
+        states = await manager.wait_many(agent_ids, timeout=wait)
         snapshots = [{**subagent_summary(state), 'settled': state.settled} for state in states]
         for state in states:
             if state.settled:
