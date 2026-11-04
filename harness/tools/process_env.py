@@ -40,6 +40,20 @@ _EXECUTION_SECRET_NAMES = {
     "KUBECONFIG",
     "SSH_AUTH_SOCK",
 }
+_EXECUTION_INJECTION_NAMES = {
+    "BASH_ENV",
+    "ENV",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "PERL5OPT",
+    "PROMPT_COMMAND",
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "RUBYOPT",
+}
 
 
 def execution_env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -53,13 +67,15 @@ def execution_env(extra: dict[str, str] | None = None) -> dict[str, str]:
         key: value
         for key, value in source.items()
         if key.upper() not in _EXECUTION_SECRET_NAMES
+        and key.upper() not in _EXECUTION_INJECTION_NAMES
         and not any(marker in key.upper() for marker in _EXECUTION_SECRET_MARKERS)
     }
     if extra:
         for key, value in extra.items():
             name = str(key)
             upper = name.upper()
-            if upper in _EXECUTION_SECRET_NAMES or any(marker in upper for marker in _EXECUTION_SECRET_MARKERS):
+            if (upper in _EXECUTION_SECRET_NAMES or upper in _EXECUTION_INJECTION_NAMES
+                    or any(marker in upper for marker in _EXECUTION_SECRET_MARKERS)):
                 continue
             env[name] = str(value)
     return utf8_env(env)

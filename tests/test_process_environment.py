@@ -25,6 +25,8 @@ class ProcessEnvironmentTests(unittest.TestCase):
             'AWS_SECRET_ACCESS_KEY': 'host-secret',
             'GOOGLE_APPLICATION_CREDENTIALS': '/host/credentials.json',
             'SSH_AUTH_SOCK': '/tmp/agent.sock',
+            'NODE_OPTIONS': '--require=/host/inject.js',
+            'PYTHONPATH': '/host/inject',
             'PUBLIC_SETTING': 'kept',
         }, clear=True):
             env = execution_env({
@@ -37,7 +39,8 @@ class ProcessEnvironmentTests(unittest.TestCase):
         self.assertEqual(env['PUBLIC_EXTRA'], 'kept-extra')
         self.assertEqual(env['HARNESS_SESSION'], 'session')
         for name in ('OPENAI_API_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY',
-                     'GOOGLE_APPLICATION_CREDENTIALS', 'SSH_AUTH_SOCK', 'GITHUB_TOKEN'):
+                     'GOOGLE_APPLICATION_CREDENTIALS', 'SSH_AUTH_SOCK', 'GITHUB_TOKEN',
+                     'NODE_OPTIONS', 'PYTHONPATH'):
             self.assertNotIn(name, env)
 
     def test_active_owners_excludes_only_settled_jobs(self):
