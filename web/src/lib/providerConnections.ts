@@ -11,9 +11,14 @@ export const newProviderKey = (): ProviderKey => ({id: newIdentity(), value: '',
 export const newProviderModel = (value: string, source?: CatalogModel): ProviderModel => ({id: newIdentity(), model: value, name: source?.name || value, enabled: true, input: source?.input || ['text'], ...(source?.contextWindow ? {context_window: source.contextWindow} : {}), ...(source?.maxTokens ? {max_output_tokens: source.maxTokens} : {}), ...(source?.thinkingLevelMap ? {reasoning_efforts: source.thinkingLevelMap} : source?.reasoningEfforts?.length ? {reasoning_efforts: Object.fromEntries(source.reasoningEfforts.map(level => [level, level === 'off' ? null : level]))} : {})})
 export const maskProviderKey = (value: string) => value ? value.length > 4 ? '******' + value.slice(-4) : '******' : ''
 export function newProviderConnection(template: ProviderTemplate): ProviderConnection {
-  const authType = template.id === 'opencode-local' ? 'opencode_local' : ['amazon-bedrock', 'google-vertex'].includes(template.id) ? 'environment' : template.api_key ? 'api_key' : template.oauth ? 'oauth' : 'environment'
+  const authType = template.id === 'kilo-free' ? 'anonymous' : template.id === 'opencode-local' ? 'opencode_local' : ['amazon-bedrock', 'google-vertex'].includes(template.id) ? 'environment' : template.api_key ? 'api_key' : template.oauth ? 'oauth' : 'environment'
   return {id: newIdentity(), name: template.name, protocol: ['custom', 'opencode-zen'].includes(template.id) ? 'openai-completions' : '', base_url: template.base_url || '', enabled: true,
     auth: {type: authType, env: {}}, keys: authType === 'api_key' ? [newProviderKey()] : [], models: []}
+}
+/** 已添加的免费渠道直接编辑原配置，避免重复保存一份相同渠道。 */
+export function providerDraftForTemplate(template: ProviderTemplate, providers: readonly ModelProvider[]): ModelProvider {
+  const existing = template.id === 'kilo-free' ? providers.find(provider => provider.type === template.id) : undefined
+  return existing ? structuredClone(existing) : {id: newIdentity(), type: template.id, name: template.name, connections: [newProviderConnection(template)]}
 }
 export function providerPayload(providers: ModelProvider[]) {
   return providers.map(provider => ({...provider, connections: provider.connections.map(connection => ({...connection,

@@ -93,7 +93,7 @@ def hashlib_device(home):
 
 def discovery_protocol(template, kind):
     """内置供应商按目录中的统一协议探测，协议混杂或无法识别时只使用内置目录。"""
-    if kind in {'custom', 'deepseek-official', 'deepseek-account', 'openrouter', 'opencode', 'opencode-go', 'opencode-zen'}:
+    if kind in {'custom', 'deepseek-official', 'deepseek-account', 'openrouter', 'opencode', 'opencode-go', 'opencode-zen', 'kilo-free'}:
         return 'openai-completions'
     if not template or not template.get('models'):
         return ''
@@ -262,6 +262,9 @@ def build_router(ctx):
                     entries = [{'id': k, **v} for k, v in payload['models'].items() if isinstance(v, dict)]
                 else:
                     raise invalid()
+                if body['provider'] == 'kilo-free':
+                    from ...llm.kilo_free import free_models
+                    return {'models': free_models(entries), 'fallback': False}
                 models, ids = [], set()
                 for value in entries:
                     if not isinstance(value, dict) or not isinstance(value.get('id'), str) or not value['id'].strip() or value['id'] in ids:

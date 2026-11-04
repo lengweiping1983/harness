@@ -35,6 +35,15 @@ HEADERS = b'HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: cl
 IDENTITY = 'harness/supplier/endpoint/model-a'
 
 
+async def wait_for_peer_disconnect(reader, disconnected):
+    """EOF 和连接重置都证明对端断开；其他读取故障仍向上传播。"""
+    try:
+        await reader.read()
+    except ConnectionResetError:
+        pass
+    disconnected.set()
+
+
 @asynccontextmanager
 async def endpoint(respond):
     """本轮独占回环监听与连接，退出前等待每个处理协程收尾。"""
@@ -146,8 +155,7 @@ class ProviderStreamResilienceTests(unittest.IsolatedAsyncioTestCase):
     async def test_no_headers_times_out_with_recoverable_diagnostics(self):
         disconnected = asyncio.Event()
         async def respond(number, reader, writer):
-            await reader.read()
-            disconnected.set()
+            await wait_for_peer_disconnect(reader, disconnected)
         with tempfile.TemporaryDirectory() as root:
             async with endpoint(respond) as (url, requests):
                 adapter = self.adapter(root, url)
@@ -278,8 +286,7 @@ class ProviderStreamResilienceTests(unittest.IsolatedAsyncioTestCase):
             writer.write(HEADERS + b': heartbeat\n\n')
             await writer.drain()
             active.set()
-            await reader.read()
-            disconnected.set()
+            await wait_for_peer_disconnect(reader, disconnected)
         with tempfile.TemporaryDirectory() as root:
             async with endpoint(respond) as (url, requests):
                 adapter = self.adapter(root, url, timeout=5)
@@ -293,3 +300,19 @@ class ProviderStreamResilienceTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(disconnected.wait(), 3)
                 self.assertEqual(len(requests), 1)
                 self.assertEqual(adapter.provider_connections.leases, {})
+
+    async def test_disconnect_observer_accepts_reset_but_preserves_other_read_failures(self):
+        """确定性注入断连形式，不能把连接重置误报为取消未释放。"""
+        for failure in (None, ConnectionResetError('对端重置连接'), OSError('原始读取故障')):
+            with self.subTest(failure=failure):
+                disconnected = asyncio.Event()
+                reader = SimpleNamespace(read=AsyncMock(return_value=b'', side_effect=failure))
+                if failure is not None and not isinstance(failure, ConnectionResetError):
+                    with self.assertRaises(OSError) as caught:
+                        await wait_for_peer_disconnect(reader, disconnected)
+                    self.assertIs(caught.exception, failure)
+                    self.assertFalse(disconnected.is_set())
+                else:
+                    await wait_for_peer_disconnect(reader, disconnected)
+                    self.assertTrue(disconnected.is_set())
+                reader.read.assert_awaited_once_with()

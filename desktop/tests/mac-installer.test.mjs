@@ -8,6 +8,7 @@ import {EventEmitter} from 'node:events'
 import {execFile} from 'node:child_process'
 import {promisify} from 'node:util'
 import {MacInstaller, downloadInstaller, installScript} from '../mac-installer.mjs'
+import {sealDevelopmentApp, verifyMacBundle} from '../mac-signing.mjs'
 const execute = promisify(execFile)
 const bytes = Buffer.from('test installer bytes')
 const asset = {browser_download_url:'https://github.com/test/release.dmg',size:bytes.length,digest:'sha256:'+createHash('sha256').update(bytes).digest('hex')}
@@ -43,7 +44,10 @@ async function preparedFixture(t, options = {}) {
   const command = async (file,args) => {
     calls.push([file,args])
     if (options.fail?.(file,args)) throw Error('native failure')
-    if (file.endsWith('hdiutil') && args[0]==='attach') await mkdir(path.join(args[args.indexOf('-mountpoint')+1],'Harness.app'))
+    if (file.endsWith('hdiutil') && args[0]==='attach') {
+      const seal=path.join(args[args.indexOf('-mountpoint')+1],'Harness.app/Contents/_CodeSignature')
+      await mkdir(seal,{recursive:true});if (!options.unsealedSource) await writeFile(path.join(seal,'CodeResources'),'fixture seal')
+    }
     if (file.endsWith('PlistBuddy')) return {stdout:args[1].includes('CFBundleIdentifier')?'test.harness':args[1].includes('CFBundleExecutable')?'Harness':'1.2.3',stderr:''}
     if (file.endsWith('codesign') && args[0]==='-d') return {stdout:'',stderr:options.adhoc?'# designated => cdhash H"old"\nSignature=adhoc\n':'designated => identifier "test.harness"\n'}
     if (file.endsWith('ditto')) await cp(args[0],args[1],{recursive:true})
@@ -134,7 +138,11 @@ test('native macOS DMG preparation mounts, checks actual ad hoc signatures, stag
   await writeFile(path.join(bundle,'Contents/Info.plist'),`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict><key>CFBundleIdentifier</key><string>test.harness.update</string><key>CFBundleExecutable</key><string>Harness</string><key>CFBundleShortVersionString</key><string>1.2.3</string><key>CFBundleVersion</key><string>1.2.3</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>`)
-  await execute('/usr/bin/codesign',['--force','--sign','-',bundle])
+  const unsealed=path.join(root,'Unsealed.app');await cp(bundle,unsealed,{recursive:true})
+  await assert.rejects(execute('/usr/bin/codesign',['--verify','--deep','--strict',unsealed]))
+  const context={electronPlatformName:'darwin',appOutDir:source,packager:{config:{},appInfo:{id:'test.harness.update',productFilename:'Harness'}}}
+  await sealDevelopmentApp(context)
+  await verifyMacBundle(context)
   const target=path.join(root,'Harness.app');await cp(bundle,target,{recursive:true})
   const image=path.join(root,'update.dmg')
   await execute('/usr/bin/hdiutil',['create','-srcfolder',source,'-volname','HarnessUpdateTest','-format','UDZO',image],{timeout:120000})
@@ -147,6 +155,12 @@ test('native macOS DMG preparation mounts, checks actual ad hoc signatures, stag
   const mounts=await execute('/usr/bin/hdiutil',['info'])
   assert.ok(!mounts.stdout.includes(path.join(ready.workspace,'volume')))
   await installer.discard()
+  const recovery=new MacInstaller({appPath:unsealed,cachePath:path.join(root,'cache'),fetch:async()=>new Response(payload)})
+  const recovered=await recovery.prepare(realAsset,'1.2.3',()=>{})
+  await execute('/usr/bin/codesign',['--verify','--deep','--strict',recovered.staged])
+  // 恢复只准备新包，不能给当前安装原件修签。
+  await assert.rejects(execute('/usr/bin/codesign',['--verify','--deep','--strict',unsealed]))
+  await recovery.discard()
 })
 
 test('wrong bundle version detaches the image and combined verification and detach failures preserve both causes',async t=>{
@@ -169,4 +183,21 @@ test('failed helper launch is retained as a single failed handoff and never auto
   await assert.rejects(first,error=>error===original)
   assert.equal(installer.install('retry'),first)
   assert.equal(launches,1)
+})
+
+test('damaged sealed current app reports reinstall guidance and an invalid new seal reports integrity failure',async t=>{
+  for(const mode of ['current','new']) {
+    const {installer,target}=await preparedFixture(t,{fail:(file,args)=>file.endsWith('codesign')&&args[0]==='--verify'&&(mode==='current'?args.at(-1).endsWith('/Harness.app')&&!args.at(-1).includes('/volume/'):args.at(-1).includes('/volume/'))})
+    await assert.rejects(installer.prepare(asset,'1.2.3',()=>{}),error=>error.menuKey===(mode==='current'?'updateCurrentSignatureInvalid':'updateIntegrityFailed')&&error.cause.message==='native failure')
+    assert.equal(installer.prepared,null)
+    assert.ok(await lstat(target))
+  }
+})
+
+test('an incoming app without a resource seal is rejected even if a native signature command would succeed',async t=>{
+  const {installer,calls}=await preparedFixture(t,{unsealedSource:true})
+  await assert.rejects(installer.prepare(asset,'1.2.3',()=>{}),error=>error.menuKey==='updateIntegrityFailed'&&error.cause.code==='ENOENT')
+  assert.equal(installer.prepared,null)
+  assert.equal(calls.some(([file])=>file.endsWith('ditto')),false)
+  assert.equal(calls.at(-1)[1][0],'detach')
 })

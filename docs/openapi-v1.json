@@ -28946,7 +28946,8 @@
               "api_key",
               "oauth",
               "environment",
-              "opencode_local"
+              "opencode_local",
+              "anonymous"
             ]
           },
           "env": {

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { ArrowUpRight, Check, Circle, Crop, Download, Grid2X2, Pencil, Redo2, Square, Trash2, Type, Undo2, X } from 'lucide-react'
 import { canvasBlob, captureRect, screenshotName, ScreenshotError, type Point, type CaptureRect } from '@/lib/screenshot'
 import { constrainPoint, drawAnnotation, renderScreenshot, type Annotation, type AnnotationTool } from '@/lib/screenshotAnnotations'
+import {ResourceError, failureText} from '@/lib/resourceError'
 import { copyPng } from '@/lib/imageActions'
 import { useAppStore } from '@/store/app'
 import { noticeText } from '@/lib/noticeText'
@@ -145,14 +146,15 @@ export function ScreenshotCrop({ source, initialFullSelection = false, onConfirm
       ctx.drawImage(full, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height)
       const pendingBlob = canvasBlob(output)
       // 在用户点击完成时申请剪贴板写入，等待同一张最终 PNG 编码完成。
-      const copied = download ? null : copyPng(pendingBlob).then(() => true, () => false)
+      const copied = download ? null : copyPng(pendingBlob).then(() => null, cause => cause instanceof ResourceError ? failureText(cause) : {key:'ui.screenshot.copyFailed'})
       const blob = await pendingBlob
       if (download) {
         const link = document.createElement('a'), destination = URL.createObjectURL(blob)
         link.href = destination; link.download = screenshotName(); link.click()
         setTimeout(() => URL.revokeObjectURL(destination), 1000)
       } else {
-        if (!await copied) toast({ title: {key: 'ui.screenshot.copyFailed'}, tone: 'warn' })
+        const copyFailure = await copied
+        if (copyFailure) toast({ title: copyFailure, tone: 'warn' })
         await onConfirm(new File([blob], screenshotName(), { type: 'image/png' }))
       }
     } catch (cause) { setError(cause instanceof ScreenshotError ? {key: cause.key} : cause instanceof Error ? cause.message : {key: 'ui.components.chat.ScreenshotCrop.6c0e6bdc3951'}) }

@@ -40,6 +40,8 @@ node desktop/launch.mjs --prepare-only
 
 未获授权时不隐藏截图窗口、不读取截图或打开录音设备，显示可随界面语言切换的授权指引。跨应用听写缺少辅助功能权限时直接打开该设置，授权后再次按原快捷键开始；已开始转写期间权限被撤销则仍保留剪贴板回退。内嵌网页仍先取得所属页面与来源的网站授权，再申请系统设备权限；导航、切换对话或隐藏后的迟到系统回执不能授予旧页面。网页模式的本机 macOS 截图也在捕获和隐藏窗口前引导屏幕录制／辅助功能授权；普通浏览器的屏幕共享及录音沿浏览器权限入口重试，无法由网页直接打开系统设置时显示地址栏权限和系统设置指引。
 
+主窗口的同源顶层页面允许 `clipboard-sanitized-write`，不授予剪贴板读取、子框架或第三方网页写入；语音窗口仍只允许原有音频权限。图片复制使用浏览器的 PNG 剪贴板写入接口，在点击时发起请求。桌面拒绝时提示切回 Harness 再点击复制，并提供另存为的退路；普通网页拒绝时说明地址栏站点剪贴板设置及 HTTPS／localhost 要求。复制图片不需要屏幕录制或辅助功能权限，不跳转到无关系统隐私设置；截图捕获本身仍按上文申请屏幕权限。非权限错误不误报为缺少授权，不自动重试写入；图片编码和 HTTP 读取错误保留各自资源身份，截图复制失败仍添加原附件。
+
 截图 IPC 使用显式资源型失败回执，用户提示不直接显示命令、临时路径或 Electron 包装错误；原诊断留在主进程日志。窗口恢复未确认仍阻止新截图，不能将恢复失败当作权限不足而重新捕获。上述流程的跨平台系统弹窗、设置跳转及安装包权限身份仍需实机验收。
 
 网站对话框的私有 Electron 事件接管集中在 `dialogs.mjs`。仅在存在一个默认处理器时替换该处理器；事件结构不支持时记录警告并保留 Electron 默认行为，标签继续创建。此时原生对话框不进入 Harness 的对话框状态，自动化不能通过桥接作答；默认处理能力由 Electron 决定。
@@ -166,13 +168,17 @@ npm --prefix desktop run package
 
 启动时静默检查稳定版更新，帮助菜单支持手动检查。当前 GitHub 来源直接读取最新稳定 Release，按当前系统及 CPU 选择 DMG／EXE，不依赖 ZIP、blockmap 或 `latest-mac.yml`。已安装版本等于或高于公开版本时显示无较新版本；没有可读取的稳定发行、缺少对应平台安装包、发行数据异常及 HTTP／网络故障分别呈现，不将本地尚未发布的版本误报为网络失败。
 
+更新检查与 GitHub 安装包下载共用独立的内存 Electron 网络会话，使用 Chromium 的系统代理／PAC 设置，不借用第三方网页的 Cookie，且不缓存更新响应。Chromium 在收到响应前出现 DNS 解析失败时，先核对当前代理路由；仅在明确为单独 `DIRECT` 时，使用 Node 的解析与请求路径尝试同一次只读 GET，复用原超时和取消信号。配置了代理、代理解析失败、证书失败、HTTP 拒绝或正文传输已经开始时，不绕过代理、不关闭证书校验，也不自动重放传输。
+
+网络失败分别显示 DNS、代理、证书、离线、超时或连接中断原因，保留服务器域名与原始诊断；手动入口提供“重试”“打开网络设置”和官方发布页。重试由用户选择后重新检查，下载仍须确认；不会重放安装。启动时的静默检查失败只记录诊断。真实 DNS／代理仍受本机环境影响，替代路径也失败时保持失败状态，不能显示为已是最新版。
+
 macOS 发现新版后，用户选择下载，由 Harness 自己流式下载当前 CPU 对应的 DMG，不打开浏览器。帮助菜单显示实际传输百分比，Dock 显示进度；下载完成后继续验证和准备，准备成功才显示“退出并安装”。下载与检查共享在途状态，重复点击不启动第二次传输。准备完成后可选择“稍后”，本次运行内再次点击帮助菜单即可安装；普通退出不会安装未确认的更新，会释放本次下载和暂存，下次启动重新检查。
 
 macOS 安装流程：
 
 1. 运行于可写的已安装 `.app` 目录；从 DMG 挂载卷、App Translocation 或不可写目录运行时拒绝更新，提示先移动并重新打开应用，不隐式提权。
 2. 下载写入 `~/Library/Caches/Harness/updates/` 下本次独占目录。按 GitHub Release asset 的 `size` 和 `digest` 核对完整大小及 SHA-256；摘要缺失、断流、超长或不匹配都不能进入安装。
-3. 只读挂载 DMG，核对 `Harness.app` 的 Bundle ID、目标版本和可执行文件 CPU 架构。验证当前与新应用的完整代码签名；有证书的当前应用还要求新应用满足其 designated requirement。当前包为 ad hoc 签名时不固定旧版代码哈希，仍验证新包完整签名和发行摘要；完全未签名包不支持此流程。复制到安装目录旁的独占暂存目录，再次校验签名并卸载镜像。
+3. 只读挂载 DMG，核对 `Harness.app` 的 Bundle ID、目标版本和可执行文件 CPU 架构。新应用必须具有 `Contents/_CodeSignature/CodeResources`，并通过完整签名验证；有证书的当前应用还要求新应用满足其 designated requirement。无证书的完整 ad hoc 签名包也支持更新，不固定旧版代码哈希。仅当当前包明确为 ad hoc、linker-signed、Info.plist 未绑定且资源封套不存在时，允许将其替换为摘要和完整签名均已验证的新包；这属于无资源封套的安装故障恢复，不给旧包重新签名，也不接受无封套的新包。其他签名损坏报错并引导从官方 DMG 重新安装。复制到安装目录旁的独占暂存目录，再次校验签名并卸载镜像。
 4. 用户选择“退出并安装”后沿原有未保存内容确认及后端关闭流程收尾。取消离开则取消本次安装意图；关闭失败不启动安装。辅助进程受理后等待原主进程实际退出（最多 120 秒），复核目标目录身份，再将旧应用移至本次暂存目录的 `previous.app`，将新应用移入原位置并请求系统重新打开。
 5. 新应用移入失败时尝试恢复旧应用；失败诊断写入本次缓存目录的 `install.log`，通过安装时所选语言的系统提示呈现日志位置。旧包备份保留，不自动重放安装；重新打开请求失败只能报告失败，不能认定新版已成功启动。确认业务启动仍需实际安装包验收。
 
@@ -220,7 +226,7 @@ Windows 的 GitHub 分支仍由用户选择打开官方 EXE 下载地址，下�
 
 签名凭据按系统隔离：macOS 使用 `DESKTOP_MAC_CSC_LINK`、`DESKTOP_MAC_CSC_KEY_PASSWORD`，公证使用 `DESKTOP_APPLE_ID`、`DESKTOP_APPLE_APP_SPECIFIC_PASSWORD`、`DESKTOP_APPLE_TEAM_ID`；Windows 使用 `DESKTOP_WINDOWS_CSC_LINK`、`DESKTOP_WINDOWS_CSC_KEY_PASSWORD` 及可信 Authenticode 证书。
 
-无凭据可生成本机验收包，但不能据此宣称签名、公证、SmartScreen 信任或真实自动更新通过。GitHub macOS 流程使用上述 DMG 下载、验证和安装流程；静态更新源的 macOS 原生自动更新需要签名，对外分发还应公证。参见 [更新说明](https://www.electron.build/v26/docs/features/auto-update/)、[macOS 签名](https://www.electron.build/v26/docs/code-signing-mac/)和 [Windows 签名](https://www.electron.build/v26/docs/code-signing-win/)。
+无 Apple 证书时，macOS 构建在完整应用组装后通过 `afterPack` 生成本地 ad hoc 资源封签并立即执行 `codesign --verify --deep --strict`；封签和验证失败停止打包。正式强制证书签名的构建由 electron-builder 签名，`afterSign` 再检查资源封套和完整签名。ad hoc 不需要 Apple 账号，既不等于 Developer ID 签名，也不代表 Apple 公证或 Gatekeeper 信任；不能据本机验收包宣称公证、SmartScreen 信任或真实自动更新通过。资源封套在 DMG 内的 `.app` 中，与另行上传 ZIP、blockmap 或更新清单无关；发布仍只上传安装包。GitHub macOS 流程使用上述 DMG 下载、验证和安装流程；静态更新源的 macOS 原生自动更新需要签名，对外分发还应公证。参见 [更新说明](https://www.electron.build/v26/docs/features/auto-update/)、[macOS 签名](https://www.electron.build/v26/docs/code-signing-mac/)和 [Windows 签名](https://www.electron.build/v26/docs/code-signing-win/)。
 
 后续发布先更新 `desktop/package.json` 版本及 npm 锁文件，再构建；旧运行时会被版本闸拒绝。更新 Python 依赖锁的命令：
 

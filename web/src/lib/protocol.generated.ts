@@ -2026,7 +2026,7 @@ export interface AcademyTutorRequest {
   comparison_run_id?: string
 }
 export interface ProviderAuth {
-  type: 'api_key' | 'oauth' | 'environment' | 'opencode_local'
+  type: 'api_key' | 'oauth' | 'environment' | 'opencode_local' | 'anonymous'
   env: Record<string, string>
   configured?: boolean
   authorization_id?: string

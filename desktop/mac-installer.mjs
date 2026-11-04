@@ -105,20 +105,35 @@ export class MacInstaller {
         const currentPlist = path.join(target, 'Contents/Info.plist')
         if (await value(plist, 'CFBundleIdentifier') !== await value(currentPlist, 'CFBundleIdentifier') || await value(plist, 'CFBundleShortVersionString') !== version) throw new InstallerFailure('updateInvalidRelease')
         // 保持当前安装包的签名要求；不通过关闭签名校验来安装更新。
-        const signature = await this.command('/usr/bin/codesign', ['-d', '-r-', '--verbose=4', target])
+        let signature
+        try {signature = await this.command('/usr/bin/codesign', ['-d', '-r-', '--verbose=4', target])}
+        catch (cause) {throw new InstallerFailure('updateCurrentSignatureInvalid', cause)}
         const requirement = (signature.stderr + signature.stdout).split('\n').find(line => line.startsWith('designated => '))?.slice(14)
         const adhoc = (signature.stderr + signature.stdout).includes('Signature=adhoc')
         if (!requirement && !adhoc) throw new InstallerFailure('updateIntegrityFailed')
-        await this.command('/usr/bin/codesign', ['--verify', '--deep', '--strict', target])
+        // 无资源封套的 linker 签名不是有效应用签名；只允许替换为已验证的新包，绝不修签旧包。
+        let unsealedLinker = false
+        if (adhoc && (signature.stderr + signature.stdout).includes('linker-signed') && (signature.stderr + signature.stdout).includes('Sealed Resources=none') && (signature.stderr + signature.stdout).includes('Info.plist=not bound')) {
+          try {await lstat(path.join(target, 'Contents/_CodeSignature/CodeResources'))}
+          catch (error) {if (error.code === 'ENOENT') unsealedLinker = true; else throw error}
+        }
+        if (!unsealedLinker) {
+          try {await this.command('/usr/bin/codesign', ['--verify', '--deep', '--strict', target])}
+          catch (cause) {throw new InstallerFailure('updateCurrentSignatureInvalid', cause)}
+        }
         const signatureArgs = adhoc ? [] : ['-R', requirement]
-        await this.command('/usr/bin/codesign', ['--verify', '--deep', '--strict', ...signatureArgs, source])
+        try {
+          await access(path.join(source, 'Contents/_CodeSignature/CodeResources'))
+          await this.command('/usr/bin/codesign', ['--verify', '--deep', '--strict', ...signatureArgs, source])
+        } catch (cause) {throw new InstallerFailure('updateIntegrityFailed', cause)}
         const executable = await value(plist, 'CFBundleExecutable')
         if (!/^[A-Za-z0-9._-]+$/.test(executable)) throw new InstallerFailure('updateInvalidRelease')
         await this.command('/usr/bin/lipo', [path.join(source, 'Contents/MacOS', executable), '-verify_arch', this.arch === 'arm64' ? 'arm64' : 'x86_64'])
         staging = await mkdtemp(path.join(path.dirname(target), '.harness-update-'))
         const staged = path.join(staging, 'Harness.app')
         await this.command('/usr/bin/ditto', [source, staged])
-        await this.command('/usr/bin/codesign', ['--verify', '--deep', '--strict', ...signatureArgs, staged])
+        try {await this.command('/usr/bin/codesign', ['--verify', '--deep', '--strict', ...signatureArgs, staged])}
+        catch (cause) {throw new InstallerFailure('updateIntegrityFailed', cause)}
         const backup = path.join(staging, 'previous.app')
         const script = path.join(workspace, 'install.sh')
         await writeFile(script, installScript, {mode:0o700, flag:'wx'})
