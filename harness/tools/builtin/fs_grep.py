@@ -64,7 +64,8 @@ async def search(root, args, ignores, ctx):
             proc = await spawn_owned(argv, cwd=str(worker.parent), env=execution_env())
         else:
             proc = await asyncio.create_subprocess_exec(*argv, cwd=str(worker.parent),
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
+                env=execution_env(), stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE, start_new_session=True)
         # 内部 JSON 是协议，不是用户可见的命令输出流。
         # 保留 ctx 用于记录清理失败的归属，不发布原始 JSON。
         silent_ctx = replace(ctx, services={**ctx.services, 'tool_output': None})
