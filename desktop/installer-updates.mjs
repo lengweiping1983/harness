@@ -30,7 +30,7 @@ async function readRelease(response) {
 
 /** GitHub 只发布安装包时直接读取稳定发行，不依赖 ZIP 或更新清单。 */
 export class InstallerUpdates {
-  constructor({source, version, platform = process.platform, arch = process.arch, packaged, fetch = globalThis.fetch, notify = () => {}}) {
+  constructor({source, version, platform = process.platform, arch = process.arch, packaged, fetch = globalThis.fetch, notify = () => {}, installer = null}) {
     if (!source || source.provider !== 'github' || !/^[A-Za-z0-9_-]+$/.test(source.owner) || !/^[A-Za-z0-9_.-]+$/.test(source.repo)) throw Error('Invalid update repository')
     versionParts(version)
     this.source = {...source}
@@ -40,17 +40,23 @@ export class InstallerUpdates {
     this.packaged = packaged
     this.fetch = fetch
     this.notify = notify
+    this.installer = installer
+    this.progress = null
+    this.asset = null
     this.state = packaged ? 'idle' : 'development'
     this.pending = null
     this.version = null
     this.downloadUrl = null
     this.reason = null
   }
-  snapshot() {return {state:this.state, version:this.version, progress:null, mode:'installer', downloadUrl:this.downloadUrl, reason:this.reason}}
+  snapshot() {return {state:this.state, version:this.version, progress:this.progress, mode:'installer', downloadUrl:this.downloadUrl, reason:this.reason}}
   setState(state) {this.state = state; this.notify(state)}
   check() {
     if (!this.packaged) return Promise.resolve(this.snapshot())
     if (this.pending) return this.pending
+    if (this.state === 'downloaded') return Promise.resolve(this.snapshot())
+    this.asset = null
+    this.progress = null
     this.version = this.downloadUrl = this.reason = null
     this.pending = Promise.resolve().then(async () => {
       const {owner, repo} = this.source
@@ -75,11 +81,35 @@ export class InstallerUpdates {
       const assets = release.assets.filter(asset => asset?.name === name)
       if (assets.length === 0) {this.reason = 'platform'; this.setState('unavailable'); return this.snapshot()}
       if (assets.length !== 1 || assets[0].state !== 'uploaded' || !Number.isSafeInteger(assets[0].size) || assets[0].size <= 0 || assets[0].browser_download_url !== expected) throw new UpdateFailure('updateInvalidRelease')
+      this.asset = {...assets[0]}
       this.downloadUrl = expected
       this.setState('available')
       return this.snapshot()
     }).catch(error => {this.setState('error'); throw error}).finally(() => {this.pending = null})
     this.setState('checking')
     return this.pending
+  }
+  download() {
+    if (this.pending) return this.state === 'downloading' ? this.pending : Promise.reject(new UpdateFailure('updateInvalidRelease'))
+    if (this.state !== 'available' || !this.installer || !this.asset) return Promise.reject(new UpdateFailure('updateInvalidRelease'))
+    this.progress = 0
+    this.pending = Promise.resolve().then(async () => {
+      await this.installer.prepare(this.asset, this.version, progress => {
+        if (this.progress !== progress) {this.progress = progress; this.notify(this.state)}
+      })
+      this.progress = 100
+      this.setState('downloaded')
+      return this.snapshot()
+    }).catch(error => {this.setState('error'); throw error}).finally(() => {this.pending = null})
+    this.setState('downloading')
+    return this.pending
+  }
+  async close({install = false} = {}) {
+    if (this.state === 'downloading') {
+      this.installer.cancel()
+      // 下载调用方保留原失败；退出只等待所属任务收尾。
+      await this.pending.catch(() => {})
+    }
+    if (!install) await this.installer?.discard?.()
   }
 }

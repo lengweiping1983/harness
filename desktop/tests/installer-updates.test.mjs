@@ -67,3 +67,39 @@ test('untrusted downloads, malformed versions, draft releases and oversized meta
   }
   await assert.rejects(fixture(null,{fetch:async()=>Response.json({extra:'a'.repeat(1024*1024+1)})}).updates.check(),error=>error.menuKey==='updateMetadataTooLarge')
 })
+
+test('managed mac download shares one operation, reports real progress and retains ready update across checks',async()=>{
+  let finish,prepares=0
+  const installer={prepare:async(asset,version,progress)=>{
+    prepares++;assert.equal(asset.size,123);assert.equal(version,'0.1.3');progress(37)
+    await new Promise(resolve=>{finish=resolve})
+  }}
+  const {updates,calls}=fixture(undefined,{installer})
+  await updates.check()
+  const first=updates.download()
+  assert.equal(updates.download(),first)
+  assert.equal(updates.check(),first)
+  await Promise.resolve()
+  assert.equal(updates.progress,37)
+  assert.equal(updates.state,'downloading')
+  finish();await first
+  assert.equal(updates.state,'downloaded')
+  assert.equal(updates.progress,100)
+  assert.equal((await updates.check()).state,'downloaded')
+  assert.equal(prepares,1);assert.equal(calls.length,1)
+})
+
+test('managed download failures never report ready and close cancels and joins the original operation',async()=>{
+  let fail,cancelled=0,discarded=0
+  const original=Error('transfer failed')
+  const installer={prepare:()=>new Promise((_resolve,reject)=>{fail=reject}),cancel:()=>{cancelled++;fail(original)},discard:async()=>{discarded++}}
+  const {updates}=fixture(undefined,{installer})
+  await assert.rejects(updates.download())
+  await updates.check()
+  const action=updates.download()
+  await Promise.resolve()
+  const observed=assert.rejects(action,error=>error===original)
+  await updates.close();await observed
+  assert.equal(cancelled,1);assert.equal(discarded,1)
+  assert.equal(updates.state,'error');assert.equal(updates.pending,null)
+})

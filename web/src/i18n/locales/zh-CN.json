@@ -4913,5 +4913,10 @@
   "ui.collaboration.error.screenshot/permission-required": "已打开屏幕录制设置。允许用于运行 Harness 的应用后再次点击截图；如果 macOS 提示需要重启，请重启该应用。",
   "ui.collaboration.error.screenshot/accessibility-required": "已打开辅助功能设置。允许用于运行 Harness 的应用后再次点击隐藏窗口截图。",
   "ui.collaboration.error.screenshot/permission-settings-failed": "未能打开授权入口，请再次点击此功能申请权限。",
-  "ui.voice.backendMismatch": "当前后端缺少语音接口。请重启 Harness，并确认应用与后端使用相同版本。"
+  "ui.voice.backendMismatch": "当前后端缺少语音接口。请重启 Harness，并确认应用与后端使用相同版本。",
+  "ui.desktop.menu.updateMacInstallerDetail": "{version} 版。Harness 将下载并校验更新，再由你确认退出、安装和重启，保留现有数据。",
+  "ui.desktop.menu.updateMacDownloaded": "更新已校验并准备就绪。选择“退出并安装”重启到新版，或选择“稍后”继续工作。",
+  "ui.desktop.menu.updateInstallFailed": "安装未能完成。请保留旧应用，查看更新日志后再处理，不要直接重复安装。",
+  "ui.desktop.menu.updateIntegrityFailed": "更新校验失败，或发行资产缺少 SHA-256 摘要。当前应用尚未替换。",
+  "ui.desktop.menu.updateInstallLocation": "请将 Harness 移至可写的应用程序目录，重新打开后再更新。"
 }

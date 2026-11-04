@@ -8478,5 +8478,10 @@
   "desktop.release.cameraUsage": "Harness 仅在你授权网站使用摄像头时访问摄像头。",
   "ui.voice.backendMismatch": "当前后端缺少语音接口。请重启 Harness，并确认应用与后端使用相同版本。",
   "superagent.cli.control-receipt": "只读核对原暂停、继续或取消回执，不启动运行器。",
-  "superagent.control-capacity": "Superagent 控制历史已达到 1024 条请求的上限。已有回执保持不变，本次未接受新的控制意图。"
+  "superagent.control-capacity": "Superagent 控制历史已达到 1024 条请求的上限。已有回执保持不变，本次未接受新的控制意图。",
+  "ui.desktop.menu.updateMacInstallerDetail": "{version} 版。Harness 将下载并校验更新，再由你确认退出、安装和重启，保留现有数据。",
+  "ui.desktop.menu.updateMacDownloaded": "更新已校验并准备就绪。选择“退出并安装”重启到新版，或选择“稍后”继续工作。",
+  "ui.desktop.menu.updateInstallFailed": "安装未能完成。请保留旧应用，查看更新日志后再处理，不要直接重复安装。",
+  "ui.desktop.menu.updateIntegrityFailed": "更新校验失败，或发行资产缺少 SHA-256 摘要。当前应用尚未替换。",
+  "ui.desktop.menu.updateInstallLocation": "请将 Harness 移至可写的应用程序目录，重新打开后再更新。"
 }

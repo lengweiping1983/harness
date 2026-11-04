@@ -8,6 +8,8 @@ import {desktopQuit} from './quit.mjs'
 import updaterPackage from 'electron-updater'
 import {DesktopUpdates} from './updates.mjs'
 import {InstallerUpdates} from './installer-updates.mjs'
+import {MacInstaller} from './mac-installer.mjs'
+import {updateDialogOptions} from './update-dialogs.mjs'
 import {readFileSync} from 'node:fs'
 import {DesktopVoice, voiceReply} from './voice.mjs'
 import {applicationMenu, attachMenuLifecycle, configureMenuDefaults} from './application-menu.mjs'
@@ -42,17 +44,29 @@ async function startDesktop() {
   let bridge
   let fastCapture
   let voice
+  let updates
+  let installRequested = false
+  let menuText = null
   const systemPermissions = new SystemPermissions({systemPreferences, desktopCapturer, shell})
   const quit = desktopQuit({app, getWindow: () => window,
     cleanup: async () => {
-      downloads?.close()
-      try {await voice?.close()}
-      finally {try {await backend?.close()}
-      finally {
-        try {await bridge?.close()}
-        finally {fastCapture?.close()}
-      }}
-    }, onError: error => console.error('Desktop cleanup failed:', error)})
+      const failures = []
+      for (const close of [() => updates?.close?.({install:installRequested}), () => downloads?.close(),
+        () => voice?.close(), () => backend?.close(), () => bridge?.close(), () => fastCapture?.close()]) {
+        try {await close()} catch (error) {failures.push(error)}
+      }
+      if (failures.length === 1) throw failures[0]
+      if (failures.length) throw new AggregateError(failures, failures.map(error => error.message).join('\n'))
+    }, beforeQuit:async ({cleanupFailed}) => {
+      if (installRequested && cleanupFailed) throw Error(menuText.updateInstallFailed)
+      if (installRequested) await updates.installer.install(menuText.updateInstallFailed)
+    }, onError: error => {
+      console.error('Desktop cleanup failed:', error)
+      if (installRequested) {
+        installRequested = false
+        dialog.showErrorBox('Harness', `${menuText.updateInstallFailed}\n${error.message}`)
+      }
+    }})
   let downloads
   const browser = createBrowserRuntime({app, WebContentsView, ipcMain, session, shell, Menu, clipboard, systemPermissions, getWindow:() => window, getDownloads:() => downloads, getBackend:() => backend, getOrigin:() => origin, getMenuText:() => menuText})
   await app.whenReady()
@@ -115,8 +129,11 @@ async function startDesktop() {
   }))
   let menuReady = false
   const metadata = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
-  const updates = metadata.harnessUpdateSource?.provider === 'github'
-    ? new InstallerUpdates({source:metadata.harnessUpdateSource, version:app.getVersion(), packaged:app.isPackaged, notify:() => installMenu(menuReady)})
+  updates = metadata.harnessUpdateSource?.provider === 'github'
+    ? new InstallerUpdates({source:metadata.harnessUpdateSource, version:app.getVersion(), packaged:app.isPackaged, installer:process.platform === 'darwin' ? new MacInstaller({appPath:path.resolve(path.dirname(app.getPath('exe')), '../..'), cachePath:path.join(app.getPath('home'), 'Library', 'Caches', 'Harness', 'updates')}) : null, notify:() => {
+      if (!window.isDestroyed()) window.setProgressBar(updates.state === 'downloading' ? (updates.progress || 0) / 100 : -1)
+      installMenu(menuReady)
+    }})
     : new DesktopUpdates({updater:updaterPackage.autoUpdater, nativeUpdater:process.platform === 'darwin' ? nativeAutoUpdater : null, packaged:app.isPackaged, notify:() => installMenu(menuReady)})
   let updateDialog = false
   async function showUpdates() {
@@ -125,17 +142,16 @@ async function startDesktop() {
     const message = async key => dialog.showMessageBox(window, {type:'info', title:'Harness', message:formatDesktopText(menuText[key]), buttons:[menuText.ok]})
     async function showDownloaded() {
       if (window.isDestroyed()) return
-      const choice = await dialog.showMessageBox(window, {type:'info', title:'Harness', message:menuText.updateDownloaded, detail:updates.version || '', buttons:[menuText.quitInstall, menuText.later], defaultId:1, cancelId:1})
-      if (choice.response === 0) app.quit()
+      const choice = await dialog.showMessageBox(window, updateDialogOptions(updates.snapshot(), Boolean(updates.installer), menuText))
+      if (choice.response === 0) {installRequested = Boolean(updates.installer); app.quit()}
     }
     try {
       const result = await updates.check()
       if (window.isDestroyed()) return
       if (result.state === 'available') {
-        const detail = result.mode === 'installer' ? formatDesktopText(menuText.updateInstallerDetail, {version:result.version}) : result.version
-        const choice = await dialog.showMessageBox(window, {type:'info', title:'Harness', message:menuText.updateAvailable, detail, buttons:[menuText.downloadUpdate, menuText.later], defaultId:0, cancelId:1})
+        const choice = await dialog.showMessageBox(window, updateDialogOptions(result, Boolean(updates.installer), menuText))
         if (choice.response === 0) {
-          if (result.mode === 'installer') await shell.openExternal(result.downloadUrl)
+          if (result.mode === 'installer' && !updates.installer) await shell.openExternal(result.downloadUrl)
           else {await updates.download(); await showDownloaded()}
         }
       } else if (result.state === 'downloaded') await showDownloaded()
@@ -145,7 +161,7 @@ async function startDesktop() {
       console.error('Update failed:', error.message)
       if (!window.isDestroyed()) {
         const repository = metadata.harnessUpdateSource
-        const known = ['updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure'].includes(error.menuKey)
+        const known = ['updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure','updateIntegrityFailed','updateInstallLocation'].includes(error.menuKey)
         const message = known ? formatDesktopText(menuText[error.menuKey], error.params) : menuText[['ERR_UPDATER_CHANNEL_FILE_NOT_FOUND','ERR_UPDATER_LATEST_VERSION_NOT_FOUND'].includes(error.code) ? 'updateSourceUnavailable' : 'updateFailed']
         const choice = await dialog.showMessageBox(window, {type:'warning', title:'Harness', message, detail:known ? error.cause?.message || '' : error.message,
           buttons:repository?.provider === 'github' ? [menuText.openReleasePage, menuText.ok] : [menuText.ok], cancelId:repository?.provider === 'github' ? 1 : 0})
@@ -154,13 +170,16 @@ async function startDesktop() {
     }
     finally {updateDialog = false}
   }
-  let menuText = null
-  quit.attach(window, () => dialog.showMessageBoxSync(window, {
-    type: 'question', title: 'Harness',
-    message: menuText?.unsavedChanges ?? 'Unsaved changes will be lost if you leave.',
-    buttons: [menuText?.keepEditing ?? 'Keep editing', menuText?.discardLeave ?? 'Discard and leave'],
-    defaultId: 0, cancelId: 0,
-  }) === 1)
+  quit.attach(window, () => {
+    const leave = dialog.showMessageBoxSync(window, {
+      type: 'question', title: 'Harness',
+      message: menuText?.unsavedChanges ?? 'Unsaved changes will be lost if you leave.',
+      buttons: [menuText?.keepEditing ?? 'Keep editing', menuText?.discardLeave ?? 'Discard and leave'],
+      defaultId: 0, cancelId: 0,
+    }) === 1
+    if (!leave) installRequested = false
+    return leave
+  })
   function installMenu(ready) {
     menuReady = ready
     if (!menuText || window.isDestroyed()) return
@@ -174,7 +193,7 @@ async function startDesktop() {
   attachWindowChrome({window, ipcMain, Menu, origin})
   ipcMain.handle('desktop-menu', (event, labels) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) throw Error('Untrusted menu request')
-    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','screenshot','screenshotHidden','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','updateInstallerDetail','updateUnpublished','updatePlatformUnavailable','updateSourceUnavailable','updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure','openReleasePage','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
+    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','screenshot','screenshotHidden','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','updateInstallerDetail','updateMacInstallerDetail','updateMacDownloaded','updateInstallFailed','updateIntegrityFailed','updateInstallLocation','updateUnpublished','updatePlatformUnavailable','updateSourceUnavailable','updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure','openReleasePage','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
     if (!labels || keys.some(key => typeof labels[key] !== 'string' || !labels[key].trim() || labels[key].length > 120)) throw Error('Invalid menu labels')
     menuText = Object.fromEntries(keys.map(key => [key, labels[key]]))
     installMenu(true)

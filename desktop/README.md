@@ -166,7 +166,17 @@ npm --prefix desktop run package
 
 启动时静默检查稳定版更新，帮助菜单支持手动检查。当前 GitHub 来源直接读取最新稳定 Release，按当前系统及 CPU 选择 DMG／EXE，不依赖 ZIP、blockmap 或 `latest-mac.yml`。已安装版本等于或高于公开版本时显示无较新版本；没有可读取的稳定发行、缺少对应平台安装包、发行数据异常及 HTTP／网络故障分别呈现，不将本地尚未发布的版本误报为网络失败。
 
-发现新版后由用户选择打开官方安装包下载地址，下载完成后手动安装。只报告已请求下载，不展示虚构进度或自动安装完成状态；项目、对话和设置不由更新检查清理或迁移。异常时保留原诊断，并可显式打开发布页面。开发版不联网检查，不接受预发布版本或自动降级。
+macOS 发现新版后，用户选择下载，由 Harness 自己流式下载当前 CPU 对应的 DMG，不打开浏览器。帮助菜单显示实际传输百分比，Dock 显示进度；下载完成后继续验证和准备，准备成功才显示“退出并安装”。下载与检查共享在途状态，重复点击不启动第二次传输。准备完成后可选择“稍后”，本次运行内再次点击帮助菜单即可安装；普通退出不会安装未确认的更新，会释放本次下载和暂存，下次启动重新检查。
+
+macOS 安装流程：
+
+1. 运行于可写的已安装 `.app` 目录；从 DMG 挂载卷、App Translocation 或不可写目录运行时拒绝更新，提示先移动并重新打开应用，不隐式提权。
+2. 下载写入 `~/Library/Caches/Harness/updates/` 下本次独占目录。按 GitHub Release asset 的 `size` 和 `digest` 核对完整大小及 SHA-256；摘要缺失、断流、超长或不匹配都不能进入安装。
+3. 只读挂载 DMG，核对 `Harness.app` 的 Bundle ID、目标版本和可执行文件 CPU 架构。验证当前与新应用的完整代码签名；有证书的当前应用还要求新应用满足其 designated requirement。当前包为 ad hoc 签名时不固定旧版代码哈希，仍验证新包完整签名和发行摘要；完全未签名包不支持此流程。复制到安装目录旁的独占暂存目录，再次校验签名并卸载镜像。
+4. 用户选择“退出并安装”后沿原有未保存内容确认及后端关闭流程收尾。取消离开则取消本次安装意图；关闭失败不启动安装。辅助进程受理后等待原主进程实际退出（最多 120 秒），复核目标目录身份，再将旧应用移至本次暂存目录的 `previous.app`，将新应用移入原位置并请求系统重新打开。
+5. 新应用移入失败时尝试恢复旧应用；失败诊断写入本次缓存目录的 `install.log`，通过安装时所选语言的系统提示呈现日志位置。旧包备份保留，不自动重放安装；重新打开请求失败只能报告失败，不能认定新版已成功启动。确认业务启动仍需实际安装包验收。
+
+Windows 的 GitHub 分支仍由用户选择打开官方 EXE 下载地址，下载后手动安装。项目、对话、凭据和设置不由更新流程清理或迁移。异常保留原诊断，并可显式打开发布页面。开发版不联网检查，不接受预发布版本或自动降级。
 
 显式配置静态 HTTPS 更新源时仍使用原有清单及原生更新协议：用户确认下载，等待完整传输和原生校验后才报告准备完成；退出安装沿现有离开确认与后端关闭流程。它不是当前 GitHub 安装包发布流程。
 
@@ -203,14 +213,14 @@ npm --prefix desktop run package
    ```
 
 6. 核对本轮安装包的版本、系统、CPU、内置引擎、原生输入辅助程序及资源完整性。打包准备会在隔离临时数据中启动随包语音服务并完成认证健康检查，不下载模型或录音；这不等于真实麦克风及跨应用输入验收。
-7. 在 `lengweiping1983/SuperHarness` 建立草稿 Release，只上传本轮 DMG／EXE 安装包；不上传 ZIP、blockmap、更新清单或其他发行资产。核对后发布为普通稳定版，标签为 `v<桌面版本>`，不勾选 prerelease，不覆盖已发布的同版本资产。
-8. 在目标系统用上一正式版检查新版本、拒绝下载、接受下载、断网／源不可用、平台安装包缺失、手动安装及再次启动的版本；核对项目、对话、设置和凭据保持。语音另需验证麦克风、系统输入授权、全局快捷键与原应用输入。未执行的系统或专项不得标记通过；签名／公证和实机矩阵未完成前不宣称正式发行完成。
+7. 在 `lengweiping1983/SuperHarness` 建立草稿 Release，只上传本轮 DMG／EXE 安装包；不上传 ZIP、blockmap、更新清单或其他发行资产。确认 GitHub 已生成安装包的 SHA-256 `digest`，再发布为普通稳定版，标签为 `v<桌面版本>`，不勾选 prerelease，不覆盖已发布的同版本资产。
+8. 在目标系统用上一正式版检查新版本、拒绝下载、接受下载、断网／源不可用及平台安装包缺失。macOS 另核对应用内进度、摘要／签名拒绝、稍后再安装、取消离开、退出替换及重启后的实际版本；Windows 核对手动安装及再次启动的版本。确认项目、对话、设置和凭据保持。语音另需验证麦克风、系统输入授权、全局快捷键与原应用输入。未执行的系统或专项不得标记通过；签名／公证和实机矩阵未完成前不宣称正式发行完成。
 
 若新版本有缺陷，停止继续分发并发布更高版本的修复包；自动降级已关闭，不覆盖同版本文件或自动迁移用户数据。
 
 签名凭据按系统隔离：macOS 使用 `DESKTOP_MAC_CSC_LINK`、`DESKTOP_MAC_CSC_KEY_PASSWORD`，公证使用 `DESKTOP_APPLE_ID`、`DESKTOP_APPLE_APP_SPECIFIC_PASSWORD`、`DESKTOP_APPLE_TEAM_ID`；Windows 使用 `DESKTOP_WINDOWS_CSC_LINK`、`DESKTOP_WINDOWS_CSC_KEY_PASSWORD` 及可信 Authenticode 证书。
 
-无凭据可生成本机验收包，但不能据此宣称签名、公证、SmartScreen 信任或真实自动更新通过。当前 GitHub 流程通过官方安装包手动更新；macOS 原生自动更新需要签名，对外分发还应公证。参见 [更新说明](https://www.electron.build/v26/docs/features/auto-update/)、[macOS 签名](https://www.electron.build/v26/docs/code-signing-mac/)和 [Windows 签名](https://www.electron.build/v26/docs/code-signing-win/)。
+无凭据可生成本机验收包，但不能据此宣称签名、公证、SmartScreen 信任或真实自动更新通过。GitHub macOS 流程使用上述 DMG 下载、验证和安装流程；静态更新源的 macOS 原生自动更新需要签名，对外分发还应公证。参见 [更新说明](https://www.electron.build/v26/docs/features/auto-update/)、[macOS 签名](https://www.electron.build/v26/docs/code-signing-mac/)和 [Windows 签名](https://www.electron.build/v26/docs/code-signing-win/)。
 
 后续发布先更新 `desktop/package.json` 版本及 npm 锁文件，再构建；旧运行时会被版本闸拒绝。更新 Python 依赖锁的命令：
 

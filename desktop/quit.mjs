@@ -1,5 +1,5 @@
 /** 先确认主窗口是否可离开，再关闭后端；取消离开时保留全部服务。 */
-export function desktopQuit({app, getWindow, cleanup, onError}) {
+export function desktopQuit({app, getWindow, cleanup, onError, beforeQuit = async () => {}}) {
   let ready = false
   let closing = false
   let shutdown = null
@@ -11,7 +11,11 @@ export function desktopQuit({app, getWindow, cleanup, onError}) {
       if (!closing) {closing = true; window.close()}
       return
     }
-    if (!shutdown) shutdown = Promise.resolve().then(cleanup).catch(onError).finally(() => {ready = true; app.quit()})
+    if (!shutdown) shutdown = Promise.resolve().then(cleanup)
+      .then(() => false, error => {onError(error); return true})
+      .then(cleanupFailed => beforeQuit({cleanupFailed}))
+      .catch(onError)
+      .finally(() => {ready = true; app.quit()})
   })
   return {
     attach(window, confirm) {

@@ -8478,5 +8478,10 @@
   "desktop.release.cameraUsage": "Harness uses the camera only when you allow it for a website.",
   "ui.voice.backendMismatch": "The voice API is missing from the running backend. Restart Harness and check that the app and backend use the same version.",
   "superagent.cli.control-receipt": "Read the original pause, resume or cancel receipt without starting the runner.",
-  "superagent.control-capacity": "Superagent control history has reached its limit of 1024 requests. Existing receipts are preserved; no new control intent was accepted."
+  "superagent.control-capacity": "Superagent control history has reached its limit of 1024 requests. Existing receipts are preserved; no new control intent was accepted.",
+  "ui.desktop.menu.updateMacInstallerDetail": "Version {version}. Harness will download and verify it, then offer to quit, install and restart. Your data is kept.",
+  "ui.desktop.menu.updateMacDownloaded": "Update verified and ready. Choose Quit and Install to restart with the new version, or Later to keep working.",
+  "ui.desktop.menu.updateInstallFailed": "Installation could not be completed. Keep the old application and check the update log before retrying.",
+  "ui.desktop.menu.updateIntegrityFailed": "Update verification failed or the release has no SHA-256 digest. The installed application has not been replaced.",
+  "ui.desktop.menu.updateInstallLocation": "Move Harness to a writable Applications folder and reopen it before updating."
 }
