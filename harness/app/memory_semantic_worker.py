@@ -1,7 +1,7 @@
 """所属进程内的本地语义检索；私有认证通道，不提供HTTP接口。"""
 from __future__ import annotations
 
-from harness.core.text_encoding import diagnostic_text, utf8_env
+from harness.core.text_encoding import diagnostic_text
 
 import asyncio
 import contextlib
@@ -20,6 +20,7 @@ from ..core.errors import HarnessError
 from ..core.language import current_language
 from ..i18n import tr
 from ..tools.owned_process import spawn_owned
+from ..tools.process_env import execution_env
 from .config import DEFAULT_HOME
 
 MAX_FRAME = 1048576
@@ -76,9 +77,22 @@ class SemanticWorker:
         return HarnessError(tr('python.memory.semantic.exited', detail=detail),
                             code='memory/semantic-worker', **diagnostic)
 
+    @staticmethod
+    def _worker_environment(token: str, pythonpath: str) -> dict[str, str]:
+        """构造语义 worker 环境：凭据不继承，导入路径显式注入。"""
+        env = execution_env({
+            'HARNESS_MEMORY_WORKER_KEY': token,
+            'HF_HUB_OFFLINE': '1',
+        })
+        env['PYTHONPATH'] = pythonpath
+        return env
+
     async def _start(self):
         token = secrets.token_hex(32)
-        env = {**utf8_env(), 'HARNESS_MEMORY_WORKER_KEY': token, 'HF_HUB_OFFLINE': '1'}
+        root = str(Path(__file__).resolve().parents[2])
+        # 嵌入式宿主可能显式装配依赖路径，路径由可信宿主计算。
+        paths = [root, *(str(Path(item or Path.cwd()).absolute()) for item in sys.path if isinstance(item, str))]
+        env = self._worker_environment(token, os.pathsep.join(dict.fromkeys(paths)))
         if os.name == 'nt' and not any(key.casefold() == 'systemroot' for key in env):
             # 嵌入式调用方可能清空环境；从操作系统读取真实目录，不猜测安装盘。
             import ctypes
@@ -90,10 +104,6 @@ class SemanticWorker:
         if os.name == 'nt' and not any(key.casefold() == 'userprofile' for key in env):
             if not (os.environ.get('HOMEDRIVE') and os.environ.get('HOMEPATH')):
                 env['USERPROFILE'] = str(DEFAULT_HOME.parent)
-        root = str(Path(__file__).resolve().parents[2])
-        # 嵌入式宿主可能显式装配依赖路径，工作进程继承同一导入环境。
-        paths = [root, *(str(Path(item or Path.cwd()).absolute()) for item in sys.path if isinstance(item, str))]
-        env['PYTHONPATH'] = os.pathsep.join(dict.fromkeys(paths))
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             listener.bind(('127.0.0.1', 0))

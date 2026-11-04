@@ -87,6 +87,21 @@ class SemanticWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.root = Path(directory.name)
         self.store = ProjectMemory()
 
+    def test_worker_environment_scrubs_host_credentials_but_keeps_explicit_bootstrap(self):
+        with patch.dict('os.environ', {
+            'OPENAI_API_KEY': 'host-secret',
+            'AWS_SECRET_ACCESS_KEY': 'host-secret',
+            'NODE_OPTIONS': '--require=/host/inject.js',
+            'PATH': '/fixture',
+        }, clear=True):
+            env = SemanticWorker._worker_environment('worker-key', str(self.root))
+        self.assertEqual(env['HARNESS_MEMORY_WORKER_KEY'], 'worker-key')
+        self.assertEqual(env['HF_HUB_OFFLINE'], '1')
+        self.assertEqual(env['PYTHONPATH'], str(self.root))
+        self.assertEqual(env['PATH'], '/fixture')
+        for name in ('OPENAI_API_KEY', 'AWS_SECRET_ACCESS_KEY', 'NODE_OPTIONS'):
+            self.assertNotIn(name, env)
+
     async def started(self, worker):
         async def wait():
             while not worker.marker.exists():
