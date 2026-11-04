@@ -52,7 +52,7 @@ Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/de
 | `npm --prefix web run test:browser` | 自动发现全部默认浏览器场景；使用临时后端及受控传输 |
 | `npm --prefix web test` | Web／桥接单测及完整生产构建；不启动浏览器 |
 | `npm --prefix desktop test` | macOS／Windows 启动配置、后端监管／停止与原生权限管理器回归；平台分支使用替身 |
-| `make verify PYTHON=.venv/bin/python` | 按变更选择后端与 Web 常规领域，始终完整构建 Web |
+| `make verify PYTHON=.venv/bin/python` | 显式扩大验证：按变更选择后端与 Web 常规领域，始终完整构建 Web；非默认开发步骤 |
 | `make verify-plan PYTHON=.venv/bin/python` | 只解释本次选择，不运行检查、不签发通过回执 |
 | `make test-full PYTHON=.venv/bin/python` | 全部后端与 Web 常规回归及完整构建；不启动桌面或浏览器 |
 | `make test PYTHON=.venv/bin/python` | Python 与 Web 聚合入口；不启动桌面或浏览器 |
@@ -103,7 +103,28 @@ Web 单测入口也执行 `model-runtime/tests` 的桥接转录回归；Python �
 
 lint 检查 Python 语法与未使用导入；语言、协议、UI 规范和发行资源各有同步校验入口。性能结论需要固定输入与实测结果。
 
-## 增量交付验证
+## 默认开发验证
+
+默认开发和普通交付仅执行本次新增或修改的验证用例。先列出本次行为变更与对应测试，再使用精确选择器运行；优先选择具体测试方法／用例，无法独立选择时运行所在的最小测试文件。实现变更应补充或调整针对性验证，保留本次行为所需的状态矩阵和业务断言；纯文档修改只核对内容与差异。没有可执行测试时说明未验证内容，不能把空发现或未执行报告为通过。
+
+定向执行示例（替换为本次实际新增或修改的测试名称）：
+
+```sh
+# Python：指定模块、测试类和方法，不调用全量发现脚本。
+.venv/bin/python -W error::RuntimeWarning -m unittest tests.test_example.ExampleTests.test_changed_behavior
+# Web：直接选择 Vitest 文件和用例，不经过聚合 test:unit 入口。
+(cd web && node node_modules/vitest/vitest.mjs run src/example.test.ts -t 'changed behavior')
+# Node：指定文件；需要时用 --test-name-pattern 进一步选择用例。
+node --test --test-name-pattern='changed behavior' model-runtime/tests/example.test.mjs
+```
+
+以上名称为占位示例；不得原样执行或将未匹配用例当作验证通过。Windows 的 Vitest 定向运行沿用 `scripts/run_web_unit.mjs` 的要求，在启动前设置 `CHOKIDAR_USEPOLLING=true`。桌面及浏览器用例仍须用户明确要求对应专项后才运行。
+
+默认不追加 lint、类型检查、生成同步检查、生产构建、整个 Python／Web 测试、相关领域或系统全量回归。未知路径、公共基础设施、依赖不明、基线缺失、空变更、提交或推送也不触发扩大范围；选择不明确时记录未验证项。失败后定位修复并重跑本次用例，不自动扩展到其他套件。协议、资源及生成规则修改仍维护对应源、生成器、调用方和生成产物。
+
+只有用户明确要求扩大验证或构建验收时，才使用下节聚合入口并执行其对应范围。交付报告列出实际命令、结果和未执行项；定向验证通过仅证明本次执行的用例通过，不代表完整回归或构建验收。
+
+## 显式扩大验证与离线评估
 
 固定 Coding 任务位于 `tests/fixtures/coding_tasks.json`，缺陷修复、新增功能、重构和中断恢复各三项。运行 `python scripts/evaluate_coding.py --repeat 3 --output output/coding-evaluation.json` 使用脚本传输驱动真实文件工具与持久事件，独立解释器检查业务和结构条件；每个 starter 必须失败、reference 必须通过。过期观察必须先拒绝、重新读取再合并；中断恢复必须确实注入结果持久化失败、重开完成且不重复编辑。
 
@@ -111,9 +132,9 @@ lint 检查 Python 语法与未使用导入；语言、协议、UI 规范和发�
 
 5 位目标开发者的无指导完成率、入口／状态理解耗时，以及跨操作系统隔离环境和实际在线模型评估，需要对应真实参与者、环境和在线运行证据。尚未执行时不报告目标达成。
 
-日常交付使用 `make verify PYTHON=.venv/bin/python`，策略源为 `scripts/verification_policy.json`，执行器为 `scripts/verify.py`。不需要随功能或目录调整根目录 `AGENTS.md`；修改领域边界时维护策略和对应回归。新增未知路径默认全量，不需要先修改规则才能验证。
+用户明确要求按领域扩大验证时，可使用 `make verify PYTHON=.venv/bin/python`。该聚合入口仍会扩大测试范围并始终构建，不适用于上述默认开发验证。策略源为 `scripts/verification_policy.json`，执行器为 `scripts/verify.py`。不需要随功能或目录调整根目录 `AGENTS.md`；修改领域边界时维护策略和对应回归。新增未知路径默认全量，不需要先修改规则才能验证。
 
-执行器合并暂存、未暂存和未跟踪文件，重命名按旧路径删除、新路径增加参与选择。默认基线为 HEAD；需要覆盖分支已提交变更时运行 `.venv/bin/python scripts/verify.py --base origin/main`，使用其与 HEAD 的共同祖先。浅克隆、缺失基线和无工作区变更均升级到全部常规领域，不隐式启动桌面或浏览器。不能手填缩小交付文件范围；`--full` 仅扩大后端与 Web 常规范围，`--desktop`、`--browser` 分别明确追加对应专项，二者互不启用。
+执行器合并暂存、未暂存和未跟踪文件，重命名按旧路径删除、新路径增加参与选择。默认基线为 HEAD；需要覆盖分支已提交变更时运行 `.venv/bin/python scripts/verify.py --base origin/main`，使用其与 HEAD 的共同祖先。浅克隆、缺失基线和无工作区变更均升级到全部常规领域，不隐式启动桌面或浏览器。聚合执行器不支持手填缩小文件范围；`--full` 仅扩大后端与 Web 常规范围，`--desktop`、`--browser` 分别明确追加对应专项，二者互不启用。
 
 所有计划都执行 Python lint、协议和语言生成同步检查，并运行完整 `npm --prefix web run build`（包括语言/UI 规则、tsc、Vite、资源发布）。不缓存构建或测试成功结果，不以 `typecheck` 替代生产构建。构建完成后逐文件比对 `.run/web-build` 和 `web/dist` 的资源清单及 SHA-256，包括懒加载分片和静态资源；缺少入口/资源、内容不一致、符号链接或额外旧文件均失败。真实服务固定读取本轮 `web/dist`，验证结束再次核对产物未变。
 
@@ -133,7 +154,7 @@ lint 检查 Python 语法与未使用导入；语言、协议、UI 规范和发�
 
 执行开始、完成或失败时更新本地 `output/verification.json`；包含输入指纹、选择理由、命令、耗时、退出码、未执行项及构建资源摘要。第一次失败停止后续步骤并标记未执行。验证期间源码、资源或 HEAD 变化使本轮失败，需要重跑；执行被中断时回执保持非通过。`--explain` 仅输出计划，不修改回执。回执只是本轮证据，不是后续输入的成功缓存。
 
-本地相关常规领域验证通过即可交付，不重复运行无关领域。修改验证基础设施或影响无法界定时，执行器保守选择全部常规领域；CI 保留这些领域的完整门禁、实际 Python wheel 构建和隔离资源验证。桌面与浏览器分别由独立手动工作流、`make test-desktop`／`make test-browser` 或执行器的 `--desktop`／`--browser` 明确启动，不属于常规门禁，未执行时必须明确报告。这里的完整 Web 构建不代表已生成或签名各平台桌面安装包，发行验收仍遵循 `desktop/README.md`。
+上述自动扩大规则仅在显式调用聚合执行器时生效，不是日常开发要求。保留的 CI 配置包含完整常规门禁、实际 Python wheel 构建和隔离资源验证；当前远端 CI 暂停，恢复须用户明确要求。桌面与浏览器分别由独立手动工作流、`make test-desktop`／`make test-browser` 或执行器的 `--desktop`／`--browser` 明确启动，不属于常规门禁，未执行时必须明确报告。这里的完整 Web 构建不代表已生成或签名各平台桌面安装包，发行验收仍遵循 `desktop/README.md`。
 
 ## 生成文件与修改边界
 

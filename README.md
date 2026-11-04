@@ -132,14 +132,16 @@ python -m harness.cli --ui --share http://192.168.1.20:8766
 
 ## 开发与验证
 
-开发测试依赖使用 `python -m pip install -e ".[test]"`。从仓库根目录执行：
+开发测试依赖使用 `python -m pip install -e ".[test]"`。默认开发和普通交付只运行本次新增或修改的验证用例，优先选择具体方法／用例，必要时运行所在的最小测试文件；纯文档修改只核对内容与差异。不默认追加整个 Python、Web、领域或系统回归，也不默认执行其他检查或生产构建。定向命令和范围说明见 [开发与测试](docs/development.md#默认开发验证)，长期规则见 `AGENTS.md`。
+
+用户明确要求扩大验证时，可从仓库根目录执行：
 
 ```sh
 make verify-plan PYTHON=.venv/bin/python
 make verify PYTHON=.venv/bin/python
 ```
 
-`verify-plan` 只解释选择；`verify` 根据当前变更运行相关常规领域回归，始终检查生成同步并完成 Web 生产构建及发布资源核对。README 也是发行输入，会选择 Python 回归。CI 保留完整 Python 与 Web 单测门禁。只有明确要求桌面或浏览器专项时，才通过各自手动工作流、`make test-desktop` 或 `make test-browser` 运行；默认验证和 `make test-full` 均不启动这两类专项，常规通过不代表专项验收。环境准备、独立检查命令和浏览器选择见 [开发与测试](docs/development.md)；选择依据维护在 [验证策略](scripts/verification_policy.json) 与 [执行器](scripts/verify.py)。
+`verify-plan` 只解释选择；`verify` 仍按变更运行相关常规领域回归，检查生成同步并完成 Web 生产构建及发布资源核对，因此不作为默认开发步骤。其选择依据维护在 [验证策略](scripts/verification_policy.json) 与 [执行器](scripts/verify.py)。桌面和浏览器专项分别需要明确要求；常规通过不代表专项验收。远端 CI 当前暂停，保留配置供明确恢复时使用。
 
 ## 文档与协作
 
