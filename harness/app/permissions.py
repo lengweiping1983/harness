@@ -291,13 +291,17 @@ class PermissionPolicy:
                     session_id=state['scope'], call_id=ctx.call_id, timeout=600, max_question_chars=64000,
                     questions=[{'id': 'external_permission', 'header': runner,
                                 'question': tr('acp.tool.permission', agent=runner, cwd=str(ctx.cwd), detail=detail),
-                                'options': [{'label': label} for label in labels]}]), state['scope'], state['version'])
+                                'options': [{'id': item['optionId'], 'label': label} for item, label in zip(options, labels)]}]), state['scope'], state['version'])
             finally:
                 if agent and agent.status.status == 'waiting_approval':
                     agent.status.status = 'tool'
             answer = answers[0] if answers else {}
-            if not answer.get('custom') and len(answer.get('selected', [])) == 1 and answer['selected'][0] in labels:
-                selected = options[labels.index(answer['selected'][0])]['optionId']
+            selected_ids = [str(value) for value in (answer.get('selected_ids') or [])]
+            selected_labels = [str(value) for value in (answer.get('selected') or [])]
+            if not answer.get('custom') and len(selected_ids) == 1:
+                selected = next((item['optionId'] for item in options if item['optionId'] == selected_ids[0]), None)
+            elif not answer.get('custom') and len(selected_labels) == 1 and selected_labels[0] in labels:
+                selected = options[labels.index(selected_labels[0])]['optionId']
         session = ctx.services.get('session') or self.harness.get_session(ctx.session_id)
         await session.append('note', {'kind': 'external_agent_permission', 'call_id': ctx.call_id,
             'agent': runner, 'scope': state['scope'], 'policy': state['permission_policy'],
@@ -386,6 +390,14 @@ class PermissionPolicy:
                 target = (root / target).resolve() if not target.is_absolute() else target.resolve()
                 if not target.is_relative_to(root):
                     reasons.append('outside_working_directory')
+        if policy == "read_only" and name in {"read", "grep"}:
+            raw = args.get("path", "")
+            if raw:
+                root = Path(ctx.cwd or ".").resolve()
+                target = Path(raw)
+                target = (root / target).resolve() if not target.is_absolute() else target.resolve()
+                if not target.is_relative_to(root):
+                    reasons.append('outside_working_directory')
         if policy == "read_only" and (reasons or tool.effect != "read"):
             reasons.append('read_only_policy')
         if not reasons:
@@ -447,21 +459,23 @@ class PermissionPolicy:
         if fingerprint != operation_fingerprint(name, args, ctx.cwd):
             return tr('python.permissions.18c92bb13d63')
         selected = answers[0].get("selected", []) if answers else []
+        selected_ids = [str(value) for value in ((answers[0].get("selected_ids", []) if answers else []) or [])]
         custom = bool(answers and answers[0].get("custom"))
         decision = [tr('python.permissions.a149ea344e74')] if custom else selected
+        decision_ids = ['custom'] if custom else selected_ids
         if session is not None:
-            await session.append("note", {"kind": "permission_decision", "call_id": ctx.call_id, "tool": name, "fingerprint": fingerprint, "scope": scope, "decision": decision, "approval": approval, "expires_after_seconds": 900 if not custom and selected == [temporary_label] else 0})
+            await session.append("note", {"kind": "permission_decision", "call_id": ctx.call_id, "tool": name, "fingerprint": fingerprint, "scope": scope, "decision": decision, "decision_ids": decision_ids, "approval": approval, "expires_after_seconds": 900 if not custom and (selected_ids == ['allow-temporarily'] or selected == [temporary_label]) else 0})
         if self.snapshot(scope)["version"] != snapshot["version"]:
             raise _PolicyChanged()
         if not self._same_authority(authority, tool):
             return tr('python.permissions.e6e4e44a4b91')
         if custom:
             return tr('python.permissions.97230ae1cdd7')
-        if selected == [temporary_label]:
+        if selected_ids == ['allow-temporarily'] or selected == [temporary_label]:
             self.grants[grant_key] = {'_expires_at': time.monotonic() + 900,
                 '_authority': authority, 'id': 'grant_' + uuid.uuid4().hex, 'tool': name,
                 'cwd': str(ctx.cwd), 'call_id': ctx.call_id, 'operation': prompt}
-        elif selected != [once_label]:
+        elif not (selected_ids == ['allow-once'] or selected == [once_label]):
             return tr('python.permissions.4cbec050e546')
         return None
 

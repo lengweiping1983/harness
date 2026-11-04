@@ -75,7 +75,7 @@ class PermissionCopyTemplateTests(unittest.IsolatedAsyncioTestCase):
                             tr('python.permissions.136de7a8c46f')])
                         label = next(option['label'] for option in options if option['id'] == action)
                         asked.append(label)
-                        await broker.answer_and_notify(payload['question_id'], [{'id': 'permission', 'selected': [label]}],
+                        await broker.answer_and_notify(payload['question_id'], [{'id': 'permission', 'selected': [label], 'selected_ids': [action]}],
                             session_id=session.id)
 
                     bus.on('user_question/ask', answer)

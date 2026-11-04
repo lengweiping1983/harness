@@ -49,6 +49,7 @@ class PermissionApprovalReasonTests(unittest.IsolatedAsyncioTestCase):
                 ({'effect': 'unknown'}, ['unknown_effect']),
                 ({'name': 'present', 'effect': 'unknown'}, []),
                 ({'name': 'write', 'effect': 'workspace_write', 'args': {'path': outside}}, ['outside_working_directory']),
+                ({'policy_name': 'read_only', 'name': 'read', 'effect': 'read', 'args': {'path': outside}}, ['outside_working_directory', 'read_only_policy']),
                 ({'name': 'edit', 'effect': 'workspace_write', 'args': {'path': 'inside.txt'}}, []),
                 ({'policy_name': 'read_only', 'effect': 'workspace_write'}, ['read_only_policy']),
                 ({'policy_name': 'read_only', 'dangerous': True}, ['dangerous_tool', 'read_only_policy']),
