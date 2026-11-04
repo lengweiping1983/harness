@@ -12,6 +12,7 @@ import time
 import venv
 from pathlib import Path
 
+from harness.core.cleanup import raise_cleanup_errors
 from harness.core.text_encoding import diagnostic_text
 from harness.core.macos_process import resident_memory_kib
 
@@ -93,27 +94,37 @@ class AcademyRuntime:
         started = time.time()
         process = subprocess.Popen(argv, cwd=self.root, env=env, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
-        if on_started is not None:
-            on_started()
         outputs = [bytearray(), bytearray()]
         truncated = [False, False]
+        read_errors = [None, None]
+        failures, cleanup_errors, readers = [], [], []
+        streams = (process.stdout, process.stderr)
         def drain(stream, index):
-            with stream:
-                while chunk := stream.read(4096):
-                    room = self.output_limit - len(outputs[index])
-                    outputs[index].extend(chunk[:room])
-                    if len(chunk) > room:
-                        truncated[index] = True
-        readers = [threading.Thread(target=drain, args=(stream, index), daemon=True)
-                   for index, stream in enumerate((process.stdout, process.stderr))]
-        for reader in readers:
-            reader.start()
+            try:
+                with stream:
+                    while chunk := stream.read(4096):
+                        room = self.output_limit - len(outputs[index])
+                        outputs[index].extend(chunk[:room])
+                        if len(chunk) > room:
+                            truncated[index] = True
+            except BaseException as exc:
+                # 读取失败属于本次执行，不能在线程内丢失后返回成功的空输出。
+                read_errors[index] = exc
         timed_out = False
         memory_limited = False
         peak_memory_kib = 0
         try:
+            # 创建之后立即接管收尾，登记回调和任一读取线程启动失败也不遗落进程。
+            if on_started is not None:
+                on_started()
+            for index, stream in enumerate(streams):
+                reader = threading.Thread(target=drain, args=(stream, index), daemon=True)
+                readers.append(reader)
+                reader.start()
             deadline = time.monotonic() + self.timeout
             while process.poll() is None:
+                if any(error is not None for error in read_errors):
+                    break
                 if time.monotonic() >= deadline:
                     timed_out = True
                     break
@@ -129,17 +140,35 @@ class AcademyRuntime:
                         memory_limited = True
                         break
                 time.sleep(0.05)
+        except BaseException as exc:
+            failures.append(exc)
         finally:
-            # 即使父进程提前退出，也回收同组后代，避免泄漏后台写入。
+            # 逐项尝试收尾，信号失败不能跳过 wait、其他读取器或未接管的管道。
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            process.wait()
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+            try:
+                process.wait(timeout=5)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
             for reader in readers:
-                reader.join(timeout=5)
+                if reader.ident is not None:
+                    try:
+                        reader.join(timeout=5)
+                    except BaseException as exc:
+                        cleanup_errors.append(exc)
+            for index, stream in enumerate(streams):
+                if index >= len(readers) or readers[index].ident is None:
+                    try:
+                        stream.close()
+                    except BaseException as exc:
+                        cleanup_errors.append(exc)
             if any(reader.is_alive() for reader in readers):
-                raise AcademyError('cleanup-failed')
+                cleanup_errors.append(AcademyError('cleanup-failed'))
+        raise_cleanup_errors([*failures, *(error for error in read_errors if error is not None), *cleanup_errors])
         return {'status': 'timeout' if timed_out else 'passed' if process.returncode == 0 else 'failed',
                 'exit_code': process.returncode, 'stdout': diagnostic_text(bytes(outputs[0]), truncated=truncated[0]),
                 'stderr': diagnostic_text(bytes(outputs[1]), truncated=truncated[1]), 'truncated': any(truncated),

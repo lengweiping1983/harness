@@ -44,6 +44,7 @@ Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/de
 |---|---|
 | `python -W error::RuntimeWarning scripts/run_python_tests.py` | 对话、文件保护与恢复、SDK 观察隔离与混合行尾、待办作用域及合并、目标／计划、流解析、运行与关闭、队列及成员回归 |
 | `python scripts/check_text_encoding.py` | 自有源码严格 UTF-8、运行库文本 I/O 编码检查；排除任意 research 目录 |
+| `python scripts/check_academy_sandbox.py` | 显式实测当前上下文中的课程沙箱启动；只使用临时项目，失败返回非零并保留原始回执，不执行业务测试 |
 | `python scripts/lint.py` | Python 语法、未使用导入 |
 | `python scripts/generate_i18n.py --check` | 双语资源生成同步 |
 | `python scripts/generate_protocol.py --check` | OpenAPI 和 TypeScript 契约生成同步 |
@@ -92,6 +93,8 @@ Web 单测入口也执行 `model-runtime/tests` 的桥接转录回归；Python �
 完整套件中的扩展场景需要命令行加载未打包扩展。Chrome／Edge 官方发行版已移除所需参数；按 [Playwright 扩展测试说明](https://playwright.dev/docs/chrome-extensions) 安装并选择配套 Chromium。普通页面启动预检通过不代表扩展能够加载，不能因此跳过扩展场景或把等待工作线程超时判为通过。
 
 课程实际执行场景还需要操作系统沙箱：Linux 安装 bubblewrap 后须核对命名空间可实际创建，macOS 使用系统 sandbox-exec；Windows 当前拒绝课程运行。手动浏览器工作流在标准 Ubuntu runner 安装并预检 bubblewrap。缺少沙箱时修复环境，不将这些执行场景改成跳过或无隔离执行。
+
+定位课程执行的环境限制时，先显式运行 `python scripts/check_academy_sandbox.py`。它在本次临时目录创建固定探针，经真实 `AcademyRuntime` 的虚拟环境、系统隔离配置及进程监督执行；只有整数零退出码、完整预期 stdout、空 stderr、未截断、未触发内存限制及匹配后端才确认启动。失败返回非零，JSON 保留实际解释器、后端及原始执行回执；异常保留栈。程序存在不等于沙箱可启动，固定探针失败也不按 stderr 猜测为某个特定宿主限制；核对原始错误再修复运行上下文。预检成功只证明这次固定输入可执行，不代替文件／网络隔离、业务回归或后续启动验收。该命令不绕过沙箱、不自动重试，也不更改官方验证回执；业务用例未执行不得算通过。
 
 课程执行场景通过 `academy-environment.mjs` 核对真实项目回执中的 `sandbox`。明确的 `unavailable` 记录为基础设施失败，停止后续调度；缺失或非法字段仍是业务断言失败，不能靠错误正文推断环境。课程设计和概念学习场景不因不执行代码而被整体排除。Windows 只运行可验收场景时，必须明确列出尚受沙箱阻塞的执行场景，不能报告完整浏览器套件通过。
 

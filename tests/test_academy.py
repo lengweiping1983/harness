@@ -134,6 +134,30 @@ class AcademyServiceTests(unittest.TestCase):
         self.assertEqual(self.service.source(self.pid, 'tools.py')['content'], edited['content'])
         self.assertEqual(self.service.project(self.pid)['progress'][0]['state'], 'in_progress')
 
+    def test_output_reader_failure_preserves_unknown_receipt_and_never_replays(self):
+        """监督器的原读取与清理异常不能落成成功证据，也不能重跑已受理执行。"""
+        originals = (OSError('原始输出读取失败'),
+                     ExceptionGroup('读取及清理失败', [OSError('stdout 读取失败'), RuntimeError('收尾失败')]))
+        source = self.service.source(self.pid, 'tools.py')
+        for index, original in enumerate(originals):
+            request_id = f'reader-unknown-{index}'
+            def failed(command, **options):
+                options['on_started']()
+                raise original
+            with patch.object(AcademyRuntime, 'run', side_effect=failed) as run:
+                with self.assertRaises(type(original)) as caught:
+                    self.execute(request_id)
+                self.assertIs(caught.exception, original)
+                self.assertEqual(self.service.receipt(request_id)['status'], 'unknown')
+                reopened = AcademyService(self.root / 'home', catalog_root=self.library)
+                self.assertEqual(reopened.receipt(request_id)['status'], 'unknown')
+                with self.assertRaisesRegex(AcademyError, 'outcome-unknown'):
+                    self.execute(request_id)
+                self.assertEqual(run.call_count, 1)
+            self.assertEqual(self.service.runs(self.pid), [])
+            self.assertEqual(self.service.source(self.pid, 'tools.py'), source)
+            self.assertEqual(self.service.project(self.pid)['progress'][0]['state'], 'in_progress')
+
     @unittest.skipIf(AcademyRuntime.backend() == 'unavailable', '系统隔离器未安装')
     def test_break_check_restore_and_reopen_keep_evidence(self):
         good = self.execute('baseline', True)
