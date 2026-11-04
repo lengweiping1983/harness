@@ -30,8 +30,14 @@ class TunnelStartupTests(unittest.TestCase):
                     self.assertEqual(len([k for k in _tunnel_environment() if k.lower() == 'https_proxy']), 1)
 
     def test_windows_environment_is_preserved_without_system_lookup(self):
-        with patch('harness.app.mcp_service.sys.platform', 'win32'), patch('harness.app.mcp_service.urllib_request.getproxies_registry', create=True, return_value={}), patch('harness.app.mcp_service.urllib_request.getproxies_macosx_sysconf', create=True) as proxies:
-            self.assertEqual(_tunnel_environment(), dict(os.environ))
+        with patch('harness.app.mcp_service.sys.platform', 'win32'), patch.dict(os.environ, {
+            'PATH': '/fixture', 'OPENAI_API_KEY': 'host-secret', 'NODE_OPTIONS': '--require=/host/inject.js',
+            'PYTHONPATH': '/host/inject', 'GIT_CONFIG_GLOBAL': '/host/config'}, clear=True), \
+             patch('harness.app.mcp_service.urllib_request.getproxies_registry', create=True, return_value={}), patch('harness.app.mcp_service.urllib_request.getproxies_macosx_sysconf', create=True) as proxies:
+            env = _tunnel_environment()
+            self.assertEqual(env.get('PATH'), '/fixture')
+            for name in ('OPENAI_API_KEY', 'NODE_OPTIONS', 'PYTHONPATH', 'GIT_CONFIG_GLOBAL'):
+                self.assertNotIn(name, env)
             proxies.assert_not_called()
 
     def test_split_url_and_unbounded_lines_keep_bounded_tail(self):

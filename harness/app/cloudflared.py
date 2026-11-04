@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .mcp_errors import McpServiceError
+from ..tools.process_env import execution_env
 
 import base64
 import hashlib
@@ -85,6 +86,7 @@ def _download_transport(url, cancel):
                      '--connect-timeout', '10', '--max-time', '180',
                      '--max-filesize', str(MAX_BYTES), url],
                     stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.DEVNULL,
+                    env=execution_env(),
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             except OSError as exc:
                 failures.append(exc)
@@ -158,6 +160,7 @@ try {{
         encoded = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
         process = subprocess.Popen([shell, '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env=execution_env(),
             creationflags=subprocess.CREATE_NO_WINDOW)
         try:
             deadline = time.monotonic() + 185

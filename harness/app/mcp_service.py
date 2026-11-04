@@ -24,6 +24,7 @@ from ..core.language import current_language
 from ..execution.config import ExecutionConfig, ProjectConfig
 from ..core.errors import ConfigError
 from ..llm.routes import mask_api_key
+from ..tools.process_env import execution_env
 from .cloudflared import resolve_cloudflared
 from .mcp_errors import McpServiceError
 from .quick_tunnel import QuickTunnelService
@@ -53,7 +54,7 @@ def _error_text(error):
 
 def _tunnel_environment():
     """图形入口补充系统代理；显式环境配置始终优先。"""
-    env = dict(os.environ)
+    env = execution_env()
     if sys.platform in ('darwin', 'win32'):
         lookup = 'getproxies_macosx_sysconf' if sys.platform == 'darwin' else 'getproxies_registry'
         proxies = getattr(urllib_request, lookup, lambda: {})()
@@ -362,7 +363,7 @@ class McpService:
                     if not named and failure.key == 'ui.mcpService.error.rateLimited':
                         self._quick_retry_at = int(time.time()) + 300
                     raise failure
-            env = dict(os.environ)
+            env = execution_env()
             env['PYTHONPATH'] = str(self.source) + os.pathsep + env.get('PYTHONPATH', '')
             with self._lock:
                 if self._cancel.is_set():

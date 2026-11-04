@@ -26,7 +26,7 @@ Harness 的安全边界分为控制面、执行面和展示面。控制面保存
 
 MCP 与隧道 token 只通过受监督子进程环境传递，不写命令行参数；状态 API 返回遮罩。网关固定回环监听，`harness/codex_gateway` 的账号凭据与额度快照按账号目录隔离，不读取桌面客户端凭据来代替显式配置。
 
-模型可调用的 shell、代码、终端、LSP、Hex、workflow、文件 grep 和语义记忆 worker 统一经过 `harness/tools/process_env.py::execution_env`，清除宿主密钥及常见代码注入变量；worker 只接收本次调用生成的 bootstrap 和可信 `PYTHONPATH`。MCP/ACP 与 provider bridge 使用 `stdio_env`：先清洗宿主环境，再加入连接记录明确声明的运行时变量，因此已登记的 connector secret 仍可被该连接子进程读取，这不是全局秘密扫描器或操作系统级沙箱。
+模型可调用的 shell、代码、终端、LSP、Hex、workflow、文件 grep 和语义记忆 worker 统一经过 `harness/tools/process_env.py::execution_env`，清除宿主密钥及常见代码注入变量；worker 只接收本次调用生成的 bootstrap 和可信 `PYTHONPATH`。项目 hooks、cloudflared 下载/隧道和 MCP 管理服务也沿用这条边界，插件变量、隧道 token、连接器 token 和代理只在调用点显式加入。MCP/ACP 与 provider bridge 使用 `stdio_env`：先清洗宿主环境，再加入连接记录明确声明的运行时变量，因此已登记的 connector secret 仍可被该连接子进程读取，这不是全局秘密扫描器或操作系统级沙箱。
 
 ## 权限、审批与继承
 

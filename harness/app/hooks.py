@@ -1,7 +1,7 @@
 """项目命令钩子：显式信任、受限进程和结果证据。"""
 from __future__ import annotations
 
-from harness.core.text_encoding import TextDecoder, utf8_env, utf8_prefix
+from harness.core.text_encoding import TextDecoder, utf8_prefix
 
 from harness.i18n import tr
 
@@ -26,6 +26,7 @@ from ..core.cleanup import join_cleanup
 from ..llm.types import TextBlock
 from ..session.hook_runs import hook_summary
 from ..session.events import AppendOp
+from ..tools.process_env import execution_env
 from ..tools.process_output import cleanup_process
 from ..tools.processes import ProcessCleanupError
 from ..tools.registry import ToolResult, ToolRunContext
@@ -809,7 +810,7 @@ class ProjectHooks:
         data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
         if len(data) > 131072:
             raise ValueError(tr('python.hooks.78aacf83f0f5'))
-        env = {**utf8_env(), 'HARNESS_PROJECT_DIR': str(root), 'HARNESS_SESSION': ctx.session_id}
+        env = execution_env({'HARNESS_PROJECT_DIR': str(root), 'HARNESS_SESSION': ctx.session_id})
         if row.get('plugin_id'):
             Path(row['plugin_data']).mkdir(parents=True, exist_ok=True)
             env.update(PLUGIN_ROOT=row['plugin_root'], PLUGIN_DATA=row['plugin_data'],
