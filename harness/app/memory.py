@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from harness.i18n import tr
+from ..tools.process_env import execution_env
 from ..core.errors import HarnessError
 from .memory_context import MemoryContext, select_context
 from .memory_sources import SourceChecker
@@ -57,7 +58,7 @@ class ProjectMemory:
             self._roots.clear()
         try:
             result = subprocess.run(["git", "-C", str(target), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                                    stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="strict", timeout=5)
+                                    env=execution_env(), stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="strict", timeout=5)
             if result.returncode == 0:
                 common = Path(result.stdout.strip()).resolve()
                 # 普通仓库及 linked worktree 的公共 .git 均位于主工作区。
@@ -65,7 +66,7 @@ class ProjectMemory:
                     self._roots[key] = common.parent
                     return common.parent
                 result = subprocess.run(["git", "-C", str(target), "rev-parse", "--show-toplevel"],
-                                        stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="strict", timeout=5)
+                                        env=execution_env(), stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="strict", timeout=5)
                 if result.returncode == 0:
                     root = Path(result.stdout.strip()).resolve()
                     self._roots[key] = root

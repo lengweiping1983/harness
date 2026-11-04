@@ -8,6 +8,7 @@ import asyncio
 import time
 import uuid
 import math
+import re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
@@ -18,6 +19,73 @@ from ..core.errors import HarnessError, SessionNotFoundError
 from ..core.jsonutil import to_jsonable
 from ..core.cleanup import join_cleanup, raise_cleanup_errors
 from ..core.operation_lock import OperationLock
+from .plan_mode import contains_sensitive_literal, is_sensitive_reference
+
+
+_SENSITIVE_FIELD_RE = re.compile(
+    r"(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token)",
+    re.IGNORECASE,
+)
+_SENSITIVE_QUOTED_ASSIGNMENT_RE = re.compile(
+    r'''(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token)\b["']?\s*[:=]\s*)"(?:\\.|[^"\\])*"'''
+)
+_SENSITIVE_SINGLE_ASSIGNMENT_RE = re.compile(
+    r'''(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token)\b["']?\s*[:=]\s*)'(?:\\.|[^'\\])*' '''.rstrip()
+)
+_SENSITIVE_UNQUOTED_ASSIGNMENT_RE = re.compile(
+    r'''(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token)\b["']?\s*[:=]\s*)(?!["'])([^\s,;}\]]+)'''
+)
+_SENSITIVE_ASSIGNMENT_MARKER_RE = re.compile(
+    r'''(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token)\b["']?\s*[:=]\s*["']?(?!<redacted>|\[redacted\])[^\s,;}\]]+'''
+)
+_AUTH_SCHEME_RE = re.compile(r"(?i)\b(Bearer|Basic)\s+[\"']?[^\s,;}\]]+[\"']?")
+_PRIVATE_KEY_RE = re.compile(
+    r"(?is)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----"
+)
+_SECRET_TOKEN_RE = re.compile(
+    r"(?i)(?<![\w-])(?:sk-[A-Za-z0-9][A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{12,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})(?![\w-])"
+)
+_JWT_RE = re.compile(
+    r"(?<![\w-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}(?![\w-])"
+)
+
+
+def _redact_sensitive(value: Any) -> Any:
+    """仅为审批/审阅展示脱敏，不改变真实工具参数或执行指纹。"""
+    if isinstance(value, dict):
+        return {key: '[redacted]' if _SENSITIVE_FIELD_RE.search(str(key)) else _redact_sensitive(item)
+                for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_sensitive(item) for item in value]
+    if isinstance(value, str):
+        value = _PRIVATE_KEY_RE.sub('[redacted-private-key]', value)
+        value = _AUTH_SCHEME_RE.sub(lambda match: f'{match.group(1)} [redacted]', value)
+        value = _SECRET_TOKEN_RE.sub('[redacted-token]', value)
+        value = _JWT_RE.sub('[redacted-token]', value)
+        value = _SENSITIVE_QUOTED_ASSIGNMENT_RE.sub(r'\1"[redacted]"', value)
+        value = _SENSITIVE_SINGLE_ASSIGNMENT_RE.sub(r"\1'[redacted]'", value)
+        return _SENSITIVE_UNQUOTED_ASSIGNMENT_RE.sub(r'\1[redacted]', value)
+    return value
+
+
+def _redact_path(value: Any) -> Any:
+    """为审批/审阅隐藏明显凭据目录，保留普通工作目录的可核对性。"""
+    if not isinstance(value, str):
+        return value
+    return '[redacted-path]' if is_sensitive_reference(value) else value
+
+
+def _contains_sensitive_value(value: Any) -> bool:
+    """递归检查工具参数，防止嵌套参数绕过敏感操作边界。"""
+    if isinstance(value, dict):
+        return any(_SENSITIVE_FIELD_RE.search(str(key)) or _contains_sensitive_value(item)
+                   for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_sensitive_value(item) for item in value)
+    if isinstance(value, str):
+        return (is_sensitive_reference(value) or contains_sensitive_literal(value)
+                or bool(_SENSITIVE_ASSIGNMENT_MARKER_RE.search(value)))
+    return False
 
 
 class _PolicyChanged(Exception):
@@ -267,7 +335,8 @@ class PermissionPolicy:
         operation = params.get('toolCall', {})
         if not isinstance(operation, dict):
             return None
-        detail = json.dumps(operation, ensure_ascii=False)
+        sensitive = _contains_sensitive_value(operation)
+        detail = json.dumps(_redact_sensitive(operation), ensure_ascii=False)
         if len(detail) > 60000:
             return None
         options = [item for item in raw_options if isinstance(item, dict)
@@ -277,7 +346,8 @@ class PermissionPolicy:
             return None
         selected = None
         if state['permission_policy'] == 'full_access':
-            selected = next((item['optionId'] for item in options if item['kind'] == 'allow_once'), None)
+            if not sensitive:
+                selected = next((item['optionId'] for item in options if item['kind'] == 'allow_once'), None)
         elif self.harness.config.enable_interaction:
             labels = [f"{index + 1}. {str(item.get('name', item['optionId']))[:150]}" for index, item in enumerate(options)]
             agent = self.harness._agents.get(ctx.session_id)
@@ -290,7 +360,7 @@ class PermissionPolicy:
                 answers = await self._await_current(self.harness.questions.ask(
                     session_id=state['scope'], call_id=ctx.call_id, timeout=600, max_question_chars=64000,
                     questions=[{'id': 'external_permission', 'header': runner,
-                                'question': tr('acp.tool.permission', agent=runner, cwd=str(ctx.cwd), detail=detail),
+                                'question': tr('acp.tool.permission', agent=runner, cwd=_redact_path(str(ctx.cwd)), detail=detail),
                                 'options': [{'id': item['optionId'], 'label': label} for item, label in zip(options, labels)]}]), state['scope'], state['version'])
             finally:
                 if agent and agent.status.status == 'waiting_approval':
@@ -305,8 +375,9 @@ class PermissionPolicy:
         session = ctx.services.get('session') or self.harness.get_session(ctx.session_id)
         await session.append('note', {'kind': 'external_agent_permission', 'call_id': ctx.call_id,
             'agent': runner, 'scope': state['scope'], 'policy': state['permission_policy'],
-            'operation': operation,
-            'tool_call_id': str(params.get('toolCall', {}).get('toolCallId', ''))[:500],
+            'operation': _redact_sensitive(operation),
+            'sensitive': sensitive,
+            'tool_call_id': _redact_sensitive(str(params.get('toolCall', {}).get('toolCallId', '')))[:500],
             'option_id': selected, 'decision': next((item['kind'] for item in options if item['optionId'] == selected), 'cancelled')})
         if self.snapshot(ctx.session_id)['version'] != state['version']:
             return None
@@ -355,11 +426,17 @@ class PermissionPolicy:
         authority = self._tool_authority(tool)
         snapshot = self.snapshot(ctx.session_id)
         policy = snapshot["permission_policy"]
+        name = tool.schema.name
+        sensitive = _contains_sensitive_value(args)
+        if sensitive:
+            if policy == "full_access":
+                return tr('python.permissions.sensitive_reference')
         if policy == "full_access":
             return None
-        name = tool.schema.name
         scope = snapshot["scope"]
         reasons = []
+        if sensitive:
+            reasons.append('sensitive_data_access')
         if tool.approval_required:
             reasons.append('tool_requires_approval')
         if tool.dangerous:
@@ -419,11 +496,12 @@ class PermissionPolicy:
             attempts.add(attempt)
             hook = await self._await_current(hooks.permission(tool, args, ctx), scope, snapshot['version'])
             if hook.get('behavior') in ('allow', 'deny'):
+                hook_reason = _redact_sensitive(str(hook.get('reason', '')))
                 if session is not None:
                     await session.append('note', {'kind': 'permission_decision', 'call_id': ctx.call_id, 'tool': name,
                         'fingerprint': fingerprint, 'scope': scope, 'decision': [hook['behavior']], 'reviewer': 'hook',
-                        'reason': hook.get('reason', '')})
-                return hook.get('reason') or tr('hook.feedback.0a5ca5ad2cac') if hook['behavior'] == 'deny' else None
+                        'reason': hook_reason})
+                return hook_reason or tr('hook.feedback.0a5ca5ad2cac') if hook['behavior'] == 'deny' else None
         if policy == "auto_review":
             decision, reason, review = await self._await_current(self._review(tool, args, ctx, scope, agent), scope, snapshot["version"])
             if fingerprint != operation_fingerprint(name, args, ctx.cwd):
@@ -441,7 +519,7 @@ class PermissionPolicy:
         if agent:
             agent.status.status = "waiting_approval"
         try:
-            prompt = tr('permissions.confirm_operation', tool=name, cwd=str(ctx.cwd), arguments=json.dumps(args, ensure_ascii=False))
+            prompt = tr('permissions.confirm_operation', tool=name, cwd=_redact_path(str(ctx.cwd)), arguments=json.dumps(_redact_sensitive(args), ensure_ascii=False))
             if len(prompt) > 64000:
                 return tr('python.permissions.9f1aa794f201')
             once_label = tr('python.permissions.f9881e36e9cd')
@@ -450,7 +528,7 @@ class PermissionPolicy:
             answers = await self._await_current(self.harness.questions.ask(session_id=scope, call_id=ctx.call_id,
                 timeout=3600, max_question_chars=64000, questions=[{
                 "id": "permission", "header": tr('python.permissions.e83c7a5bf2a8'), "question": prompt,
-                "operation": {"tool": name, "cwd": str(ctx.cwd), "effect": tool.effect, "approval": approval},
+                "operation": {"tool": name, "cwd": _redact_path(str(ctx.cwd)), "effect": tool.effect, "approval": approval},
                 "options": [{"id": "allow-once", "label": once_label}, {"id": "allow-temporarily", "label": temporary_label}, {"id": "deny", "label": deny_label}],
             }]), scope, snapshot["version"])
         finally:
@@ -482,10 +560,10 @@ class PermissionPolicy:
     async def _review(self, tool: Any, args: Any, ctx: Any, scope: str, agent: Any) -> tuple[str, str, str]:
         """独立、无工具、受预算约束的审阅；失败回退人工而不是放行。"""
         session = self.harness.sessions.get(scope)
-        intent = [e.data.get("text", "") for e in session.events_of_type("user/message")
+        intent = [_redact_sensitive(e.data.get("text", "")) for e in session.events_of_type("user/message")
                   if e.data.get("source", "user") in {"user", "steer"}][-8:]
         payload = json.dumps({"user_messages": intent, "operation": {"tool": tool.schema.name,
-            "arguments": args, "cwd": ctx.cwd, "effect": tool.effect}}, ensure_ascii=False)
+            "arguments": _redact_sensitive(args), "cwd": _redact_path(str(ctx.cwd)), "effect": tool.effect}}, ensure_ascii=False)
         if len(payload) > 24000:
             return "ask", tr('python.permissions.517c05d73aee'), 'input_too_large'
         config = (agent.config if agent is not None else LlmCallConfig(model=self.harness.config.model)).merged(max_tokens=1024)
@@ -508,7 +586,7 @@ class PermissionPolicy:
                 raise ValueError(tr('runtime.validation.79f30161af60'))
             if value["decision"] not in {"allow", "deny", "ask"} or not isinstance(value["reason"], str) or not value["reason"].strip():
                 raise ValueError(tr('runtime.validation.3250cd19ce4a'))
-            return value["decision"], value["reason"].strip()[:1500], 'confirmation_requested'
+            return value["decision"], _redact_sensitive(value["reason"].strip()[:1500]), 'confirmation_requested'
         except Exception:
             return "ask", tr('python.permissions.83426f82d874'), 'unavailable'
         finally:

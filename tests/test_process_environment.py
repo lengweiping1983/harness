@@ -1,8 +1,12 @@
 """ACP/MCP 共用环境及未完成作业归属回归。"""
 import unittest
 import os
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from harness.app.file_search import ProjectFileSearch
 from harness.tools.process_env import execution_env, stdio_env
 from harness.tools.builtin.job_tools import JobRecord, JobRegistry
 
@@ -44,6 +48,20 @@ class ProcessEnvironmentTests(unittest.TestCase):
                      'GOOGLE_APPLICATION_CREDENTIALS', 'SSH_AUTH_SOCK', 'GITHUB_TOKEN',
                      'NODE_OPTIONS', 'PYTHONPATH'):
             self.assertNotIn(name, env)
+
+    def test_file_search_git_worker_uses_scrubbed_environment(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict('os.environ', {
+            'PATH': '/fixture', 'OPENAI_API_KEY': 'host-secret',
+            'NODE_OPTIONS': '--require=/host/inject.js', 'GIT_CONFIG_GLOBAL': '/host/config',
+        }, clear=True):
+            root = Path(directory)
+            (root / '.git').mkdir()
+            with patch('harness.app.file_search.subprocess.run', return_value=SimpleNamespace(returncode=0)) as run:
+                ProjectFileSearch()._scan(root)
+            env = run.call_args.kwargs['env']
+            self.assertEqual(env['PATH'], '/fixture')
+            for name in ('OPENAI_API_KEY', 'NODE_OPTIONS', 'GIT_CONFIG_GLOBAL'):
+                self.assertNotIn(name, env)
 
     def test_active_owners_excludes_only_settled_jobs(self):
         jobs = JobRegistry()

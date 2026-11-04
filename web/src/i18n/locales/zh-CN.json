@@ -4531,6 +4531,7 @@
   "ui.permissions.approvalPolicy.request_approval": "当前权限策略要求先审批此操作。",
   "ui.permissions.approvalPolicy.auto_review": "自动审阅未授权此操作，需要您作出决定。",
   "ui.permissions.approvalPolicy.read_only": "此操作超出当前只读策略的范围。",
+  "ui.permissions.reason.sensitive_data_access": "此操作可能访问凭据或敏感数据，需要单独审核。",
   "ui.permissions.reason.tool_requires_approval": "工具明确声明需要审批。",
   "ui.permissions.reason.dangerous_tool": "工具被标记为可能具有危险性。",
   "ui.permissions.reason.external_write": "工具声明会修改外部状态。",

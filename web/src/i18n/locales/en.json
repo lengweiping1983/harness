@@ -4531,6 +4531,7 @@
   "ui.permissions.approvalPolicy.request_approval": "The current policy requires approval for this operation.",
   "ui.permissions.approvalPolicy.auto_review": "Automatic review did not authorize this operation; your decision is needed.",
   "ui.permissions.approvalPolicy.read_only": "This operation exceeds the current read-only policy.",
+  "ui.permissions.reason.sensitive_data_access": "This operation may access credential or sensitive data and requires a separate review.",
   "ui.permissions.reason.tool_requires_approval": "The tool explicitly requires approval.",
   "ui.permissions.reason.dangerous_tool": "The tool is marked as potentially dangerous.",
   "ui.permissions.reason.external_write": "The tool declares changes to external state.",

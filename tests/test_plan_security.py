@@ -28,9 +28,10 @@ class PlanSecurityTests(unittest.IsolatedAsyncioTestCase):
                                   services={'session': self.session})
 
     async def test_sensitive_references_are_withheld_but_safe_examples_remain_readable(self):
-        for value in ('.env', 'config/oauth-credentials.json', 'keys/id_ed25519', 'certs/app.pem', '.ssh/config'):
+        for value in ('.env', 'cat .env', '--path=.env', 'credentials.txt',
+                      'config/oauth-credentials.json', 'keys/id_ed25519', 'certs/app.pem', '.ssh/config'):
             self.assertTrue(is_sensitive_reference(value), value)
-        for value in ('.env.example', 'docs/credentials.template', 'config.sample.yaml'):
+        for value in ('.env.example', 'cat .env.example', 'docs/credentials.template', 'config.sample.yaml'):
             self.assertFalse(is_sensitive_reference(value), value)
 
         read = SimpleNamespace(schema=SimpleNamespace(name='read'), effect='read', dangerous=False, approval_required=False)

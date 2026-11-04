@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from harness.i18n import tr
+from harness.tools.process_env import execution_env
 
 import os
 import stat
@@ -141,8 +142,7 @@ class ProjectFileSearch:
             # Git 枚举失败时，不能退回到不遵守忽略规则的目录遍历。
             try:
                 with tempfile.TemporaryFile() as output:
-                    env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
-                    env['GIT_TERMINAL_PROMPT'] = '0'
+                    env = execution_env({'GIT_TERMINAL_PROMPT': '0'})
                     result = subprocess.run(['git', '-c', 'core.fsmonitor=false', '-C', str(root),
                         'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '.'],
                         stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.DEVNULL, timeout=SCAN_SECONDS, env=env)

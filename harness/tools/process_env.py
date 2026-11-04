@@ -3,16 +3,6 @@ import os
 from ..core.text_encoding import utf8_env
 
 
-#: stdio 子进程的环境清洗名单：这些变量会让子进程误以为自己是 IDE 或
-#: 交互式终端，从而改变 stdio 行为。合并额外 env 时先剔除。
-STDIO_SCRUBBED_ENV = (
-    "NODE_OPTIONS",
-    "ELECTRON_RUN_AS_NODE",
-    "VSCODE_PID",
-    "VSCODE_IPC_HOOK",
-    "VSCODE_IPC_HOOK_CLI",
-)
-
 # 模型可调用的 shell、代码、终端和工作流不能继承宿主的认证材料。
 # 这里只过滤环境变量；它不构成文件系统或网络沙箱，能力声明仍须如实报告。
 _EXECUTION_SECRET_MARKERS = (

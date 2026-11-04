@@ -47,15 +47,18 @@ _SENSITIVE_BASENAMES = {
     'credentials.json', 'credentials.yaml', 'credentials.yml',
     'oauth-credentials.json', 'connection-secrets.json', 'secrets.json',
     'secrets.yaml', 'secrets.yml', 'token.json', 'tokens.json',
+    'secret.txt', 'secrets.txt', 'password.txt', 'passwords.txt',
+    'credentials.txt', 'auth.json', 'auth.yaml', 'auth.yml',
     'id_rsa', 'id_ed25519', 'id_ecdsa', 'private_key', 'privatekey',
 }
-_SENSITIVE_SUFFIXES = ('.pem', '.key', '.p12', '.pfx', '.jks', '.kdbx')
+_SENSITIVE_SUFFIXES = ('.pem', '.key', '.p12', '.pfx', '.jks', '.kdbx', '.secret', '.credentials')
 _SAFE_EXAMPLE_MARKERS = ('.example', '.sample', '.template', '.dist')
 _SENSITIVE_LITERAL_RE = re.compile(
     r"(?:-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|"
-    r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[:=]\s*['\"]?[A-Za-z0-9_./+=:-]{12,}|"
-    r"\bBearer\s+[A-Za-z0-9._~+/=-]{20,}|"
-    r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b)",
+    r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|credential|token)\b[\"']?\s*[:=]\s*[\"']?(?!<redacted>|\[redacted\])[^\s,;}\]]{4,}|"
+    r"\b(?:Bearer|Basic)\s+(?!<redacted>|\[redacted\])[A-Za-z0-9._~+/=-]{4,}|"
+    r"(?<![\w-])(?:sk-[A-Za-z0-9_-]{9,}|gh[pousr]_[A-Za-z0-9_]{13,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{11,})(?![\w-])|"
+    r"(?<![\w-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}(?![\w-]))",
     re.IGNORECASE,
 )
 
@@ -64,7 +67,9 @@ def is_sensitive_reference(value: Any) -> bool:
     """判断文件/搜索引用是否可能暴露本地凭据。"""
     if not isinstance(value, str) or not value.strip():
         return False
-    parts = [part for part in re.split(r'[\\/]+', value.strip().lower()) if part]
+    # 同时拆开命令/标题中的空白和常见标点，避免 `cat .env` 或
+    # `--path=.env` 通过只按目录分隔符切分的检查。
+    parts = [part for part in re.split(r'''[\\/\s"'`;,(){}\[\]=:]+''', value.strip().lower()) if part]
     for part in parts:
         if any(marker in part for marker in _SAFE_EXAMPLE_MARKERS):
             continue

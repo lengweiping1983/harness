@@ -13,6 +13,7 @@ from typing import Any
 
 from ..core.cleanup import join_cleanup, raise_cleanup_errors
 from ..i18n import tr
+from ..tools.process_env import execution_env
 
 from .board import BoardError, TaskBoard
 from .error_messages import board_error_message
@@ -99,7 +100,7 @@ class ProjectExecution:
         command = ['git', '-c', 'core.fsmonitor=false', 'switch']
         command += ['-c', branch, base] if base is not None else [branch]
         try:
-            result = subprocess.run(command, cwd=root, stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+            result = subprocess.run(command, cwd=root, env=execution_env(), stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BoardError('board/git-switch-failed') from exc
         if result.returncode:
