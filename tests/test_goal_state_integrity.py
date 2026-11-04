@@ -122,3 +122,61 @@ class GoalStateIntegrityTests(unittest.IsolatedAsyncioTestCase):
                         await tools[name].execute(args, ctx)
                     self.assertEqual(failure.exception.code, 'GOAL_TEAM_READ_ONLY')
                     self.assertEqual(failure.exception.message, tr(key))
+
+    async def test_complete_state_requires_all_criteria_and_preserves_invalid_header(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sessions = SessionStore(folder)
+            session = sessions.create()
+            GoalStore(sessions=sessions).create(
+                session.id, objective='必须有完成证据', success_criteria=['第一项', '第二项'])
+            header = Path(folder) / 'sessions' / session.id / 'header.json'
+            raw = json.loads(header.read_text(encoding='utf-8'))['metadata']['goal']
+            raw['phase'] = 'complete'
+            raw['completion'] = []
+            sessions.update_header(session.id, metadata={'goal': raw})
+            original = header.read_bytes()
+            with self.assertRaises(ToolError) as failure:
+                GoalStore(sessions=SessionStore(folder)).get(session.id)
+            self.assertEqual(failure.exception.code, 'GOAL_INVALID_STATE')
+            self.assertEqual(header.read_bytes(), original)
+
+    async def test_complete_state_rechecks_event_backed_evidence_before_restore(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sessions = SessionStore(folder)
+            session = sessions.create()
+            store = GoalStore(sessions=sessions)
+            goal = store.create(session.id, objective='证据必须来自真实事件')
+            await session.append('tool/call', {'call_id': 'proof', 'name': 'read', 'turn': 1,
+                                               'status': 'running', 'input': {'path': 'source.txt'}}, ignorable=True)
+            result = await session.append('tool/result', {'call_id': 'proof', 'name': 'read', 'turn': 1,
+                'results': [{'tool_use_id': 'proof', 'is_error': False, 'content': '真实结果'}]}, surface_op=AppendOp())
+            store.complete(session.id, goal_id=goal.id, revision=goal.revision,
+                           checks=[{'criterion': 1, 'summary': '已核对', 'evidence_seqs': [result.seq]}])
+            header = Path(folder) / 'sessions' / session.id / 'header.json'
+            raw = json.loads(header.read_text(encoding='utf-8'))['metadata']['goal']
+            raw['completion'][0]['evidence'][0]['preview'] = '伪造结果'
+            sessions.update_header(session.id, metadata={'goal': raw})
+            original = header.read_bytes()
+            with self.assertRaises(ToolError) as failure:
+                GoalStore(sessions=SessionStore(folder)).get(session.id)
+            self.assertEqual(failure.exception.code, 'GOAL_INVALID_STATE')
+            self.assertEqual(header.read_bytes(), original)
+
+    async def test_restore_rejects_block_without_reason_and_over_reserved_budget(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sessions = SessionStore(folder)
+            session = sessions.create()
+            GoalStore(sessions=sessions).create(session.id, objective='状态不变量')
+            header = Path(folder) / 'sessions' / session.id / 'header.json'
+            base = json.loads(header.read_text(encoding='utf-8'))['metadata']['goal']
+            for changed in (
+                {**base, 'phase': 'blocked'},
+                {**base, 'token_budget': 1, 'tokens_used': 1, 'budget_reservations': {'request': 1}},
+            ):
+                with self.subTest(changed=changed):
+                    sessions.update_header(session.id, metadata={'goal': changed})
+                    original = header.read_bytes()
+                    with self.assertRaises(ToolError) as failure:
+                        GoalStore(sessions=SessionStore(folder)).get(session.id)
+                    self.assertEqual(failure.exception.code, 'GOAL_INVALID_STATE')
+                    self.assertEqual(header.read_bytes(), original)

@@ -190,6 +190,12 @@ def _restore_goal(raw: Any) -> GoalView:
     if not isinstance(reservations, Mapping) or any(not isinstance(key, str) or not integer(value)
                                                    for key, value in reservations.items()):
         invalid()
+    if any(not key.strip() for key in reservations):
+        invalid()
+    if raw['token_budget'] is not None and raw['tokens_used'] + sum(reservations.values()) > raw['token_budget']:
+        invalid()
+    if raw['max_goal_rounds'] is not None and raw['rounds_started'] > raw['max_goal_rounds']:
+        invalid()
     completion = raw['completion']
     if not isinstance(completion, (list, tuple)) or len(completion) > len(checks):
         invalid()
@@ -217,7 +223,22 @@ def _restore_goal(raw: Any) -> GoalView:
     data = to_jsonable(raw)
     data['criteria'] = tuple(data['criteria'])
     data['completion'] = tuple(data['completion'])
-    return GoalView(**data, activation='disarmed')
+    goal = GoalView(**data, activation='disarmed')
+    # 生命周期字段必须相互一致。否则损坏的 header 可能把没有验收
+    # 证据的目标恢复成 complete，随后被界面或自动续接当成已完成。
+    if goal.phase == 'complete':
+        if (goal.blocked_reason is not None or goal.stop_reason is not None or
+                goal.retry_at is not None or goal.retry_count != 0 or goal.retry_error is not None or
+                len(goal.completion) != len(goal.criteria) or
+                {item['criterion'] for item in goal.completion} != set(range(1, len(goal.criteria) + 1))):
+            invalid()
+    elif goal.completion:
+        invalid()
+    if goal.phase == 'blocked' and goal.blocked_reason is None:
+        invalid()
+    if goal.phase != 'blocked' and goal.blocked_reason is not None:
+        invalid()
+    return goal
 
 
 def _locked(method):
@@ -256,7 +277,22 @@ class GoalStore:
                 version = metadata.get('goal_state_version')
                 if type(version) is not int or version < 1:
                     raise _fail('GOAL_INVALID_STATE', tr('goal.storage.invalid'))
-                self._goals[session_id] = _restore_goal(raw)
+                goal = _restore_goal(raw)
+                if goal.phase == 'complete':
+                    # 完成回执引用的是会话事件，而不是 header 中可自行填写的
+                    # 摘要。恢复时重新核对每一条引用，防止篡改或事件缺失后
+                    # 仍向模型和界面报告已完成。
+                    from .goal_evidence import result_reference
+                    session = self.sessions.get(session_id)
+                    try:
+                        for check in goal.completion:
+                            for saved in check['evidence']:
+                                actual = result_reference(session, goal, saved['sourceSeq'])
+                                if actual != saved:
+                                    raise ValueError('completion evidence mismatch')
+                    except Exception as exc:
+                        raise _fail('GOAL_INVALID_STATE', tr('goal.storage.invalid')) from exc
+                self._goals[session_id] = goal
         return deepcopy(self._goals.get(session_id))
 
     # -- 写入 ---------------------------------------------------------------
