@@ -23,7 +23,8 @@ from ..skills.tool import render_catalog
 from ..tools.builtin.fs_tools import build_fs_tools
 from ..tools.builtin.job_tools import JobRegistry
 from ..tools.builtin.workspace_tools import collect_workspace_dependencies
-from ..core.text_encoding import output_encoding, utf8_env
+from ..core.text_encoding import output_encoding
+from ..tools.process_env import execution_env
 from ..tools.builtin.pwsh_tools import _build_argv, _build_script, _resolve_powershell
 from ..tools.job_archive import JobArchive
 from .environment import ExecutionEnvironment, LocalExecutionEnvironment
@@ -372,8 +373,7 @@ class ExecutionRuntime(PipelineRuntime):
         return apply_changes(policy, args["changes"], self.config.home, self.config.max_file_bytes)
 
     def _environment(self):
-        env = {key: value for key, value in os.environ.items() if not any(word in key.upper() for word in ("API_KEY", "TOKEN", "SECRET", "PASSWORD"))}
-        env = utf8_env(env)
+        env = execution_env()
         env["GIT_TERMINAL_PROMPT"] = "0"
         return env
 

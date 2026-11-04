@@ -32,7 +32,8 @@ from ..command_output import STDOUT_CHARS, STDERR_CHARS, command_display, comman
 from ..registry import ToolDefinition, ToolRunContext
 from ..process_output import cleanup_process, collect_process
 from ..processes import ProcessCleanupError, start_process
-from ...core.text_encoding import decode_output, output_encoding, utf8_env
+from ...core.text_encoding import decode_output, output_encoding
+from ..process_env import execution_env
 
 #: 默认超时（秒）
 DEFAULT_TIMEOUT = 120.0
@@ -116,10 +117,8 @@ def _resolve_python() -> str:
 
 
 def _build_env(ctx: ToolRunContext) -> dict[str, str]:
-    env = utf8_env()
-    env["HARNESS_SESSION"] = ctx.session_id
-    # 与 shell_tools 保持一致：强制 UTF-8，杜绝中文乱码
-    return env
+    # 与 shell_tools 保持一致：强制 UTF-8，且不把宿主凭据带入临时脚本。
+    return execution_env({"HARNESS_SESSION": ctx.session_id})
 
 
 def build_code_tools(

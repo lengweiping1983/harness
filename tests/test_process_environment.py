@@ -3,7 +3,7 @@ import unittest
 import os
 from unittest.mock import patch
 
-from harness.tools.process_env import stdio_env
+from harness.tools.process_env import execution_env, stdio_env
 from harness.tools.builtin.job_tools import JobRecord, JobRegistry
 
 
@@ -16,6 +16,29 @@ class ProcessEnvironmentTests(unittest.TestCase):
             self.assertEqual(stdio_env({'EXTRA': 'yes', 'PYTHONUTF8': '0', 'PYTHONIOENCODING': 'gbk'}), expected)
             self.assertEqual(dict(os.environ), original)
             self.assertEqual(stdio_env({'NODE_OPTIONS': 'explicit'})['NODE_OPTIONS'], 'explicit')
+
+    def test_execution_environment_drops_host_credentials_and_does_not_readd_them(self):
+        with patch.dict('os.environ', {
+            'PATH': '/fixture',
+            'OPENAI_API_KEY': 'host-secret',
+            'AWS_ACCESS_KEY_ID': 'host-access',
+            'AWS_SECRET_ACCESS_KEY': 'host-secret',
+            'GOOGLE_APPLICATION_CREDENTIALS': '/host/credentials.json',
+            'SSH_AUTH_SOCK': '/tmp/agent.sock',
+            'PUBLIC_SETTING': 'kept',
+        }, clear=True):
+            env = execution_env({
+                'HARNESS_SESSION': 'session',
+                'GITHUB_TOKEN': 'attempted-secret',
+                'PUBLIC_EXTRA': 'kept-extra',
+            })
+        self.assertEqual(env['PATH'], '/fixture')
+        self.assertEqual(env['PUBLIC_SETTING'], 'kept')
+        self.assertEqual(env['PUBLIC_EXTRA'], 'kept-extra')
+        self.assertEqual(env['HARNESS_SESSION'], 'session')
+        for name in ('OPENAI_API_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY',
+                     'GOOGLE_APPLICATION_CREDENTIALS', 'SSH_AUTH_SOCK', 'GITHUB_TOKEN'):
+            self.assertNotIn(name, env)
 
     def test_active_owners_excludes_only_settled_jobs(self):
         jobs = JobRegistry()

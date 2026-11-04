@@ -23,13 +23,14 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ...core.text_encoding import decode_output, output_encoding, utf8_env
+from ...core.text_encoding import decode_output, output_encoding
 from ...llm.types import TextBlock
 from ..command_output import STDOUT_CHARS, STDERR_CHARS, command_display, command_progress_key, render_command_output, summarize_command_output, exited_command_result
 from ..registry import ToolDefinition, ToolRunContext
 from ..process_output import cleanup_process, collect_process
 from ..processes import start_process
 from ..windows_shell import WINDOWS_SHELL_BRIDGE, windows_shell_command
+from ..process_env import execution_env
 
 if TYPE_CHECKING:  # pragma: no cover - 仅用于类型标注
     from .job_tools import JobRegistry
@@ -55,7 +56,7 @@ def shell_execution_cwd(args: Any, ctx: ToolRunContext) -> Path:
 
 def _build_child_env(session_id: str) -> dict[str, str]:
     """为所属子进程固定 UTF-8，不修改宿主环境。"""
-    return {**utf8_env(), "HARNESS_SESSION": session_id}
+    return execution_env({"HARNESS_SESSION": session_id})
 
 
 def _make_label(command: str) -> str:

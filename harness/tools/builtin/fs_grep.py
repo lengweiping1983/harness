@@ -17,6 +17,7 @@ import time
 
 from ...core.errors import ToolExecutionError
 from ..owned_process import spawn_owned
+from ..process_env import execution_env
 from ..process_output import cleanup_process, collect_process
 
 SEARCH_SECONDS = 30.0
@@ -60,7 +61,7 @@ async def search(root, args, ignores, ctx):
         # 使用独立解释器，不执行 Shell 插值或工作区代码。
         # 工作进程使用同一套剪枝遍历器和 Python 正则表达式。
         if os.name == 'nt' or sys.platform.startswith('linux') and hasattr(os, 'WNOWAIT'):
-            proc = await spawn_owned(argv, cwd=str(worker.parent), env=dict(os.environ))
+            proc = await spawn_owned(argv, cwd=str(worker.parent), env=execution_env())
         else:
             proc = await asyncio.create_subprocess_exec(*argv, cwd=str(worker.parent),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)

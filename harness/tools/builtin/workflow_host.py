@@ -574,6 +574,7 @@ class WorkflowGuest:
     async def run(self) -> dict[str, Any]:
         """驱动脚本跑完，返回 ``WorkflowResult`` 形状的字典。"""
         from ...core.language import current_language
+        from ..process_env import execution_env
         node = resolve_node()
         self._proc = await start_process(lambda: asyncio.create_subprocess_exec(
             node,
@@ -582,7 +583,7 @@ class WorkflowGuest:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self._cwd,
-            env={**os.environ, 'HARNESS_WORKFLOW_LANGUAGE': current_language.get()},
+            env=execution_env({'HARNESS_WORKFLOW_LANGUAGE': current_language.get()}),
         ), stop=self._reclaim_process)
         stderr_task = asyncio.create_task(self._drain_stderr())
         try:

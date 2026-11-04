@@ -32,7 +32,8 @@ from __future__ import annotations
 from harness.core.text_encoding import utf8_prefix
 
 from harness.i18n import tr
-from ...core.text_encoding import TextDecoder, output_encoding as resolve_output_encoding, utf8_env
+from ...core.text_encoding import TextDecoder, output_encoding as resolve_output_encoding
+from ..process_env import execution_env
 
 import asyncio
 import contextlib
@@ -938,7 +939,7 @@ class TerminalSessionService:
         raise TerminalError(tr('python.terminal_tools.b187f39dd0f9', p0=f'{key}', p1=f'{known}'))
 
     def _child_env(self, kind: str | None = None) -> dict[str, str]:
-        env = utf8_env()
+        env = execution_env()
         if sys.platform != 'win32':
             env['TERM'] = 'xterm-256color'
             if kind == 'zsh':
