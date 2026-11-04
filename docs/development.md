@@ -59,9 +59,11 @@ Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/de
 
 新增 Python 用例放在 `tests/test_*.py`；前端用例放在 `web/src/**/*.test.ts` 或 `.test.tsx`；桌面用例放在 `desktop/tests/**/*.test.mjs`。Node 发现脚本递归收集 .test.mjs 后传入显式文件列表，空目录不会启动 Node 默认发现。Python 和浏览器发现为空时失败；Node 独立发现器对空目录明确提示，不把空套件作为业务验收。Vitest 当前没有启用 --passWithNoTests。
 
-Python 聚合入口在发现测试前输出实际解释器、版本、基础安装目录、平台、UTF-8 模式、已加载的 `sitecustomize` 来源及 `os.open` 的目录句柄能力。随后在独立临时目录核对 `mkdir(exist_ok=True)` 和递归创建语义；macOS 另用 `/bin/ps` 读取本进程内存，核对课程运行器需要的监督命令。预检失败保留原异常栈、返回非零并明确说明未执行测试，不生成业务通过结论。`tests/test_test_discovery.py` 覆盖代理错误、命令拒绝／超时／异常回执、空发现及业务失败传播。预检只说明这些基础能力可用，不代表所有沙箱限制均已排除；仍须完整执行业务回归。解释器目录名称和宿主沙箱开关都不能单独证明失败归因，需结合原始异常调用链及同输入复测；大量用例通过也不能替代对剩余失败的定位。
+Python 聚合入口在发现测试前输出实际解释器、版本、基础安装目录、平台、UTF-8 模式、已加载的 `sitecustomize` 来源及 `os.open` 的目录句柄能力。随后在独立临时目录核对 `mkdir(exist_ok=True)` 和递归创建语义；macOS 另通过 `harness.core.macos_process.resident_memory_kib` 调用系统 `libproc.proc_pid_rusage` 读取本进程内存，与课程运行器共用原生监督接口，不启动 `/bin/ps`。预检失败保留原异常栈、返回非零并明确说明未执行测试，不生成业务通过结论。`tests/test_test_discovery.py` 覆盖代理错误、原生观察拒绝／非法读数、空发现及业务失败传播。预检只说明这些基础能力可用，不代表所有沙箱限制均已排除；仍须完整执行业务回归。解释器目录名称和宿主沙箱开关都不能单独证明失败归因，需结合原始异常调用链及同输入复测；大量用例通过也不能替代对剩余失败的定位。
 
 `test_session_view_control_failures.py` 的宿主夹具提供对话投影实际消费的 `_active_team_runs`，在完整、对话和窗口视图分别核对计划／待答问题的原始读取异常与合法空态、活动快照；夹具缺字段造成的 `AttributeError` 不能当作已覆盖目标读取失败。模型流回环夹具在超时与取消后以 EOF 或 `ConnectionResetError` 确认对端断开，其他读取错误继续传播；`test_disconnect_observer_accepts_reset_but_preserves_other_read_failures` 固定注入这些分支，真实取消用例仍核对连接释放、单次请求和 Key 租约收尾。
+
+`test_macos_process.py` 核对系统 `RUSAGE_INFO_V0` 的完整结构与字节到 KiB 换算、原始 errno、后代枚举缓冲区增长及容量耗尽、已退出进程与权限失败的区分。在 macOS 实测子进程 RSS、明确拒绝 `/bin/ps` 的 Seatbelt 沙箱中的官方预检，以及独立进程组子进程的 PTY 收尾。`test_academy_runtime_memory.py` 经真实课程沙箱核对不启动 `ps` 时仍执行并记录内存；注入超过既有阈值的读数核对终止，注入观察失败核对原异常及进程、输出读取器收尾。触发原问题的是外层会话拒绝启动带提权位的 `/bin/ps`；原生接口本身被拒仍明确失败，不通过零读数或跳过预检制造通过，也不据此保证所有外层沙箱允许课程执行。
 
 发现后打印实际用例总数，模块切换时输出名称，结束时列出最慢的十个用例。每个用例从开始至收尾独立设置原生堆栈诊断，默认连续等待 120 秒后重复输出全部线程堆栈，下个用例重新计时；可用 `--traceback-timeout=30` 调整为有限正数，配合 `-v` 保留当前用例名称。计时器保持到下一用例或整个运行结束，覆盖 `stopTest` 之后的异步运行器和执行器关闭。诊断不终止、跳过或重放用例，也不把堆栈中的 `Timeout` 字样计为业务失败；它不是强制终止机制。Superagent 集成模块包含多次真实 Git、工作树和回环 HTTP 操作，模块总耗时超过 120 秒本身不能证明挂死。需要外部硬截止时间时，必须保留当前用例、堆栈与所属资源的收尾证据，未执行项不能计为通过。
 

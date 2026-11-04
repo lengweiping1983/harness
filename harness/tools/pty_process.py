@@ -117,28 +117,32 @@ class PtyProcess:
         # 后台任务也有独立进程组，应在终止 Shell 前记录后代进程，
         # 避免终止操作使它们成为孤儿进程。
         if self.returncode is None:
-            scan = await asyncio.create_subprocess_exec(
-                '/bin/ps', '-axo', 'pid=,ppid=', stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            try:
-                output, _ = await asyncio.wait_for(scan.communicate(), 2)
-            except BaseException:
-                if scan.returncode is None:
-                    scan.kill()
-                await scan.wait()
-                raise
-            if scan.returncode != 0:
-                raise OSError(tr('terminal.transport.inspect_failed'))
-            parents = {}
-            for line in output.splitlines():
-                pid, parent = map(int, line.split())
-                parents.setdefault(parent, []).append(pid)
-            descendants, pending = [], [self.pid]
-            while pending:
-                children = parents.get(pending.pop(), [])
-                descendants.extend(children)
-                pending.extend(children)
+            if sys.platform == 'darwin':
+                from ..core.macos_process import descendant_pids
+                descendants = await asyncio.to_thread(descendant_pids, self.pid)
+            else:
+                scan = await asyncio.create_subprocess_exec(
+                    '/bin/ps', '-axo', 'pid=,ppid=', stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                try:
+                    output, _ = await asyncio.wait_for(scan.communicate(), 2)
+                except BaseException:
+                    if scan.returncode is None:
+                        scan.kill()
+                    await scan.wait()
+                    raise
+                if scan.returncode != 0:
+                    raise OSError(tr('terminal.transport.inspect_failed'))
+                parents = {}
+                for line in output.splitlines():
+                    pid, parent = map(int, line.split())
+                    parents.setdefault(parent, []).append(pid)
+                descendants, pending = [], [self.pid]
+                while pending:
+                    children = parents.get(pending.pop(), [])
+                    descendants.extend(children)
+                    pending.extend(children)
             for pid in reversed(descendants):
                 with contextlib.suppress(ProcessLookupError):
                     os.kill(pid, signal.SIGKILL)

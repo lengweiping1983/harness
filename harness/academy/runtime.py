@@ -13,6 +13,7 @@ import venv
 from pathlib import Path
 
 from harness.core.text_encoding import diagnostic_text
+from harness.core.macos_process import resident_memory_kib
 
 from .errors import AcademyError
 from .files import file_path
@@ -117,9 +118,12 @@ class AcademyRuntime:
                     timed_out = True
                     break
                 if sys.platform == 'darwin':
-                    measured = subprocess.run(['/bin/ps', '-o', 'rss=', '-p', str(process.pid)],
-                                              capture_output=True, timeout=1, check=False)
-                    rss = int(measured.stdout.strip() or b'0')
+                    try:
+                        rss = resident_memory_kib(process.pid)
+                    except ProcessLookupError:
+                        if process.poll() is not None:
+                            break
+                        raise
                     peak_memory_kib = max(peak_memory_kib, rss)
                     if rss > 512 * 1024:
                         memory_limited = True

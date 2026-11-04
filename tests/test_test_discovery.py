@@ -1,6 +1,7 @@
 """环境异常、发现为空和业务失败都必须让聚合入口失败。"""
 import contextlib
 import io
+import os
 import subprocess
 import sys
 import textwrap
@@ -95,10 +96,10 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(main(), 1)
 
     def test_environment_probe_preserves_real_directory_semantics(self):
-        """真实临时目录重复创建成功，非 macOS 不依赖 ps。"""
-        with patch('scripts.run_python_tests.sys.platform', 'linux'), patch('scripts.run_python_tests.subprocess.run') as run:
+        """真实临时目录重复创建成功，非 macOS 不调用原生内存接口。"""
+        with patch('scripts.run_python_tests.sys.platform', 'linux'), patch('harness.core.macos_process.resident_memory_kib') as measure:
             check_environment()
-        run.assert_not_called()
+        measure.assert_not_called()
 
     def test_broken_exist_ok_stops_before_discovery_with_original_diagnostic(self):
         """模拟宿主代理破坏 exist_ok，不能计成业务用例失败。"""
@@ -117,25 +118,33 @@ class DiscoveryTests(unittest.TestCase):
         discover.assert_not_called()
         self.assertIn('FileExistsError: fixture broker EEXIST', error.getvalue())
 
-    def test_mac_memory_probe_rejects_denial_nonzero_invalid_output_and_timeout(self):
-        """保留系统拒绝与非零回执，不伪造内存监督能力。"""
-        command = ['/bin/ps', '-o', 'rss=', '-p']
-        for failure in (PermissionError('fixture ps denied'), subprocess.TimeoutExpired(command, 5),
-                        subprocess.CalledProcessError(1, command), Mock(stdout=b'invalid')):
+    def test_mac_memory_probe_rejects_denial_and_invalid_values(self):
+        """原生观察被拒仍阻止发现，不伪造内存监督能力。"""
+        for failure in (PermissionError('fixture native denied'), OSError('fixture native failure'),
+                        0, -1, True, '123'):
             error = io.StringIO()
             with (self.subTest(failure=failure), patch('sys.argv', ['run_python_tests.py']),
                   patch('scripts.run_python_tests.sys.platform', 'darwin'),
-                  patch('scripts.run_python_tests.subprocess.run') as run,
+                  patch('harness.core.macos_process.resident_memory_kib') as measure,
                   patch('unittest.defaultTestLoader.discover') as discover, contextlib.redirect_stderr(error)):
                 if isinstance(failure, Exception):
-                    run.side_effect = failure
+                    measure.side_effect = failure
                 else:
-                    run.return_value = failure
+                    measure.return_value = failure
                 self.assertEqual(main(), 1)
                 discover.assert_not_called()
-                self.assertEqual(run.call_args.args[0][:4], command)
-                self.assertTrue(run.call_args.kwargs['check'])
+                measure.assert_called_once_with(os.getpid())
                 self.assertIn('测试尚未发现或执行', error.getvalue())
+                if isinstance(failure, Exception):
+                    self.assertIn(str(failure), error.getvalue())
+
+    def test_mac_memory_probe_uses_native_observation_without_spawning_ps(self):
+        """受限命令执行不影响可用的原生观察。"""
+        with (patch('scripts.run_python_tests.sys.platform', 'darwin'),
+              patch('harness.core.macos_process.resident_memory_kib', return_value=1024) as measure,
+              patch('scripts.run_python_tests.subprocess.run', side_effect=PermissionError('ps denied'))):
+            check_environment()
+        measure.assert_called_once_with(os.getpid())
 
     def test_business_failure_is_not_reclassified_as_environment_failure(self):
         runner = Mock()

@@ -63,11 +63,11 @@ def check_environment() -> None:
         (target / 'nested').mkdir(parents=True, exist_ok=True)
         target.mkdir(parents=True, exist_ok=True)
     if sys.platform == 'darwin':
-        # 课程运行器通过同一命令监督内存，预检只读取本进程。
-        measured = subprocess.run(['/bin/ps', '-o', 'rss=', '-p', str(os.getpid())],
-                                  capture_output=True, timeout=5, check=True)
-        if not measured.stdout.strip().isdigit():
-            raise ValueError(f'/bin/ps 返回无效内存读数：{measured.stdout!r}')
+        # 与课程运行器共用系统接口，预检只读取本进程。
+        from harness.core.macos_process import resident_memory_kib
+        measured = resident_memory_kib(os.getpid())
+        if type(measured) is not int or measured <= 0:
+            raise ValueError(f'proc_pid_rusage 返回无效内存读数：{measured!r}')
 
 
 def environment_identity() -> dict:
@@ -86,6 +86,7 @@ def main() -> int:
     parser.add_argument('--traceback-timeout', type=positive_seconds, default=120,
                         help='单个用例超过此秒数后重复输出全部线程堆栈；不终止或跳过用例（默认 120）')
     args = parser.parse_args()
+    sys.path.insert(0, str(ROOT))
     print('Python 验证环境：' + json.dumps(environment_identity(), ensure_ascii=False), flush=True)
     try:
         check_environment()
@@ -93,7 +94,6 @@ def main() -> int:
         print('Python 环境预检失败；测试尚未发现或执行。原始异常：', file=sys.stderr)
         traceback.print_exc()
         return 1
-    sys.path.insert(0, str(ROOT))
     suite = unittest.defaultTestLoader.discover(str(ROOT / 'tests'), top_level_dir=str(ROOT))
     count = suite.countTestCases()
     if count == 0:
