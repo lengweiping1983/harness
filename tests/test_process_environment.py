@@ -9,13 +9,15 @@ from harness.tools.builtin.job_tools import JobRecord, JobRegistry
 
 class ProcessEnvironmentTests(unittest.TestCase):
     def test_stdio_environment_scrubs_host_flags_and_keeps_explicit_override(self):
-        with patch.dict('os.environ', {'NODE_OPTIONS': 'host-only', 'VSCODE_PID': '123', 'PATH': '/fixture'}, clear=True):
+        with patch.dict('os.environ', {'NODE_OPTIONS': 'host-only', 'VSCODE_PID': '123',
+                                       'OPENAI_API_KEY': 'host-secret', 'PATH': '/fixture'}, clear=True):
             original = dict(os.environ)
             expected = {'PATH': '/fixture', 'EXTRA': 'yes', 'PYTHONUTF8': '1', 'PYTHONIOENCODING': 'utf-8'}
             self.assertEqual(stdio_env({'EXTRA': 'yes'}), expected)
             self.assertEqual(stdio_env({'EXTRA': 'yes', 'PYTHONUTF8': '0', 'PYTHONIOENCODING': 'gbk'}), expected)
             self.assertEqual(dict(os.environ), original)
             self.assertEqual(stdio_env({'NODE_OPTIONS': 'explicit'})['NODE_OPTIONS'], 'explicit')
+            self.assertNotIn('OPENAI_API_KEY', stdio_env({'EXTRA': 'yes'}))
 
     def test_execution_environment_drops_host_credentials_and_does_not_readd_them(self):
         with patch.dict('os.environ', {

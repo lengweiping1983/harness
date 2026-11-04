@@ -53,6 +53,10 @@ _EXECUTION_INJECTION_NAMES = {
     "PYTHONPATH",
     "PYTHONSTARTUP",
     "RUBYOPT",
+    "ELECTRON_RUN_AS_NODE",
+    "VSCODE_IPC_HOOK",
+    "VSCODE_IPC_HOOK_CLI",
+    "VSCODE_PID",
 }
 
 
@@ -82,7 +86,9 @@ def execution_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def stdio_env(extra: dict[str, str]) -> dict[str, str]:
-    """构造 stdio 子进程环境：清洗后的环境 + 额外变量。"""
-    env = {k: v for k, v in os.environ.items() if k not in STDIO_SCRUBBED_ENV}
+    """构造 stdio 子进程环境：清洗宿主环境后加入显式配置变量。"""
+    env = execution_env()
+    # 连接器声明或可信运行时显式提供的变量可以传入；宿主同名变量不会
+    # 自动继承。这样 MCP/ACP 仍能使用已登记的秘密，但不会旁路读取宿主密钥。
     env.update({str(k): str(v) for k, v in extra.items()})
     return utf8_env(env)
