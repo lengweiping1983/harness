@@ -1603,7 +1603,7 @@ export interface BrowserAccessLogout {
 }
 export interface PermissionApproval {
   policy: 'request_approval' | 'auto_review' | 'read_only'
-  reasons: Array<'tool_requires_approval' | 'dangerous_tool' | 'external_write' | 'command_execution' | 'connector_operation' | 'browser_interaction' | 'network_access' | 'unknown_effect' | 'outside_working_directory' | 'read_only_policy'>
+  reasons: Array<'tool_requires_approval' | 'dangerous_tool' | 'external_write' | 'command_execution' | 'connector_operation' | 'browser_interaction' | 'network_access' | 'unknown_effect' | 'outside_working_directory' | 'read_only_policy' | 'workspace_write'>
   review?: 'confirmation_requested' | 'input_too_large' | 'budget_unavailable' | 'unavailable'
 }
 export interface PermissionOperation {

@@ -37,6 +37,8 @@ class PermissionSensitiveTests(unittest.IsolatedAsyncioTestCase):
             'AKIA1234567890ABCDEF',
             'eyJfixture12345678.fixture.fixture',
             '-----BEGIN PRIVATE KEY-----\\nfixture\\n-----END PRIVATE KEY-----',
+            'AWS_SHARED_CREDENTIALS_FILE=/host/aws',
+            'export GIT_SSH_COMMAND="ssh -i /host/key"',
         ):
             masked = _redact_sensitive(text)
             self.assertNotIn('fixture', masked)

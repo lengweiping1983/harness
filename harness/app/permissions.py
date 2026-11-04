@@ -23,7 +23,7 @@ from .plan_mode import contains_sensitive_literal, is_sensitive_reference
 
 
 _SENSITIVE_FIELD_RE = re.compile(
-    r"(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token)",
+    r"(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token|aws_shared_credentials_file|aws_config_file|aws_profile|boto_config|azure_config_dir|azure_auth_location|cloudsdk_config|npm_config_userconfig|pip_config_file|pip_index_url|pip_extra_index_url|docker_config|git_askpass|git_ssh_command)",
     re.IGNORECASE,
 )
 _SENSITIVE_QUOTED_ASSIGNMENT_RE = re.compile(
@@ -37,6 +37,18 @@ _SENSITIVE_UNQUOTED_ASSIGNMENT_RE = re.compile(
 )
 _SENSITIVE_ASSIGNMENT_MARKER_RE = re.compile(
     r'''(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token)\b["']?\s*[:=]\s*["']?(?!<redacted>|\[redacted\])[^\s,;}\]]+'''
+)
+_SENSITIVE_ENV_QUOTED_ASSIGNMENT_RE = re.compile(
+    r'''(?i)(\b(?:AWS_SHARED_CREDENTIALS_FILE|AWS_CONFIG_FILE|AWS_PROFILE|BOTO_CONFIG|AZURE_CONFIG_DIR|AZURE_AUTH_LOCATION|CLOUDSDK_CONFIG|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|DOCKER_CONFIG|GIT_ASKPASS|GIT_SSH_COMMAND)\b\s*=\s*)"(?:\\.|[^"\\])*"'''
+)
+_SENSITIVE_ENV_SINGLE_ASSIGNMENT_RE = re.compile(
+    r'''(?i)(\b(?:AWS_SHARED_CREDENTIALS_FILE|AWS_CONFIG_FILE|AWS_PROFILE|BOTO_CONFIG|AZURE_CONFIG_DIR|AZURE_AUTH_LOCATION|CLOUDSDK_CONFIG|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|DOCKER_CONFIG|GIT_ASKPASS|GIT_SSH_COMMAND)\b\s*=\s*)'(?:\\.|[^'\\])*' '''.rstrip()
+)
+_SENSITIVE_ENV_UNQUOTED_ASSIGNMENT_RE = re.compile(
+    r'''(?i)(\b(?:AWS_SHARED_CREDENTIALS_FILE|AWS_CONFIG_FILE|AWS_PROFILE|BOTO_CONFIG|AZURE_CONFIG_DIR|AZURE_AUTH_LOCATION|CLOUDSDK_CONFIG|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|DOCKER_CONFIG|GIT_ASKPASS|GIT_SSH_COMMAND)\b\s*=\s*)(?!["'])([^\s,;}\]]+)'''
+)
+_SENSITIVE_ENV_REFERENCE_RE = re.compile(
+    r'''(?i)(?<![A-Z0-9_])(?:AWS_SHARED_CREDENTIALS_FILE|AWS_CONFIG_FILE|AWS_PROFILE|BOTO_CONFIG|AZURE_CONFIG_DIR|AZURE_AUTH_LOCATION|CLOUDSDK_CONFIG|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|DOCKER_CONFIG|GIT_ASKPASS|GIT_SSH_COMMAND)(?![A-Z0-9_])'''
 )
 _AUTH_SCHEME_RE = re.compile(r"(?i)\b(Bearer|Basic)\s+[\"']?[^\s,;}\]]+[\"']?")
 _PRIVATE_KEY_RE = re.compile(
@@ -62,6 +74,9 @@ def _redact_sensitive(value: Any) -> Any:
         value = _AUTH_SCHEME_RE.sub(lambda match: f'{match.group(1)} [redacted]', value)
         value = _SECRET_TOKEN_RE.sub('[redacted-token]', value)
         value = _JWT_RE.sub('[redacted-token]', value)
+        value = _SENSITIVE_ENV_QUOTED_ASSIGNMENT_RE.sub(r'\1"[redacted]"', value)
+        value = _SENSITIVE_ENV_SINGLE_ASSIGNMENT_RE.sub(r"\1'[redacted]'", value)
+        value = _SENSITIVE_ENV_UNQUOTED_ASSIGNMENT_RE.sub(r'\1[redacted]', value)
         value = _SENSITIVE_QUOTED_ASSIGNMENT_RE.sub(r'\1"[redacted]"', value)
         value = _SENSITIVE_SINGLE_ASSIGNMENT_RE.sub(r"\1'[redacted]'", value)
         return _SENSITIVE_UNQUOTED_ASSIGNMENT_RE.sub(r'\1[redacted]', value)
@@ -84,7 +99,8 @@ def _contains_sensitive_value(value: Any) -> bool:
         return any(_contains_sensitive_value(item) for item in value)
     if isinstance(value, str):
         return (is_sensitive_reference(value) or contains_sensitive_literal(value)
-                or bool(_SENSITIVE_ASSIGNMENT_MARKER_RE.search(value)))
+                or bool(_SENSITIVE_ASSIGNMENT_MARKER_RE.search(value))
+                or bool(_SENSITIVE_ENV_REFERENCE_RE.search(value)))
     return False
 
 
@@ -441,6 +457,8 @@ class PermissionPolicy:
             reasons.append('tool_requires_approval')
         if tool.dangerous:
             reasons.append('dangerous_tool')
+        if policy in {"request_approval", "auto_review"} and tool.effect == "workspace_write":
+            reasons.append('workspace_write')
         if tool.effect == 'external_write':
             reasons.append('external_write')
         if tool.effect == 'execute':
@@ -460,6 +478,14 @@ class PermissionPolicy:
             if name not in trusted:
                 reasons.append('unknown_effect')
         if name in {"write", "edit"}:
+            raw = args.get("path", "")
+            if raw:
+                root = Path(ctx.cwd or ".").resolve()
+                target = Path(raw)
+                target = (root / target).resolve() if not target.is_absolute() else target.resolve()
+                if not target.is_relative_to(root):
+                    reasons.append('outside_working_directory')
+        if name == "read" and isinstance(args, dict):
             raw = args.get("path", "")
             if raw:
                 root = Path(ctx.cwd or ".").resolve()

@@ -4542,6 +4542,7 @@
   "ui.permissions.reason.unknown_effect": "The tool has no confirmed side-effect declaration.",
   "ui.permissions.reason.outside_working_directory": "The target file is outside the working directory.",
   "ui.permissions.reason.read_only_policy": "The current policy requires confirmation for this operation.",
+  "ui.permissions.reason.workspace_write": "This operation changes files or state in the workspace and requires approval.",
   "ui.permissions.review.confirmation_requested": "Automatic review requested your confirmation.",
   "ui.permissions.review.input_too_large": "The operation exceeds the automatic review input limit.",
   "ui.permissions.review.budget_unavailable": "Automatic review could not obtain the required budget.",

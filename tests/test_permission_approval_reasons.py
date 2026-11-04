@@ -41,16 +41,17 @@ class PermissionApprovalReasonTests(unittest.IsolatedAsyncioTestCase):
                 ({'name': 'bash', 'effect': 'execute'}, ['command_execution']),
                 ({'name': 'bash'}, ['command_execution']),
                 ({'name': 'mcp__fixture', 'effect': 'read'}, []),
-                ({'name': 'mcp__fixture', 'effect': 'workspace_write'}, ['connector_operation']),
+                ({'name': 'mcp__fixture', 'effect': 'workspace_write'}, ['workspace_write', 'connector_operation']),
                 ({'name': 'mcp__fixture', 'effect': 'unknown'}, ['connector_operation', 'unknown_effect']),
                 ({'name': 'browser', 'args': {'action': 'click'}}, ['browser_interaction', 'network_access']),
                 ({'name': 'browser', 'args': {'action': 'navigate'}}, ['network_access']),
                 ({'name': 'web_search'}, ['network_access']),
                 ({'effect': 'unknown'}, ['unknown_effect']),
                 ({'name': 'present', 'effect': 'unknown'}, []),
-                ({'name': 'write', 'effect': 'workspace_write', 'args': {'path': outside}}, ['outside_working_directory']),
+                ({'name': 'write', 'effect': 'workspace_write', 'args': {'path': outside}}, ['workspace_write', 'outside_working_directory']),
+                ({'name': 'read', 'effect': 'read', 'args': {'path': outside}}, ['outside_working_directory']),
                 ({'policy_name': 'read_only', 'name': 'read', 'effect': 'read', 'args': {'path': outside}}, ['outside_working_directory', 'read_only_policy']),
-                ({'name': 'edit', 'effect': 'workspace_write', 'args': {'path': 'inside.txt'}}, []),
+                ({'name': 'edit', 'effect': 'workspace_write', 'args': {'path': 'inside.txt'}}, ['workspace_write']),
                 ({'policy_name': 'read_only', 'effect': 'workspace_write'}, ['read_only_policy']),
                 ({'policy_name': 'read_only', 'dangerous': True}, ['dangerous_tool', 'read_only_policy']),
                 ({'policy_name': 'full_access', 'dangerous': True, 'approval_required': True, 'effect': 'execute'}, []),
@@ -137,7 +138,7 @@ class PermissionApprovalReasonTests(unittest.IsolatedAsyncioTestCase):
                 if behavior is None:
                     self.assertTrue(result.is_error)
                     operation = host.questions.ask.await_args.kwargs['questions'][0]['operation']
-                    self.assertEqual(operation['approval']['reasons'], ['outside_working_directory'])
+                    self.assertEqual(operation['approval']['reasons'], ['workspace_write', 'outside_working_directory'])
                     self.assertIn(json.dumps({'path': outside}, ensure_ascii=False), host.questions.ask.await_args.kwargs['questions'][0]['question'])
                     execute.assert_not_awaited()
                 else:
@@ -146,3 +147,12 @@ class PermissionApprovalReasonTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(execute.await_count, int(behavior == 'allow'))
                     if behavior == 'allow':
                         self.assertEqual(execute.await_args.args[0]['path'], outside)
+
+    async def test_workspace_write_requires_explicit_allow_once(self):
+        host, _, _, registry, execute, context, call = approval_fixture(
+            name='write', effect='workspace_write', args={'path': 'inside.txt'})
+        host.questions.ask.side_effect = None
+        host.questions.ask.return_value = [{'selected_ids': ['allow-once'], 'selected': [tr('python.permissions.f9881e36e9cd')]}]
+        result = await registry.execute_call(call, context)
+        self.assertFalse(result.is_error)
+        execute.assert_awaited_once()

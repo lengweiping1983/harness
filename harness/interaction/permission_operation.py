@@ -5,7 +5,7 @@ from ..tools.schema import validate
 
 APPROVAL_REASONS = (
     'tool_requires_approval', 'dangerous_tool', 'external_write', 'command_execution',
-    'connector_operation', 'browser_interaction', 'network_access', 'unknown_effect', 'outside_working_directory', 'read_only_policy',
+    'connector_operation', 'browser_interaction', 'network_access', 'unknown_effect', 'outside_working_directory', 'read_only_policy', 'workspace_write',
 )
 REVIEW_OUTCOMES = ('confirmation_requested', 'input_too_large', 'budget_unavailable', 'unavailable')
 APPROVAL_SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['policy', 'reasons'], 'properties': {

@@ -33,6 +33,12 @@ class ProcessEnvironmentTests(unittest.TestCase):
             'SSH_AUTH_SOCK': '/tmp/agent.sock',
             'NODE_OPTIONS': '--require=/host/inject.js',
             'PYTHONPATH': '/host/inject',
+            'AWS_SHARED_CREDENTIALS_FILE': '/host/aws',
+            'AWS_PROFILE': 'private',
+            'CLOUDSDK_CONFIG': '/host/gcloud',
+            'PIP_INDEX_URL': 'https://user:secret@example.invalid/simple',
+            'GIT_ASKPASS': '/host/askpass',
+            'GIT_SSH_COMMAND': 'ssh -i /host/key',
             'PUBLIC_SETTING': 'kept',
         }, clear=True):
             env = execution_env({
@@ -46,7 +52,8 @@ class ProcessEnvironmentTests(unittest.TestCase):
         self.assertEqual(env['HARNESS_SESSION'], 'session')
         for name in ('OPENAI_API_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY',
                      'GOOGLE_APPLICATION_CREDENTIALS', 'SSH_AUTH_SOCK', 'GITHUB_TOKEN',
-                     'NODE_OPTIONS', 'PYTHONPATH'):
+                     'NODE_OPTIONS', 'PYTHONPATH', 'AWS_SHARED_CREDENTIALS_FILE', 'AWS_PROFILE',
+                     'CLOUDSDK_CONFIG', 'PIP_INDEX_URL', 'GIT_ASKPASS', 'GIT_SSH_COMMAND'):
             self.assertNotIn(name, env)
 
     def test_file_search_git_worker_uses_scrubbed_environment(self):

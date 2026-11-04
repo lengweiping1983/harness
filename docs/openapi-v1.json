@@ -27018,7 +27018,7 @@
           "reasons": {
             "type": "array",
             "minItems": 1,
-            "maxItems": 10,
+            "maxItems": 11,
             "items": {
               "type": "string",
               "enum": [
@@ -27031,7 +27031,8 @@
                 "network_access",
                 "unknown_effect",
                 "outside_working_directory",
-                "read_only_policy"
+                "read_only_policy",
+                "workspace_write"
               ]
             }
           },
