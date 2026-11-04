@@ -83,6 +83,7 @@ web/echo_*.md
 
 # Browser verification artifacts
 output/
+dsh-superagent-prototype/
 
 # Desktop dependencies
 desktop/node_modules/

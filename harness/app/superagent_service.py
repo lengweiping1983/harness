@@ -110,12 +110,29 @@ def read_config(path: Path):
         raise _error('invalid', field='config') from exc
 
 
+_COORDINATOR_STATE_FILES = (
+    "superagent.sqlite3", "superagent.sqlite3-wal", "superagent.sqlite3-shm",
+)
+
+
+def _has_coordinator_state(root: Path) -> bool:
+    """识别当前及祖先目录中的 v2 协调账本，拒绝嵌套状态目录。"""
+    return any(
+        (ancestor / name).exists() or (ancestor / name).is_symlink()
+        for ancestor in (root, *root.parents)
+        for name in _COORDINATOR_STATE_FILES
+    )
+
+
 class SuperagentService:
     """本机可信文件信道；同一状态目录只允许一个所属运行进程。"""
 
     @classmethod
     async def open(cls, config_path: Path, *, worker_transport=None, router_transport=None):
         spec = read_config(config_path)
+        # 先于凭据读取拒绝 v2 账本；锁内还会复核一次以封闭并发启动竞态。
+        if _has_coordinator_state(Path(spec['state_dir'])):
+            raise _error('conflict')
         api_key = os.environ.get('HARNESS_API_KEY') or os.environ.get('OPENROUTER_API_KEY','')
         if not api_key:
             raise _error('credentials-required')
@@ -146,6 +163,8 @@ class SuperagentService:
                 service.stack.enter_context(event_write_lock(service.root / 'superagent-runtime'))
             except OSError as exc:
                 raise _error('runtime-busy') from exc
+            if _has_coordinator_state(service.root):
+                raise _error('conflict')
             service.path = service.root / 'service.sqlite3'
             with service._db(initialize=True, write=True) as db:
                 identity = json.dumps(spec, ensure_ascii=False, sort_keys=True)

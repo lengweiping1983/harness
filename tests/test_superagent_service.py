@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from harness.cli import build_parser, main
 from harness.app.git_process import run_git
 from harness.app.superagent_service import SuperagentService, read_config
+from harness.app.superagent_coordinator_host import CoordinatorHost
 from harness.core.errors import HarnessError
 from harness.core.language import current_language
 from harness.i18n import tr
@@ -205,6 +206,55 @@ class SuperagentServiceTests(unittest.IsolatedAsyncioTestCase):
                 await SuperagentService.open(self.path,worker_transport=self.work_transport,router_transport=self.router_transport)
         self.assertEqual(caught.exception.code,'superagent/runtime-busy')
 
+    async def test_v1_service_refuses_v2_coordinator_directory_before_host_construction(self):
+        with CoordinatorHost.open(
+            self.root / "state", instance_id="v2-instance",
+            identity={"profile": "coordinator"},
+            legacy_state_dir=self.root / "legacy-v1",
+        ):
+            pass
+        with patch("harness.app.superagent_service.Harness",
+                   side_effect=AssertionError("v1 Harness must not be constructed")):
+            with self.assertRaises(HarnessError) as caught:
+                await self.open()
+        self.assertEqual(caught.exception.code, "superagent/conflict")
+        self.assertFalse((self.root / "state" / "service.sqlite3").exists())
+
+    async def test_v1_service_refuses_v2_ancestor_directory_before_host_construction(self):
+        v2_root = self.root / "state"
+        with CoordinatorHost.open(
+            v2_root, instance_id="v2-instance",
+            identity={"profile": "coordinator"},
+            legacy_state_dir=self.root / "legacy-v1",
+        ):
+            pass
+        nested_v1_root = v2_root / "legacy-child"
+        self.spec["state_dir"] = str(nested_v1_root.relative_to(self.root))
+        self.save()
+        with patch("harness.app.superagent_service.Harness",
+                   side_effect=AssertionError("nested v1 Harness must not be constructed")):
+            with self.assertRaises(HarnessError) as caught:
+                await self.open()
+        self.assertEqual(caught.exception.code, "superagent/conflict")
+        self.assertFalse(nested_v1_root.exists())
+        self.assertTrue((v2_root / "superagent.sqlite3").is_file())
+
+    async def test_v1_and_v2_hosts_share_the_same_runtime_lease(self):
+        from harness.session.write_lock import event_write_lock
+
+        state_dir = self.root / "state"
+        state_dir.mkdir()
+        with event_write_lock(state_dir / "superagent-runtime"):
+            with self.assertRaises(HarnessError) as caught:
+                CoordinatorHost.open(
+                    state_dir, instance_id="v2-instance",
+                    identity={"profile": "coordinator"},
+                    legacy_state_dir=self.root / "legacy-v1",
+                )
+            self.assertEqual(caught.exception.code, "superagent/runtime-busy")
+        self.assertFalse((state_dir / "service.sqlite3").exists())
+        self.assertFalse((state_dir / "superagent.sqlite3").exists())
+
     async def test_bad_event_is_retained_and_does_not_prevent_other_work(self):
         service = await self.open()
         malformed = service.root / 'incoming' / 'bad.json'
@@ -386,3 +436,19 @@ class SuperagentCliTests(unittest.TestCase):
                 patch('harness.superagent_cli.run',new=AsyncMock(return_value=0)) as runner:
             self.assertEqual(main(['--superagent','state.json','--superagent-once']),0)
         runner.assert_awaited_once_with(Path('state.json'),once=True)
+
+    def test_dedicated_runner_still_opens_the_v1_superagent_service(self):
+        from harness.superagent_cli import run
+        from unittest.mock import AsyncMock
+        service = SimpleNamespace(
+            root=Path("legacy-state"), github=None, feishu=None,
+            serve=AsyncMock(return_value=0), aclose=AsyncMock(),
+        )
+        with redirect_stderr(io.StringIO()), patch(
+            "harness.superagent_cli.SuperagentService.open",
+            new=AsyncMock(return_value=service),
+        ) as opener:
+            self.assertEqual(asyncio.run(run(Path("legacy-config.json"), once=True)), 0)
+        opener.assert_awaited_once_with(Path("legacy-config.json"))
+        service.serve.assert_awaited_once()
+        service.aclose.assert_awaited_once()
