@@ -11,8 +11,12 @@ export function observeAcademyExecutions(browser) {
     const response = value => {
       const request = value.request()
       const pathname = new URL(value.url()).pathname
-      if (request.method() !== 'POST' || !/^\/api\/v1\/academy\/projects\/[^/]+\/(run|check)$/.test(pathname)) return
-      const record = {url: value.url(), status: value.status(), state: 'pending'}
+      const method = request.method()
+      const execution = method === 'POST' && /^\/api\/v1\/academy\/projects\/[^/]+\/(run|check|tutor-turns)$/.test(pathname)
+      const recovery = method === 'GET' && (/^\/api\/v1\/academy\/receipts\/[^/]+$/.test(pathname)
+        || /^\/api\/v1\/academy\/projects\/[^/]+\/(runs|tutor-turns)$/.test(pathname))
+      if (!execution && !recovery) return
+      const record = {url: value.url(), method, status: value.status(), state: 'pending'}
       records.push(record)
       if (records.length > limit) records.shift()
       const reading = (async () => {

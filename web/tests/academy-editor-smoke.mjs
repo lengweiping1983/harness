@@ -1,4 +1,5 @@
 import {requireAcademySandbox} from './academy-environment.mjs'
+import {academyDiagnostics} from './academy-diagnostics.mjs'
 import {openAcademySection} from './academy-sections.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
@@ -111,6 +112,12 @@ try {
   await page.waitForFunction(() => !sessionStorage.getItem('harness.academy.pending.v1'))
   let runs = (await (await page.request.get(base + '/api/v1/academy/projects/' + project.id + '/runs')).json()).runs
   assert.equal(runs.length, 1)
+  const diagnostics = academyDiagnostics(browser)
+  await diagnostics.wait()
+  const recovered = diagnostics.snapshot().find(record => record.method === 'GET'
+    && new URL(record.url).pathname === '/api/v1/academy/receipts/' + pending.requestId && record.state === 'received')
+  assert.ok(recovered, 'Lost execution responses must retain the actual receipt recovery body')
+  assert.deepEqual(JSON.parse(recovered.body).result.run.result, runs[0].result)
   assert.ok(runs[0].result.stdout.includes('EDITOR_SHORTCUT_OUTPUT'))
   await panel.locator('[data-academy-run-id="' + runs[0].id + '"]').waitFor()
   const order = await panel.evaluate(node => {

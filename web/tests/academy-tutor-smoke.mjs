@@ -1,4 +1,5 @@
 import {requireAcademySandbox} from './academy-environment.mjs'
+import {academyDiagnostics} from './academy-diagnostics.mjs'
 import {openAcademySection} from './academy-sections.mjs'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
@@ -82,6 +83,14 @@ try {
   assert.equal(turns[0].status, 'completed')
   assert.equal(turns[0].prompt, question)
   assert.equal(turns[0].allow_execution, true)
+  const diagnostics = academyDiagnostics(browser)
+  await diagnostics.wait()
+  const observed = diagnostics.snapshot().filter(record => record.method === 'GET'
+    && record.url === base + '/api/v1/academy/projects/' + project.id + '/tutor-turns' && record.state === 'received')
+    .flatMap(record => JSON.parse(record.body).tutor_turns)
+    .find(turn => turn.id === turns[0].id && turn.status === 'completed')
+  assert.ok(observed, 'Background tutor execution must retain its actual completed history response')
+  assert.deepEqual(observed.actions, turns[0].actions)
   assert.ok(turns[0].response.includes('NATIVE_TUTOR_OBSERVED_OUTPUT'))
   const runs = (await (await page.request.get(base + '/api/v1/academy/projects/' + project.id + '/runs')).json()).runs
   assert.equal(runs.length, 1)

@@ -95,7 +95,7 @@ Web 单测入口也执行 `model-runtime/tests` 的桥接转录回归；Python �
 
 课程执行场景通过 `academy-environment.mjs` 核对真实项目回执中的 `sandbox`。明确的 `unavailable` 记录为基础设施失败，停止后续调度；缺失或非法字段仍是业务断言失败，不能靠错误正文推断环境。课程设计和概念学习场景不因不执行代码而被整体排除。Windows 只运行可验收场景时，必须明确列出尚受沙箱阻塞的执行场景，不能报告完整浏览器套件通过。
 
-`seatbelt`／`bubblewrap` 只表示检测到对应程序，不证明当前宿主允许启动沙箱。`launchBrowser` 被动记录课程执行的原始 POST 响应；场景失败时，`cleanupFixture` 在关闭浏览器前最多等待 3 秒，并将最近 8 条 `/run`／`check` 回执写入所属场景日志，每条正文最多 65536 个字符，截断与读取失败明确标记。诊断不新增请求、不重放执行、不替换原断言或根据 stderr 自动改变失败分类；没有捕获到直接证据的场景仍须独立定位。`academy-diagnostics-smoke.mjs` 以受控失败响应核对真实浏览器的两个上下文创建入口、回执原文、原异常身份、零重放与监听清理，不作为真实沙箱拒绝的验收。
+`seatbelt`／`bubblewrap` 只表示检测到对应程序，不证明当前宿主允许启动沙箱。`launchBrowser` 被动记录课程 `/run`／`check`／`tutor-turns` 的原始 POST 响应，以及产品实际发起的 `GET /receipts/{request_id}`、项目 `/runs` 和 `/tutor-turns` 响应。丢失的 POST 响应没有正文，须保留随后实际收到的回查原件；导师 HTTP 接口返回 JSON，后台执行证据由问答历史和运行记录读取，不把它当作浏览器可见的 SSE 执行接口。场景失败时，`cleanupFixture` 在关闭浏览器前最多等待 3 秒，并将最近 8 条响应的方法、URL、HTTP 状态及原始正文写入所属场景日志，每条正文最多 65536 个字符，截断与读取失败明确标记。诊断不新增请求、不重放执行、不替换原断言或根据 stderr 自动改变失败分类；没有捕获到直接证据的场景仍须独立定位。`academy-diagnostics-smoke.mjs` 以受控失败响应核对真实浏览器的两个上下文创建入口、POST 丢失后的 GET 回查、导师历史与运行记录、回执原文、原异常身份、无额外读取及零重放与监听清理，不作为真实沙箱拒绝的验收。真实 `academy-editor` 与 `academy-tutor` 场景另核对被动采集到的回查／完成历史与实际持久结果一致，避免诊断数组为空仍误报采集已覆盖。
 
 `academy-curriculum-smoke.mjs` 的课程完成投影使用真实读取后改写夹具响应。结束时须先以 `unrouteAll({behavior: 'wait'})` 撤销拦截并等待在途回调，再关闭浏览器；否则 `route.fetch()` 可能在最后的界面断言完成后仍未收尾，关闭会造成未处理的 `TargetClosedError` 并中断工作进程。诊断 smoke 用屏障固定这一时序，验证关闭发生在路由完成之后，不通过忽略路由异常消除失败。
 
