@@ -146,6 +146,7 @@ make verify PYTHON=.venv/bin/python
 ## 文档与协作
 
 - [架构与模块](docs/architecture.md)
+- [长程 Goal、续接与可核验完成](docs/goal-longrun.md)
 - [当前项目约束](docs/project-contract.md)、[开发与测试](docs/development.md)与[代码生成规则](docs/code-generation.md)
 - [接口与协议](docs/api.md)及[生成的 OpenAPI](docs/openapi-v1.json)
 - [存储与恢复](docs/storage.md)、[扩展能力](docs/extensions.md)
