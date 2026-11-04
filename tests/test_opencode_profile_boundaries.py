@@ -31,7 +31,7 @@ class OpenCodeProfileBoundariesTests(unittest.TestCase):
                     with self.assertRaises(LlmError) as error:
                         load_profile(executable,profile)
                     self.assertEqual(error.exception.code,'llm/opencode-local-profile')
-                    self.assertEqual(error.exception.message,tr('llm.opencode_local.profile_invalid'))
+                    self.assertEqual(error.exception.message,tr('ui.llm.opencodeLocalProfileInvalid',profile=str(profile)))
                     self.assertEqual(profile.read_bytes(),raw)
 
     def test_configured_path_uses_same_bounded_reader_before_resolving_executable(self):

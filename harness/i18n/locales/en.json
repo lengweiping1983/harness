@@ -8501,5 +8501,14 @@
   "ui.desktop.menu.updateNetworkDetail": "Update server: {host}\n{diagnostic}",
   "ui.desktop.menu.updateRetry": "Retry",
   "ui.desktop.menu.updateNetworkSettings": "Open Network Settings",
-  "ui.desktop.menu.updateOpenFailed": "Could not open the page or Network Settings. See the details and open it manually."
+  "ui.desktop.menu.updateOpenFailed": "Could not open the page or Network Settings. See the details and open it manually.",
+  "ui.llm.opencodeLocalProfileMissing": "The local OpenCode profile was not found: {profile}. Prepare it with python -m harness.llm.opencode_local --executable <absolute native OpenCode executable path> --profile <profile path above>, then continue the current task.",
+  "ui.llm.opencodeLocalProfileUnreadable": "Cannot read the local OpenCode profile: {profile}. Check the path and read permissions; the original file has not been modified.",
+  "ui.llm.opencodeLocalProfileInvalid": "The local OpenCode profile is invalid: {profile}. The original file has not been modified. Explicitly prepare it again with python -m harness.llm.opencode_local --executable <absolute native OpenCode executable path> --profile <profile path above> --refresh-backup <unused backup path>, then continue the current task.",
+  "ui.llm.opencodeLocalProfileExecutableUnavailable": "Cannot read the local OpenCode executable: {executable}. Check the installation path and permissions; the profile at {profile} has not been modified.",
+  "ui.llm.opencodeLocalProfileExecutableChanged": "The local OpenCode executable has changed and no longer matches its profile. Executable: {executable}; profile: {profile}. Explicitly refresh it and preserve the original with python -m harness.llm.opencode_local --executable <executable path above> --profile <profile path above> --refresh-backup <unused backup path>, then continue the current task.",
+  "ui.llm.opencodeLocalProfileRefreshFailed": "Could not refresh the local OpenCode profile: {profile}. Check file permissions, whether another program changed the profile, and that backup path {backup} is unused. Inspect the current files to confirm the replacement state before retrying.",
+  "llm.opencode_local.refresh_help": "Explicitly refresh an existing profile: validate the new profile, then preserve the original at this unused backup path; failures are not retried automatically.",
+  "ui.modelFailure.localProfileRequired": "The local OpenCode profile needs attention",
+  "ui.modelFailure.localProfileHint": "The existing execution task is preserved. Check or explicitly refresh the local profile as described in the technical details, then continue the current task."
 }

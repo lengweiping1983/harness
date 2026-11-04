@@ -2,6 +2,9 @@ import { t } from '@/i18n'
 /** Human-facing projection; keep original diagnostics available for inspection. */
 export function modelFailure(message: unknown, code?: unknown): { title: string; hint: string } | null {
   const text = String(message ?? '')
+  if (code === 'llm/opencode-local-profile') {
+    return { title: t('ui.modelFailure.localProfileRequired'), hint: t('ui.modelFailure.localProfileHint') }
+  }
   if (code === 'agent/no-progress') {
     return { title: t("ui.lib.modelFailure.387b05e38bf9"), hint: t("ui.lib.modelFailure.c924e28e433e") }
   }

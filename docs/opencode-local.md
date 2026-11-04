@@ -24,7 +24,18 @@ python -m harness.llm.opencode_local --executable '<已安装的 opencode-cli.ex
 
 准备过程在临时项目中通过 `run --standalone` 启动私有服务，同时固定 `cwd` 与 `PWD`，隔离 XDG 数据、状态、配置、缓存和临时目录，并移除外部 OpenCode 配置及 API Key 环境覆盖。它使用 `opencode/big-pickle` 捕获上下文，避开首次目录刷新前找不到较新模型的问题；该模型只用于准备，不会替换设置中选择的模型。`http.request` 钩子捕获三项客户端头及系统上下文，检查主请求采用 `Bearer public` 后中止请求，不向远端发送模型生成请求。本次准备的第三方对话和私有服务随临时目录回收，不连接或停止用户已有常驻服务。
 
-资料保存可执行文件绝对路径及 SHA-256、`user-agent`、`x-opencode-client`、`x-opencode-project` 和捕获的系统上下文。该第三方上下文保留原文，实际发送内容进入请求诊断，附加输入计入容量预检。目标资料已存在时拒绝覆盖；准备新资料时选择新路径，再显式配置该路径。
+资料保存可执行文件绝对路径及 SHA-256、`user-agent`、`x-opencode-client`、`x-opencode-project` 和捕获的系统上下文。该第三方上下文保留原文，实际发送内容进入请求诊断，附加输入计入容量预检。普通准备命令在目标资料已存在时拒绝覆盖；也可选择新路径准备，再显式配置该路径。
+
+OpenCode 更新导致摘要不匹配或已有资料损坏时，可显式刷新原路径，并指定一个尚不存在的备份文件：
+
+```sh
+.venv/bin/python -m harness.llm.opencode_local \
+  --executable /Applications/OpenCode.app/Contents/Resources/opencode-cli \
+  --profile "$HOME/.harness/opencode-local/profile.json" \
+  --refresh-backup "$HOME/.harness/opencode-local/profile.before-refresh.json"
+```
+
+Windows 同样支持 `--refresh-backup`，将路径替换为实际安装与用户目录。刷新先在隔离目录捕获并校验新资料，再独占创建备份、保留旧资料原始字节，并原子替换目标文件；macOS／Linux 的备份权限为 `0600`。捕获失败或取消不改写原件。备份路径已占用、原资料是符号链接，或准备期间检测到资料变化时拒绝替换；备份与提交阶段失败可能留下备份，先检查现状，不自动重试。文件身份及摘要回查不能排除非协作外部进程在最后检查与替换之间写入；刷新期间应避免其他程序同时编辑资料。刷新成功后继续原任务，不自动重放任何模型或工具操作。
 
 准备过程的启动等待和 CLI 等待各有 60 秒截止。宿主先回收独占监督进程及其后代，再读取捕获资料和释放临时目录；取消或到达启动截止仍等待迟到句柄并完成清理，清理等待另计。
 
@@ -47,7 +58,7 @@ python -m harness.llm.opencode_local --executable '<已安装的 opencode-cli.ex
 | `HARNESS_OPENCODE_PROFILE` | 指定资料路径，支持用户目录展开 |
 | `HARNESS_OPENCODE_EXECUTABLE` | 显式指定可执行文件，覆盖资料中记录的路径 |
 
-默认资料为当前系统用户的 `~/.harness/opencode-local/profile.json`，不随 `HARNESS_HOME` 改变。显式资料缺失、损坏或与可执行文件摘要不匹配时返回 `llm/opencode-local-profile`，保留原件；可执行文件更新后需显式准备对应资料。
+默认资料为当前系统用户的 `~/.harness/opencode-local/profile.json`，不随 `HARNESS_HOME` 改变。资料校验失败仍返回 `llm/opencode-local-profile`，通过 `reason` 区分 `missing`、`unreadable`、`invalid`、`executableUnavailable` 和 `executableChanged`，包含资料路径及双语资源身份；摘要不匹配另保留预期与实际 SHA-256，不包含资料正文。错误卡片明确提示检查本机资料，具体路径和准备／刷新命令在技术详情中呈现。读取错误保留原件，不自动安装、刷新或降级传输；可执行文件变化后需显式准备对应资料。
 
 配置发现、正式加载与准备捕获共用资料解析入口：解析前最多读取 1 MiB 加一个判界字节，超过 1 MiB 拒绝；严格校验 UTF-8、重复字段、孤立代理码点、非有限数值和超过 128 层的嵌套。客户端身份头必须为非空可打印 ASCII，资料版本必须为当前整数版本；合法上下文与扩展字段保持原文。
 

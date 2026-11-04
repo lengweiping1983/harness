@@ -8501,5 +8501,14 @@
   "ui.desktop.menu.updateNetworkDetail": "更新服务器：{host}\n{diagnostic}",
   "ui.desktop.menu.updateRetry": "重试",
   "ui.desktop.menu.updateNetworkSettings": "打开网络设置",
-  "ui.desktop.menu.updateOpenFailed": "无法打开页面或网络设置。请查看详细原因，并手动打开。"
+  "ui.desktop.menu.updateOpenFailed": "无法打开页面或网络设置。请查看详细原因，并手动打开。",
+  "ui.llm.opencodeLocalProfileMissing": "找不到本机 OpenCode 接口资料：{profile}。请使用 python -m harness.llm.opencode_local --executable <OpenCode 原生可执行文件绝对路径> --profile <上述资料路径> 准备资料，然后继续当前任务。",
+  "ui.llm.opencodeLocalProfileUnreadable": "无法读取本机 OpenCode 接口资料：{profile}。请检查路径和读取权限；原件未修改。",
+  "ui.llm.opencodeLocalProfileInvalid": "本机 OpenCode 接口资料格式无效：{profile}。原件未修改。请使用 python -m harness.llm.opencode_local --executable <OpenCode 原生可执行文件绝对路径> --profile <上述资料路径> --refresh-backup <未使用的备份路径> 显式重新准备，再继续当前任务。",
+  "ui.llm.opencodeLocalProfileExecutableUnavailable": "无法读取本机 OpenCode 可执行文件：{executable}。请检查安装路径和权限；资料 {profile} 未修改。",
+  "ui.llm.opencodeLocalProfileExecutableChanged": "本机 OpenCode 可执行文件已变化，接口资料不再匹配。可执行文件：{executable}；资料：{profile}。请使用 python -m harness.llm.opencode_local --executable <上述可执行文件路径> --profile <上述资料路径> --refresh-backup <未使用的备份路径> 显式刷新并保留原件，然后继续当前任务。",
+  "ui.llm.opencodeLocalProfileRefreshFailed": "无法刷新本机 OpenCode 接口资料：{profile}。请检查文件权限、资料是否被其他程序修改，以及备份路径 {backup} 是否未被占用；替换结果以当前文件为准，请先核对状态。",
+  "llm.opencode_local.refresh_help": "显式刷新已有资料：先验证新资料，再将原件保存到此未使用的备份路径；失败不自动重试。",
+  "ui.modelFailure.localProfileRequired": "本机 OpenCode 接口资料需要处理",
+  "ui.modelFailure.localProfileHint": "已有执行任务已保留。请按技术详情检查或显式刷新本机接口资料，再继续当前任务。"
 }

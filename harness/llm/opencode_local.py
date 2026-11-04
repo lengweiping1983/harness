@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -151,6 +152,34 @@ def _validate_json(value):
             pending.extend((child, depth + 1) for child in item)
 
 
+def _profile_error(reason, path, executable=None, **details):
+    """保留可定位的原因与资源身份，不向诊断写入资料正文。"""
+    key = {
+        'missing': 'ui.llm.opencodeLocalProfileMissing',
+        'unreadable': 'ui.llm.opencodeLocalProfileUnreadable',
+        'invalid': 'ui.llm.opencodeLocalProfileInvalid',
+        'executableUnavailable': 'ui.llm.opencodeLocalProfileExecutableUnavailable',
+        'executableChanged': 'ui.llm.opencodeLocalProfileExecutableChanged',
+    }[reason]
+    params = {'profile': str(path)}
+    if executable is not None:
+        params['executable'] = str(executable)
+    return LlmError(tr(key, **params), code='llm/opencode-local-profile',
+        reason=reason, profile_path=str(path), **details, copy={'key': key, 'params': params})
+
+
+def _read_profile(path):
+    """区分资料缺失、不可读取与内容损坏，所有入口继续共用严格解析。"""
+    try:
+        return _profile_json(path)
+    except FileNotFoundError:
+        raise _profile_error('missing', path) from None
+    except OSError as exc:
+        raise _profile_error('unreadable', path, errno=exc.errno) from None
+    except (ValueError, TypeError, RecursionError):
+        raise _profile_error('invalid', path) from None
+
+
 def configured_transport(*, required=False):
     """显式本机认证缺少资料时拒绝，不能静默改用普通HTTP。"""
     executable = os.environ.get('HARNESS_OPENCODE_EXECUTABLE')
@@ -158,16 +187,16 @@ def configured_transport(*, required=False):
     profile = Path(explicit_profile).expanduser() if explicit_profile else Path.home()/'.harness/opencode-local/profile.json'
     if not executable and not explicit_profile and not profile.exists():
         if required:
-            raise LlmError(tr('llm.opencode_local.profile_invalid'), code='llm/opencode-local-profile')
+            raise _profile_error('missing', profile)
         return None
     if not executable:
         try:
-            data = _profile_json(profile)
+            data = _read_profile(profile)
             executable = data['executable']
             if not isinstance(executable, str) or not Path(executable).is_absolute():
                 raise ValueError
-        except (OSError, ValueError, KeyError, TypeError, RecursionError):
-            raise LlmError(tr('llm.opencode_local.profile_invalid'), code='llm/opencode-local-profile') from None
+        except (ValueError, KeyError, TypeError):
+            raise _profile_error('invalid', profile) from None
     return OpenCodeLocalTransport(executable, str(profile))
 
 
@@ -179,10 +208,12 @@ def executable_digest(path: Path) -> str:
 
 def load_profile(executable: Path, path: Path) -> dict:
     """拒绝缺失、损坏或与本机可执行文件不匹配的配置，不覆盖原件。"""
+    data = _read_profile(path)
     try:
-        data = _profile_json(path)
         if (not isinstance(data, dict) or type(data.get('version')) is not int or data['version'] != 1
-                or data.get('executable_sha256') != executable_digest(executable)
+                or not isinstance(data.get('executable_sha256'), str)
+                or len(data['executable_sha256']) != 64
+                or any(char not in '0123456789abcdef' for char in data['executable_sha256'])
                 or not isinstance(data.get('headers'), dict)
                 or set(data['headers']) != {'user-agent', 'x-opencode-client', 'x-opencode-project'}
                 or not all(isinstance(k, str) and isinstance(v, str) and v and all(32 <= ord(char) <= 126 for char in v)
@@ -192,9 +223,16 @@ def load_profile(executable: Path, path: Path) -> dict:
                            and item['role'] == 'system' and isinstance(item['content'], str)
                            and item['content'] for item in data['system'])):
             raise ValueError
-        return data
-    except (OSError, ValueError, TypeError, RecursionError):
-        raise LlmError(tr('llm.opencode_local.profile_invalid'), code='llm/opencode-local-profile') from None
+    except (ValueError, TypeError, RecursionError):
+        raise _profile_error('invalid', path) from None
+    try:
+        digest = executable_digest(executable)
+    except OSError as exc:
+        raise _profile_error('executableUnavailable', path, executable, errno=exc.errno) from None
+    if data['executable_sha256'] != digest:
+        raise _profile_error('executableChanged', path, executable,
+            expected_sha256=data['executable_sha256'], actual_sha256=digest)
+    return data
 
 
 class OpenCodeLocalTransport(Transport):
@@ -393,6 +431,40 @@ throw Error('harness_profile_captured');
     load_profile(executable, destination)
 
 
+async def refresh_profile(executable: Path, destination: Path, backup: Path) -> None:
+    """显式刷新时先完成捕获与验证，再备份原件并原子替换，不自动恢复或重放。"""
+    key = 'ui.llm.opencodeLocalProfileRefreshFailed'
+    def identity():
+        stat = destination.stat()
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+    try:
+        if destination.is_symlink() or backup.exists() or backup.is_symlink():
+            raise ValueError
+        original_stat = identity()
+        original_digest = executable_digest(destination)
+        with tempfile.TemporaryDirectory(prefix='.opencode-refresh-', dir=destination.parent) as directory:
+            candidate = Path(directory) / 'profile.json'
+            await bootstrap_profile(executable, candidate)
+            load_profile(executable, candidate)
+            if identity() != original_stat or executable_digest(destination) != original_digest:
+                raise ValueError
+            # 独占创建备份；失败保留原件与已产生的备份，不覆盖任何既有文件。
+            with destination.open('rb') as source, backup.open('xb') as target:
+                if os.name != 'nt':
+                    os.fchmod(target.fileno(), 0o600)
+                shutil.copyfileobj(source, target)
+                target.flush()
+                os.fsync(target.fileno())
+            if (identity() != original_stat or executable_digest(backup) != original_digest
+                    or executable_digest(destination) != original_digest):
+                raise ValueError
+            os.replace(candidate, destination)
+    except (OSError, ValueError) as exc:
+        params = {'profile': str(destination), 'backup': str(backup)}
+        raise LlmError(tr(key, **params), code='llm/opencode-local-refresh',
+            copy={'key': key, 'params': params}) from exc
+
+
 def main():
     """显式准备本机接口资料，不改模型列表、用户登录和已有运行目录。"""
     selector = argparse.ArgumentParser(add_help=False)
@@ -402,9 +474,15 @@ def main():
     parser = argparse.ArgumentParser(parents=[selector], description=tr('llm.opencode_local.help'))
     parser.add_argument('--executable', required=True)
     parser.add_argument('--profile', required=True)
+    parser.add_argument('--refresh-backup', help=tr('llm.opencode_local.refresh_help'))
     args = parser.parse_args()
     current_language.set(args.language)
-    asyncio.run(bootstrap_profile(Path(args.executable).resolve(), Path(args.profile).resolve()))
+    executable = Path(args.executable).expanduser().resolve()
+    profile = Path(args.profile).expanduser().absolute()
+    if args.refresh_backup:
+        asyncio.run(refresh_profile(executable, profile, Path(args.refresh_backup).expanduser().absolute()))
+    else:
+        asyncio.run(bootstrap_profile(executable, profile))
     print(tr('llm.opencode_local.ready'))
 
 

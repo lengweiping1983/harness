@@ -16,7 +16,7 @@ from harness.llm.capabilities import CapabilityRegistry
 from harness.llm.routes import ModelRoutes
 from harness.llm.providers import ProviderConnections
 from harness.llm.types import AssistantMessage, LlmCallConfig, StreamEvent, ToolSchema, ToolUseBlock, UserMessage
-from harness.llm.opencode_local import BASE_URL, OpenCodeLocalTransport, executable_digest, load_profile, bootstrap_profile
+from harness.llm.opencode_local import BASE_URL, OpenCodeLocalTransport, executable_digest, load_profile, bootstrap_profile, refresh_profile
 
 
 class OpenCodeLocalTests(unittest.IsolatedAsyncioTestCase):
@@ -42,6 +42,123 @@ class OpenCodeLocalTests(unittest.IsolatedAsyncioTestCase):
         original=self.profile.read_bytes()
         with self.assertRaises(LlmError):self.transport()
         self.assertEqual(self.profile.read_bytes(),original)
+
+    async def test_profile_diagnostics_distinguish_local_failures_without_spawning(self):
+        """同一入口随语言切换报告真实原因，保留资料且不泄露正文。"""
+        from harness.i18n import tr
+        from harness.llm.opencode_local import configured_transport
+        for reason in ('missing', 'invalid', 'executableUnavailable', 'executableChanged'):
+            self.save()
+            executable = self.executable
+            if reason == 'missing':
+                self.profile.unlink()
+            elif reason == 'invalid':
+                self.profile.write_bytes(b'private invalid content')
+            elif reason == 'executableUnavailable':
+                executable = self.profile.with_name('missing-runtime')
+            else:
+                self.data['executable_sha256'] = '0' * 64
+                self.save()
+            original = self.profile.read_bytes() if self.profile.exists() else None
+            with patch.dict(os.environ, {'HARNESS_OPENCODE_EXECUTABLE':str(executable),
+                    'HARNESS_OPENCODE_PROFILE':str(self.profile)}), \
+                    patch('harness.llm.opencode_local.asyncio.create_subprocess_exec') as spawn:
+                for language in ('en', 'zh-CN', 'en'):
+                    with self.subTest(reason=reason, language=language), current_language.set(language):
+                        with self.assertRaises(LlmError) as caught:
+                            configured_transport(required=True)
+                        error = caught.exception
+                        self.assertEqual(error.details['reason'], reason)
+                        self.assertFalse(error.transient)
+                        copy = error.details['copy']
+                        self.assertEqual(error.message, tr(copy['key'], **copy['params']))
+                        self.assertNotIn('private invalid content', str(error.to_dict()))
+                        self.assertEqual(self.profile.read_bytes() if self.profile.exists() else None, original)
+                spawn.assert_not_called()
+
+    async def test_refresh_validates_then_backs_up_original_and_reloads_transport(self):
+        """显式刷新保留原始字节，替换后的资料可经真实配置入口加载。"""
+        from harness.llm.opencode_local import configured_transport
+        backup = self.profile.with_suffix('.backup')
+        self.profile.write_bytes(b'original invalid profile')
+        async def capture(executable, destination):
+            self.assertEqual(self.profile.read_bytes(), b'original invalid profile')
+            self.assertFalse(backup.exists())
+            destination.write_text(json.dumps({**self.data, 'executable':str(executable)}), encoding='utf-8')
+        with patch('harness.llm.opencode_local.bootstrap_profile', side_effect=capture) as bootstrap:
+            await refresh_profile(self.executable, self.profile, backup)
+        bootstrap.assert_awaited_once()
+        self.assertEqual(backup.read_bytes(), b'original invalid profile')
+        if os.name != 'nt':
+            self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+        with patch.dict(os.environ, {'HARNESS_OPENCODE_EXECUTABLE':'', 'HARNESS_OPENCODE_PROFILE':str(self.profile)}):
+            self.assertIsInstance(configured_transport(required=True), OpenCodeLocalTransport)
+
+    async def test_refresh_failure_cancel_and_invalid_capture_preserve_original(self):
+        """捕获失败、取消和无效新资料均不创建备份或改写已有资料。"""
+        original = self.profile.read_bytes()
+        backup = self.profile.with_suffix('.backup')
+        for failure in ('failed', 'cancelled', 'invalid'):
+            async def capture(executable, destination):
+                if failure == 'failed':
+                    raise LlmError('fixture', code='llm/opencode-local-bootstrap')
+                if failure == 'cancelled':
+                    raise asyncio.CancelledError
+                destination.write_bytes(b'invalid')
+            with self.subTest(failure=failure), patch('harness.llm.opencode_local.bootstrap_profile', side_effect=capture):
+                with self.assertRaises((LlmError, asyncio.CancelledError)):
+                    await refresh_profile(self.executable, self.profile, backup)
+                self.assertEqual(self.profile.read_bytes(), original)
+                self.assertFalse(backup.exists())
+
+    async def test_refresh_refuses_existing_backup_and_changed_profile(self):
+        """备份冲突不启动捕获，准备期间原件变化则拒绝覆盖。"""
+        backup = self.profile.with_suffix('.backup')
+        original = self.profile.read_bytes()
+        backup.write_bytes(b'existing backup')
+        with patch('harness.llm.opencode_local.bootstrap_profile') as capture:
+            with self.assertRaises(LlmError):
+                await refresh_profile(self.executable, self.profile, backup)
+            capture.assert_not_called()
+        self.assertEqual(backup.read_bytes(), b'existing backup')
+        self.assertEqual(self.profile.read_bytes(), original)
+        backup.unlink()
+        async def changed(executable, destination):
+            destination.write_bytes(original)
+            self.profile.write_bytes(b'concurrent change')
+        with patch('harness.llm.opencode_local.bootstrap_profile', side_effect=changed):
+            with self.assertRaises(LlmError) as caught:
+                await refresh_profile(self.executable, self.profile, backup)
+            self.assertEqual(caught.exception.code, 'llm/opencode-local-refresh')
+        self.assertEqual(self.profile.read_bytes(), b'concurrent change')
+        self.assertFalse(backup.exists())
+
+    async def test_profile_read_permission_error_retains_errno_and_resource(self):
+        """无法读取资料时报告读取权限问题，不误报版本变化。"""
+        original = self.profile.read_bytes()
+        with patch('harness.llm.opencode_local._profile_json', side_effect=PermissionError(13, 'fixture')):
+            for language in ('en', 'zh-CN', 'en'):
+                with current_language.set(language), self.assertRaises(LlmError) as caught:
+                    load_profile(self.executable, self.profile)
+                self.assertEqual(caught.exception.details['reason'], 'unreadable')
+                self.assertEqual(caught.exception.details['errno'], 13)
+                self.assertEqual(caught.exception.details['copy']['key'], 'ui.llm.opencodeLocalProfileUnreadable')
+        self.assertEqual(self.profile.read_bytes(), original)
+
+    async def test_refresh_replace_failure_preserves_original_and_backup(self):
+        """最终替换被拒绝时保留可核对原件与备份，不重放捕获。"""
+        backup = self.profile.with_suffix('.backup')
+        original = self.profile.read_bytes()
+        async def capture(executable, destination):
+            destination.write_bytes(original)
+        with patch('harness.llm.opencode_local.bootstrap_profile', side_effect=capture) as capture_mock, \
+                patch('harness.llm.opencode_local.os.replace', side_effect=PermissionError(13, 'fixture')):
+            with self.assertRaises(LlmError) as caught:
+                await refresh_profile(self.executable, self.profile, backup)
+        self.assertEqual(caught.exception.code, 'llm/opencode-local-refresh')
+        capture_mock.assert_awaited_once()
+        self.assertEqual(self.profile.read_bytes(), original)
+        self.assertEqual(backup.read_bytes(), original)
 
     async def test_adapter_includes_native_context_and_localized_boundary_without_changing_history(self):
         """恢复本机上下文，实际请求计入附加输入并保留用户原文和资料。"""
@@ -171,7 +288,9 @@ class OpenCodeLocalTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaises(LlmError) as caught:
                         async for _ in adapter.stream([UserMessage('hello')], config=LlmCallConfig(model='harness/local/local-endpoint/free')):
                             pass
-                    self.assertEqual(caught.exception.message, tr('llm.opencode_local.profile_invalid'))
+                    self.assertEqual(caught.exception.message, tr('ui.llm.opencodeLocalProfileMissing',
+                        profile=str(Path(self.directory.name)/'.harness/opencode-local/profile.json')))
+                    self.assertEqual(caught.exception.details['reason'], 'missing')
                 self.assertEqual(caught.exception.code, 'llm/opencode-local-profile')
                 self.assertFalse(store.leases)
 
