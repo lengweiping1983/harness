@@ -39,7 +39,7 @@ try {
   const editor = panel.getByRole('textbox', {name: '练习代码', exact: true})
   await editor.waitFor()
   const project = (await (await page.request.get(base + '/api/v1/academy/projects')).json()).projects[0]
-  requireAcademySandbox(project)
+  await requireAcademySandbox(project)
   const content = await editor.inputValue() + '\nprint("FOCUS_OWNER_RESULT")\n'
   await editor.fill(content)
   const endpoint = '**/api/v1/academy/projects/' + project.id + '/run'

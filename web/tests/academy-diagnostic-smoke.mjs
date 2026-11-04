@@ -39,7 +39,7 @@ try {
   const editor = panel.getByRole('textbox', {name: '练习代码', exact: true})
   await editor.waitFor()
   const project = (await (await page.request.get(base + '/api/v1/academy/projects')).json()).projects[0]
-  requireAcademySandbox(project)
+  await requireAcademySandbox(project)
   const helper = '# 实验源码 🧪\nprint("BEFORE_LEARNER_FAILURE")\nraise RuntimeError("LEARNER_TRACE")\n'
   const seeded = await page.request.post(base + '/api/v1/academy/projects/' + project.id + '/files', {data: {
     request_id: 'seed-helper', path: 'helper.py', content: helper, expected_version: 'absent', expected_fingerprint: project.fingerprint}})

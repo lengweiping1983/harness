@@ -39,7 +39,7 @@ try {
   const editor = panel.getByRole('textbox', {name: '练习代码', exact: true})
   await editor.waitFor()
   const project = (await (await page.request.get(base + '/api/v1/academy/projects')).json()).projects[0]
-  requireAcademySandbox(project)
+  await requireAcademySandbox(project)
   await editor.fill('raise RuntimeError("SELECTED_RESULT_OUTPUT")\n')
   const executed = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/run'))
   await panel.getByRole('button', {name: '运行代码', exact: true}).click()

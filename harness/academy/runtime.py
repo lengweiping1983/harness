@@ -96,20 +96,25 @@ class AcademyRuntime:
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
         outputs = [bytearray(), bytearray()]
         truncated = [False, False]
-        read_errors = [None, None]
+        output_errors = [[], []]
         failures, cleanup_errors, readers = [], [], []
         streams = (process.stdout, process.stderr)
         def drain(stream, index):
             try:
-                with stream:
-                    while chunk := stream.read(4096):
-                        room = self.output_limit - len(outputs[index])
-                        outputs[index].extend(chunk[:room])
-                        if len(chunk) > room:
-                            truncated[index] = True
+                while chunk := stream.read(4096):
+                    room = self.output_limit - len(outputs[index])
+                    outputs[index].extend(chunk[:room])
+                    if len(chunk) > room:
+                        truncated[index] = True
             except BaseException as exc:
                 # 读取失败属于本次执行，不能在线程内丢失后返回成功的空输出。
-                read_errors[index] = exc
+                output_errors[index].append(exc)
+            finally:
+                try:
+                    stream.close()
+                except BaseException as exc:
+                    # 关闭失败独立汇集，不能只在异常上下文中保留先前读取错误。
+                    output_errors[index].append(exc)
         timed_out = False
         memory_limited = False
         peak_memory_kib = 0
@@ -123,7 +128,7 @@ class AcademyRuntime:
                 reader.start()
             deadline = time.monotonic() + self.timeout
             while process.poll() is None:
-                if any(error is not None for error in read_errors):
+                if any(output_errors):
                     break
                 if time.monotonic() >= deadline:
                     timed_out = True
@@ -168,7 +173,7 @@ class AcademyRuntime:
                         cleanup_errors.append(exc)
             if any(reader.is_alive() for reader in readers):
                 cleanup_errors.append(AcademyError('cleanup-failed'))
-        raise_cleanup_errors([*failures, *(error for error in read_errors if error is not None), *cleanup_errors])
+        raise_cleanup_errors([*failures, *(error for errors in output_errors for error in errors), *cleanup_errors])
         return {'status': 'timeout' if timed_out else 'passed' if process.returncode == 0 else 'failed',
                 'exit_code': process.returncode, 'stdout': diagnostic_text(bytes(outputs[0]), truncated=truncated[0]),
                 'stderr': diagnostic_text(bytes(outputs[1]), truncated=truncated[1]), 'truncated': any(truncated),

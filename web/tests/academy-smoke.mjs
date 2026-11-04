@@ -74,7 +74,7 @@ try {
   await panel.getByText('答对了。继续前，试着解释为什么。', {exact: true}).waitFor()
   assert.deepEqual((await (await page.request.get(base + '/api/v1/academy/projects/' + project.id)).json()).project.progress, progressBeforeQuiz)
   assert.equal((await (await page.request.get(base + '/api/v1/academy/projects/' + project.id + '/runs')).json()).runs.length, 0, 'Concept practice must not run code')
-  requireAcademySandbox(project)
+  await requireAcademySandbox(project)
   await panel.getByRole('button', {name: '检查练习', exact: true}).click()
   await panel.getByText('本课检查通过', {exact: true}).waitFor()
   await panel.getByRole('button', {name: '运行代码', exact: true}).click()

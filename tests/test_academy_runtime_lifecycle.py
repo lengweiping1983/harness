@@ -114,6 +114,46 @@ class AcademyRuntimeLifecycleTests(unittest.TestCase):
             self.assertEqual(caught.exception.exceptions, originals)
             self.assert_released(owned[0])
 
+    def test_read_and_close_failures_are_both_collected_as_original_objects(self):
+        """同一管道的读取及关闭连续失败时，两者均作为独立失败传播。"""
+        for primary in (OSError('stdout 原始读取失败'), KeyboardInterrupt('读取被中断')):
+            cleanup = OSError('stdout 原始关闭失败')
+            with self.subTest(primary=primary), self.owned_runtime('pass') as (runtime, owned), contextlib.ExitStack() as patches:
+                closes = []
+                def started():
+                    stream = owned[0].stdout
+                    close = stream.close
+                    def fail_close():
+                        closes.append(stream)
+                        close()
+                        raise cleanup
+                    patches.enter_context(patch.object(stream, 'read', side_effect=primary))
+                    patches.enter_context(patch.object(stream, 'close', side_effect=fail_close))
+                with self.assertRaises(BaseExceptionGroup) as caught:
+                    runtime.run(['python', 'main.py'], on_started=started)
+                self.assertEqual(caught.exception.exceptions, (primary, cleanup))
+                self.assertEqual(closes, [owned[0].stdout])
+                self.assert_released(owned[0])
+
+    def test_close_failure_after_successful_read_is_not_a_successful_result(self):
+        """读取完成并不代表管道收尾成功，关闭失败保留原对象且不重试。"""
+        original = OSError('stdout 原始关闭失败')
+        with self.owned_runtime('print("done")') as (runtime, owned), contextlib.ExitStack() as patches:
+            closes = []
+            def started():
+                stream = owned[0].stdout
+                close = stream.close
+                def fail_close():
+                    closes.append(stream)
+                    close()
+                    raise original
+                patches.enter_context(patch.object(stream, 'close', side_effect=fail_close))
+            with self.assertRaises(OSError) as caught:
+                runtime.run(['python', 'main.py'], on_started=started)
+            self.assertIs(caught.exception, original)
+            self.assertEqual(closes, [owned[0].stdout])
+            self.assert_released(owned[0])
+
     def test_wait_timeout_is_bounded_and_does_not_skip_unowned_pipe_cleanup(self):
         primary = RuntimeError('启动登记失败')
         timeout = subprocess.TimeoutExpired('owned course process', 5)
@@ -170,10 +210,11 @@ class AcademyRuntimeLifecycleTests(unittest.TestCase):
             self.assertEqual(result['stderr'], '诊断\n')
             script.write_text('print("x" * 10000)\n', encoding='utf-8')
             result = runtime.run(['python', 'main.py'])
-            self.assertTrue(result['truncated'])
+            self.assertEqual(result['status'], 'passed', result)
+            self.assertTrue(result['truncated'], result)
             self.assertEqual(result['stdout'], 'x' * 1024)
             script.write_text('while True: pass\n', encoding='utf-8')
             runtime.timeout = .2
             result = runtime.run(['python', 'main.py'])
-            self.assertEqual(result['status'], 'timeout')
+            self.assertEqual(result['status'], 'timeout', result)
             self.assertNotEqual(result['exit_code'], 0)

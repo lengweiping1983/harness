@@ -39,7 +39,7 @@ try {
   const editor = panel.getByRole('textbox', {name: '练习代码', exact: true})
   await editor.waitFor()
   const project = (await (await page.request.get(base + '/api/v1/academy/projects')).json()).projects[0]
-  requireAcademySandbox(project)
+  await requireAcademySandbox(project)
   const before = 'value = 1\nprint(value)\n'
   const after = 'value = 2\nprint(value)\n'
   await editor.fill(before)

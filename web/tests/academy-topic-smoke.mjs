@@ -154,7 +154,7 @@ try {
   await editor.waitFor()
   assert.ok((await editor.inputValue()).includes('def double(value)'))
   projects=(await get('/projects')).projects
-  requireAcademySandbox(projects.find(project=>project.id!==studyProject.id))
+  await requireAcademySandbox(projects.find(project=>project.id!==studyProject.id))
   await panel.getByRole('button',{name:'检查练习',exact:true}).click()
   await panel.getByText('本课检查通过',{exact:true}).waitFor()
   projects=(await get('/projects')).projects

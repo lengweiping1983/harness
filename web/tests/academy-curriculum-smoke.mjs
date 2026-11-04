@@ -58,7 +58,7 @@ try{
   await editor.waitFor()
   assert.ok((await editor.inputValue()).includes('learner ='))
   const firstProject=(await get('/projects')).projects[0]
-  requireAcademySandbox(firstProject)
+  await requireAcademySandbox(firstProject)
   const check=panel.getByRole('button',{name:'检查练习',exact:true})
   await check.click()
   await panel.getByText('本课检查通过',{exact:true}).waitFor()
