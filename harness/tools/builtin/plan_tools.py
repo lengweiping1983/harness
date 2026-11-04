@@ -16,6 +16,7 @@ from ...app import plans
 from ...app.plan_mode import (
     PLAN_TITLE_RE,
     PlanModeController,
+    contains_sensitive_literal,
     first_heading,
 )
 from ...core.errors import ToolExecutionError
@@ -52,6 +53,8 @@ def build_exit_plan_mode_tool(
             raise ToolExecutionError(
                 tr('python.plan_tools.2f5eb9fc5ef5')
             )
+        if contains_sensitive_literal(plan):
+            raise ToolExecutionError(tr('python.plan_tools.sensitive_plan'))
         if questions is None:
             await session.append('note', {'kind': 'plan_review_unavailable', 'turn': ctx.turn})
             raise ToolExecutionError(
@@ -104,8 +107,9 @@ def build_exit_plan_mode_tool(
         async with controller.review_lock(session.id):
             answer = answers[0] if answers else {}
             selected = [str(s) for s in (answer.get("selected") or [])]
+            selected_ids = [str(s) for s in (answer.get("selected_ids") or [])]
             custom = str(answer.get("custom") or "").strip()
-            approved = selected == [approve_label] and not custom
+            approved = (selected_ids == ["approve"] if selected_ids else selected == [approve_label]) and not custom
             current = plans.versions(session)[-1]
             if current["id"] != plan_id or current["status"] != "pending":
                 return ToolResult(content=[TextBlock(text=tr('python.plan_tools.99487e2e17b3'))],
@@ -116,11 +120,15 @@ def build_exit_plan_mode_tool(
                 return ToolResult(content=[TextBlock(text=tr('python.plan_tools.6311f8f1707d'))],
                                   data={"approved": False, "plan_id": plan_id})
             if not approved:
-                detail = custom or (tr('python.plan_tools.919c9760e29f') if keep_label in selected else tr('python.plan_tools.e3bc12801881'))
+                detail = custom or (tr('python.plan_tools.919c9760e29f')
+                                    if ("keep-planning" in selected_ids or keep_label in selected)
+                                    else tr('python.plan_tools.e3bc12801881'))
                 text = (tr('python.plan_tools.0ac425b2b05a', p0=f'{detail}'))
                 await plans.decide(session, plan_id, "revision_requested", detail)
                 await notify()
-                payload = {"approved": False, "plan_id": plan_id, "title": title, "feedback": detail, "turn": ctx.turn, "step": ctx.step}
+                payload = {"approved": False, "plan_id": plan_id, "title": title,
+                           "content_hash": current["content_hash"], "feedback": detail,
+                           "turn": ctx.turn, "step": ctx.step}
                 return ToolResult(content=[TextBlock(text=text)], display=payload, data=payload)
 
             await plans.decide(session, plan_id, "approved")
@@ -128,7 +136,8 @@ def build_exit_plan_mode_tool(
             # 审核锁覆盖验证、持久化决定和退出模式。
             await controller._set(session, False, narrate=False)
             text = tr('owned.plan_tools.c2f73319c24a')
-            payload = {"approved": True, "plan_id": plan_id, "title": title, "turn": ctx.turn, "step": ctx.step}
+            payload = {"approved": True, "plan_id": plan_id, "title": title,
+                       "content_hash": current["content_hash"], "turn": ctx.turn, "step": ctx.step}
             return ToolResult(content=[TextBlock(text=text)], display=payload, data=payload)
 
     return ToolDefinition(

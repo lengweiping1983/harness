@@ -21570,7 +21570,8 @@
           "previous_id",
           "seq",
           "submitted_at",
-          "decided_at"
+          "decided_at",
+          "content_hash"
         ],
         "properties": {
           "id": {
@@ -21578,6 +21579,10 @@
           },
           "title": {
             "type": "string"
+          },
+          "content_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           },
           "status": {
             "type": "string",
@@ -21623,6 +21628,7 @@
           "seq",
           "submitted_at",
           "decided_at",
+          "content_hash",
           "plan",
           "diff"
         ],
@@ -21632,6 +21638,10 @@
           },
           "title": {
             "type": "string"
+          },
+          "content_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           },
           "status": {
             "type": "string",
@@ -23598,6 +23608,12 @@
             "type": "string"
           },
           "selected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selected_ids": {
             "type": "array",
             "items": {
               "type": "string"

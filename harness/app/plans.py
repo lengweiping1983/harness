@@ -4,11 +4,17 @@ from __future__ import annotations
 from harness.i18n import tr
 
 import uuid
+import hashlib
 from collections.abc import Mapping
 from typing import Any
 
 from ..core.diff import unified_patch
 from .plan_mode import first_heading
+
+
+def content_hash(plan: str) -> str:
+    """返回计划正文的稳定 SHA-256 摘要，用于审批与恢复时核对版本。"""
+    return hashlib.sha256(plan.encode('utf-8')).hexdigest()
 
 
 def versions(session: Any) -> list[dict[str, Any]]:
@@ -18,7 +24,13 @@ def versions(session: Any) -> list[dict[str, Any]]:
     for event in session.events_of_type("note"):
         data = event.data
         if data.get("kind") == "plan_submission":
-            records[data["id"]] = {"id": data["id"], "title": data["title"], "plan": data["plan"],
+            plan = data["plan"]
+            digest = data.get("content_hash")
+            if not isinstance(digest, str) or len(digest) != 64:
+                # 旧事件没有摘要时只派生只读摘要，不把它伪装成提交时的字段。
+                digest = content_hash(plan)
+            records[data["id"]] = {"id": data["id"], "title": data["title"], "plan": plan,
+                "content_hash": digest,
                 "submitted_at": event.time, "seq": event.seq, "status": "pending", "feedback": "",
                 "previous_id": data.get("previous_id"), "decided_at": None}
         elif data.get("kind") == "plan_decision" and data.get("id") in records:
@@ -28,13 +40,16 @@ def versions(session: Any) -> list[dict[str, Any]]:
 
 async def submit(session: Any, plan: str, call_id: str) -> str:
     prior = versions(session)
+    plan_id = "plan_" + uuid.uuid4().hex
+    # 先提交新版本，再关闭旧待审版本。新提交失败时旧审批仍有效，
+    # 不把一次未知的持久化失败误报成“旧计划已被替换”。
+    await session.append("note", {"kind": "plan_submission", "id": plan_id, "title": first_heading(plan)[:120],
+        "plan": plan, "content_hash": content_hash(plan), "call_id": call_id,
+        "previous_id": prior[-1]["id"] if prior else None})
     # 后续提交替换仍待审核的版本，不继承其审批。
     for record in prior:
         if record["status"] == "pending":
             await decide(session, record["id"], "superseded")
-    plan_id = "plan_" + uuid.uuid4().hex
-    await session.append("note", {"kind": "plan_submission", "id": plan_id, "title": first_heading(plan)[:120],
-        "plan": plan, "call_id": call_id, "previous_id": prior[-1]["id"] if prior else None})
     return plan_id
 
 

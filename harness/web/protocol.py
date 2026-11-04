@@ -264,14 +264,16 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         'agents': {'type': 'array', 'items': {'$ref': '#/components/schemas/SubagentView'}},
         'has_more': {'type': 'boolean'}, 'next_before': {'type': ['string', 'null']},
     }},
-    'PlanVersion': {'type': 'object', 'required': ['id', 'title', 'status', 'feedback', 'previous_id', 'seq', 'submitted_at', 'decided_at'], 'properties': {
+    'PlanVersion': {'type': 'object', 'required': ['id', 'title', 'status', 'feedback', 'previous_id', 'seq', 'submitted_at', 'decided_at', 'content_hash'], 'properties': {
         'id': {'type': 'string'}, 'title': {'type': 'string'},
+        'content_hash': {'type': 'string', 'pattern': '^[0-9a-f]{64}$'},
         'status': {'type': 'string', 'enum': ['pending', 'revision_requested', 'approved', 'closed', 'superseded']},
         'feedback': {'type': 'string'}, 'previous_id': {'type': ['string', 'null']}, 'seq': {'type': 'integer'},
         'submitted_at': {'type': 'integer'}, 'decided_at': {'type': ['integer', 'null']},
     }},
-    'PlanDetail': {'type': 'object', 'required': ['id', 'title', 'status', 'feedback', 'previous_id', 'seq', 'submitted_at', 'decided_at', 'plan', 'diff'], 'properties': {
+    'PlanDetail': {'type': 'object', 'required': ['id', 'title', 'status', 'feedback', 'previous_id', 'seq', 'submitted_at', 'decided_at', 'content_hash', 'plan', 'diff'], 'properties': {
         'id': {'type': 'string'}, 'title': {'type': 'string'},
+        'content_hash': {'type': 'string', 'pattern': '^[0-9a-f]{64}$'},
         'status': {'type': 'string', 'enum': ['pending', 'revision_requested', 'approved', 'closed', 'superseded']},
         'feedback': {'type': 'string'}, 'previous_id': {'type': ['string', 'null']}, 'seq': {'type': 'integer'},
         'submitted_at': {'type': 'integer'}, 'decided_at': {'type': ['integer', 'null']},
@@ -523,7 +525,8 @@ SCHEMAS.update({
         "encoding_errors": {"type": "array", "items": {"$ref": "#/components/schemas/EncodingError"}},
     }},
     "QuestionAnswer": {"type": "object", "required": ["id", "selected"], "properties": {
-        "id": {"type": "string"}, "selected": {"type": "array", "items": {"type": "string"}}, "custom": {"type": "string"},
+        "id": {"type": "string"}, "selected": {"type": "array", "items": {"type": "string"}},
+        "selected_ids": {"type": "array", "items": {"type": "string"}}, "custom": {"type": "string"},
     }},
     "SubmitAnswers": {"type": "object", "required": ["answers"], "properties": {
         "answers": {"type": "array", "items": {"$ref": "#/components/schemas/QuestionAnswer"}},

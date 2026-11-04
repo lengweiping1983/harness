@@ -256,9 +256,9 @@ export const QuestionCard = memo(function QuestionCard({ block, onAnswer, busy, 
           </div> : directPlanActions ? <div className="flex flex-wrap items-center gap-2 pt-0.5">
             <Button variant="primary" size="sm" disabled={busy || Boolean(planFeedback)}
               loading={busy} icon={<Check className="h-3.5 w-3.5" />}
-              onClick={() => onAnswer(block.questionId, [{ id: 'plan-review', selected: [approveOption!.label!] }])}>{t("ui.components.chat.blocks.QuestionCard.b168fdafe0f4")}</Button>
+              onClick={() => onAnswer(block.questionId, [{ id: 'plan-review', selected: [approveOption!.label!], selected_ids: ['approve'] }])}>{t("ui.components.chat.blocks.QuestionCard.b168fdafe0f4")}</Button>
             <Button size="sm" disabled={busy} onClick={() => onAnswer(block.questionId, [{
-              id: 'plan-review', selected: [keepOption!.label!], ...(planFeedback ? { custom: planFeedback } : {}),
+              id: 'plan-review', selected: [keepOption!.label!], selected_ids: ['keep-planning'], ...(planFeedback ? { custom: planFeedback } : {}),
             }])}>
               {planFeedback ? t("ui.components.chat.blocks.QuestionCard.4c381122f9a2") : t("ui.components.chat.blocks.QuestionCard.b367cdfb55b5")}
             </Button>

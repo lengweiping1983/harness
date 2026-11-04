@@ -222,10 +222,20 @@ def normalize_answers(
         question = known[aid]
         if not question.get('multi_select', False) and len(selected) > 1:
             raise QuestionError(tr('python.questions.4b31c6072b8e', p0=f'{aid!r}'))
-        labels = {option['label'] for option in question.get('options', [])}
-        if any(value not in labels for value in selected):
+        options = question.get('options', [])
+        labels = {option['label'] for option in options}
+        option_ids = {option['id']: option for option in options if isinstance(option.get('id'), str)}
+        if any(value not in labels and value not in option_ids for value in selected):
             raise QuestionError(tr('python.questions.235f35846b13', p0=f'{aid!r}'))
         answer: dict[str, Any] = {"id": aid, "selected": list(selected)}
+        # 保留 UI 的显示文本，同时提供稳定的机器选项身份；没有 id 的
+        # 普通问答继续使用原有答案结构。
+        if option_ids:
+            answer['selected_ids'] = [
+                value if value in option_ids else next(
+                    option['id'] for option in options if option['label'] == value and 'id' in option)
+                for value in selected
+            ]
         custom = entry.get("custom")
         if custom is not None and not isinstance(custom, str):
             raise QuestionError(tr('python.questions.f8de5b33aae8', p0=f'{aid!r}'))

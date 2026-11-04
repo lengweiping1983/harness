@@ -465,6 +465,7 @@ export interface SubagentPage {
 export interface PlanVersion {
   id: string
   title: string
+  content_hash: string
   status: 'pending' | 'revision_requested' | 'approved' | 'closed' | 'superseded'
   feedback: string
   previous_id: string | null
@@ -475,6 +476,7 @@ export interface PlanVersion {
 export interface PlanDetail {
   id: string
   title: string
+  content_hash: string
   status: 'pending' | 'revision_requested' | 'approved' | 'closed' | 'superseded'
   feedback: string
   previous_id: string | null
@@ -889,6 +891,7 @@ export interface CommandOutput {
 export interface QuestionAnswer {
   id: string
   selected: Array<string>
+  selected_ids?: Array<string>
   custom?: string
 }
 export interface SubmitAnswers {

@@ -40,6 +40,45 @@ PLAN_TITLE_RE = re.compile(r"^#[ \t]+\S")
 #: 取出计划的第一行标题，用于 UI 卡片与审批问题。
 FIRST_HEADING_RE = re.compile(r"^#[ \t]+(.+)$", re.MULTILINE)
 
+# 计划阶段只需要仓库事实，不应把本机凭据读进模型上下文、计划正文或审阅卡片。
+_SENSITIVE_BASENAMES = {
+    '.env', '.env.local', '.env.production', '.env.development', '.env.test',
+    '.git-credentials', '.netrc', '.npmrc', '.pypirc',
+    'credentials.json', 'credentials.yaml', 'credentials.yml',
+    'oauth-credentials.json', 'connection-secrets.json', 'secrets.json',
+    'secrets.yaml', 'secrets.yml', 'token.json', 'tokens.json',
+    'id_rsa', 'id_ed25519', 'id_ecdsa', 'private_key', 'privatekey',
+}
+_SENSITIVE_SUFFIXES = ('.pem', '.key', '.p12', '.pfx', '.jks', '.kdbx')
+_SAFE_EXAMPLE_MARKERS = ('.example', '.sample', '.template', '.dist')
+_SENSITIVE_LITERAL_RE = re.compile(
+    r"(?:-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|"
+    r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[:=]\s*['\"]?[A-Za-z0-9_./+=:-]{12,}|"
+    r"\bBearer\s+[A-Za-z0-9._~+/=-]{20,}|"
+    r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b)",
+    re.IGNORECASE,
+)
+
+
+def is_sensitive_reference(value: Any) -> bool:
+    """判断文件/搜索引用是否可能暴露本地凭据。"""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    parts = [part for part in re.split(r'[\\/]+', value.strip().lower()) if part]
+    for part in parts:
+        if any(marker in part for marker in _SAFE_EXAMPLE_MARKERS):
+            continue
+        if part in {'.ssh', '.aws', '.azure'}:
+            return True
+        if part in _SENSITIVE_BASENAMES or part.endswith(_SENSITIVE_SUFFIXES):
+            return True
+    return False
+
+
+def contains_sensitive_literal(value: Any) -> bool:
+    """识别计划正文中的常见明文凭据形态，不保存或展示命中正文。"""
+    return isinstance(value, str) and bool(_SENSITIVE_LITERAL_RE.search(value))
+
 
 def plan_policy_section() -> str:
     """按本次请求语言解析计划策略，资源是唯一文案来源。"""
@@ -164,8 +203,14 @@ class PlanModeController:
         if not active:
             return None
         name = tool.schema.name
+        if name in {'read', 'glob', 'grep'}:
+            references = [args.get(key) for key in ('path', 'pattern', 'glob') if isinstance(args, dict)]
+            if any(is_sensitive_reference(value) for value in references):
+                return tr('python.plan_mode.sensitive_reference')
+        if name in {'terminal_read', 'terminal_list', 'terminal_send', 'terminal_open'}:
+            return tr('python.plan_mode.a55832dec5b4')
         controls = {"ask_user_question", "list_agents", "wait_agent", "wait_agents", "spawn_agent", "followup_task", "send_message", "interrupt_agent"}
-        reads = {"get_goal", "session_search", "session_trace", "session_event_search", "session_event_trace", "session_event_read", "list_subagent_models", "load_workspace_dependencies", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource", "web_fetch", "web_search", "terminal_read", "terminal_list"}
+        reads = {"get_goal", "session_search", "session_trace", "session_event_search", "session_event_trace", "session_event_read", "list_subagent_models", "load_workspace_dependencies", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource", "web_fetch", "web_search"}
         if name == "exit_plan_mode":
             if self._parent_active(ctx.session_id):
                 return tr('python.plan_mode.d8a11d8e83e9')
@@ -319,4 +364,6 @@ __all__ = [
     "PLAN_TITLE_RE",
     "SetOutcome",
     "first_heading",
+    "is_sensitive_reference",
+    "contains_sensitive_literal",
 ]
