@@ -12,6 +12,18 @@
 
 触发条件是供应商桥接返回正 `cacheRead`：`model-runtime/bridge.mjs` 的完成事件原先只传 `cache_read_tokens`，遗漏 `cache_reported_input_tokens`；`provider_runtime.provider_stream` 经 `TokenUsage.to_dict` 将缺失覆盖保留为缺失，而 `request_traces._usage_totals` 把它当作零，造成有读取量却被判不一致，前端随后隐藏比例。桥接现在同步传递覆盖输入，归档和单请求展示按正读取证据逐请求确定缺失分母，保留显式矛盾和未知零报告。回归为 `test_cache_usage_reporting.py`、`RuntimeBridgeTests.test_messages_and_responses_streams_map_text_tools_and_usage`、`model-runtime/tests/transcript.test.mjs`、`promptCache.test.ts` 和 `context-statistics-language-smoke.mjs`；产品规则统一见 [架构与模块](architecture.md)。这些回归使用隔离数据与回环接口，不代表在线供应商验收。
 
+## Kilo 匿名免费池的接入依据
+
+来源代码为 `dsh-our-free-model/src/kilo.js` 的公共网关地址、无认证 Chat Completions 调用，以及 `src/catalog.js` 的 `isFree === true` 筛选规则；未读取任意 research 目录。当前调用链为 `ModelConnections` → `/connection/discover` → `kilo_free.free_models` → 保存接口目录与模型身份 → `provider_runtime.provider_stream` → `KiloFreeAdapter` → 既有 HTTP/SSE 解析与 Harness 工具执行。认证字段为显式 `anonymous`，地址与协议在保存时校验，最终请求剔除认证头。
+
+已证实的保存问题：接口配置采用 `anonymous` 后，`ProviderAuth.type` 的公开协议枚举仍只列原认证类型，导致浏览器 `responseValidation` 将已经写入成功的 `PATCH /connection` 回执及之后的 `GET /connection` 判为 `response/invalid-schema`，无法确认保存。现已同步协议源及 OpenAPI、TypeScript、响应校验生成产物；前端 `providerConnections.test.ts` 的匿名保存／读回契约用例在修复前于 `$.providers[0].connections[0].auth.type` 失败，修复后通过。未知认证值继续拒绝，未放宽校验。
+
+`tests/test_kilo_free.py` 核对匿名配置重载、非法配置原件保留、免费筛选、真实发现路由无认证且不写配置、未知容量、明确推理档位、工具调用配对与传输收尾；语言错误按英中英切换。新增 HTTP 保存／读回／重启用例检查指定免费模型、目录缓存和 Kilo Free 分组保持。前端用例覆盖初始选择为空、获取目录不自动选择 Auto Free 或其他模型、稳定身份、显式选择时的推理元数据及后续刷新保留用户选择；数据说明核对英中英呈现。自动目录读取延迟到稳定挂载，避免开发模式试挂载发出后立即取消读取；沿用原请求代次、取消、保存准入及失败回退。未执行浏览器和安装包专项，不将单元或 HTTP 验证视为这些环境的验收。在线验收入口和产品限制见 [模型提供商](model-providers.md#免登录免费模型)。
+
+重复渠道的触发条件是已经保存 Kilo Free 后再次从提供商目录选择它；原 `ModelConnections.onPick` 总是生成新的提供商与接口身份。现在 `providerDraftForTemplate` 对已配置的 Kilo Free 返回原身份的隔离草稿，不更改其他提供商的多配置行为，也不自动删除已有配置。`providerConnections.test.ts` 核对重复选择不产生新身份及草稿修改不污染原件；初始模型选择与目录刷新均为空选择起步，模型只通过显式勾选加入。
+
+2026-11-04 在线核对：当前出口读取到 11 个明确免费的模型，以 `kilo-auto/free` 和具体模型 `nvidia/nemotron-3.5-super-vl:free` 分别使用空 API Key 配置运行隔离验收，真实 `write`／`read` 工具成功，生成的 Python 函数执行得到本次唯一标记，同对话续接和另一对话隔离均通过。该结果只代表本次模型、网络和输入，不代表持续可用、所有模型或桌面安装包验收。
+
 ## 核对依据与调用链
 
 通用目录以 DeepSeek Harness `packages/llm/llm-pi-ai/src/index.ts` 的 `catalogProviderIds()` 注册入口、`provider-data.generated.ts` 的认证字段及其固定供应商库目录为依据；专用入口为 `llm-deepseek` 与 `llm-deepseek-account`。不读取 research 目录。

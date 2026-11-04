@@ -929,7 +929,7 @@ def _localized_schemas() -> dict[str, dict[str, Any]]:
 # 供应商配置采用接口级凭据；模型列表与 Key 池不再相互嵌套。
 SCHEMAS.update({
     'ProviderAuth': {'type': 'object', 'required': ['type', 'env'], 'properties': {
-        'type': {'type': 'string', 'enum': ['api_key', 'oauth', 'environment', 'opencode_local']},
+        'type': {'type': 'string', 'enum': ['api_key', 'oauth', 'environment', 'opencode_local', 'anonymous']},
         'env': {'type': 'object', 'additionalProperties': {'type': 'string'}}, 'configured': {'type': 'boolean'}, 'authorization_id': {'type': 'string', 'writeOnly': True}}},
     'ProviderModel': {'type': 'object', 'required': ['id', 'model', 'name', 'enabled', 'input'], 'properties': {
         'id': {'type': 'string'}, 'model': {'type': 'string'}, 'name': {'type': 'string'}, 'enabled': {'type': 'boolean'},

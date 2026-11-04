@@ -273,6 +273,26 @@ async def provider_stream(adapter, messages, *, config, tools=None, on_attempt=N
         try:
             if on_attempt:
                 await on_attempt({'phase': 'waiting', 'model': model['model'], 'attempt': index + 1, 'max_attempts': len(available), 'api_key_slot': f'{index + 1}/{len(available)}'})
+            if provider['type'] == 'kilo-free':
+                from dataclasses import replace
+                from .kilo_free import BASE_URL, KiloFreeAdapter
+                levels = info['reasoning_efforts']
+                extra_body = {**config.extra_body}
+                if config.reasoning_effort == 'off' and 'off' in levels:
+                    extra_body['reasoning'] = {'enabled': False}
+                call = replace(config, model=model['model'], extra_headers={**connection['headers'], **config.extra_headers},
+                               extra_body=extra_body, reasoning_effort=None if config.reasoning_effort == 'off' else config.reasoning_effort)
+                worker = KiloFreeAdapter('anonymous', base_url=BASE_URL, model=model['model'],
+                    transport=adapter.transport if adapter._transport_injected else None,
+                    max_retries=connection['max_retries'], network_timeout=adapter.network_timeout,
+                    context_window=adapter.context_window, prompt_cache_mode=adapter.prompt_cache_mode,
+                    model_info={**caps, 'supports_thinking': bool(levels), 'supported_efforts': levels})
+                async with aclosing(worker.stream(messages, config=call, tools=tools, on_attempt=on_attempt,
+                        on_request=on_request, cache_session_id=cache_session_id, capacity_retries=capacity_retries,
+                        max_retries=max_retries)) as stream:
+                    async for event in stream:
+                        yield event
+                return
             if provider['type'] == 'opencode-local':
                 from .opencode_local import BASE_URL
                 if connection['base_url'] != BASE_URL or connection['auth']['type'] != 'opencode_local':

@@ -1,4 +1,3 @@
-import {newIdentity} from '@/lib/ids'
 import {useEffect, useRef, useState} from 'react'
 import {DefaultModelFeedback, ModelPreferences} from './ModelPreferences'
 import {Plus, Eye, EyeOff, Trash2, ChevronUp, ChevronDown, ListPlus, RefreshCw} from 'lucide-react'
@@ -18,7 +17,12 @@ import type {ProviderChoice} from './ProviderPickers'
 import {ModelPagination, ModelPicker, ProviderPicker} from './ProviderPickers'
 import {ManualModelEditor, ProviderModelFields} from './ProviderModelEditor'
 import type {CatalogModel, ModelProvider, ProviderConnection, ProviderSnapshot, ProviderTemplate} from '@/lib/providerConnections'
-import {providerModelGroups, providerCatalogChanges, reconcileProviderModels, providerConnectionIssue, sortProviderChoices, providerConfigurationState, validProviderEndpoint, maskProviderKey, moveProviderItem, newProviderConnection, newProviderKey, providerPayload} from '@/lib/providerConnections'
+import {providerDraftForTemplate, providerModelGroups, providerCatalogChanges, reconcileProviderModels, providerConnectionIssue, sortProviderChoices, providerConfigurationState, validProviderEndpoint, maskProviderKey, moveProviderItem, newProviderConnection, newProviderKey, providerPayload} from '@/lib/providerConnections'
+
+export function KiloFreeNotice() {
+  useLocale()
+  return <p className="text-xs text-warn">{t('ui.providers.kiloFreeHint')}</p>
+}
 
 const field = 'w-full min-w-0 rounded-lg border border-line bg-canvas px-3 py-2 text-xs'
 
@@ -83,7 +87,7 @@ export function ModelConnections() {
     <header className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="ui-section-title">{t('ui.providers.title')}</h3><p className="mt-1 text-xs text-muted">{t('ui.providers.description')}</p><p className="mt-1 text-xs text-muted">{t('ui.components.overlays.SettingsDialog.60044c2733c0')}</p></div><Button size="sm" disabled={busy || !!draft || !snapshot} onClick={() => {setAdding(true); setSaved(false)}}><Plus className="h-4 w-4" />{t('ui.providers.add')}</Button></header>
     {error ? <p role="alert" className="text-xs text-danger">{noticeText(error)}</p> : null}
     {!snapshot ? error ? <Button size="sm" onClick={() => {setError(''); setLoadAttempt(value => value + 1)}}>{t('ui.providers.retryLoading')}</Button> : <p role="status" className="text-xs text-muted">{t('ui.providers.loading')}</p> : null}
-    {adding ? <ProviderPicker choices={choices} onClose={() => setAdding(false)} onPick={id => {setAdding(false); setSaved(false); if (id === 'codex-account-pool') {setSubscription(true); return} const selected = templates.find(row => row.id === id); if (!selected) return; setDraft({id: newIdentity(), type: selected.id, name: selected.name, connections: [newProviderConnection(selected)]})}} /> : null}
+    {adding ? <ProviderPicker choices={choices} onClose={() => setAdding(false)} onPick={id => {setAdding(false); setSaved(false); if (id === 'codex-account-pool') {setSubscription(true); return} const selected = templates.find(row => row.id === id); if (!selected) return; setDraft(providerDraftForTemplate(selected, configuredProviders))}} /> : null}
     <DefaultModelFeedback />
     {subscription ? <CodexGatewayAccounts /> : null}
     {snapshot && !snapshot.providers.length && !subscription && !draft && !adding ? <div className="rounded-xl border border-dashed border-line p-6 text-center text-xs text-muted">{t('ui.providers.empty')}</div> : null}
@@ -97,7 +101,7 @@ export function ModelConnections() {
     </section>)}
     {draft && template ? <form ref={editor} onInvalid={event => {let parent = event.target instanceof HTMLElement ? event.target.parentElement : null; while (parent) {if (parent instanceof HTMLDetailsElement) parent.open = true; parent = parent.parentElement}}} autoComplete="off" onSubmit={event => event.preventDefault()} className="space-y-4 rounded-xl border border-brand/30 bg-surface p-4"><label className="block space-y-1 text-xs"><span>{t('ui.providers.supplierName')}</span><input className={field} value={draft.name} onChange={event => setDraft({...draft, name: event.target.value})} disabled={busy} /></label>
       {draft.connections.map((connection, index) => <ConnectionEditor key={connection.id} connection={connection} template={template} busy={busy} removable={draft.connections.length > 1} initiallyOpen={index === 0 || !snapshot?.providers.some(provider => provider.connections.some(row => row.id === connection.id))} stored={!!snapshot?.providers.some(provider => provider.connections.some(row => row.id === connection.id))} onProbeStateChange={pending => {activeProbes.current = Math.max(0, activeProbes.current + (pending ? 1 : -1)); setProbeCount(activeProbes.current)}} validationIssue={credentialIssue?.connection === connection.id ? credentialIssue.key : undefined} onValidation={key => setCredentialIssue({connection: connection.id, key})} onChange={next => {setDraft(current => current?.id === draft.id ? {...current, connections: current.connections.map(row => row.id === next.id ? next : row)} : current); if (credentialIssue?.connection === next.id && !providerConnectionIssue(next)) setCredentialIssue(null)}} onRemove={() => setDraft({...draft, connections: draft.connections.filter((_, position) => position !== index)})} providerId={draft.id} onRefresh={next => {if (next) setSnapshot(next)}} />)}
-      <details><summary className="cursor-pointer text-xs text-muted">{t('ui.providers.additionalConnections')}</summary><div className="mt-3"><Button size="sm" disabled={busy} onClick={() => setDraft({...draft, connections: [...draft.connections, newProviderConnection(template)]})}>{t('ui.providers.addConnection')}</Button></div></details>
+      {template.id !== 'kilo-free' ? <details><summary className="cursor-pointer text-xs text-muted">{t('ui.providers.additionalConnections')}</summary><div className="mt-3"><Button size="sm" disabled={busy} onClick={() => setDraft({...draft, connections: [...draft.connections, newProviderConnection(template)]})}>{t('ui.providers.addConnection')}</Button></div></details> : null}
       <div className="sticky bottom-0 z-10 -mx-4 -mb-4 flex flex-wrap items-center gap-2 rounded-b-xl border-t border-line bg-surface px-4 py-3"><Button disabled={busy || probeCount > 0 || !draft.name.trim() || !draft.connections.length} onClick={() => void persist([...(snapshot?.providers.filter(provider => provider.id !== draft.id) ?? []), draft])}>{t('ui.providers.save')}</Button><Button disabled={busy} onClick={() => {setDraft(null); setError(''); setCredentialIssue(null)}}>{t('ui.providers.cancel')}</Button>{busy ? <SaveStatus phase="saving" /> : null}</div>
     </form> : null}
     {saved ? <SaveStatus phase="saved" /> : null}
@@ -118,7 +122,8 @@ export function ProviderModelPreferences({provider, models}: {provider: ModelPro
 }
 
 type ConnectionProps = {onProbeStateChange: (pending: boolean) => void; validationIssue?: string; onValidation: (key: string) => void; removable: boolean; initiallyOpen: boolean; connection: ProviderConnection; template: ProviderTemplate; busy: boolean; stored: boolean; providerId: string; onChange: (next: ProviderConnection) => void; onRemove: () => void; onRefresh: (snapshot: ProviderSnapshot | null) => void}
-function ConnectionEditor({onProbeStateChange, validationIssue, onValidation, removable, initiallyOpen, connection, template, busy, stored, providerId, onChange, onRemove, onRefresh}: ConnectionProps) {
+export function ConnectionEditor({onProbeStateChange, validationIssue, onValidation, removable, initiallyOpen, connection, template, busy, stored, providerId, onChange, onRemove, onRefresh}: ConnectionProps) {
+  useLocale()
   const connectionRef = useRef(connection)
   connectionRef.current = connection
   const [picking, setPicking] = useState(false)
@@ -135,6 +140,7 @@ function ConnectionEditor({onProbeStateChange, validationIssue, onValidation, re
   const active = pageVisible && expanded
   const probeController = useRef<AbortController | null>(null)
   const probing = useRef(false)
+  const automaticProbeStarted = useRef(false)
   useEffect(() => {++generation.current; probeController.current?.abort(); setLoading(false); setFallback(false); setCatalogChanges(null); return () => {++generation.current; probeController.current?.abort()}}, [active, connection.base_url, connection.protocol, connection.auth, connection.keys, connection.headers])
   const change = (value: Partial<ProviderConnection>) => {
     const current = connectionRef.current
@@ -153,6 +159,16 @@ function ConnectionEditor({onProbeStateChange, validationIssue, onValidation, re
     setLoading(true); setError(''); setCatalogChanges(null); setFallback(false)
     try {const result = await runtimeRequest<{models: CatalogModel[]; fallback: boolean}>('/connection/discover', 'POST', {provider: template.id, connection: providerPayload([{id: providerId, type: template.id, name: template.name, connections: [connection]}])[0].connections[0]}, {signal: controller.signal}); if (owner === generation.current) {setFallback(!!result.fallback); if (!result.fallback) {const current = connectionRef.current; const models = reconcileProviderModels(current.models, current.model_catalog ?? template.models, result.models); setCatalogChanges({...providerCatalogChanges(current.model_catalog ?? template.models, result.models), removed: current.models.length - models.length}); change({model_catalog: result.models, models})}}} catch (failure) {if (owner === generation.current) setError(failureText(failure))} finally {probing.current = false; onProbeStateChange(false); if (owner === generation.current) setLoading(false)}
   }
+  useEffect(() => {
+    let disposed = false
+    // 等待当前挂载稳定，StrictMode 的试挂载不发起目录读取。
+    queueMicrotask(() => {
+      if (disposed || template.id !== 'kilo-free' || !active || busy || connection.model_catalog !== undefined || automaticProbeStarted.current) return
+      automaticProbeStarted.current = true
+      void probe()
+    })
+    return () => {disposed = true}
+  }, [template.id, active, busy, stored, connection.model_catalog])
   const endpointInvalid = !validProviderEndpoint(connection.base_url)
   const selected = connection.models.map((model, index) => ({model, index})).filter(({model}) => `${model.model} ${model.name}`.toLowerCase().includes(selectedSearch.trim().toLowerCase()))
   const currentSelectedPage = Math.min(selectedPage, Math.max(0, Math.ceil(selected.length / 10) - 1))
@@ -161,6 +177,7 @@ function ConnectionEditor({onProbeStateChange, validationIssue, onValidation, re
     <summary className="cursor-pointer pr-10"><span className="ui-card-title [overflow-wrap:anywhere]">{connection.name}</span>{!expanded ? <span className="ml-2 text-xs text-muted">{t('ui.providers.modelCounts', {total: available.length, selected: connection.models.length})}</span> : null}</summary>
     {removable ? <Button size="xs" variant="ghost" className="absolute right-3 top-3" disabled={busy} aria-label={t('ui.providers.removeConnection')} onClick={onRemove}><Trash2 className="h-4 w-4" /></Button> : null}
     <div className="mt-3 space-y-3">
+    {template.id === 'kilo-free' ? <p className="text-xs text-muted">{t('ui.providers.anonymous')}</p> : <>
     <label className="block space-y-1 text-xs"><span>{t('ui.providers.protocol')}</span><select className={field} value={connection.protocol} disabled={busy} onChange={event => change({protocol: event.target.value})}><option value="">{t('ui.providers.nativeProtocol')}</option><option value="openai-completions">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic Messages</option></select></label>
     <label className="block space-y-1 text-xs"><span>{t('ui.providers.endpoint')}</span><input className={field} value={connection.base_url} disabled={busy} required={template.id === 'custom' || !!connection.protocol} autoComplete="off" spellCheck={false} inputMode="url" aria-invalid={endpointInvalid} ref={element => element?.setCustomValidity(endpointInvalid ? t('ui.providers.invalidEndpoint') : '')} name={`provider-endpoint-${connection.id}`} placeholder={t('ui.providers.endpointAutomatic')} onChange={event => change({base_url: event.target.value})} /></label>
     {endpointInvalid ? <p role="alert" className="text-xs text-danger">{t('ui.providers.invalidEndpoint')}</p> : null}
@@ -168,8 +185,10 @@ function ConnectionEditor({onProbeStateChange, validationIssue, onValidation, re
     <label className="block space-y-1 text-xs"><span>{t('ui.providers.authentication')}</span><select className={field} value={connection.auth.type} disabled={busy} onChange={event => change({auth: {type: event.target.value, env: connection.auth.env}, keys: event.target.value === 'api_key' ? connection.keys.length ? connection.keys : [newProviderKey()] : []})}>
       {template.api_key ? <option value="api_key">{t('ui.providers.apiKey')}</option> : null}{template.oauth ? <option value="oauth">{t('ui.providers.oauth')}</option> : null}<option value="environment">{t('ui.providers.environment')}</option>{template.id === 'opencode-local' ? <option value="opencode_local">{t('ui.providers.localAuth')}</option> : null}
     </select></label>
+    </>}
     {connection.auth.type === 'api_key' ? <div className="space-y-2"><p className="text-xs text-muted">{t('ui.providers.sharedKeys')}</p>{connection.keys.map((key, index) => <div key={key.id} className="flex flex-wrap items-center gap-2"><label className="min-w-0 flex-1 text-xs"><span>{t('ui.providers.keyNumber', {number: index + 1})}</span><ProviderKeyInput identity={key.id} value={key.value ?? ''} mask={key.mask ?? ''} disabled={busy} onChange={value => change({keys: connection.keys.map(row => row.id === key.id ? {...row, value} : row)})} /></label><Switch checked={key.enabled} label={t('ui.providers.keyEnabled')} disabled={busy} onChange={enabled => change({keys: connection.keys.map(row => row.id === key.id ? {...row, enabled} : row)})} /><Button size="xs" disabled={busy || index === 0} aria-label={t('ui.providers.moveUp')} onClick={() => change({keys: moveProviderItem(connection.keys, index, -1)})}><ChevronUp className="h-4 w-4" /></Button><Button size="xs" disabled={busy || index === connection.keys.length - 1} aria-label={t('ui.providers.moveDown')} onClick={() => change({keys: moveProviderItem(connection.keys, index, 1)})}><ChevronDown className="h-4 w-4" /></Button><Button size="xs" disabled={busy || connection.keys.length === 1} aria-label={t('ui.providers.removeKey')} onClick={() => change({keys: connection.keys.filter(row => row.id !== key.id)})}><Trash2 className="h-4 w-4" /></Button>{key.available === false ? <span className="text-xs text-warn">{t('ui.providers.unavailable')}</span> : null}{key.in_use ? <span className="text-xs text-brand">{t('ui.providers.inUse')}</span> : null}</div>)}<Button size="xs" disabled={busy} onClick={() => change({keys: [...connection.keys, newProviderKey()]})}>{t('ui.providers.addKey')}</Button>{stored ? <Button size="xs" disabled={busy} onClick={() => {void runtimeRequest<ProviderSnapshot>('/connection/reset', 'POST', {connection_id: connection.id}).then(onRefresh).catch(failure => setError(failureText(failure)))}}>{t('ui.providers.resetKeys')}</Button> : null}</div> : null}
     {(connection.auth.type === 'environment' || ['amazon-bedrock', 'google-vertex', 'azure', 'cloudflare-ai-gateway', 'cloudflare-workers-ai'].includes(template.id)) ? <div className="space-y-2">{(template.env ?? []).map(name => <label key={name} className="block text-xs">{name}<input className={field} type={/KEY|TOKEN|SECRET/.test(name) ? "password" : "text"} autoComplete="off" value={connection.auth.env[name] ?? ''} disabled={busy} onChange={event => change({auth: {...connection.auth, env: {...connection.auth.env, [name]: event.target.value}}})} /></label>)}</div> : null}
+    {template.id === 'kilo-free' ? <><p className="text-xs text-muted">{t('ui.providers.kiloFreeModels')}</p><KiloFreeNotice /></> : null}
     {connection.auth.type === 'environment' ? <p className="text-xs text-muted">{t('ui.providers.environmentHint')}</p> : null}
     {connection.auth.type === 'opencode_local' ? <p className="text-xs text-muted">{t('ui.providers.localHint')}</p> : null}
     {connection.auth.type === 'oauth' ? <ProviderAuthorization providerId={providerId} connection={connection} stored={stored} active={active} onRefresh={onRefresh} providerType={template.id} onAuthorized={id => change({auth: {...connection.auth, configured: true, authorization_id: id}})} /> : null}
@@ -187,14 +206,14 @@ function ConnectionEditor({onProbeStateChange, validationIssue, onValidation, re
       {fallback && !error ? <p role="status" className="text-xs text-warn">{t('ui.providers.discoverFallback')}</p> : null}
       {!available.length ? <p role="status" className="text-xs text-muted">{t('ui.providers.emptyCatalog')}</p> : null}
       {picking ? <ModelPicker context={connection.name} available={available} catalog={template.models} selected={connection.models} onClose={() => setPicking(false)} onConfirm={models => {setPicking(false); setSelectedSearch(''); resetSelection(models)}} /> : null}
-      <ManualModelEditor models={connection.models} disabled={busy || loading} onAdd={model => {
+      {template.id !== 'kilo-free' ? <ManualModelEditor models={connection.models} disabled={busy || loading} onAdd={model => {
         const models = connectionRef.current.models
         if (busy || loading || models.some(row => row.model === model.model)) return false
         change({models: [...models, model]})
         setSelectedSearch('')
         setSelectedPage(Math.floor(models.length / 10))
         return true
-      }} />
+      }} /> : null}
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2"><h5 className="ui-group-title">{t('ui.providers.selectedModels', {count: connection.models.length})}</h5>
           {connection.models.length > 10 || selectedSearch ? <input className={field + ' sm:w-64'} aria-label={t('ui.providers.searchSelectedModels')} placeholder={t('ui.providers.searchSelectedModels')} autoComplete="off" value={selectedSearch} onChange={event => {setSelectedSearch(event.target.value); setSelectedPage(0)}} /> : null}

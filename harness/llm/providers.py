@@ -52,6 +52,8 @@ def directory():
     local_models = [{'id': 'deepseek-v4.1-flash-free', 'name': 'deepseek-v4.1-flash-free', 'input': ['text']}]
     rows.append({'id': 'opencode-zen', 'name': 'OpenCode Zen', 'base_url': 'https://opencode.ai/zen/v1', 'api_key': True, 'oauth': False, 'models': local_models})
     rows.append({'id': 'opencode-local', 'name': 'OpenCode Local', 'base_url': 'https://opencode.ai/inference/openai/v1', 'api_key': False, 'oauth': False, 'models': local_models})
+    from .kilo_free import BASE_URL, BOOTSTRAP_MODEL
+    rows.append({'id': 'kilo-free', 'name': 'Kilo Free', 'base_url': BASE_URL, 'api_key': False, 'oauth': False, 'models': [copy.deepcopy(BOOTSTRAP_MODEL)]})
     rows.append({'id': 'custom', 'name': 'Custom API', 'base_url': '', 'api_key': True, 'oauth': False, 'models': []})
     return rows
 
@@ -209,9 +211,15 @@ class ProviderConnections:
                 if protocol not in PROTOCOLS or kind == 'custom' and (not protocol or not url):
                     raise invalid()
                 auth = connection.get('auth', {'type': 'environment', 'env': {}})
-                if not isinstance(auth, dict) or set(auth) - {'type', 'env', 'credential', 'configured', 'authorization_id'} or not isinstance(auth.get('type'), str) or auth.get('type') not in {'api_key', 'oauth', 'environment', 'opencode_local'}:
+                if not isinstance(auth, dict) or set(auth) - {'type', 'env', 'credential', 'configured', 'authorization_id'} or not isinstance(auth.get('type'), str) or auth.get('type') not in {'api_key', 'oauth', 'environment', 'opencode_local', 'anonymous'}:
                     raise invalid()
                 if auth['type'] == 'oauth' and not known[kind].get('oauth') or auth['type'] == 'opencode_local' and kind != 'opencode-local' or auth['type'] == 'api_key' and not known[kind].get('api_key'):
+                    raise invalid()
+                if kind == 'kilo-free':
+                    from .kilo_free import BASE_URL
+                    if auth['type'] != 'anonymous' or auth.get('env') or connection.get('keys') or url != BASE_URL or protocol not in ('', 'openai-completions'):
+                        raise invalid()
+                elif auth['type'] == 'anonymous':
                     raise invalid()
                 if not stored and 'credential' in auth:
                     raise invalid()
@@ -370,7 +378,7 @@ class ProviderConnections:
                         else:
                             levels = [level for level, value in mapping.items() if value is not None or level == 'off']
                         result.append({'id': model_identity(provider['id'], connection['id'], model['id']), 'label': model['name'],
-                            'provider': provider['name'] + ' / ' + connection['name'], 'description': model['model'],
+                            'provider': provider['name'] if provider['type'] == 'kilo-free' else provider['name'] + ' / ' + connection['name'], 'description': model['model'],
                             'context_window': model.get('context_window', base.get('contextWindow', 0)),
                             'max_output': model.get('max_output_tokens', base.get('maxTokens', 0)),
                             'supports_reasoning': bool(levels), 'reasoning_efforts': levels})

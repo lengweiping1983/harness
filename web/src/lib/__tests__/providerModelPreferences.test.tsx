@@ -5,8 +5,8 @@ import type {ModelInfo} from '@/types'
 import {modelSaveKey, useAppStore} from '@/store/app'
 type AppState = ReturnType<typeof useAppStore.getState>
 import type {ModelProvider} from '../providerConnections'
-import {providerModelGroups} from '../providerConnections'
-import {ProviderModelPreferences} from '@/components/overlays/ModelConnections'
+import {addProviderModels, newProviderConnection, providerModelGroups} from '../providerConnections'
+import {ConnectionEditor, KiloFreeNotice, ProviderModelPreferences} from '@/components/overlays/ModelConnections'
 import {DefaultModelFeedback} from '@/components/overlays/ModelPreferences'
 
 const fixture = vi.hoisted(() => ({state: {} as AppState}))
@@ -107,4 +107,36 @@ it('retains global default save feedback even while its provider is being edited
     expect(html).toContain(t('ui.http.invalidResponse'))
     expect(html).toContain(t('ui.settings.models.retryDefault', {model: 'Flash 原文'}))
   }
+})
+
+it('renders the anonymous free pool limits and data notice through English, Chinese, English', () => {
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    setLocale(language)
+    const html = renderToStaticMarkup(<KiloFreeNotice />)
+    expect(html).toContain(t('ui.providers.kiloFreeHint'))
+    expect(html).toContain(language === 'en' ? 'no login or API key' : '无需登录或 API Key')
+  }
+})
+
+it('renders Kilo as an anonymous channel with concrete selectable models and without endpoint or manual-add forms', () => {
+  const template = {id: 'kilo-free', name: 'Kilo Free', base_url: 'https://api.kilo.ai/api/gateway', api_key: false, oauth: false, env: [], models: [{id: 'kilo-auto/free', name: 'Auto Free'}, {id: 'vendor/coder:free', name: 'Coder 原文'}]}
+  const connection = newProviderConnection(template)
+  connection.models = addProviderModels([], template.models)
+  const change = vi.fn(), validation = vi.fn(), probe = vi.fn()
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    setLocale(language)
+    const html = renderToStaticMarkup(<ConnectionEditor connection={{...connection, model_catalog: template.models}} template={template} busy={false} stored={true} providerId="free" initiallyOpen removable={false} onChange={change} onRemove={vi.fn()} onRefresh={vi.fn()} onValidation={validation} onProbeStateChange={probe} />)
+    expect(html).toContain(t('ui.providers.anonymous'))
+    expect(html).toContain(t('ui.providers.kiloFreeModels'))
+    expect(html).toContain(t('ui.providers.chooseModels', {count: 2}))
+    expect(html).toContain('Coder 原文')
+    expect(html).toContain('vendor/coder:free')
+    expect(html).not.toContain(t('ui.providers.manualConfiguration'))
+    expect(html).not.toContain(t('ui.providers.authentication'))
+    expect(html).not.toContain(t('ui.providers.endpoint'))
+    expect(connection.models.map(model => model.model)).toEqual(['kilo-auto/free', 'vendor/coder:free'])
+  }
+  expect(change).not.toHaveBeenCalled()
+  expect(validation).not.toHaveBeenCalled()
+  expect(probe).not.toHaveBeenCalled()
 })

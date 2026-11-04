@@ -1,9 +1,18 @@
 import {modelDisplayName} from '../modelMenu'
 import {describe, expect, it} from 'vitest'
-import {providerCatalogChanges, latestProviderModels, reconcileProviderModels, providerConnectionIssue, sortProviderChoices, addProviderModels, newProviderConnection, providerConfigurationState, validProviderEndpoint, validProviderModelId} from '../providerConnections'
+import {providerDraftForTemplate, providerCatalogChanges, latestProviderModels, reconcileProviderModels, providerConnectionIssue, sortProviderChoices, addProviderModels, newProviderConnection, providerConfigurationState, validProviderEndpoint, validProviderModelId} from '../providerConnections'
 import type {ModelProvider, ProviderTemplate} from '../providerConnections'
 
 describe('provider configuration edits', () => {
+  it('starts Kilo Free anonymously without preselecting Auto Free or any other model', () => {
+    const template: ProviderTemplate = {id: 'kilo-free', name: 'Kilo Free', base_url: 'https://api.kilo.ai/api/gateway', api_key: false, oauth: false, env: [], models: [{id: 'kilo-auto/free', name: 'Auto Free'}]}
+    const connection = newProviderConnection(template)
+    expect(connection.auth).toEqual({type: 'anonymous', env: {}})
+    expect(connection.keys).toEqual([])
+    expect(connection.models).toEqual([])
+    expect(providerConnectionIssue(connection, true)).toBeNull()
+    expect(providerConfigurationState({id: 'free', type: template.id, name: template.name, connections: [connection]})).toBe('incomplete')
+  })
   it('explains missing, duplicate and disabled draft credentials before discovery or saving', () => {
     const connection = newProviderConnection({id: 'openai', name: 'OpenAI', base_url: 'https://api.openai.com/v1', api_key: true, oauth: false, env: [], models: []})
     expect(providerConnectionIssue(connection)).toBe('ui.providers.keyRequired')
@@ -136,4 +145,44 @@ it('counts additions and retirements across the complete list independently of s
   expect(providerCatalogChanges([], [])).toEqual({added: 0, retired: 0})
   expect(providerCatalogChanges([], [{id: 'a', name: 'A'}])).toEqual({added: 1, retired: 0})
   expect(providerCatalogChanges([{id: 'a', name: 'A'}], [])).toEqual({added: 0, retired: 1})
+})
+
+it('accepts anonymous Kilo save and readback responses through the generated HTTP contract', async () => {
+  const {responseIssue} = await import('../responseValidation')
+  const connection = newProviderConnection({id: 'kilo-free', name: 'Kilo Free', base_url: 'https://api.kilo.ai/api/gateway', api_key: false, oauth: false, env: [], models: [{id: 'kilo-auto/free', name: 'Auto Free'}]})
+  const routing = {version: 2, revision: 'saved', providers: [{id: 'kilo', type: 'kilo-free', name: 'Kilo Free', connections: [connection]}], models: [], current: null, cycle: 1}
+  expect(responseIssue('/api/v1/connection', 'GET', 200, routing)).toBeUndefined()
+  expect(responseIssue('/api/v1/connection', 'PATCH', 200, {routing, config: {}})).toBeUndefined()
+  expect(responseIssue('/api/v1/connection', 'GET', 200, {...routing, providers: [{...routing.providers[0], connections: [{...connection, auth: {type: 'unknown', env: {}}}]}]})).toBeDefined()
+})
+
+it('fetching a free channel leaves initial selection empty and preserves subsequent explicit choices', () => {
+  const template: ProviderTemplate = {id: 'kilo-free', name: 'Kilo Free', base_url: 'https://api.kilo.ai/api/gateway', api_key: false, oauth: false, env: [], models: [{id: 'kilo-auto/free', name: 'Auto Free'}]}
+  const connection = newProviderConnection(template)
+  const fresh = [{id: 'kilo-auto/free', name: 'Auto Free', contextWindow: 64000}, {id: 'vendor/coder:free', name: 'Coder', thinkingLevelMap: {high: 'high'}, contextWindow: 128000}]
+  expect(reconcileProviderModels(connection.models, template.models, fresh)).toEqual([])
+  const explicit = addProviderModels([], [fresh[1]])
+  expect(explicit[0].reasoning_efforts).toEqual({high: 'high'})
+  const selected = {...connection, models: explicit}
+  const refreshed = reconcileProviderModels(selected.models, fresh, [...fresh, {id: 'new:free', name: 'New'}])
+  expect(refreshed.map(model => model.model)).toEqual(['vendor/coder:free'])
+  expect(refreshed[0].id).toBe(explicit[0].id)
+  expect(reconcileProviderModels(selected.models, fresh, [])).toEqual([])
+  expect(connection.models).toEqual([])
+})
+
+it('reuses the configured Kilo channel when picked again and isolates the editing draft', () => {
+  const template: ProviderTemplate = {id: 'kilo-free', name: 'Kilo Free', base_url: 'https://api.kilo.ai/api/gateway', api_key: false, oauth: false, env: [], models: [{id: 'kilo-auto/free', name: 'Auto Free'}]}
+  const first = providerDraftForTemplate(template, [])
+  expect(first.connections[0].models).toEqual([])
+  first.connections[0].models = addProviderModels([], template.models)
+  const picked = providerDraftForTemplate(template, [first])
+  expect(picked).toEqual(first)
+  expect(picked.id).toBe(first.id)
+  picked.connections[0].models[0].name = 'Edited'
+  expect(first.connections[0].models[0].name).toBe('Auto Free')
+  const again = providerDraftForTemplate(template, [first])
+  expect(again.connections[0].models[0].id).toBe(first.connections[0].models[0].id)
+  const anotherTemplate = {...template, id: 'custom'}
+  expect(providerDraftForTemplate(anotherTemplate, [{...first, type: 'custom'}]).id).not.toBe(first.id)
 })
