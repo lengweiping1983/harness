@@ -264,6 +264,8 @@ export interface GoalState {
     revision: number
     objective: string
     phase: 'active' | 'paused' | 'blocked' | 'complete'
+    /** Derived machine status; phase remains the persisted lifecycle field. */
+    status?: 'active' | 'paused' | 'blocked' | 'usage_limited' | 'budget_limited' | 'complete'
     elapsedSeconds?: number
     timingActive?: boolean
     roundsStarted: number

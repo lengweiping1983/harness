@@ -37,6 +37,7 @@ from ..registry import ToolDefinition, ToolRunContext, ToolResult
 from .goal_evidence import MAX_CRITERIA, MAX_EVIDENCE_PER_CHECK, MAX_CHECK_SUMMARY_CHARS, completion_guidance
 
 GoalPhase = Literal["active", "paused", "blocked", "complete"]
+GoalStatus = Literal["active", "paused", "blocked", "usage_limited", "budget_limited", "complete"]
 GoalActivation = Literal["armed", "disarmed"]
 
 #: 允许的轮次上限，避免模型填一个天文数字把会话永远钉在目标模式。
@@ -91,6 +92,19 @@ class GoalView:
     elapsed_seconds: float = 0.0
     running_since: float | None = None
 
+    @property
+    def status(self) -> GoalStatus:
+        """把生命周期和自动续接刹车原因归一成稳定的机器状态。"""
+        if self.phase != "active":
+            return self.phase
+        if self.activation == "armed":
+            return "active"
+        if self.stop_reason in {"token-budget", "round-limit"}:
+            return "budget_limited"
+        if self.stop_reason in {"token-accounting-error", "usage-limited"}:
+            return "usage_limited"
+        return "paused"
+
     def to_value(self) -> dict[str, Any]:
         """物化成给模型看的稳定结构（对应 ``GoalToolValue``）。"""
         goal: dict[str, Any] = {
@@ -98,6 +112,7 @@ class GoalView:
             "revision": self.revision,
             "objective": self.objective,
             "phase": self.phase,
+            "status": self.status,
             "roundsStarted": self.rounds_started,
             "maxGoalRounds": self.max_goal_rounds,
             "stopReason": self.stop_reason,
@@ -132,6 +147,7 @@ class GoalView:
         return {
             'id': self.id, 'revision': self.revision, 'objective': self.objective,
             'phase': self.phase, 'activation': self.activation,
+            'status': self.status,
             'criteria': list(self.criteria or (self.objective,)),
             'roundsStarted': self.rounds_started, 'maxGoalRounds': self.max_goal_rounds,
             'tokenBudget': self.token_budget, 'tokensUsed': self.tokens_used,
@@ -895,5 +911,6 @@ __all__ = [
     "UPDATE_ACTIONS",
     "GoalStore",
     "GoalView",
+    "GoalStatus",
     "build_goal_tools",
 ]

@@ -180,3 +180,30 @@ class GoalStateIntegrityTests(unittest.IsolatedAsyncioTestCase):
                         GoalStore(sessions=SessionStore(folder)).get(session.id)
                     self.assertEqual(failure.exception.code, 'GOAL_INVALID_STATE')
                     self.assertEqual(header.read_bytes(), original)
+
+    async def test_goal_snapshot_exposes_derived_limit_status_without_changing_phase(self):
+        store = GoalStore()
+        active = store.create('status-active', objective='active')
+        self.assertEqual(store.snapshot('status-active')['goal']['status'], 'active')
+
+        paused = store.pause('status-active', goal_id=active.id, revision=active.revision)
+        self.assertEqual(paused.phase, 'paused')
+        self.assertEqual(store.snapshot('status-active')['goal']['status'], 'paused')
+
+        store = GoalStore()
+        limited = store.create('status-budget', objective='budget')
+        store.disarm('status-budget', 'token-budget', goal_id=limited.id)
+        self.assertEqual(store.get('status-budget').phase, 'active')
+        self.assertEqual(store.snapshot('status-budget')['goal']['status'], 'budget_limited')
+
+        store = GoalStore()
+        usage = store.create('status-usage', objective='usage')
+        store.disarm('status-usage', 'usage-limited', goal_id=usage.id)
+        self.assertEqual(store.snapshot('status-usage')['goal']['status'], 'usage_limited')
+
+        blocked = GoalView(id='blocked', revision=1, objective='blocked', phase='blocked', max_goal_rounds=None,
+                           activation='disarmed', blocked_reason={'code': 'model-reported', 'message': '等待输入'})
+        complete = GoalView(id='complete', revision=1, objective='complete', phase='complete', max_goal_rounds=None,
+                            activation='disarmed')
+        self.assertEqual(blocked.status, 'blocked')
+        self.assertEqual(complete.status, 'complete')
