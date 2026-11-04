@@ -11,7 +11,7 @@ from harness.web.views import session_detail
 class SessionViewControlFailureTests(unittest.TestCase):
     def fixture(self):
         session = Session()
-        host = SimpleNamespace(get_session=Mock(return_value=session),
+        host = SimpleNamespace(get_session=Mock(return_value=session), _active_team_runs={},
             plan_mode_state=Mock(return_value={'active': False}),
             questions=SimpleNamespace(pending=Mock(return_value=[])))
         return session, host
@@ -31,12 +31,14 @@ class SessionViewControlFailureTests(unittest.TestCase):
 
     def test_valid_empty_and_active_snapshots_remain_distinct(self):
         session, host = self.fixture()
-        for plan, questions in [({'active': False}, []), ({'active': True}, [{'id': 'Original {x}'}])]:
-            host.plan_mode_state.return_value = plan
-            host.questions.pending.return_value = questions
-            result = session_detail(host, session.id)
-            self.assertEqual(result['plan_mode'], plan)
-            self.assertEqual(result['questions'], questions)
+        for view in ('full', 'conversation', 'conversation-window'):
+            for plan, questions in [({'active': False}, []), ({'active': True}, [{'id': 'Original {x}'}])]:
+                with self.subTest(view=view, plan=plan):
+                    host.plan_mode_state.return_value = plan
+                    host.questions.pending.return_value = questions
+                    result = session_detail(host, session.id, view=view)
+                    self.assertEqual(result['plan_mode'], plan)
+                    self.assertEqual(result['questions'], questions)
 
     def test_member_context_does_not_read_parent_controls(self):
         session, host = self.fixture()

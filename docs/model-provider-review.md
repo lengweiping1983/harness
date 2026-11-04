@@ -8,6 +8,8 @@
 
 `test_provider_stream_resilience.py` 经发行桥接与隔离回环接口验证 Completions／Messages／Responses 心跳及分片参数超过无活动阈值仍完成、无响应超时、断流后正文续接且已完成工具只执行一次、取消后的连接释放，以及英中英错误呈现、脱敏、协议／进程错误和未知刷新保护。`model-runtime/tests/stream-observation.test.mjs` 核对活动节流、字节与响应元数据、取消等待和 SDK 原始原因；其中活动回归在旧发行桥接上失败后再验证修复。取消回归也固定了 TransformStream 取消返回早于底层释放的问题，现使用显式读取器等待原流取消。这些证据不代表在线接口或跨平台安装包验收；产品行为统一见 [模型提供商](model-providers.md#执行预算与流监控)。
 
+回环断连观察另有夹具问题：对端以 TCP reset 断开时，原 `respond` 在 `reader.read()` 抛出 `ConnectionResetError`，未设置断连事件，导致取消测试误报等待超时；连接收尾中的同类异常处理无法补回该事件。当前超时与取消夹具共用 `wait_for_peer_disconnect`，接受 EOF 和连接重置，其他读取异常保持原对象并且不发布断连成功。确定性分支回归与真实发行桥接的取消、无响应超时用例分别核对观察语义和实际资源释放。
+
 ## 缓存用量报告
 
 触发条件是供应商桥接返回正 `cacheRead`：`model-runtime/bridge.mjs` 的完成事件原先只传 `cache_read_tokens`，遗漏 `cache_reported_input_tokens`；`provider_runtime.provider_stream` 经 `TokenUsage.to_dict` 将缺失覆盖保留为缺失，而 `request_traces._usage_totals` 把它当作零，造成有读取量却被判不一致，前端随后隐藏比例。桥接现在同步传递覆盖输入，归档和单请求展示按正读取证据逐请求确定缺失分母，保留显式矛盾和未知零报告。回归为 `test_cache_usage_reporting.py`、`RuntimeBridgeTests.test_messages_and_responses_streams_map_text_tools_and_usage`、`model-runtime/tests/transcript.test.mjs`、`promptCache.test.ts` 和 `context-statistics-language-smoke.mjs`；产品规则统一见 [架构与模块](architecture.md)。这些回归使用隔离数据与回环接口，不代表在线供应商验收。
