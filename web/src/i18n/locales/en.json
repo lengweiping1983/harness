@@ -4921,5 +4921,15 @@
   "ui.desktop.menu.updateInstallLocation": "Move Harness to a writable Applications folder and reopen it before updating.",
   "ui.desktop.menu.updateCurrentSignatureInvalid": "The installed app signature is damaged. Download and reinstall the official DMG, then check for updates again.",
   "ui.imageActions.clipboardDeniedDesktop": "Harness could not write to the clipboard. Focus the Harness window and click Copy again. If it still fails, save the image as a file; no Screen Recording or Accessibility permission is needed for copying.",
-  "ui.imageActions.clipboardDeniedBrowser": "Clipboard access was denied. Keep this page focused, open the site controls beside the address bar and allow Clipboard if available, then click Copy again. Use HTTPS or localhost; you can also save the image as a file."
+  "ui.imageActions.clipboardDeniedBrowser": "Clipboard access was denied. Keep this page focused, open the site controls beside the address bar and allow Clipboard if available, then click Copy again. Use HTTPS or localhost; you can also save the image as a file.",
+  "ui.desktop.menu.updateNetworkDns": "Cannot resolve the update server. Check DNS and your system proxy, then retry.",
+  "ui.desktop.menu.updateNetworkProxy": "Cannot reach the update server through your system proxy. Check the proxy settings.",
+  "ui.desktop.menu.updateNetworkTls": "The update connection failed certificate verification. Check the clock and proxy certificate.",
+  "ui.desktop.menu.updateNetworkOffline": "The network is unavailable. Connect to the internet, then retry.",
+  "ui.desktop.menu.updateNetworkTimeout": "The update connection timed out. Check the network or system proxy, then retry.",
+  "ui.desktop.menu.updateNetworkConnection": "The update connection was interrupted or refused. Check the network, then retry.",
+  "ui.desktop.menu.updateNetworkDetail": "Update server: {host}\n{diagnostic}",
+  "ui.desktop.menu.updateRetry": "Retry",
+  "ui.desktop.menu.updateNetworkSettings": "Open Network Settings",
+  "ui.desktop.menu.updateOpenFailed": "Could not open the page or Network Settings. See the details and open it manually."
 }
