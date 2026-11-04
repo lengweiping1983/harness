@@ -1,3 +1,4 @@
+import {ResourceError, failureText} from '@/lib/resourceError'
 import {noticeText} from '@/lib/noticeText'
 import { ComposerRemoveButton } from './ComposerRemoveButton'
 import { useState } from 'react'
@@ -95,7 +96,7 @@ function DraftChip({
       else await saveImageAs(item.previewUrl, item.name)
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
-      useAppStore.getState().toast({ title: {key: action === 'copy' ? 'ui.imageActions.copyFailed' : 'ui.imageActions.saveFailed'}, tone: 'danger' })
+      useAppStore.getState().toast({ title: error instanceof ResourceError ? failureText(error) : {key: action === 'copy' ? 'ui.imageActions.copyFailed' : 'ui.imageActions.saveFailed'}, tone: 'danger' })
     }
   }
   return (<>

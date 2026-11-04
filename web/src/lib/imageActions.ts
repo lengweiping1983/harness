@@ -28,8 +28,18 @@ async function clipboardPng(src: string): Promise<Blob> {
 }
 
 export async function copyPng(blob: Blob | Promise<Blob>): Promise<void> {
+  const image = Promise.resolve(blob)
+  // 浏览器可能在读取图片 Promise 前拒绝授权，仍须观察已开始的编码结果。
+  void image.catch(() => {})
   if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new ResourceError({key: 'ui.imageActions.clipboardUnavailable'})
-  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+  try {await navigator.clipboard.write([new ClipboardItem({ 'image/png': image })])}
+  catch (cause) {
+    if (cause instanceof ResourceError) throw cause
+    const denied = cause instanceof Error && ['NotAllowedError', 'SecurityError'].includes(cause.name)
+    const desktop = typeof window !== 'undefined' && Boolean((window as Window & {harnessDesktop?: unknown}).harnessDesktop)
+    const key = denied ? (desktop ? 'ui.imageActions.clipboardDeniedDesktop' : 'ui.imageActions.clipboardDeniedBrowser') : 'ui.imageActions.copyFailed'
+    throw Object.assign(new ResourceError({key}), {cause})
+  }
 }
 
 export async function copyImage(src: string): Promise<void> {

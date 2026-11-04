@@ -2784,7 +2784,7 @@
   "ui.screenshot.download": "Save image",
   "ui.screenshot.typeHere": "Enter text",
   "ui.screenshot.textHint": "Enter for a new line · Click outside to finish editing · Esc to cancel editing",
-  "ui.screenshot.copyFailed": "Could not copy screenshot. Check clipboard permissions; the screenshot will still be attached.",
+  "ui.screenshot.copyFailed": "Could not copy the screenshot. Keep this window focused and try again from the attachment menu, or save it as a file. The screenshot will still be attached.",
   "ui.screenshot.imageError": "Could not load image. Capture again.",
   "ui.screenshot.selectHint": "Drag to select · Enter to finish · Esc to cancel",
   "ui.screenshot.editHint": "Draw, mark or add text · Enter to finish · Esc to cancel",
@@ -2897,7 +2897,7 @@
   "ui.goal.alreadyExists": "This conversation already has a goal",
   "ui.imageActions.copy": "Copy image",
   "ui.imageActions.save": "Save as…",
-  "ui.imageActions.copyFailed": "Could not copy image. Check clipboard permissions and try again.",
+  "ui.imageActions.copyFailed": "Could not write the image to the clipboard. Keep this window focused and try again, or save the image as a file.",
   "ui.imageActions.saveFailed": "Save As failed; try again.",
   "ui.changes.title": "Changes",
   "ui.changes.view": "View changes",
@@ -4918,5 +4918,8 @@
   "ui.desktop.menu.updateMacDownloaded": "Update verified and ready. Choose Quit and Install to restart with the new version, or Later to keep working.",
   "ui.desktop.menu.updateInstallFailed": "Installation could not be completed. Keep the old application and check the update log before retrying.",
   "ui.desktop.menu.updateIntegrityFailed": "Update verification failed or the release has no SHA-256 digest. The installed application has not been replaced.",
-  "ui.desktop.menu.updateInstallLocation": "Move Harness to a writable Applications folder and reopen it before updating."
+  "ui.desktop.menu.updateInstallLocation": "Move Harness to a writable Applications folder and reopen it before updating.",
+  "ui.desktop.menu.updateCurrentSignatureInvalid": "The installed app signature is damaged. Download and reinstall the official DMG, then check for updates again.",
+  "ui.imageActions.clipboardDeniedDesktop": "Harness could not write to the clipboard. Focus the Harness window and click Copy again. If it still fails, save the image as a file; no Screen Recording or Accessibility permission is needed for copying.",
+  "ui.imageActions.clipboardDeniedBrowser": "Clipboard access was denied. Keep this page focused, open the site controls beside the address bar and allow Clipboard if available, then click Copy again. Use HTTPS or localhost; you can also save the image as a file."
 }

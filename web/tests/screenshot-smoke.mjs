@@ -154,7 +154,7 @@ try {
     await done.click()
     await dialog.waitFor({state: 'hidden'})
     assert.equal(await attachments.getByRole('listitem').count(), 2)
-    await page.getByText(text('ui.screenshot.copyFailed'), {exact: true}).waitFor()
+    await page.getByText(text('ui.imageActions.clipboardDeniedDesktop'), {exact: true}).waitFor()
     assert.equal(await page.evaluate(() => window.screenshotTest.copies), 2)
     await start()
     const download = page.waitForEvent('download')

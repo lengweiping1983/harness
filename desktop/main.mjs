@@ -12,6 +12,7 @@ import {MacInstaller} from './mac-installer.mjs'
 import {updateDialogOptions} from './update-dialogs.mjs'
 import {readFileSync} from 'node:fs'
 import {DesktopVoice, voiceReply} from './voice.mjs'
+import {attachApplicationPermissions} from './application-permissions.mjs'
 import {applicationMenu, attachMenuLifecycle, configureMenuDefaults} from './application-menu.mjs'
 import {attachMenuShortcutGuard} from './shortcuts.mjs'
 import {windowChrome, attachWindowChrome} from './window-chrome.mjs'
@@ -80,22 +81,8 @@ async function startDesktop() {
     applicationURL = (await backend.start()).url
     origin = new URL(applicationURL).origin
   } catch (error) {dialog.showErrorBox('Harness startup failed', String(error)); app.quit(); throw error}
-  // The application window uses the default Electron session, while website
-  // permissions are scoped to the separate browser session. Explicitly grant
-  // microphone access only to the local Harness origin so Chromium does not
-  // reject getUserMedia on Windows before the renderer can start recording.
-  const appSession = session.defaultSession
-  const allowsApplicationAudio = (webContents, permission, requestingOrigin, details = {}) => {
-    let requestOrigin = requestingOrigin
-    try {requestOrigin = new URL(requestingOrigin).origin} catch {}
-    if (![window?.webContents, voice?.window?.webContents].includes(webContents) || !webContents || permission !== 'media' || requestOrigin !== origin) return false
-    const mediaTypes = details.mediaTypes || (details.mediaType ? [details.mediaType] : [])
-    return mediaTypes.length === 1 && mediaTypes[0] === 'audio'
-  }
-  appSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) =>
-    allowsApplicationAudio(webContents, permission, requestingOrigin, details))
-  appSession.setPermissionRequestHandler((webContents, permission, callback, details) =>
-    callback(allowsApplicationAudio(webContents, permission, details?.requestingUrl || '', details)))
+  // 应用主窗口的剪贴板写入与录音权限不影响第三方网页的独立权限会话。
+  attachApplicationPermissions(session.defaultSession, () => ({origin, window, voiceWindow:voice?.window}))
   downloads = new BrowserDownloads(() => path.join(app.getPath('downloads'), 'Harness'), () => browser.publish())
   window = new BrowserWindow({width: 1440, height: 960, minWidth: 800, minHeight: 600, title: 'Harness', icon: brandIcon, ...windowChrome(), webPreferences: {preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true}})
   instanceReady()
@@ -161,7 +148,7 @@ async function startDesktop() {
       console.error('Update failed:', error.message)
       if (!window.isDestroyed()) {
         const repository = metadata.harnessUpdateSource
-        const known = ['updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure','updateIntegrityFailed','updateInstallLocation'].includes(error.menuKey)
+        const known = ['updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure','updateIntegrityFailed','updateInstallLocation','updateCurrentSignatureInvalid'].includes(error.menuKey)
         const message = known ? formatDesktopText(menuText[error.menuKey], error.params) : menuText[['ERR_UPDATER_CHANNEL_FILE_NOT_FOUND','ERR_UPDATER_LATEST_VERSION_NOT_FOUND'].includes(error.code) ? 'updateSourceUnavailable' : 'updateFailed']
         const choice = await dialog.showMessageBox(window, {type:'warning', title:'Harness', message, detail:known ? error.cause?.message || '' : error.message,
           buttons:repository?.provider === 'github' ? [menuText.openReleasePage, menuText.ok] : [menuText.ok], cancelId:repository?.provider === 'github' ? 1 : 0})
@@ -193,7 +180,7 @@ async function startDesktop() {
   attachWindowChrome({window, ipcMain, Menu, origin})
   ipcMain.handle('desktop-menu', (event, labels) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) throw Error('Untrusted menu request')
-    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','screenshot','screenshotHidden','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','updateInstallerDetail','updateMacInstallerDetail','updateMacDownloaded','updateInstallFailed','updateIntegrityFailed','updateInstallLocation','updateUnpublished','updatePlatformUnavailable','updateSourceUnavailable','updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure','openReleasePage','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
+    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','screenshot','screenshotHidden','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','updateInstallerDetail','updateMacInstallerDetail','updateMacDownloaded','updateInstallFailed','updateIntegrityFailed','updateInstallLocation','updateCurrentSignatureInvalid','updateUnpublished','updatePlatformUnavailable','updateSourceUnavailable','updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure','openReleasePage','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
     if (!labels || keys.some(key => typeof labels[key] !== 'string' || !labels[key].trim() || labels[key].length > 120)) throw Error('Invalid menu labels')
     menuText = Object.fromEntries(keys.map(key => [key, labels[key]]))
     installMenu(true)
