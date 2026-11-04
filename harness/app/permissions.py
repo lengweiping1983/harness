@@ -372,7 +372,7 @@ class PermissionPolicy:
             reasons.append('network_access')
         if policy in {"request_approval", "auto_review"} and tool.effect == "unknown":
             trusted = {"get_goal", "create_goal", "update_goal", "todo_write", "todo_update", "todo_bind", "ask_user_question", "exit_plan_mode",
-                "spawn_agent", "followup_task", "list_agents", "wait_agent", "send_message", "interrupt_agent", "list_subagent_models",
+                "spawn_agent", "followup_task", "list_agents", "wait_agent", "wait_agents", "send_message", "interrupt_agent", "list_subagent_models",
                 "session_search", "session_trace", "session_event_search", "session_event_trace", "session_event_read",
                 "load_workspace_dependencies", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource",
                 "terminal_read", "terminal_list", "job_output", "job_list", "present"}

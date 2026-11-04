@@ -7,7 +7,7 @@ import {groupToolRuns} from '../toolRuns'
 const block=(name:string,status:ToolBlockState['status']='ok'):ToolBlockState=>({kind:'tool',id:name,callId:name,turn:1,at:1,name,status,input:{description:'Original-{name} 原文',target:'Original-target'},output:'Original result 原文'})
 afterEach(()=>setLocale('zh-CN'))
 it('classifies current Agent controls and groups spawn/followup as Agent collaboration',()=>{
- for(const name of ['spawn_agent','followup_task','list_agents','wait_agent','send_message','interrupt_agent'])expect(toolActivityKind(block(name))).toBe('agent')
+ for(const name of ['spawn_agent','followup_task','list_agents','wait_agent','wait_agents','send_message','interrupt_agent'])expect(toolActivityKind(block(name))).toBe('agent')
  expect(toolActivityKind(block('subagent'))).toBe('tool')
  const rows=[block('spawn_agent'),block('followup_task')].map(block=>({kind:'block' as const,id:block.id,block}))
  for(const locale of ['en','zh-CN','en'] as const){

@@ -88,6 +88,7 @@ NAME_CATEGORY: dict[str, str] = {
     "send_message": "agent",
     "list_agents": "agent",
     "wait_agent": "agent",
+    "wait_agents": "agent",
     "interrupt_agent": "agent",
     "list_subagent_models": "agent",
     # 后台任务

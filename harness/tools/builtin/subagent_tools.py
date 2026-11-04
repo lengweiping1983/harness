@@ -1,6 +1,6 @@
 """子代理工具。
 
-对外暴露七个工具：``spawn_agent`` / ``list_agents`` / ``wait_agent`` /
+对外暴露八个工具：``spawn_agent`` / ``list_agents`` / ``wait_agent`` / ``wait_agents`` /
 ``send_message`` / ``followup_task`` / ``interrupt_agent`` / ``member_evidence``。它们都是 :class:`SubagentManager`
 的薄封装——真正的生命周期管理在 :mod:`harness.subagent.manager`，
 这里只负责参数校验、异常翻译与给模型看的文本整形。
@@ -18,9 +18,11 @@ import asyncio
 import json
 from typing import Any
 
+from ...core.cleanup import raise_cleanup_errors
 from ...core.errors import ToolExecutionError
 from ...llm.types import TextBlock
-from ...subagent.manager import SubagentManager, validate_spawn_text, validate_wait_timeout
+from ...subagent.manager import SubagentManager, validate_spawn_text, validate_wait_ids, validate_wait_timeout
+from ...subagent.archive import subagent_summary
 from ...session.agent_messages import validate_message_text
 from ...core.runs import AgentRun, ACTIVE_STATES, TERMINAL_STATES
 from ..registry import ToolDefinition, ToolRunContext, ToolResult
@@ -42,7 +44,7 @@ def _state_lines(states: list[AgentRun]) -> str:
 
 
 def build_subagent_tools(manager: SubagentManager, *, agent_persona: Any = None, configured_spawn: Any = None, configured_followup: Any = None) -> list[ToolDefinition]:
-    """构造七个协作工具，绑定到给定的 :class:`SubagentManager`。
+    """构造协作工具，绑定到给定的 :class:`SubagentManager`。
 
     :param agent_persona: 可选的人设解析器 ``(agent_name, session_id) -> str | None``；
         由宿主（Agent系统）提供，供 ``spawn_agent`` 工具的 ``agent`` 参数把Agent
@@ -169,11 +171,13 @@ def build_subagent_tools(manager: SubagentManager, *, agent_persona: Any = None,
                     await asyncio.gather(waiting, incoming, return_exceptions=True)
         except KeyError:
             raise ToolExecutionError(tr('python.subagent_tools.aebb26001e55', agent_id=agent_id)) from None
+        raise_cleanup_errors(manager._wait_errors(state))
         data = state.to_dict()
+        data['settled'] = state.settled
         session = manager.session_for(ctx.session_id)
         incoming_count = len(session.agent_messages.pending()) if session is not None else 0
         data['incoming_messages'] = incoming_count
-        if state.finished:
+        if state.settled:
             state._wait_consumed = True
             body = state.output or state.error_message or tr('python.subagent_tools.8ae64c2c8ce5')
             text = f"{state.summary_line()}\n{body}"
@@ -188,6 +192,33 @@ def build_subagent_tools(manager: SubagentManager, *, agent_persona: Any = None,
             display=data,
             data=data,
         )
+
+    async def wait_agents(args: Any, ctx: ToolRunContext) -> ToolResult:
+        """批量等待一组成员；只结束观察，不停止仍在运行的成员。"""
+        try:
+            agent_ids = validate_wait_ids(args.get('agent_ids'))
+            wait = min(validate_wait_timeout(args.get('timeout', DEFAULT_WAIT_TIMEOUT)), MAX_WAIT_TIMEOUT)
+        except ValueError as exc:
+            raise ToolExecutionError(str(exc)) from exc
+        try:
+            for agent_id in agent_ids:
+                target(agent_id, ctx)
+            states = await manager.wait_many(agent_ids, timeout=wait)
+        except KeyError as exc:
+            raise ToolExecutionError(tr('python.subagent_tools.aebb26001e55', agent_id=str(exc.args[0]))) from None
+        snapshots = [{**subagent_summary(state), 'settled': state.settled} for state in states]
+        for state in states:
+            if state.settled:
+                state._wait_consumed = True
+        data = {'agents': snapshots,
+                'completed': sum(state.settled and state.status == 'completed' for state in states),
+                'failed': sum(state.settled and state.status in {'failed', 'interrupted'} for state in states),
+                'pending': sum(not state.settled for state in states),
+                'timed_out': [state.id for state in states if not state.settled]}
+        text = tr('agent.message.wait_many.summary', completed=data['completed'], failed=data['failed'], pending=data['pending'])
+        # content 是模型实际读取的通道，data/display 仅供宿主与界面使用。
+        text += '\n' + json.dumps(data, ensure_ascii=False)
+        return ToolResult(content=[TextBlock(text=text)], display=data, data=data)
 
     async def send_message(args: Any, ctx: ToolRunContext) -> ToolResult:
         """向协作者或直接委派者投递有来源与回执的消息。"""
@@ -342,6 +373,32 @@ def build_subagent_tools(manager: SubagentManager, *, agent_persona: Any = None,
                 },
             },
             execute=wait_agent,
+            concurrency_safe=True,
+            timeout=MAX_WAIT_TIMEOUT + 30.0,
+        ),
+        ToolDefinition(
+            schema={
+                "description_key": 'agent.message.wait_many',
+                "parameter_keys": {
+                    ('properties', 'agent_ids', 'description'): 'agent.message.wait_many.ids',
+                    ('properties', 'timeout', 'description'): 'python.subagent_tools.da50ab1dbd92',
+                },
+                "name": "wait_agents",
+                "description": tr('agent.message.wait_many'),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "agent_ids": {"type": "array", "minItems": 1, "maxItems": 32,
+                                      "items": {"type": "string", "minLength": 1},
+                                      "description": tr('agent.message.wait_many.ids')},
+                        "timeout": {"type": "number", "minimum": 0,
+                                    "description": tr('python.subagent_tools.da50ab1dbd92')},
+                    },
+                    "required": ["agent_ids"],
+                    **no_extra,
+                },
+            },
+            execute=wait_agents,
             concurrency_safe=True,
             timeout=MAX_WAIT_TIMEOUT + 30.0,
         ),

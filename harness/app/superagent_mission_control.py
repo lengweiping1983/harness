@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 
 from ..core.cleanup import join_cleanup, raise_cleanup_errors
 from ..core.language import current_language, resolve_language
 from ..i18n import tr
 from ..session.turn_scope import turn_events
-from ..session.tool_activity import confirmed_tool_result, tool_invocations
+from ..session.tool_activity import tool_invocations
 from ..tools.processes import ProcessCleanupError
 from .superagent_inbox import _error
 from .superagent_mission_store import TERMINAL
+from .superagent_background import background_invocation, background_status
 
 
 class MissionControlRuntime:
@@ -28,9 +28,9 @@ class MissionControlRuntime:
         applied = coordinator.control.reconcile(mission_exists=coordinator._mission_exists, mission_id=mission_id)
         cancelled = {row['mission_id'] for row in applied if row['status'] == 'applied' and row['mode'] == 'cancelled'}
         if recover:
-            active = coordinator.store.active_missions()
-            modes = coordinator.control.modes([mission['id'] for mission in active])
-            cancelled.update(mission['id'] for mission in active if modes[mission['id']]['mode'] == 'cancelled')
+            # 已应用取消的目标通常已是终态，重启不能从活动清单恢复它的停止事实。
+            cancelled.update(identity for identity in coordinator.control.cancelled_missions()
+                             if identity not in self._cancelling)
         if mission_id is not None and coordinator.control.mode(mission_id)['mode'] == 'cancelled':
             cancelled.add(mission_id)
         for identity in cancelled:
@@ -64,9 +64,7 @@ class MissionControlRuntime:
                     except ValueError as exc:
                         raise _error('corrupt') from exc
                     for call in tool_invocations(events):
-                        start = call['_start_event']
-                        arguments = start.data.get('input') if start is not None else None
-                        if (isinstance(arguments, Mapping) and arguments.get('run_in_background') is True
+                        if (background_invocation(call)
                                 and not self._background_confirmed(host, record.session_id, call)):
                             target['unconfirmed'] = True
             if record.finished:
@@ -88,24 +86,7 @@ class MissionControlRuntime:
 
     def _background_confirmed(self, host, owner, call):
         """恢复后只采用确切作业回执；旧 PID 或缺失的句柄都不是停止依据。"""
-        if not confirmed_tool_result(call):
-            return False
-        display = call['_result_event'].data.get('display')
-        identity = display.get('job_id') if isinstance(display, Mapping) else None
-        if not isinstance(identity, str) or not identity:
-            return False
-        live = host.jobs._jobs.get(identity)
-        if live is not None:
-            return live.owner == owner
-        if host.jobs.archive is None:
-            return False
-        try:
-            view = host.jobs.archive.output(owner, identity, limit=1)['job']
-        except LookupError:
-            return False
-        except (ValueError, TypeError, KeyError, RuntimeError) as exc:
-            raise _error('corrupt') from exc
-        return view['status'] in ('completed', 'killed', 'failed') and not view.get('cleanupError')
+        return background_status(host.jobs, owner, call)['confirmed']
 
     async def _stop_job(self, identity, owner):
         host = self.coordinator.dispatcher.harness

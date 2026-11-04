@@ -1,8 +1,11 @@
 """隔离真实 Git、运行和工具的目标图、交付、复核及有限修正回归。"""
 import asyncio
+import base64
 import json
 import os
 import shlex
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -17,6 +20,20 @@ from harness.core.errors import HarnessError
 from harness.core.language import current_language
 from harness.i18n import tr
 from tests.agent_configuration_fixture import RecordingTransport
+
+
+def python_command(code):
+    """通过当前解释器执行跨平台夹具，保留真实 Shell 边界和退出码。"""
+    encoded = base64.b64encode(code.encode('utf-8')).decode('ascii')
+    executable = subprocess.list2cmdline([sys.executable]) if os.name == 'nt' else shlex.quote(sys.executable)
+    return f'{executable} -I -X utf8 -c "exec(__import__(\'base64\').b64decode(\'{encoded}\'))"'
+
+
+def background_command(marker):
+    """所属进程真实等待闸门，放行后才写入节点产物。"""
+    return python_command('from pathlib import Path\nimport time\n'
+        f'while not Path({str(marker)!r}).is_file():\n    time.sleep(.01)\n'
+        "Path('first.txt').write_bytes(b'alpha\\n')")
 
 
 def frame_of(request):
@@ -91,21 +108,23 @@ class MissionWorkerTransport(RecordingTransport):
                     if self.background_marker is None:
                         tool, args = 'write', {'path': 'first.txt', 'content': 'alpha\n'}
                     else:
-                        marker = shlex.quote(str(self.background_marker))
-                        tool, args = 'bash', {'command': f"while [ ! -f {marker} ]; do sleep 0.01; done; printf 'alpha\\n' > first.txt",
+                        tool, args = 'bash', {'command': background_command(self.background_marker),
                                               'run_in_background': True}
                 elif 'work:second:' in frame['job_id']:
                     tool, args = 'write', {'path': 'second.txt', 'content': 'beta\n'}
                 else:
-                    tool, args = 'bash', {'command': 'test "$(cat first.txt)" = alpha && test "$(cat second.txt)" = beta && cat first.txt second.txt > combined.txt'}
+                    tool, args = 'bash', {'command': python_command("from pathlib import Path\n"
+                        "assert Path('first.txt').read_bytes() == b'alpha\\n'\n"
+                        "assert Path('second.txt').read_bytes() == b'beta\\n'\n"
+                        "Path('combined.txt').write_bytes(Path('first.txt').read_bytes() + Path('second.txt').read_bytes())")}
             elif role == 'integrate':
-                tool, args = ('bash', {'command': "printf 'alpha\\nbeta\\n' > combined.txt"}) if frame['attempt'] > 1 else ('read', {'path': 'combined.txt'})
+                tool, args = ('bash', {'command': python_command("from pathlib import Path; Path('combined.txt').write_bytes(b'alpha\\nbeta\\n')")}) if frame['attempt'] > 1 else ('read', {'path': 'combined.txt'})
             else:
-                command = 'test "$(cat combined.txt)" = "$(printf \'alpha\\nbeta\')"'
+                command = python_command("from pathlib import Path; assert Path('combined.txt').read_bytes() == b'alpha\\nbeta\\n'")
                 if self.repair and frame['attempt'] == 1:
-                    command = 'test -f repaired.txt'
+                    command = python_command("from pathlib import Path; assert Path('repaired.txt').is_file()")
                 if self.review_modified:
-                    command = "printf 'changed\\n' > combined.txt"
+                    command = python_command("from pathlib import Path; Path('combined.txt').write_bytes(b'changed\\n')")
                 args = {'command': command}
                 if self.review_cwd is not None:
                     args['cwd'] = self.review_cwd
@@ -136,15 +155,17 @@ class SuperagentMissionFixture(unittest.IsolatedAsyncioTestCase):
         self.repo = self.root / 'repo'
         self.repo.mkdir()
         for args in [('init', '--initial-branch=main'), ('config', 'user.name', 'Fixture'),
-                     ('config', 'user.email', 'fixture@example.invalid')]:
+                     ('config', 'user.email', 'fixture@example.invalid'),
+                     ('config', 'core.autocrlf', 'false'), ('config', 'core.eol', 'lf')]:
             self.git(*args)
-        (self.repo / 'main.txt').write_text('baseline\n', encoding='utf-8')
+        (self.repo / 'main.txt').write_bytes(b'baseline\n')
         self.git('add', '.')
         self.git('commit', '-m', 'baseline')
         self.path = self.root / 'config.json'
         self.spec = {'version': 1, 'instance_id': 'team', 'state_dir': 'state', 'language': 'en',
             'router_model': 'planner-model', 'worker_model': 'worker-model', 'base_url': 'https://fixture.invalid/v1',
-            'permission_policy': 'full_access', 'interval': 0.01, 'once_timeout': 30,
+            # 真实多工作树流程采用产品默认批次预算；短截止时间由独立受控时钟回归核对。
+            'permission_policy': 'full_access', 'interval': 0.01, 'once_timeout': 600,
             'sources': {'local': {'mode': 'requests', 'actors': ['operator'], 'threads': ['project']}},
             'profiles': {'coding': {'repo': 'repo', 'description': 'Implement the requested objective.',
                          'sources': ['local'], 'tools': ['read', 'write', 'bash']}},

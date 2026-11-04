@@ -210,12 +210,18 @@ class MissionWatchdog:
             row = db.execute('SELECT * FROM heartbeats WHERE mission=?', (mission_id,)).fetchone()
         return None if row is None else self._decode(row)
 
-    def status(self, *, limit: int = 32) -> dict[str, Any]:
+    def status(self, *, limit: int = 32, mission_ids: list[str] | None = None) -> dict[str, Any]:
         if type(limit) is not int or not 1 <= limit <= 100:
             raise _error('invalid', field='watchdog.limit')
+        if mission_ids is not None and not isinstance(mission_ids, list):
+            raise _error('invalid', field='watchdog.mission_ids')
+        ids = None if mission_ids is None else list(dict.fromkeys(_text(value, 'mission_id') for value in mission_ids))
+        where = '' if ids is None else ' WHERE mission IN (' + ','.join('?' for _ in ids) + ')'
+        arguments = () if ids is None else tuple(ids)
         with self._db() as db:
-            rows = db.execute('SELECT * FROM heartbeats ORDER BY CASE state WHEN \'blocked\' THEN 0 WHEN \'stalled\' THEN 1 ELSE 2 END,last_seen DESC LIMIT ?', (limit,)).fetchall()
-            counts = dict(db.execute('SELECT state,count(*) FROM heartbeats GROUP BY state').fetchall())
+            db.execute('BEGIN')
+            rows = db.execute('SELECT * FROM heartbeats' + where + ' ORDER BY CASE state WHEN \'blocked\' THEN 0 WHEN \'stalled\' THEN 1 ELSE 2 END,last_seen DESC LIMIT ?', (*arguments, limit)).fetchall()
+            counts = dict(db.execute('SELECT state,count(*) FROM heartbeats' + where + ' GROUP BY state', arguments).fetchall())
         items = [self._decode(row) for row in rows]
         return {
             'enabled': True,

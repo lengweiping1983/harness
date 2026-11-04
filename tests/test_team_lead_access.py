@@ -29,7 +29,7 @@ class TeamLeadAccessTests(unittest.IsolatedAsyncioTestCase):
         self.executions = {}
         for name, effect in (('probe_read', 'read'), ('probe_execute', 'execute'),
                              ('probe_write', 'workspace_write'), ('probe_external', 'external_write'), ('probe_unknown', 'unknown'),
-                             ('spawn_agent', 'unknown'), ('wait_agent', 'unknown')):
+                             ('spawn_agent', 'unknown'), ('wait_agent', 'unknown'), ('wait_agents', 'unknown')):
             execute = AsyncMock(return_value='完成')
             self.executions[name] = execute
             self.parent.tools.register(ToolDefinition({'name': name}, execute, effect=effect), replace=True)
@@ -47,7 +47,7 @@ class TeamLeadAccessTests(unittest.IsolatedAsyncioTestCase):
         run = await self.start()
         self.addAsyncCleanup(run.close, 'completed')
         names = {schema.name for schema in self.parent._eligible_tool_schemas()}
-        self.assertTrue({'probe_read', 'spawn_agent', 'wait_agent'} <= names)
+        self.assertTrue({'probe_read', 'spawn_agent', 'wait_agent', 'wait_agents'} <= names)
         self.assertFalse({'probe_execute', 'probe_write', 'probe_external', 'probe_unknown'} & names)
         ctx = ToolRunContext(call_id='probe', session_id=self.session.id, cwd=self.directory.name,
             turn=1, step=1, services={'isolated_team_coordinator': lambda: self.parent.isolated_team_coordinator})

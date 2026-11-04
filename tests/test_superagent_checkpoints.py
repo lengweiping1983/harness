@@ -1,7 +1,6 @@
 """真实文件交接的长节点接续、预算、证据和崩溃边界回归。"""
 import asyncio
 import json
-import shlex
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -16,6 +15,7 @@ from harness.i18n import tr
 from harness.session.events import SessionEvent
 from tests.test_superagent_missions import (
     SuperagentMissionFixture, MissionWorkerTransport, frame_of, tool_messages, stream_delta,
+    python_command, background_command,
 )
 
 
@@ -48,19 +48,19 @@ class CheckpointTransport(MissionWorkerTransport):
         if not messages:
             if node == 'first' and attempt == 1:
                 if self.background_marker is not None:
-                    tool, args = 'bash', {'command': 'while [ ! -f ' + shlex.quote(str(self.background_marker))
-                        + " ]; do sleep 0.01; done; printf 'alpha\\n' > first.txt", 'run_in_background': True}
+                    tool, args = 'bash', {'command': background_command(self.background_marker), 'run_in_background': True}
                 else:
                     tool, args = 'write', {'path': 'first.txt', 'content': 'alpha\n'}
             elif node == 'first':
-                command = 'test "$(cat first.txt)" = alpha'
+                command = "from pathlib import Path; assert Path('first.txt').read_bytes() == b'alpha\\n'"
                 if not self.repeat:
-                    command += " && printf 'stage two\\n' > stage.txt"
-                tool, args = 'bash', {'command': command}
+                    command += "; Path('stage.txt').write_bytes(b'stage two\\n')"
+                tool, args = 'bash', {'command': python_command(command)}
             elif node == 'second':
                 tool, args = 'write', {'path': 'second.txt', 'content': 'beta\n'}
             else:
-                tool, args = 'bash', {'command': 'cat first.txt second.txt > combined.txt'}
+                tool, args = 'bash', {'command': python_command("from pathlib import Path; "
+                    "Path('combined.txt').write_bytes(Path('first.txt').read_bytes() + Path('second.txt').read_bytes())")}
             yield stream_delta({'tool_calls': [{'index': 0, 'id': 'stage-' + node + '-' + str(attempt),
                 'type': 'function', 'function': {'name': tool, 'arguments': json.dumps(args)}}]}, 'tool_calls')
         else:

@@ -1,7 +1,6 @@
 """子代理管理器：把独立 AgentLoop 组织成可观测、可中断的并发单元。
 
-对模型暴露 spawn_agent / followup_task / list_agents / wait_agent / send_message /
-interrupt_agent 六个工具。
+通过协作工具提供派工、续接、单个或批量等待、消息及中断能力。
 
 设计取舍：
 
@@ -72,6 +71,15 @@ def validate_wait_timeout(value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
         raise ValueError(tr('subagent.wait.invalid_timeout'))
     return value
+
+
+def validate_wait_ids(value: Any) -> list[str]:
+    """批量观察只接收有界且互不重复的真实身份，不隐式枚举成员。"""
+    if (not isinstance(value, list) or not 1 <= len(value) <= 32
+            or any(not isinstance(agent_id, str) or not agent_id.strip() for agent_id in value)
+            or len(set(value)) != len(value)):
+        raise ValueError(tr('agent.message.wait_many.invalid_ids'))
+    return list(value)
 
 
 class SubagentManager:
@@ -560,6 +568,20 @@ class SubagentManager:
     # ==================================================================
     # 等待 / 消息 / 中断
     # ==================================================================
+    @staticmethod
+    def _wait_errors(state: AgentRun) -> list[BaseException]:
+        """同步核对已结束句柄，避免观察任务归并后终态变化漏掉原失败。"""
+        errors = []
+        for future in (state.task, state.finalization_task):
+            if future is None or not future.done() or future is state.task and future.cancelled():
+                continue
+            try:
+                future.result()
+            except BaseException as exc:
+                if not any(error is exc for error in errors):
+                    errors.append(exc)
+        return errors
+
     async def wait(self, agent_id: str, timeout: float | None = None) -> AgentRun:
         """等待子代理进入终态。超时只停止等待，不杀死子代理。"""
         wait_for = validate_wait_timeout(DEFAULT_AGENT_TIMEOUT if timeout is None else timeout)
@@ -567,18 +589,74 @@ class SubagentManager:
         if state is None:
             raise KeyError(agent_id)
         task = state.task
-        if task is None:
-            return state
-        with contextlib.suppress(asyncio.TimeoutError):
-            async with asyncio.timeout(wait_for):
-                try:
-                    await asyncio.shield(task)
-                except asyncio.CancelledError:
-                    # 目标自身取消与调用者停止等待分开处理，后者不能延长或取消目标。
-                    if not task.cancelled() or asyncio.current_task().cancelling():
-                        raise
-                await asyncio.shield(self._finalization(state))
+        deadline = asyncio.get_running_loop().time() + wait_for
+
+        async def observed(future):
+            if not future.done():
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0 or not (await asyncio.wait((future,), timeout=remaining))[0]:
+                    return False
+            return True
+
+        if task is not None:
+            if not await observed(task):
+                raise_cleanup_errors(self._wait_errors(state))
+                return state
+            # 执行被正常中断后仍须观察所属收尾；等待方取消不会传给执行任务。
+            if not task.cancelled():
+                task.result()
+        finalization = (self._finalization(state) if task is not None and wait_for > 0
+                        else state.finalization_task)
+        if finalization is not None and await observed(finalization):
+            # 收尾自身的取消和 TimeoutError 是原始失败，不是本次观察超时。
+            finalization.result()
+        raise_cleanup_errors(self._wait_errors(state))
         return state
+
+    async def wait_many(self, agent_ids: list[str], timeout: float | None = None) -> list[AgentRun]:
+        """等待一组子代理；超时只返回当前快照，不取消任何成员。"""
+        agent_ids = validate_wait_ids(agent_ids)
+        wait_for = validate_wait_timeout(DEFAULT_AGENT_TIMEOUT if timeout is None else timeout)
+        states = []
+        for agent_id in agent_ids:
+            state = self.get(agent_id)
+            if state is None:
+                raise KeyError(agent_id)
+            states.append(state)
+        deadline = asyncio.get_running_loop().time() + wait_for
+
+        async def observe(agent_id):
+            remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+            return await self.wait(agent_id, timeout=remaining)
+
+        waits = [asyncio.create_task(observe(agent_id),
+                                     name=f'subagent-wait-many-{agent_id}') for agent_id in agent_ids]
+        joined = asyncio.gather(*waits, return_exceptions=True)
+        cancelled = None
+        cancelled_observers = set()
+        try:
+            await asyncio.wait((joined,))
+        except asyncio.CancelledError as exc:
+            cancelled = exc
+            # 只取消本次观察任务；成员执行及其唯一收尾仍由原管理器拥有。
+            for task in waits:
+                if not task.done() and not task.cancelling():
+                    cancelled_observers.add(task)
+                    task.cancel()
+        try:
+            results = await join_cleanup(joined)
+        except asyncio.CancelledError as exc:
+            cancelled = cancelled or exc
+            results = joined.result()
+        errors = [result for task, result in zip(waits, results) if isinstance(result, BaseException)
+                  and not (isinstance(result, asyncio.CancelledError) and task in cancelled_observers)]
+        for state, task, result in zip(states, waits, results):
+            if not isinstance(result, BaseException) or task in cancelled_observers:
+                for error in self._wait_errors(state):
+                    if not any(original is error for original in errors):
+                        errors.append(error)
+        raise_cleanup_errors([*errors, *([cancelled] if cancelled is not None else [])])
+        return states
 
     def session_for(self, session_id: str):
         """主会话与子上下文共用实际 Session，不创建虚拟父 Agent 对象。"""

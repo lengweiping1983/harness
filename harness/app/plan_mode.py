@@ -164,7 +164,7 @@ class PlanModeController:
         if not active:
             return None
         name = tool.schema.name
-        controls = {"ask_user_question", "list_agents", "wait_agent", "spawn_agent", "followup_task", "send_message", "interrupt_agent"}
+        controls = {"ask_user_question", "list_agents", "wait_agent", "wait_agents", "spawn_agent", "followup_task", "send_message", "interrupt_agent"}
         reads = {"get_goal", "session_search", "session_trace", "session_event_search", "session_event_trace", "session_event_read", "list_subagent_models", "load_workspace_dependencies", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource", "web_fetch", "web_search", "terminal_read", "terminal_list"}
         if name == "exit_plan_mode":
             if self._parent_active(ctx.session_id):

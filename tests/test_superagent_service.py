@@ -9,7 +9,8 @@ import threading
 import unittest
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 from harness.cli import build_parser, main
 from harness.app.git_process import run_git
@@ -18,6 +19,36 @@ from harness.core.errors import HarnessError
 from harness.core.language import current_language
 from harness.i18n import tr
 from tests.agent_configuration_fixture import RecordingTransport
+
+
+class SuperagentOnceDeadlineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_batch_deadline_preserves_accepted_work_and_original_status(self):
+        release = asyncio.Event()
+        task = asyncio.create_task(release.wait())
+        status = {'inputs': {'pending': 1}, 'results': {}, 'batches': [], 'cursor': 0, 'input_errors': []}
+        service = SuperagentService.__new__(SuperagentService)
+        service.spec, service.closed = {'once_timeout': 10, 'interval': .01}, False
+        service.guidance_files, service._input_count, service._draft_cursor = None, 0, 0
+        service.hosts = [SimpleNamespace(runtime=SimpleNamespace(records=SimpleNamespace(active={'original': task})),
+                                        jobs=SimpleNamespace(active_owners=lambda: set()))]
+        service.results = SimpleNamespace(uncollected=lambda: False, drafts=lambda **_: [])
+        service.inbox = SimpleNamespace(events=lambda **_: {'events': []})
+        service.channels, service.router = [], SimpleNamespace()
+        service.tick = AsyncMock(return_value=status)
+        try:
+            for language in ('en', 'zh-CN', 'en'):
+                with current_language.set(language), \
+                        patch('harness.app.superagent_service.time', SimpleNamespace(monotonic=Mock(side_effect=[100, 111]))):
+                    with self.assertRaises(HarnessError) as caught:
+                        await service.serve(asyncio.Event(), once=True)
+                self.assertEqual(caught.exception.code, 'superagent/once-timeout')
+                self.assertIs(service._serve_error, caught.exception)
+                self.assertIs(service.hosts[0].runtime.records.active['original'], task)
+                self.assertFalse(task.done())
+                self.assertEqual(status['inputs']['pending'], 1)
+        finally:
+            release.set()
+            await task
 
 
 class ServiceRouterTransport(RecordingTransport):

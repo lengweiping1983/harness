@@ -11,7 +11,7 @@ from ...core.errors import ToolError
 from ...core.jsonutil import to_jsonable
 
 BOOKKEEPING = frozenset({'search_tools', 'get_goal', 'create_goal', 'update_goal', 'todo_read', 'todo_write', 'todo_update', 'todo_bind',
-                        'exit_plan_mode', 'spawn_agent', 'followup_task', 'list_agents', 'send_message', 'wait_agent', 'interrupt_agent',
+                        'exit_plan_mode', 'spawn_agent', 'followup_task', 'list_agents', 'send_message', 'wait_agent', 'wait_agents', 'interrupt_agent',
                         'job_list', 'job_kill'})
 MAX_CRITERIA = 12
 MAX_EVIDENCE_PER_CHECK = 10

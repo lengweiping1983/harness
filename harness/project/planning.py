@@ -37,7 +37,7 @@ class ProjectPlanning:
                         member.name == (previous.prompt_input or {}).get('member') and member.role != 'lead'
                         for member in run.team.members):
                     return None
-            if name in {'wait_agent', 'list_agents', 'send_message', 'interrupt_agent'}:
+            if name in {'wait_agent', 'wait_agents', 'list_agents', 'send_message', 'interrupt_agent'}:
                 return None
         if definition.schema.name == 'project_tasks_generate' and str(Path(ctx.cwd or self.harness.config.cwd).resolve()) == marker.get('root'):
             return None

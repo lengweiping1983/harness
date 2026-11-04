@@ -15,7 +15,7 @@ export function toolActivityKind(block: Pick<ToolBlockState, 'name' | 'input'>):
   if (/^(grep|glob|find|search|list_dir|ls|session_search|session_event_search|team_history)$/.test(name)) return 'search'
   if (/^(bash|pwsh|run_code|exec_command|shell|terminal_send)$/.test(name)) return 'command'
   if (/^(web_search|web_fetch|browser)$/.test(name)) return 'web'
-  if (/^(spawn_agent|followup_task|list_agents|wait_agent|send_message|interrupt_agent)$/.test(name)) return 'agent'
+  if (/^(spawn_agent|followup_task|list_agents|wait_agent|wait_agents|send_message|interrupt_agent)$/.test(name)) return 'agent'
   if (/^(todo_write|todo_update|todo_bind|exit_plan_mode|create_goal|get_goal|update_goal)$/.test(name)) return 'plan'
   if (name === 'skill') return 'skill'
   return 'tool'
@@ -42,7 +42,7 @@ export function toolActivity(block: ToolBlockState): ToolActivity {
   else if (kind === 'command') { action = t("ui.lib.toolActivity.e53f35dc006b"); detail = firstText('command', 'cmd', 'script', 'code', 'text') }
   else if (kind === 'web') { action = name === 'web_search' ? t("ui.lib.toolActivity.01aeaf3f0fde") : t("ui.lib.toolActivity.1846b9b97b84"); detail = firstText('query', 'url', 'action') }
   else if (kind === 'agent') {
-    action = ({ spawn_agent: t("ui.lib.toolActivity.8db869874648"), followup_task: t("ui.toolActivity.followupAgent"), list_agents: t("ui.lib.toolActivity.07fe1db44a8e"), wait_agent: t("ui.lib.toolActivity.ff1841e287b5"), send_message: t("ui.lib.toolActivity.f979ee1f47a3"), interrupt_agent: t("ui.lib.toolActivity.d4b2fe048c2a") } as Record<string, string>)[name]!
+    action = ({ spawn_agent: t("ui.lib.toolActivity.8db869874648"), followup_task: t("ui.toolActivity.followupAgent"), list_agents: t("ui.lib.toolActivity.07fe1db44a8e"), wait_agent: t("ui.lib.toolActivity.ff1841e287b5"), wait_agents: t("ui.lib.toolActivity.ff1841e287b5"), send_message: t("ui.lib.toolActivity.f979ee1f47a3"), interrupt_agent: t("ui.lib.toolActivity.d4b2fe048c2a") } as Record<string, string>)[name]!
     detail = firstText('description', 'target')
   } else if (kind === 'plan') { action = /^todo_(write|update|bind)$/.test(name) ? t("ui.lib.toolActivity.6253f06c73ac") : t("ui.lib.toolActivity.1c9c198d6fd3"); detail = firstText('objective', 'status') }
   else if (kind === 'skill') { action = t("ui.lib.toolActivity.11ff0491f783"); detail = firstText('name') }

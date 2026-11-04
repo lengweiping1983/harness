@@ -14,7 +14,7 @@ BOOKKEEPING_TOOLS = frozenset({
     'todo_write', 'todo_read', 'todo_update', 'todo_bind', 'create_goal', 'get_goal', 'update_goal',
     'project_tasks_generate', 'project_task_save',
     'exit_plan_mode', 'ask_user_question', 'job_output', 'job_list',
-    'terminal_read', 'terminal_list', 'list_agents', 'wait_agent',
+    'terminal_read', 'terminal_list', 'list_agents', 'wait_agent', 'wait_agents',
     'session_status', 'clock', 'sleep', 'wait',
 })
 

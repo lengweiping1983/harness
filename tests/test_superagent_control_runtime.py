@@ -218,6 +218,9 @@ class SuperagentControlRuntimeTests(SuperagentMissionFixture):
                 work = next(job for job in service.router.store.jobs(self.mission(trigger)) if job['node'] == 'first')
                 archive = service.worker_host.jobs.archive
                 self.control(self.mission(trigger), 'cancel', 'cancel-before-restart')
+                await service.tick()
+                self.assertEqual(service.control.mode(self.mission(trigger))['mode'], 'cancelled')
+                self.assertIsNotNone(service.router.control_runtime.stopping(self.mission(trigger)))
                 await service.aclose()
                 if unknown:
                     with archive.db() as db:

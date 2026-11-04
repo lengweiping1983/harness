@@ -11,7 +11,7 @@ from harness.core.errors import HarnessError
 from harness.core.language import current_language
 from harness.i18n import tr
 from tests.test_superagent_missions import (
-    MissionWorkerTransport, frame_of, stream_delta,
+    MissionWorkerTransport, frame_of, stream_delta, python_command,
 )
 from tests import test_superagent_missions as mission_fixture
 
@@ -34,7 +34,8 @@ class GuidedWorkerTransport(MissionWorkerTransport):
             else:
                 # 引导可使旧模型提议不进入执行；新推理须实际完成节点工作，不能只报告收到。
                 yield stream_delta({'tool_calls': [{'index': 0, 'id': 'guided-prepare', 'type': 'function',
-                    'function': {'name': 'bash', 'arguments': json.dumps({'command': "test -f first.txt || printf 'alpha\\n' > first.txt"})}}]}, 'tool_calls')
+                    'function': {'name': 'bash', 'arguments': json.dumps({'command': python_command("from pathlib import Path\n"
+                        "if not Path('first.txt').is_file():\n    Path('first.txt').write_bytes(b'alpha\\n')")})}}]}, 'tool_calls')
             yield b'data: [DONE]\n\n'
         else:
             async for chunk in super().post_stream(url, headers=headers, body=body, timeout=timeout):

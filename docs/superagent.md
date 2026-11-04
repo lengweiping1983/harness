@@ -113,7 +113,7 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 执行链为：
 
 1. **规划**：无工具的协调模型输出 `steps` 与 `acceptance`。每步有稳定 `id`、`profile_id`、明确指令和 `depends_on`；完成标准有 `id`、可观察要求及 `command`／`inspection` 类型。宿主拒绝环、缺失依赖、重复身份、未知或越权模板、跨仓库计划。格式无效时可重新规划，包含首次的规划总尝试最多 `max_attempts` 次；只有合法计划才建立工作资源。
-2. **冻结与派工**：接纳计划时冻结仓库提交。所有节点共享同一目标资源组和基线，延迟创建不再读取新的源 HEAD。独立节点可并行，整个工作宿主仍受 `max_active` 限制；活动目标轮转推进，慢目标不阻塞其他目标。已接受运行及其收尾未结束时不交接；同对话仍有后台作业时继续等待，并显示 `waiting_for=background-jobs`；交付捕获同时复核实时句柄、原工具回执和作业归档，缺少任一层收尾证据时不提前交接。
+2. **冻结与派工**：接纳计划时冻结仓库提交。所有节点共享同一目标资源组和基线，延迟创建不再读取新的源 HEAD。独立节点可并行，整个工作宿主仍受 `max_active` 限制；活动目标轮转推进，慢目标不阻塞其他目标。已接受运行及其收尾未结束时不交接；同对话仍有后台作业时继续等待，并显示 `waiting_for=background-jobs`。交付捕获与恢复取消共用原工具证据判定，既核对显式后台请求，也核对前台超时提升的后台作业；唯一规范失败回执明确 `not_executed` 或 `execution_state=not-started` 且无矛盾作业身份时，确认未启动。已启动作业按确切身份核对实时归属或归档收尾；缺失、重复、矛盾结果、普通工具错误或归档清理失败都不能当成收尾成功。
 3. **真实交接**：节点完成后冻结交付树，包含未提交新增、修改和删除。依赖节点启动前复用 `plan_delivery_merge/apply_delivery_merge` 导入真实前置文件，并附上原运行、交付引用和有截断标记的报告。报告不是依赖文件的替代。合并冲突保留全部原件并阻塞目标，不自动选择一方覆盖。
 4. **集成**：所有工作节点产生候选后，宿主使用指定模板建立集成工作树，合并全部交付并运行集成任务。它负责最终整体一致性，源项目分支和真实暂存区保持不变。
 5. **独立复核**：新对话、新工作树导入本轮集成候选，逐项检查 `acceptance`。复核模型引用自己本轮的 `call_id`，宿主从唯一 `turn/start` 和真实工具开始／结果配对派生事件序号，拒绝其他运行、重复调用身份、伪造或未执行证据。命令项要求真实前台 `bash/pwsh` 已退出、整数零退出码、无后台和编码异常，且工作目录为本复核工作树根目录；省略 `cwd` 时继承该目录。检查项要求本树内 `read/glob/grep` 的成功证据。复核前后交付树须一致，不能边修改候选边宣布通过。
@@ -122,7 +122,9 @@ python -m harness.cli --superagent /path/to/superagent.json --superagent-status
 
 目标状态为 `planning/running/integrating/reviewing/completed/blocked/unknown/rejected/suppressed/cancelled`。`max_missions` 限制活动目标，`max_workers` 仍限制保留的全部 Worker 创建记录；不会隐式删除旧工作树或释放历史容量。完整报告与逐项证据留在 `missions.sqlite3`，原工具日志、用量及轮次仍属于原宿主，协调账本不复制执行历史。启用 autonomy 时会在同一状态目录旁创建独立的 `watchdog.sqlite3`，保存每个目标的进度指纹、最后进展、停滞窗口和升级原因；它不复制工具输出，也不改变原运行所有权。未配置 `watchdog` 时使用 `stale_after=900` 秒、`max_stale_ticks=3`、`action=attention` 的安全默认值。
 
-Watchdog 按每个目标独立的有界采样间隔观察目标账本和任务状态，采样不会把高频协调 tick 变成额外的磁盘事务，也不会让并行目标互相抢占心跳。进度指纹同时包含目标账本、任务交付和原运行的有界活动摘要；工具事件、轮次或最后活动变化会清零停滞计数。指纹在一个 `stale_after` 窗口内没有变化时最多增加一个停滞窗口，避免高频 tick 放大证据。`attention` 将目标标为 `stalled` 并在 `status.json` 的顶层 `watchdog` 及目标 `watchdog` 字段中给出有界摘要，供工作台或人工处理；它不会取消、重放或复制未知运行。只有显式选择 `action=block` 且达到 `max_stale_ticks`，协调器才把活动目标安全转为 `blocked`，原因固定为 `watchdog/stalled`。重启只回读心跳账本，不发送信号、不创建资源、不重放命令。
+Watchdog 按每个目标独立的有界采样间隔观察目标账本和任务状态，采样不会把高频协调 tick 变成额外的心跳写入，也不会让并行目标互相抢占心跳。进度指纹同时包含目标账本、任务交付和原运行的有界活动摘要；工具事件、轮次、最后活动或确切归属后台作业的 stdout/stderr 累计字符数变化会清零停滞计数。后台摘要只读取原调用对应的实时句柄状态和输出量，不读取正文或推进模型消费游标；其他对话的输出、缺失句柄与旧归档不能制造活性。暂停不采样，人工恢复以持久控制修订开启新的观察窗口，同时清除暂停前的停滞；暂停中重启也沿用此规则。
+
+指纹在一个 `stale_after` 窗口内没有变化时最多增加一个停滞窗口，避免高频 tick 放大证据。`attention` 将心跳标为 `stalled` 并在 `status.json` 给出有界摘要，供工作台或人工处理；它不会取消、重放或复制未知运行。只有显式选择 `action=block` 且达到 `max_stale_ticks`，协调器才把活动目标转为 `blocked`，原因固定为 `watchdog/stalled`。重启只回读心跳账本，不发送信号、不创建资源、不重放命令。活性仅说明观察到变化，不能替代业务验收。
 
 运行提交、导入、捕获均先记录意图。丢失确认后只按原提交键或确切导入／交付树回查；不能确认则 `unknown`，不重放写入。原运行失败或重启中断进入 `blocked`，不会因为长时间没有文本重新执行原命令。来源撤销在创建、提交和最终完成前复核，已受理操作仍由原宿主收尾。
 
@@ -153,7 +155,7 @@ python -m harness.cli --superagent /path/to/superagent.json \
 - 取消使控制模式进入终态 `cancelled`；仍在调度的目标也进入 `cancelled`，释放活动目标名额。已有完成、失败、未知和发布事实不改写。每个停止核对原任务、资源、稳定提交键及确切运行，复核到投递取消之间不让出执行权；不会因共用规划会话误停另一个目标。未提交的节点不会补造运行；排队节点按原运行移除。
 - 原工作会话仍拥有的后台作业各有一次独立停止收尾。慢停止不阻塞其他目标；控制层不重复执行已失败或未确认的停止。停止进度和原运行／作业的实际状态分开保存和呈现，失败原件在关闭时继续向上传播。后续又产生的所属后台作业继续进入原目标的停止收尾，服务关闭等待已经接受的停止。
 
-`missions.recent[].control` 给出模式及修订，取消后本次运行器观察到的 `stopping` 区分 `pending/settled/unknown`，并给出未收尾运行、后台会话、停止失败数量及未确认执行标记；`settled` 仅说明已核对的原运行与当前所属作业完成收尾，不等于撤销外部副作用。重启后未观察本次停止时该字段为 `null`。重启恢复只采用确切运行和原后台作业回执；旧后台回执仍不可用或原执行未确认时保持 `unknown`，不向旧 PID 发送信号，也不重放命令。已保存的完成候选不因后来取消被追溯撤回。
+`missions.recent[].control` 给出模式及修订，取消后本次运行器观察到的 `stopping` 区分 `pending/settled/unknown`，并给出未收尾运行、后台会话、停止失败数量及未确认执行标记；`settled` 仅说明已核对的原运行与当前所属作业完成收尾，不等于撤销外部副作用。重启首次推进从控制账本的完整已应用取消集合恢复监督，包括已经进入终态的目标；首次观察前该字段为 `null`。恢复只采用确切运行和原后台作业回执；旧后台回执仍不可用或原执行未确认时保持 `unknown`，不向旧 PID 发送信号，也不重放命令。已保存的完成候选不因后来取消被追溯撤回。
 
 顶层 `control` 提供全局命令状态计数、总量及摘要截断标记；命令或目标摘要不是完整清单。`inputs.pending` 统计全部仍允许调度的目标，不受最近 16 项展示限制；目标账本中的活动清单、游标、统计、目标及任务使用同一读事务，控制库与原运行仍是独立事实源。暂停或取消的未运行节点显示 `control-paused/control-cancelled`，已接受运行及后台作业仍显示真实等待，并标明调度已停止。
 
@@ -191,7 +193,7 @@ python -m harness.cli --superagent /path/to/superagent.json \
 
 ### 自主目标的只读监督
 
-`status.json` 的 `missions.states` 统计全部目标；`recent` 最多展示 16 项，依次优先活动目标、`unknown/blocked/rejected/cancelled`、`suppressed`、已完成目标，同类按接纳序号倒序。`total/shown/has_more` 明示总量与截断，不能把 `recent` 当成全部任务清单。每个目标含原来源、工作树、交付树、修正轮数、有界完成标准及复核摘要，并含 `watchdog` 心跳摘要或 `null`；`budget` 提供当前尝试、上限及 `planning/delivery` 阶段，尚无合法计划的终止目标仍归规划阶段。顶层 `watchdog.states` 统计 `healthy/stalled/blocked`，`items` 有界列出最需要关注的目标。`work.total/delivered` 仅表示计划工作节点数与已冻结交付数，没有计划时总数为 `null`，这些数值不是业务完成百分比。
+`status.json` 的 `missions.states` 统计全部目标；`recent` 最多展示 16 项，依次优先活动目标、`unknown/blocked/rejected/cancelled`、`suppressed`、已完成目标，同类按接纳序号倒序。`total/shown/has_more` 明示总量与截断，不能把 `recent` 当成全部任务清单。每个目标含原来源、工作树、交付树、修正轮数、有界完成标准及复核摘要，并含 `watchdog` 心跳摘要或 `null`；心跳的 `monitoring/mission_state/control_mode` 区分当前监督与历史证据。`budget` 提供当前尝试、上限及 `planning/delivery` 阶段，尚无合法计划的终止目标仍归规划阶段。顶层 `watchdog.states/items/total` 仅统计控制模式为 running 的活动目标，在截断前按完整身份集合筛选；暂停或终止目标退出当前警报，自己的历史心跳仍保留，阻塞原因仍在目标字段中。`work.total/delivered` 仅表示计划工作节点数与已冻结交付数，没有计划时总数为 `null`，这些数值不是业务完成百分比。
 
 任务的 `run` 按原稳定提交键核对运行身份，从该 `run_id` 的唯一轮次事件派生最后活动及工具计数。同一集成对话的下一轮不会覆盖上一轮进度。`run.turn` 是本运行的确切轮次，尚未开始时为 `null`；目标同时提供原 `revision/thread_ids`，用于绑定本机节点指令。创建、开始、结束时间保留原运行的 Unix 秒值，`last_activity.time` 保留原事件的 Unix 毫秒值；无本轮事件时为 `null`。`tools.started/completed/errors` 分别统计实际开始、具有唯一且身份匹配结果、已确认错误；`unconfirmed` 是已开始但缺少确切配对结果的总数，包含尚在执行与已中断的调用。`active` 只列当前仍执行的调用名称，最多 16 项，每项最多 128 字符，`active_truncated` 标记截断。轮次结束不能把缺失结果伪装为完成，停止也不证明未知副作用已撤销。运行正文、工具参数、输出和错误原文不进入该运行摘要。
 
@@ -496,7 +498,7 @@ Router 对照冻结名单选择已有任务；推理期间新建 Worker 不能�
 |---|---|---|
 | 持久运行与幂等提交 | `app/runtime.py` 的 `RunController.submit` 在运行记录和 `run_keys` 中保存提交及正文指纹；相同键不同正文拒绝 | 事件分发须传稳定键，不能仅设置 `request_id` 就假定获得幂等性 |
 | 独立对话与并发执行 | `app/harness.py` 的 `create_session`、`run_async` 与 `RunController` 按对话组织运行 | 一个协调对话不应承担所有具体任务；新任务应绑定独立工作对话 |
-| 后台成员与后续消息 | `subagent/manager.py` 的 `spawn`、`send_message`、`followup_task`；消息有提交回执，续接核对原委派者及原上下文 | 成员消息不是通用外部事件入口；不能绕过可见性或把任意外部身份伪装成成员 |
+| 后台成员与后续消息 | `subagent/manager.py` 的 `spawn`、`send_message`、`followup_task`、`wait_many`；批量等待返回每个成员的完成或仍运行快照，消息有提交回执，续接核对原委派者及原上下文 | 成员消息不是通用外部事件入口；不能绕过可见性或把任意外部身份伪装成成员 |
 | 引导与普通排队 | `RunController` 及对话引导事件分别保留排队和安全边界采用语义 | 外部新事件不应默认取消当前轮次，也不能把普通排队改成隐式引导 |
 | 定时自动化 | `app/automations.py` 的 `AutomationService` 提供租约、有限并发、运行记录和关闭准入 | 计划触发与手动运行不构成跨信道 Thread 订阅；调度租约不等于所有运行的分布式所有权 |
 | 工具权限与来源 | `app/permissions.py`、`app/session_access.py` 和运行前的 `require_submitter` | “收到事件”“订阅事件”“获准执行”“获准对外发言”须分别判断 |

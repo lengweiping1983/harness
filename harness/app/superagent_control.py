@@ -182,6 +182,15 @@ class MissionControl:
     def mode(self, mission_id: str) -> dict:
         return self.modes([mission_id])[mission_id]
 
+    def cancelled_missions(self) -> list[str]:
+        """恢复使用完整的持久取消集合，不能从活动目标或截断摘要推断。"""
+        with self.db() as db:
+            db.execute('BEGIN')
+            self._revision(db)
+            rows = db.execute("SELECT * FROM mission_control WHERE instance=? AND mode='cancelled' ORDER BY mission_id",
+                              (self.instance_id,)).fetchall()
+            return [self._mode(db, row, row['mission_id'])['mission_id'] for row in rows]
+
     def modes(self, mission_ids):
         ids = list(dict.fromkeys(_text(value, 'mission_id', limit=256) for value in mission_ids))
         result = {}

@@ -195,7 +195,7 @@ class SchemaResourceIdentityTests(unittest.TestCase):
             with current_language.set('zh-CN'):
                 registered = build()
             originals = [tool.schema.to_dict() for tool in registered]
-            self.assertEqual(len(registered), 8)
+            self.assertEqual(len(registered), 9)
             for language in ('en', 'zh-CN', 'en'):
                 with current_language.set(language):
                     expected = {tool.schema.name: tool.schema.to_dict() for tool in build()}

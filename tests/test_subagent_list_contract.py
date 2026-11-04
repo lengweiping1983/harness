@@ -14,7 +14,7 @@ from harness.tools.registry import ToolRegistry, ToolRunContext
 class SubagentListContractTests(unittest.IsolatedAsyncioTestCase):
     def test_only_current_collaboration_tools_are_registered(self):
         expected = {'spawn_agent', 'followup_task', 'list_agents', 'wait_agent',
-                    'send_message', 'interrupt_agent', 'member_evidence'}
+                    'wait_agents', 'send_message', 'interrupt_agent', 'member_evidence'}
         for language in ('en', 'zh-CN', 'en'):
             with current_language.set(language):
                 tools = build_subagent_tools(SimpleNamespace())

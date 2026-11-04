@@ -9,7 +9,7 @@ from harness.i18n import tr
 
 def coordinator_tool_allowed(definition) -> bool:
     """隔离主理人只保留观察和现有任务控制入口，不推测远程工具副作用。"""
-    controls = {'spawn_agent', 'followup_task', 'send_message', 'wait_agent', 'list_agents',
+    controls = {'spawn_agent', 'followup_task', 'send_message', 'wait_agent', 'wait_agents', 'list_agents',
                 'interrupt_agent', 'create_goal', 'update_goal', 'get_goal',
                 'todo_write', 'todo_update', 'todo_bind', 'ask_user_question',
                 'project_task_save', 'project_tasks_generate'}
