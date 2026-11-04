@@ -702,6 +702,8 @@ UI字号检查按PostCSS声明解析，覆盖属性空白、大小写与值内�
 
 设置导航回归的显式页面顺序包含基础组的 `voice`，语音页关键词含快捷键，因此中文“快捷键”搜索同时命中 `shortcuts` 和 `voice`；Escape 仍清空搜索并恢复目录。`navigation-resource-chain`、`settings-layout`、`settings-navigation-icons` 和 `settings-search-escape` 场景分别核对资源链、顺序、图标与搜索结果，保留原中英文往返、主题和视口矩阵。旧列表与单结果断言会在语音页正常存在时误报。`desktop-menu-language` 的菜单数量按源资源集合核对，并继续逐键比较整个实际回执；更新提示增加菜单资源时，不能仅凭旧的固定数量否定完整且正确的菜单翻译。
 
+`academy-model-focus` 与 `academy-resume` 的尺寸矩阵先等待 `.app-shell` 实际切换到预期布局。前者通过真实点击等待编辑器稳定且可用后设置选区并提交键盘请求，后者以不产生导航的悬停等待布局稳定，再核对继续课程按钮结束加载。`App.useElementWidth` 经 ResizeObserver 和动画帧更新布局，`setViewportSize` 返回不等于这些工作已结束；旧焦点场景曾在窄屏仍呈现 columns 时提交，随后抽屉初始化聚焦导航并撤销编辑焦点意图。只读场景原来的瞬时 `isEnabled` 也可能撞上布局切换期间的重新加载。两场景均不执行课程代码，不能仅因名称含 Academy 就将其超时归因于课程沙箱；原焦点、选区、禁止重放、零写入及中英文主题尺寸断言继续保留。
+
 `screenshotShortcuts.test.tsx` 通过实际截图按钮、全局快捷键和桌面菜单消费端，核对两种截图入口、输入框组合键、输入法与重复按键保护、并发准入、浮层／隐藏／卸载拒绝、迟到回执隔离、窗口恢复失败锁定及同一实例英→中→英的菜单／提示／帮助资源消费。`desktop/tests/application-menu.test.mjs` 属于显式桌面专项：核对主文档与内嵌预览的菜单就绪边界、重载期间的主进程动作、平台菜单加速键、全屏进程默认值及原生组合输入保护；替身测试不证明 AppKit 实际呈现或原生屏幕捕获验收。
 
 `copy-button-smoke.mjs` 使用真实CopyButton与受控剪贴板，核对字符串/延迟正文在同实例替换后的迟到反馈隔离与新复制恢复；保留拒绝、计时、同步锁和卸载边界。内容替换等待真实DOM提交，不依赖固定睡眠。

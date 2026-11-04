@@ -54,7 +54,8 @@ try {
   }
   const select=async()=>{
     await waitReady()
-    await prompt.focus()
+    // 点击经过真实控件的稳定性与可用性检查，避免在响应式布局切换中途提交。
+    await prompt.click()
     await prompt.evaluate(node=>{node.setSelectionRange(4,12,'backward');node.scrollTop=35})
     return prompt.evaluate(node=>({start:node.selectionStart,end:node.selectionEnd,direction:node.selectionDirection,top:node.scrollTop,left:node.scrollLeft}))
   }
@@ -92,6 +93,7 @@ try {
     for(const theme of ['light','dark']){
       await page.setViewportSize({width:theme==='light'?390:1440,height:1000})
       await page.evaluate(theme=>document.documentElement.className=theme,theme)
+      await page.locator('.app-shell[data-mode="'+(theme==='light'?'overlay':'columns')+'"]').waitFor()
       const expected=await select()
       await prompt.press(theme==='light'?'Control+Enter':'Meta+Enter')
       await restore(expected)

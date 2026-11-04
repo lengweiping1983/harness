@@ -85,6 +85,10 @@ try {
     for (const theme of ['light', 'dark']) for (const width of [390, 1440]) {
       await page.setViewportSize({width, height: 1000})
       await page.evaluate(theme => document.documentElement.className = theme, theme)
+      await page.locator('.app-shell[data-mode="' + (width === 390 ? 'overlay' : 'columns') + '"]').waitFor()
+      // 悬停等待真实布局稳定，不点击只读导航；加载后的可用状态单独确认。
+      await card.getByRole('button').hover()
+      await page.waitForFunction(() => document.querySelector('[data-course-id="harness-foundations"] button')?.disabled === false)
       assert.equal(await card.getByRole('button').isEnabled(), true)
       assert.equal(await panel.getByRole('textbox', {name: copy['ui.academy.source'], exact: true}).inputValue(), content)
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
