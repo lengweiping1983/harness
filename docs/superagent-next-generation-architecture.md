@@ -659,16 +659,23 @@ Phase 1 仅持久化 `job_dependencies.requires_delivery` 与逐边 Delivery 回
 
 ### Phase 2：Source Registry 与授权 Engine
 
-交付：
+当前实现边界：
 
-- SourceKind / SourceInstance / SourceRegistry；
-- GitHub、Feishu、Local Adapter；
-- Trigger 去重、Thread、Channel；
-- PolicyRevision / Gate / Evaluation / Decision；
-- Mandate 和 Ticket；
-- work / context Subscription 与 handback。
+- `superagent_source_registry.py` 定义带 API 版本兼容检查的 SourceKind 契约、SourceInstance 注册与配置修订；版本不匹配的插件按 unavailable 处理。`CoordinatorHost.open(source_kinds=...)` 可在宿主启动时注入自定义插件；启动时会对持久化 SourceInstance 与当前插件清单做核对，缺失或版本不匹配的 SourceKind 会撤销对应 Mandate、取消在途 Evaluation 并过滤尚未评估的 Trigger。运行期注册/卸载同样通过宿主租约和注册表锁串行化，卸载不能与事件规范化并发穿越。内置 GitHub、Feishu、Local Adapter。GitHub HMAC 与 Feishu 加密 Webhook 验证后才规范化事件；Local Adapter 必须由宿主身份核验器提供 Actor 事实，未注入时只能形成 system actor。Coordinator 边界再次限制 SourceInstance、Trigger、Actor、Thread 与 Adapter 身份字段长度，避免自定义 SourceKind 把超长标识写入索引或账本。
+- SourceInstance 身份由 kind + identity_hash 固定；legacy_source_id 是唯一的一对一映射，绑定后不可重映射，避免历史 Shadow 对照键碰撞；凭据只保存 Secret Reference。SourceCursor 按 (SourceInstance, stream_key) 持久化，以 expected_revision 执行 CAS；SourceRegistry 提供 SourceInstance / Trigger / Thread / Channel 只读 get/list 查询，Trigger 详情包含有界处置事件历史；事件本身仍以 (SourceInstance, external_event_id) 去重，同 ID 不同 fingerprint 直接拒绝。
+- Trigger 保存不可变 Actor、正文、元数据、addressed、source_revision 与 adapter_version；Thread Key 包含 SourceInstance 身份，生命周期观察单独推进 lifecycle_revision。GitHub Issue / PR 生命周期以 Provider `updated_at` 作为观察顺序；较旧事件不得覆盖较新状态，同一观察时间发生冲突时 `closed` 优先，避免乱序 Webhook 意外重新开放已关闭 Thread。Channel 只保存不可变地址和能力快照，当前 reply / read_context 均为 false，不代表已经接入发送或上下文读取。
+- `superagent_authorization.py` 将 PolicyRevision 的 JSON 快照、policy_rules 和 source_policies 投影写入同一事务。policy_version 是发布修订身份，policy_hash 是内容身份；回到旧内容会创建新修订，不复用历史 Revision。
+- Gate 以来源启用状态、Actor、addressed、Admission、Policy Scope 与 Thread 生命周期确定 admissible 与 explicit / inferred 强度；GitHub close 事件仅更新生命周期，不成为新任务，已关闭 Thread 上的新消息也不能进入评估或 fanout。Assessor 只能看到 Gate 放行的 Trigger 正文并返回 Decision Proposal；拒绝项仅向宿主暴露身份 / Gate 结果摘要，不进入模型上下文。accept 的 direction.evidence 与 intent_evidence 必须分别引用同一条 Gate 放行 Trigger 的正文或标题原文，否则降级为 ignore；Proposal 与 Policy 的标识、说明、规则文本和整体快照均有大小边界。accept 只将 Gate 放行的 Trigger 写入 TicketInput / Subscription，拒绝项标记 filtered；Assessor unavailable 的重试也只重新排队 Gate 放行项。宿主重新核对策略版本、Source 配置修订、Thread 生命周期修订、Evaluation deadline、规则命中、来源原文证据和 Scope 后才写 Decision。已过期但未回执的 running Evaluation 会在下一次 begin_evaluation 时取消并重新排队，不会永久占用 Thread。
+- observe 保留显式人类请求的接受路径；inferred 候选只记录 would_accept，不创建 Ticket。inferred 自动接受必须由具体来源策略显式启用 auto，并继续通过规则、意图与 Scope 检查。
+- Authorization Engine 提供 PolicyRevision、Evaluation、Decision、Mandate 的有界只读历史查询；Evaluation 详情包含冻结策略与逐 Trigger Gate 快照，Decision 保留核验审计依据，Mandate 详情包含追加式状态事件。查询通过 CoordinatorHost 活动租约，不触发 revalidation 或写入。
+- accept 在同一事务中创建 Decision、不可变 Mandate、Ticket、work / context Subscription、TicketInput 和审计事件。Mandate Scope 是 Subscription 的硬边界；context 输入不能 handback、恢复 Ticket 或成为 work。每个新 Trigger 在复用既有 Subscription 前都按当前 Policy 重新执行 Gate；只有主 Thread 命中 work Subscription 才形成 work fanout，相关 Thread 命中始终是 context-only，work / context 投影严格分离；Gate 拒绝项保持 evaluation.queued 并在 Evaluation 中过滤，不进入 Assessor 上下文。work follow-up 经 handback 后重新进入 Evaluation。Policy 变化会标记 Mandate affected，并在 revalidation 时核验当前 Gate、Thread 生命周期与 Scope；仍允许时追加 revalidated，Scope 缩窄时撤销。来源停用、SourceInstance 配置修订变化及来源主 Thread 关闭则在各自写事务中立即撤销相关 Mandate；SourceKind 卸载、启动时缺失或 API 版本不匹配也会撤销其 Mandate、取消该来源运行中的 Evaluation，并将待评估 Trigger 过滤；插件恢复后不会自动恢复旧授权或重放已过滤事件，必须重新接收来源事件并重新授权。inferred Mandate 在策略不再为 auto 时撤销，防止 observe 模式继续沿用旧的推断授权。
+- `superagent_shadow.py` 只读打开 v1 Inbox / Router 数据库，对照旧新来源事实及决策；决策比较逐 Trigger 应用 v2 Gate 结果，拒绝项映射为 ignore，并报告两侧未匹配记录及样本截断标记；不写任一账本、不执行 Ticket，也不改变生产路由。
 
-验收：签名错误、伪造身份、重复事件、冲突事件、跨来源 ID 碰撞、Policy 更新竞态和 Ticket follow-up 矩阵全部通过。
+**运行与接入边界：** CoordinatorHost 只组合 Source Registry、Authorization Engine、Outbox 和 Shadow 读取服务；没有注册 CLI / HTTP 默认路由，没有启动旧版或新版 Worker，也没有调用 Provider 发送、拉取或执行接口。生产默认路由继续保持 v1；Phase 2 的接入、评估和 Shadow 只能通过显式宿主 API 使用。
+
+**本阶段不包含：** GitHub / Feishu API 轮询与上下文读取、Channel 外发和回执、Harness Executor / Worker 派工、生产账号切换、v1 数据迁移或 v1 默认路由退役。这些能力仍属于后续阶段，不能由当前 Channel 地址记录或 Shadow 对照推断为已实现。
+
+针对性回归覆盖签名错误与有效签名、Feishu 租户与聊天范围、Local 身份、事件重复与冲突、跨 SourceInstance ID 隔离、Policy 更新竞态、显式 / 推断模式、deadline、Scope、Mandate 撤销、work / context、handback、Cursor CAS 并发，以及 Shadow 只读对照。
 
 ### Phase 3：统一单 Worker 执行
 

@@ -15,6 +15,10 @@ from ..tools.builtin.fs_tools import DEFAULT_IGNORES
 from .policy import PathPolicy, fail, file_version
 
 
+MAX_SNAPSHOT_FILE_BYTES = 128 * 1024 * 1024
+MAX_SNAPSHOT_TOTAL_BYTES = 512 * 1024 * 1024
+
+
 def eligible_files(policy: PathPolicy, start: str = "."):
     """不跟随链接，不向搜索工具暴露私密文件内容。"""
     root = policy.resolve(start)
@@ -72,16 +76,23 @@ def search(policy: PathPolicy, query: str, path: str, limit: int, max_bytes: int
     return {"matches": matches, "truncated": truncated, "scanned": scanned}
 
 
-def snapshot(policy: PathPolicy, max_bytes: int):
-    """工作树内容指纹不受模型提供的摘要影响。"""
+def snapshot(policy: PathPolicy, max_bytes: int, *, snapshot_max_bytes: int | None = None,
+             snapshot_max_total_bytes: int = MAX_SNAPSHOT_TOTAL_BYTES):
+    """对完整工作树计算内容指纹；快照限额独立于普通文件操作限额。"""
+    file_limit = max_bytes if snapshot_max_bytes is None else snapshot_max_bytes
     digest = hashlib.sha256()
     count = 0
+    total_bytes = 0
     for target in eligible_files(policy):
         count += 1
         if count > 100000:
             fail("execution/project-too-large", tr('execution.files.fe8bea3d2bce'))
-        if target.stat().st_size > max_bytes:
+        size = target.stat().st_size
+        if size > file_limit:
             fail("execution/file-too-large", tr('execution.files.d39845014a8a'))
+        total_bytes += size
+        if total_bytes > snapshot_max_total_bytes:
+            fail("execution/project-too-large", tr('execution.files.fe8bea3d2bce'))
         digest.update(str(target.relative_to(policy.root)).replace("\\", "/").encode("utf-8"))
         digest.update(b"\x00")
         digest.update(file_version(target).encode("ascii"))

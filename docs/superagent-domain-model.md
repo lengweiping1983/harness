@@ -1,6 +1,6 @@
 # 下一代 Harness Superagent 领域模型与数据契约
 
-> 文档状态：Phase 0 设计基线 v0.1，待维护者评审确认。\
+> 文档状态：目标领域模型 v0.1；Phase 1 / Phase 2 当前实现边界见第 9 节。\
 > 文档性质：目标领域模型，不代表当前代码已经实现。\
 > 关联总览：[下一代 Harness Superagent 总体架构方案](superagent-next-generation-architecture.md)。\
 > 关联规范：[状态机与合法转移](superagent-state-machines.md) · [架构决策与接口协议](superagent-architecture-decisions.md)。\
@@ -131,11 +131,13 @@ JSON 仅用于有界、版本化的扩展数据或不可变快照。需要查询
 - 可选 Channel 地址解析能力；实际发送与发送回查由独立 Channel Port 执行，Provider 远端撤回不属于 Phase 1 基础契约；
 - 健康状态与游标能力。
 
+SourceCursor 以 (source_instance_id, stream_key) 为唯一身份，保存不透明 cursor_json、cursor_revision 和 updated_at。游标推进必须携带 expected_revision 并执行 CAS；相同内容重放是幂等重复，过期 Revision 冲突失败。Cursor 是拉取进度提示，不替代 Trigger 的事件去重键，也不授权跳过尚未持久化的事件。SourceRegistry 同时提供 SourceInstance、Thread、Channel 的只读 get/list 查询；Channel 查询只暴露地址与能力快照，不提供发送或读取上下文动作。
+
 **SourceInstance** 是某个具体 Provider 账号、仓库、Bot 或本机事件入口。字段至少包括：
 
-source_instance_id, kind, kind_api_version, enabled, config_json, config_revision, identity_hash, created_at, updated_at, health_json。
+source_instance_id, kind, kind_api_version, enabled, config_json, config_revision, identity_hash, legacy_source_id, created_at, updated_at, health_json。
 
-凭据只保存 Secret Reference，不保存 Token 明文。配置修订变更不能悄悄改变已接收 Trigger 的身份解释。
+凭据只保存 Secret Reference，不保存 Token 明文。配置修订变更不能悄悄改变已接收 Trigger 的身份解释。legacy_source_id 只用于 v1/v2 Shadow 对照，不参与来源身份哈希；可以从未绑定状态绑定一次，绑定后不可更改或清空，避免历史 Trigger 的 Shadow 归属被追溯性重解释。
 
 ### 5.2 ActorRef、ThreadRef 与 ChannelRef
 
@@ -143,7 +145,7 @@ source_instance_id, kind, kind_api_version, enabled, config_json, config_revisio
 - ThreadRef = {source_instance_id, external_thread_id}。
 - ChannelRef = {channel_id, source_instance_id, thread_id, address_ref, address_hash}。
 
-Channel 只说明消息可写到哪里，不代表该 Ticket 已获得对外发送授权。发送必须经 Mandate 校验和 Outbox。
+Channel 只说明消息可写到哪里，不代表该 Ticket 已获得对外发送授权。地址按 SourceInstance + Thread + address_hash 唯一保存且不可原地修改；当前 Phase 2 只记录地址，能力默认为不可发送、不可读取上下文。发送必须经 Mandate 校验和 Outbox。
 
 ### 5.3 Trigger 与 TriggerDisposition
 
@@ -153,7 +155,7 @@ trigger_id, source_instance_id, external_event_id, actor_ref, event_kind, occurr
 
 addressed 只能是 Adapter 根据 Provider 事实确认的 mention | direct | none | unknown。explicit / inferred 是 Gate 结合主体、来源和 Policy 得出的授权强度，不应由模型或原始消息自行声明。
 
-Trigger 的原始正文和元数据不因后续路由或策略变化而改写。
+Trigger 的原始正文和元数据不因后续路由或策略变化而改写。数据库以 (source_instance_id, external_event_id) 唯一去重；同一身份、同一规范化事实返回 duplicate，身份相同但 fingerprint 不同则拒绝，不能覆盖旧事实。
 
 TriggerDisposition 是 Trigger 的路由投影，不是 Trigger 本体。至少记录：
 
@@ -178,13 +180,15 @@ Thread 的 Subscription、待评估 Trigger、活动 Evaluation 和 Decision 历
 
 ### 5.5 PolicyRevision、Evaluation 与 Decision
 
-**PolicyRevision** 是不可变策略快照，包含全局规则、来源 Admission、允许主体、Bot 规则、显式 / 推断接受模式及预算边界。
+**PolicyRevision** 是不可变策略快照，包含全局规则、来源 Admission、允许主体、Bot 规则、显式 / 推断接受模式及预算边界。policy_version 标识一次发布修订，policy_hash 标识规范化内容；同一内容在切换到其他策略后再次启用会形成新的修订身份。policy_rules 与 source_policies 是不可变的关系投影，不能脱离该快照修改。
+
+**Gate** 是宿主确定性准入检查：验证 SourceInstance 启用状态、Actor 类型、来源 Admission、addressed 事实和 Policy Scope。Gate 决定 admissible 与 explicit / inferred 强度；Assessor 不能提升强度或扩大 Scope，且只能接收 Gate 放行的 Trigger 正文。Gate 拒绝的 Trigger 仅保留身份与拒绝原因用于审计，不得暴露给 Assessor 或进入 TicketInput / Subscription Fan-out。observe 模式保留显式人类请求的正常接受路径，但 inferred 提案只记录 would_accept，不签发 Ticket；只有显式启用 auto 且其他 Gate / Rule 条件通过，才允许 inferred 接受。
 
 **Evaluation** 是一个 Thread 上固定输入批次的一次研判。字段至少包括：
 
 eval_id, thread_id, policy_version, state, trigger_batch_hash, strength, actor_ref, mandate_basis_json, started_at, delivered_at, deadline_at, paused_at, completed_at, aggregate_revision。
 
-Evaluation 开始后，其 Trigger 列表和 Policy Version 不得原地变化。后来到达的 Trigger 进入下一批。completed_at 标记 Evaluation 终结；unavailable 且 completed_at 为空表示仍可有界重排，终结时必须写入 completed_at。一个 Thread 同时最多一个活动 Evaluation。
+Evaluation 开始后，其 Trigger 列表、逐 Trigger Gate 结果和 Policy Version 不得原地变化。Assessor 候选只包含 Gate admissible 的 Trigger 正文；完整 Gate 结果以不含正文的身份 / 结果摘要单独保留。accept 时只有 Gate admissible 的 Trigger 能成为 TicketInput 或创建相关 Thread Subscription，其他 Trigger 标记为 filtered。后来到达的 Trigger 进入下一批。Assessor 回执必须在 deadline_at 前完成；过期回执作废并将原批次重新排队，不产生授权。若 Assessor 没有回执，下一次 begin_evaluation 也会先取消已过期的 running Evaluation，再为同一批 Trigger 创建新尝试，避免永久占住 Thread。completed_at 标记 Evaluation 终结；unavailable 可按有界重试重新排队，但每次重试创建新的 Evaluation 身份，且只重新排队 Gate admissible 的 Trigger，拒绝项保持 filtered。一个 Thread 同时最多一个活动 Evaluation。
 
 **Decision** 是宿主核验后的不可变决策，字段至少包括：
 
@@ -207,7 +211,7 @@ Mandate 是一次 accept 决策签发的不可变授权快照。至少包含：
 
 Mandate 的自然语言摘要不能代替结构化 scope_json。模型不能扩大仓库、Profile、工具、网络、预算或对外发送范围。
 
-Mandate 本体不可变。mandate_events 追加 affected | revalidated | revoked | expired 等事件；当前有效性是派生投影。策略版本改变不自动等于撤销，必须按原 Gate Basis 重新核验。
+Mandate 本体不可变。mandate_events 追加 affected | revalidated | revoked | expired 等事件；当前有效性是派生投影。策略版本改变不自动等于撤销：写入路径按原 Gate Basis 重新核验，并在当前 Gate 与 Policy Scope 仍允许时追加 revalidated；新 Policy Scope 必须完整覆盖原 Mandate Scope，否则撤销授权并阻止后续 fanout 或重新激活订阅。SourceInstance 配置修订变化会使原 Mandate 失效；inferred Mandate 仅在当前策略仍为 auto 时有效，切换至 observe 或 off 时撤销。
 
 ### 5.7 Ticket、Subscription、TicketInput 与 Attention
 
@@ -222,6 +226,8 @@ Ticket state 只有 open | ended。终结 outcome：completed | merged | closed 
 **Subscription** 通过 ticket_subscriptions 表达：
 
 - mode = work | context。work 允许符合原 Mandate 范围的人类后续消息成为 Ticket Input；context 只提供只读上下文，不得恢复 Ticket、派工、写文件或对外发言。
+- Subscription 的 ticket_id、thread_id、source_instance_id、mode 和 owns_thread 是不可变身份；取消后只能按原身份重新激活，不能把 context 原地升级为 work。
+- 自动从 Trigger 关联 Thread 创建 Subscription 时，必须逐个核对 Mandate 的 source_instance_ids 与 thread_ids；超出范围的 related Thread 不得被隐式订阅。
 - owns_thread = boolean，独立于 mode，表示该 Ticket 是否创建或拥有该 Thread，例如它创建的 PR。
 
 Source Closure 是 Thread 的来源事实，不在每个 Subscription 中重复保存；Thread 聚合维护 source_state / source_closed_at / source_outcome。
@@ -377,7 +383,7 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 1. SourceInstance 是 Actor、Thread、Trigger 和 Channel 的身份命名空间。
 2. Trigger 不可变；重复身份同哈希是重复回执，异哈希是冲突。
 3. Thread 一次只有一个活动 Evaluation；Evaluation 的输入和 Policy Version 在开始后冻结。
-4. Model Assessor 没有 Repository 写权限；它只能返回 Proposal。
+4. Model Assessor 没有 Repository 写权限；它只能返回 Proposal，且只能看到 Gate 放行的 Trigger 正文。
 5. Mandate 只能由宿主在已核验的 Decision.accept 后签发，且本体不可变。
 6. Bot、CI、引用文本和转发内容不能自行升级为显式人类授权。
 7. context Subscription 只提供上下文，不恢复 Ticket、不派工、不扩大权限。
@@ -412,9 +418,9 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 | Results drafts | Report / Outbox Candidate | Draft 不等于 Sent |
 | Harness 原生存储 | Evidence Provider | 不复制 Run / Tool Event 历史 |
 
-## 9. Phase 1 当前实现边界
+## 9. Phase 1 / Phase 2 当前实现边界
 
-本文件仍定义完整目标领域模型；当前仅完成独立协调账本的第一批持久化骨架，不代表完整领域模型或状态机已经实现。
+本文件定义完整目标领域模型。Phase 1 的独立持久化基础设施、状态机基础与宿主隔离已按既定范围完成；Phase 2 的 Source Registry、Authorization Engine 和只读 Shadow 已通过显式 CoordinatorHost API 提供。Phase 3 及后续执行、交付和生产接入能力仍未实现。
 
 已落地的持久化基础：
 
@@ -429,23 +435,35 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 - Mission 的 plan_revision 只能由 PlanRevisionRepository 推进；封存后的计划、Job 身份、计划规格字段及依赖关系不可追加或改写；读取时核对 PlanRevision 哈希、Job 规格哈希与 DAG 物化结果。
 - Assignment 的 Run 身份一经绑定不可替换；Outbox 的状态转换拒绝从 unknown 自动回到 sending，发送成功必须同时保存 Provider 身份、幂等键和时间。
 
-仍未实现或尚未验收：
+Phase 2 已实现的来源与授权能力：
+
+- `SourceRegistry` 提供带 API 版本兼容检查的 `SourceKind` 插件契约、SourceInstance 配置修订，以及 GitHub、Feishu、Local 三种内置来源规范化；版本不匹配的插件按 unavailable 处理。`CoordinatorHost.open(source_kinds=...)` 可在启动时注入自定义插件，并核对持久化 SourceInstance 与当前插件清单；缺失或版本不匹配会撤销相关 Mandate、取消在途 Evaluation、过滤待评估 Trigger。运行期插件注册/卸载由注册表锁与宿主操作租约保护，卸载与事件规范化串行执行；插件恢复不会自动恢复旧授权或重放旧事件。Webhook 在调用插件前统一限制请求体、Header 数量及单值/总量大小，拒绝 NUL 与大小写不敏感的重复 Header；Feishu 数字字符串 `event_time` 按 Unix 时间规范化。规范化 Trigger 的 SourceInstance / Event / Actor / Thread / Adapter 身份字段均有长度上限；正文、元数据、Thread 元数据和 Channel 地址也有独立大小边界，并拒绝 NUL、无效空标识与空元数据类型。SourceCursor 只允许启用且插件版本兼容的来源推进，并以 CAS 防止并发覆盖；重复推进返回原持久化时间。`legacy_source_id` 是唯一的一对一映射，绑定后不可重映射，防止 Shadow 对照键发生碰撞。Trigger 去重、Trigger 事实及处置历史的有界查询、Thread / Channel 投影与 SourceCursor 均由独立协调账本持久化；GitHub Thread 生命周期按 Provider 更新时间排序，迟到事件不能覆盖较新状态，同一观察时间冲突时 `closed` 优先。
+- `CoordinatorAuthorizationEngine` 提供不可变 PolicyRevision、Gate、Evaluation、Decision、Mandate、Ticket、Subscription 和 TicketInput；accept 在单一事务中创建 Decision、Mandate、Ticket、订阅、输入和审计记录。accept 的 direction.evidence 与 intent_evidence 必须是同一条 Gate 放行 Trigger 正文或标题中的原文片段，不能以模型自述替代来源事实；Proposal 和 Policy 字段及快照有明确大小上限。Gate 同时检查 Thread 生命周期：GitHub close 事件仅更新状态，已关闭 Thread 上的新消息不会进入评估或 fanout；关闭来源主 Thread 会在同一事务中撤销相关 Mandate。SourceInstance 停用或配置修订变化也会在配置事务中立即撤销该来源的 Mandate；SourceKind 卸载、宿主启动时缺失或 API 版本不匹配同样会撤销 Mandate、取消在途 Evaluation 并过滤待评估 Trigger。每个新 Trigger 在复用既有 Ticket Subscription 前重新执行当前 Gate；只有主 Thread 命中 work Subscription 才能形成 work fanout，相关 Thread 命中保持 context-only，work 与 context 投影分别记录；Policy 变化可触发 Mandate revalidation。
+- 授权宿主 API 提供 PolicyRevision、Evaluation、Decision、Mandate 的有界只读历史查询；Evaluation 详情包含冻结 Policy 与逐 Trigger Gate 快照，Mandate 详情包含追加式状态事件。
+- `ShadowComparisonService` 只读对照 v1 Inbox / Router 与 v2 来源事实和决策；决策比较按每个 Trigger 的 Gate 结果映射，Gate 拒绝项按 ignore 对照，并报告新旧两侧未匹配项及有界样本是否截断，不写任一账本、不执行 Ticket。
+
+后续阶段仍未实现或尚未验收：
 
 - DAG 目前只验证结构、同版本依赖和环；尚未实现 Job ready 解锁所需的 Artifact Delivery applied 与目标树核验。
 - EffectRecoveryService 提供同步与异步只读回查入口；OutboxProviderLookupAdapter 通过宿主注入的 Channel 与正文解析器分发到 GitHubIssueCommentLookupAdapter / FeishuThreadReplyLookupAdapter。两种适配器仅查询 Provider 资源 GET，只有在完整有界扫描中找到唯一、原幂等键标记和发送主体均匹配的远端对象才返回 applied；未找到、重复匹配或分页不完整均保持 indeterminate，不把缺失结果解释为安全重试。GitHub / 飞书列表接口不提供权威的“未执行”回执，因此这两种适配器不会返回 not_applied / permanent_rejection；retry_wait 仍必须由支持原操作状态查询的 Provider 明确证明。
-- 尚未实现 SourceInstance、Trigger、Thread、Policy、Evaluation、Decision、Mandate、Subscription、TicketInput、Attention 等领域 Repository。
-- 尚未实现完整的业务状态转换 Application Service；当前 Repository 不替代状态机守卫、授权核验和业务不变量。
+- Phase 2 的 SourceInstance、Trigger、Thread、Channel、PolicyRevision、Gate、Evaluation、Decision、Mandate、Ticket Subscription / TicketInput 已由 SourceRegistry 和 CoordinatorAuthorizationEngine 持久化；这些能力当前仅通过显式 CoordinatorHost API 使用，尚未接入生产默认路由。Attention 与 Ticket 后续协作流程仍待实现。
+- Mission / Job / Assignment / Artifact / Delivery 的完整业务 Application Service 与执行状态机仍待实现；当前通用聚合转移和 PlanRevisionRepository 只覆盖宿主核验后的基础事务、不可变计划与 DAG 约束，不等同于可运行的 Executor / Worker 流程。
 - GitHub / Feishu 只读回查适配器及模拟 Provider REST 沙箱已实现；尚无 Phase 1 Outbox Sender、生产 Channel 注册表 / 正文 Artifact Resolver 接线或周期性恢复 Worker。Feishu 发送 UUID 与 GitHub / Feishu 正文标记已定义为 Sender 应复用的稳定身份。
-- 尚未把新账本接入现有 Router、MissionStore、Dispatcher、Worker 或 Harness Runtime；不会自动创建生产账本、迁移旧数据库或双写。
-- 尚未启用推断自动授权、远程 Worker 或 OS Sandbox。
+- Phase 2 CoordinatorHost 尚未接入现有 Router、MissionStore、Dispatcher、Worker 或 Harness Runtime 的默认运行链；不会自动创建生产账本、迁移旧数据库、双写或切换 CLI / HTTP 路由。
+- 推断自动接受仅在具体 Source 策略显式启用 `auto` 且 Gate、规则、意图与 Scope 全部通过时可用；它不会因此切换生产默认路由。远程 Worker 与 OS Sandbox 尚未启用。
 
-因此，当前实现已覆盖隔离账本、Ticket / Mission / Job / Assignment / Outbox 持久化、不可变 PlanRevision / DAG 基础约束及 GitHub / Feishu 只读回查的模拟 Provider 证据矩阵，但不代表 Phase 1 验收完成。后续须实现 Outbox Sender、生产 Channel / Artifact 注入、Delivery 约束和完整项目回归，再评估运行路径集成。
+因此，Phase 1 按其持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 已提供显式来源接入、来源事实核验、授权闭环、审计读取和只读 Shadow 对照。当前仍保持 v1 生产默认路由，未交付 Phase 3 Executor / Worker、生产 Channel 外发、Artifact Delivery 完整生命周期或新架构默认入口。
 
 ## 10. 源码依据
 
 ### Harness
 
-- harness/app/superagent_inbox.py：当前 Source、Task、Subscription、Trigger、Route、重复事件和正文冲突校验。
+- harness/app/superagent_coordinator_store.py：v2 独立协调账本、Schema 迁移、Revision、AuditEvent、Durable Effect 与 UOW。
+- harness/app/superagent_coordinator_host.py：v2 宿主组合、活动操作租约、来源 / 授权 / Shadow API 与 v1 隔离。
+- harness/app/superagent_source_registry.py：SourceKind、SourceInstance、GitHub / Feishu / Local 规范化、Trigger Intake、Thread / Channel 和 Cursor。
+- harness/app/superagent_authorization.py：PolicyRevision、Gate、Evaluation、Decision、Mandate、Ticket、Subscription、TicketInput 与审计查询。
+- harness/app/superagent_shadow.py：v1 Inbox / Router 与 v2 来源事实及决策的只读对照。
+- harness/app/superagent_inbox.py：当前 v1 Source、Task、Subscription、Trigger、Route、重复事件和正文冲突校验。
 - harness/app/superagent_dispatch.py：稳定 submission key、原 Run 回查及 submitting / accepted / unknown。
 - harness/app/superagent_router.py：批次、输入、研判提交及恢复。
 - harness/app/superagent_workers.py：Worker Profile、Workspace、Session 资源绑定。

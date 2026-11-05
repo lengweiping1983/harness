@@ -26,9 +26,9 @@ class CoordinatorStoreTests(unittest.TestCase):
         self.assertTrue(self.path.exists())
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute("PRAGMA application_id").fetchone()[0], _APPLICATION_ID)
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 8)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 11)
             self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 8)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 11)
             self.assertEqual(db.execute("SELECT instance_id FROM instances").fetchone()[0], "instance-a")
 
     def test_reopen_is_idempotent_and_identity_is_bound(self):
@@ -103,15 +103,15 @@ class CoordinatorStoreTests(unittest.TestCase):
             db.commit()
         return instance_id, identity, effect_id
 
-    def test_every_prior_schema_version_upgrades_to_v8_without_losing_effects(self):
-        for version in range(1, 8):
+    def test_every_prior_schema_version_upgrades_to_v11_without_losing_effects(self):
+        for version in range(1, 11):
             with self.subTest(from_version=version):
                 path = Path(self.temp.name) / f"schema-v{version}.sqlite3"
                 instance_id, identity, effect_id = self._create_legacy_schema_with_effect(path, version)
                 upgraded = CoordinatorStore(path, instance_id=instance_id, identity=identity)
                 with closing(sqlite3.connect(path)) as db:
-                    self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 8)
-                    self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 8)
+                    self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 11)
+                    self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 11)
                     columns = {row[1] for row in db.execute("PRAGMA table_info(effects)")}
                     self.assertTrue({"correlation_id", "last_event_id"} <= columns)
                     legacy = db.execute(
@@ -224,10 +224,38 @@ class CoordinatorStoreTests(unittest.TestCase):
             self.assertNotIn("assignments_one_active_per_job", indexes)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM assignments").fetchone()[0], 2)
 
+    def test_migration11_rejects_duplicate_legacy_source_mapping_without_data_loss(self):
+        path = Path(self.temp.name) / "schema-v10-duplicate-legacy-mapping.sqlite3"
+        instance_id, identity, _ = self._create_legacy_schema_with_effect(path, 10)
+        with closing(sqlite3.connect(path)) as db:
+            for source_id, namespace in (("source-one", "one"), ("source-two", "two")):
+                identity_json = '{"namespace":"' + namespace + '"}'
+                identity_hash = hashlib.sha256(identity_json.encode("utf-8")).hexdigest()
+                db.execute(
+                    """INSERT INTO source_instances(
+                        source_instance_id,kind,kind_api_version,enabled,config_json,config_revision,
+                        identity_json,identity_hash,legacy_source_id,health_json,created_at,updated_at
+                    ) VALUES(?, 'local', 1, 1, '{}', 1, ?, ?, 'legacy-duplicate', '{}', ?, ?)""",
+                    (source_id, identity_json, identity_hash,
+                     "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z"),
+                )
+            db.commit()
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            CoordinatorStore(path, instance_id=instance_id, identity=identity)
+        with closing(sqlite3.connect(path)) as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 10)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 10)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM source_instances").fetchone()[0], 2)
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM source_instances WHERE legacy_source_id='legacy-duplicate'").fetchone()[0],
+                2,
+            )
+
     def test_future_schema_version_is_rejected(self):
         with closing(sqlite3.connect(self.path)) as db:
-            db.execute("INSERT INTO schema_migrations VALUES(9,'future','now')")
-            db.execute("PRAGMA user_version=9")
+            db.execute("INSERT INTO schema_migrations VALUES(12,'future','now')")
+            db.execute("PRAGMA user_version=12")
             db.commit()
         with self.assertRaises(HarnessError):
             CoordinatorStore(self.path, instance_id="instance-a", identity={"profile": "local"})
@@ -641,10 +669,13 @@ class CoordinatorStoreTests(unittest.TestCase):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )}
             self.assertTrue({
-                "tickets", "missions", "mission_plans", "jobs", "job_dependencies", "assignments"
+                "tickets", "missions", "mission_plans", "jobs", "job_dependencies", "assignments",
+                "source_instances", "source_cursors", "threads", "triggers", "trigger_threads", "channels",
+                "trigger_dispositions", "policy_versions", "policy_rules", "source_policies",
+                "evaluations", "decisions", "mandates", "ticket_subscriptions", "ticket_inputs",
             } <= names)
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 8)
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 8)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 11)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 11)
 
     def test_unit_of_work_commits_aggregate_audit_and_effect_together(self):
         with self.store.unit_of_work(actor={"kind": "human"}, correlation_id="corr-1") as uow:

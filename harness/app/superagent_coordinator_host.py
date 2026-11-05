@@ -15,6 +15,9 @@ from .superagent_coordinator_service import CoordinatorApplicationService
 from .superagent_coordinator_store import CoordinatorStore
 from .superagent_effect_recovery import EffectLookupAdapter, EffectRecoveryService
 from .superagent_outbox import OutboxEffectService
+from .superagent_authorization import CoordinatorAuthorizationEngine
+from .superagent_shadow import ShadowComparisonService
+from .superagent_source_registry import LocalIdentityVerifier, SecretResolver, SourceKind, SourceRegistry
 
 
 _LEGACY_STATE_FILES = (
@@ -184,31 +187,230 @@ class _HostEffectRecoveryService:
             return await self.__service.recover_async(limit=limit)
 
 
-class CoordinatorHost:
-    """Phase 1 Runtime Composition Root；只管理新账本和宿主证据入口。
+class _HostSourceRegistry:
+    """每次来源注册、配置或验收都持有宿主活动租约。"""
 
-    不创建 Harness、Session、Worker、Router、Source 或 Channel；
-    也不注册 CLI / HTTP 路由。真实 Executor / Provider 核验器由后续阶段注入。
+    __slots__ = ("__host", "__service")
+
+    def __init__(self, host, service):
+        self.__host = host
+        self.__service = service
+
+    def kinds(self):
+        with self.__host._operation():
+            return self.__service.kinds()
+
+    def register(self, kind: SourceKind):
+        with self.__host._operation():
+            unregister = self.__service.register(kind)
+
+        def guarded_unregister():
+            with self.__host._operation():
+                return unregister()
+
+        return guarded_unregister
+
+    def create_instance(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.create_instance(*args, **kwargs)
+
+    def update_instance(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.update_instance(*args, **kwargs)
+
+    def get_instance(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.get_instance(*args, **kwargs)
+
+    def list_instances(self):
+        with self.__host._operation():
+            return self.__service.list_instances()
+
+    def get_trigger(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.get_trigger(*args, **kwargs)
+
+    def list_triggers(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.list_triggers(*args, **kwargs)
+
+    def get_thread(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.get_thread(*args, **kwargs)
+
+    def list_threads(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.list_threads(*args, **kwargs)
+
+    def get_channel(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.get_channel(*args, **kwargs)
+
+    def list_channels(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.list_channels(*args, **kwargs)
+
+    def get_cursor(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.get_cursor(*args, **kwargs)
+
+    def advance_cursor(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.advance_cursor(*args, **kwargs)
+
+    def receive(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.receive(*args, **kwargs)
+
+    def receive_local(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.receive_local(*args, **kwargs)
+
+
+class _HostAuthorizationEngine:
+    """授权写操作和评估读取都不能越过宿主关闭边界。"""
+
+    __slots__ = ("__host", "__service")
+
+    def __init__(self, host, service):
+        self.__host = host
+        self.__service = service
+
+    def publish_policy(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.publish_policy(*args, **kwargs)
+
+    def current_policy(self):
+        with self.__host._operation():
+            return self.__service.current_policy()
+
+    def begin_evaluation(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.begin_evaluation(*args, **kwargs)
+
+    def complete_evaluation(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.complete_evaluation(*args, **kwargs)
+
+    def assess_next(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.assess_next(*args, **kwargs)
+
+    def requeue_unavailable(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.requeue_unavailable(*args, **kwargs)
+
+    def subscribe(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.subscribe(*args, **kwargs)
+
+    def unsubscribe(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.unsubscribe(*args, **kwargs)
+
+    def handback(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.handback(*args, **kwargs)
+
+    def revalidate_mandate(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.revalidate_mandate(*args, **kwargs)
+
+    def policy_revision(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.policy_revision(*args, **kwargs)
+
+    def list_policy_revisions(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.list_policy_revisions(*args, **kwargs)
+
+    def evaluation(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.evaluation(*args, **kwargs)
+
+    def list_evaluations(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.list_evaluations(*args, **kwargs)
+
+    def decision(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.decision(*args, **kwargs)
+
+    def list_decisions(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.list_decisions(*args, **kwargs)
+
+    def mandate(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.mandate(*args, **kwargs)
+
+    def list_mandates(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.list_mandates(*args, **kwargs)
+
+    def ticket(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.ticket(*args, **kwargs)
+
+
+class _HostShadowComparison:
+    """Shadow 只读扫描期间保留宿主实例租约。"""
+
+    __slots__ = ("__host", "__service")
+
+    def __init__(self, host, service):
+        self.__host = host
+        self.__service = service
+
+    def compare(self, **kwargs):
+        with self.__host._operation():
+            return self.__service.compare(**kwargs)
+
+
+class CoordinatorHost:
+    """下一代 Superagent 的宿主组合边界。
+
+    组合 Source Registry、Authorization Engine 和只读 Shadow 审计；
+    不创建旧版 Harness、Router、Worker，不注册 CLI / HTTP 默认路由，也不执行新 Ticket。
     """
 
     def __init__(
         self, state_dir: Path, store: CoordinatorStore, stack: ExitStack,
-        *, evidence_verifier: HostEvidenceVerifier | None = None,
+        *, legacy_state_dir: Path, evidence_verifier: HostEvidenceVerifier | None = None,
+        secret_resolver: SecretResolver | None = None,
+        local_identity_verifier: LocalIdentityVerifier | None = None,
+        source_kinds: tuple[SourceKind, ...] = (),
     ):
         self.state_dir = state_dir
+        self._legacy_state_dir = legacy_state_dir
         self._store = store
         self._stack = stack
         self._evidence_verifier = evidence_verifier
         self._lifecycle_lock = Lock()
         self._active_operations = 0
-        self._outbox = _HostOutboxService(self, OutboxEffectService(store))
         self._closed = False
+        self._outbox = _HostOutboxService(self, OutboxEffectService(store))
+        self._authorization_service = CoordinatorAuthorizationEngine(store)
+        self._source_service = SourceRegistry(
+            store, ingest=self._authorization_service.receive_normalized,
+            on_config_changed=self._authorization_service.revalidate_source_mandates_in_transaction,
+            on_kind_changed=self._authorization_service.revalidate_source_kind_mandates_in_transaction,
+            initial_kinds=source_kinds,
+            secret_resolver=secret_resolver, local_identity_verifier=local_identity_verifier,
+        )
+        self._shadow_service = ShadowComparisonService(store, legacy_state_dir)
+        self._sources = _HostSourceRegistry(self, self._source_service)
+        self._authorization = _HostAuthorizationEngine(self, self._authorization_service)
+        self._shadow = _HostShadowComparison(self, self._shadow_service)
 
     @classmethod
     def open(
         cls, state_dir: str | Path, *, instance_id: str, identity: object,
         legacy_state_dir: str | Path,
         evidence_verifier: HostEvidenceVerifier | None = None,
+        secret_resolver: SecretResolver | None = None,
+        local_identity_verifier: LocalIdentityVerifier | None = None,
+        source_kinds: tuple[SourceKind, ...] = (),
     ) -> "CoordinatorHost":
         requested = Path(state_dir).expanduser()
         is_junction = getattr(requested, "is_junction", None)
@@ -239,7 +441,11 @@ class CoordinatorHost:
             store = CoordinatorStore(
                 root / "superagent.sqlite3", instance_id=instance_id, identity=identity,
             )
-            return cls(root, store, stack, evidence_verifier=evidence_verifier)
+            return cls(
+                root, store, stack, legacy_state_dir=legacy, evidence_verifier=evidence_verifier,
+                secret_resolver=secret_resolver, local_identity_verifier=local_identity_verifier,
+                source_kinds=source_kinds,
+            )
         except BaseException:
             stack.close()
             raise
@@ -252,6 +458,21 @@ class CoordinatorHost:
     def outbox(self) -> _HostOutboxService:
         self._ensure_open()
         return self._outbox
+
+    @property
+    def sources(self) -> _HostSourceRegistry:
+        self._ensure_open()
+        return self._sources
+
+    @property
+    def authorization(self) -> _HostAuthorizationEngine:
+        self._ensure_open()
+        return self._authorization
+
+    @property
+    def shadow(self) -> _HostShadowComparison:
+        self._ensure_open()
+        return self._shadow
 
     @contextmanager
     def unit_of_work(self, *, actor: object, correlation_id: str | None = None):

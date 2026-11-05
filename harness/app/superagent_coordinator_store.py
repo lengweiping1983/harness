@@ -437,10 +437,368 @@ BEGIN
 END;
 """
 
+
+_MIGRATION_9 = """
+CREATE TABLE source_instances (
+ source_instance_id TEXT PRIMARY KEY CHECK(length(trim(source_instance_id))>0),
+ kind TEXT NOT NULL CHECK(length(trim(kind))>0),
+ kind_api_version INTEGER NOT NULL CHECK(kind_api_version>=1),
+ enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+ config_json TEXT NOT NULL CHECK(json_valid(config_json)),
+ config_revision INTEGER NOT NULL CHECK(config_revision>=1),
+ identity_json TEXT NOT NULL CHECK(json_valid(identity_json)),
+ identity_hash TEXT NOT NULL CHECK(length(identity_hash)=64),
+ legacy_source_id TEXT CHECK(legacy_source_id IS NULL OR length(trim(legacy_source_id))>0),
+ health_json TEXT NOT NULL CHECK(json_valid(health_json)),
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ UNIQUE(kind,identity_hash)
+);
+CREATE TRIGGER source_instances_identity_immutable
+BEFORE UPDATE OF source_instance_id,kind,kind_api_version,identity_json,identity_hash ON source_instances BEGIN
+ SELECT RAISE(ABORT,'source instance identity is immutable');
+END;
+CREATE TRIGGER source_instances_config_revision_guard
+BEFORE UPDATE OF config_json,enabled,config_revision ON source_instances
+WHEN (NEW.config_json IS NOT OLD.config_json OR NEW.enabled IS NOT OLD.enabled)
+ AND NEW.config_revision<>OLD.config_revision+1 BEGIN
+ SELECT RAISE(ABORT,'source instance configuration requires the next revision');
+END;
+CREATE TABLE source_cursors (
+ source_instance_id TEXT NOT NULL REFERENCES source_instances(source_instance_id) ON DELETE RESTRICT,
+ stream_key TEXT NOT NULL CHECK(length(trim(stream_key))>0),
+ cursor_json TEXT NOT NULL CHECK(json_valid(cursor_json)),
+ cursor_revision INTEGER NOT NULL CHECK(cursor_revision>=1),
+ updated_at TEXT NOT NULL,
+ PRIMARY KEY(source_instance_id,stream_key)
+);
+CREATE TRIGGER source_cursors_revision_guard
+BEFORE UPDATE OF cursor_json,cursor_revision ON source_cursors
+WHEN NEW.cursor_revision<>OLD.cursor_revision+1 BEGIN
+ SELECT RAISE(ABORT,'source cursor update requires the next revision');
+END;
+CREATE TABLE threads (
+ thread_id TEXT PRIMARY KEY CHECK(length(trim(thread_id))>0),
+ source_instance_id TEXT NOT NULL REFERENCES source_instances(source_instance_id) ON DELETE RESTRICT,
+ external_thread_id TEXT NOT NULL CHECK(length(trim(external_thread_id))>0),
+ metadata_json TEXT NOT NULL CHECK(json_valid(metadata_json)),
+ source_state TEXT NOT NULL CHECK(source_state IN ('open','closed','unknown','unsupported')),
+ source_outcome TEXT CHECK(source_outcome IN ('merged','closed')),
+ provider_revision TEXT,
+ source_observed_at TEXT,
+ last_event_at TEXT,
+ aggregate_revision INTEGER NOT NULL DEFAULT 1 CHECK(aggregate_revision>=1),
+ lifecycle_revision INTEGER NOT NULL DEFAULT 1 CHECK(lifecycle_revision>=1),
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ UNIQUE(source_instance_id,external_thread_id),
+ UNIQUE(thread_id,source_instance_id),
+ CHECK((source_state='closed' AND source_outcome IS NOT NULL)
+    OR (source_state<>'closed' AND source_outcome IS NULL))
+);
+CREATE TRIGGER threads_identity_immutable
+BEFORE UPDATE OF thread_id,source_instance_id,external_thread_id,created_at ON threads BEGIN
+ SELECT RAISE(ABORT,'thread identity is immutable');
+END;
+CREATE TABLE triggers (
+ trigger_id TEXT PRIMARY KEY CHECK(length(trim(trigger_id))>0),
+ source_instance_id TEXT NOT NULL REFERENCES source_instances(source_instance_id) ON DELETE RESTRICT,
+ external_event_id TEXT NOT NULL CHECK(length(trim(external_event_id))>0),
+ event_kind TEXT NOT NULL CHECK(length(trim(event_kind))>0),
+ actor_json TEXT NOT NULL CHECK(json_valid(actor_json)),
+ occurred_at TEXT NOT NULL,
+ received_at TEXT NOT NULL,
+ addressed TEXT NOT NULL CHECK(addressed IN ('mention','direct','none','unknown')),
+ primary_thread_id TEXT NOT NULL,
+ body_json TEXT NOT NULL CHECK(json_valid(body_json)),
+ body_ref TEXT NOT NULL CHECK(length(trim(body_ref))>0),
+ body_hash TEXT NOT NULL CHECK(length(body_hash)=64),
+ metadata_json TEXT NOT NULL CHECK(json_valid(metadata_json)),
+ meta_ref TEXT NOT NULL CHECK(length(trim(meta_ref))>0),
+ meta_hash TEXT NOT NULL CHECK(length(meta_hash)=64),
+ source_revision INTEGER NOT NULL CHECK(source_revision>=1),
+ adapter_version TEXT NOT NULL CHECK(length(trim(adapter_version))>0),
+ verification_state TEXT NOT NULL CHECK(verification_state IN ('verified','local_attested')),
+ fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64),
+ UNIQUE(source_instance_id,external_event_id),
+ UNIQUE(trigger_id,source_instance_id),
+ FOREIGN KEY(primary_thread_id,source_instance_id)
+   REFERENCES threads(thread_id,source_instance_id) ON DELETE RESTRICT
+);
+CREATE INDEX triggers_source_received ON triggers(source_instance_id,received_at,trigger_id);
+CREATE INDEX triggers_primary_thread ON triggers(primary_thread_id,occurred_at,trigger_id);
+CREATE TRIGGER triggers_immutable_update
+BEFORE UPDATE ON triggers BEGIN
+ SELECT RAISE(ABORT,'source triggers are immutable');
+END;
+CREATE TRIGGER triggers_immutable_delete
+BEFORE DELETE ON triggers BEGIN
+ SELECT RAISE(ABORT,'source triggers are immutable');
+END;
+CREATE TABLE trigger_threads (
+ trigger_id TEXT NOT NULL,
+ source_instance_id TEXT NOT NULL,
+ thread_id TEXT NOT NULL,
+ relation TEXT NOT NULL CHECK(relation IN ('primary','related')),
+ PRIMARY KEY(trigger_id,thread_id),
+ FOREIGN KEY(trigger_id,source_instance_id)
+   REFERENCES triggers(trigger_id,source_instance_id) ON DELETE RESTRICT,
+ FOREIGN KEY(thread_id,source_instance_id)
+   REFERENCES threads(thread_id,source_instance_id) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX trigger_threads_one_primary ON trigger_threads(trigger_id) WHERE relation='primary';
+CREATE INDEX trigger_threads_thread ON trigger_threads(thread_id,trigger_id);
+CREATE TABLE channels (
+ channel_id TEXT PRIMARY KEY CHECK(length(trim(channel_id))>0),
+ source_instance_id TEXT NOT NULL,
+ thread_id TEXT NOT NULL,
+ address_json TEXT NOT NULL CHECK(json_valid(address_json)),
+ address_hash TEXT NOT NULL CHECK(length(address_hash)=64),
+ capabilities_json TEXT NOT NULL CHECK(json_valid(capabilities_json)),
+ created_at TEXT NOT NULL,
+ UNIQUE(source_instance_id,thread_id,address_hash),
+ FOREIGN KEY(thread_id,source_instance_id)
+   REFERENCES threads(thread_id,source_instance_id) ON DELETE RESTRICT
+);
+CREATE TRIGGER channels_identity_immutable_update
+BEFORE UPDATE ON channels BEGIN
+ SELECT RAISE(ABORT,'channel addresses are immutable');
+END;
+CREATE TRIGGER channels_identity_immutable_delete
+BEFORE DELETE ON channels BEGIN
+ SELECT RAISE(ABORT,'channel addresses are immutable');
+END;
+CREATE TABLE trigger_dispositions (
+ trigger_id TEXT PRIMARY KEY REFERENCES triggers(trigger_id) ON DELETE RESTRICT,
+ state TEXT NOT NULL CHECK(state IN ('evaluation.queued','evaluation.started','decision.recorded','ticket.fanout','ticket.context_only','filtered')),
+ evaluation_id TEXT,
+ decision_id TEXT,
+ fanout_json TEXT NOT NULL CHECK(json_valid(fanout_json)),
+ context_json TEXT NOT NULL CHECK(json_valid(context_json)),
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE trigger_disposition_events (
+ event_id TEXT PRIMARY KEY CHECK(length(trim(event_id))>0),
+ trigger_id TEXT NOT NULL REFERENCES triggers(trigger_id) ON DELETE RESTRICT,
+ event_type TEXT NOT NULL CHECK(length(trim(event_type))>0),
+ payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+ occurred_at TEXT NOT NULL,
+ audit_event_id TEXT NOT NULL REFERENCES audit_events(event_id) ON DELETE RESTRICT
+);
+CREATE INDEX trigger_disposition_events_trigger ON trigger_disposition_events(trigger_id,occurred_at,event_id);
+CREATE TRIGGER trigger_disposition_events_immutable_update
+BEFORE UPDATE ON trigger_disposition_events BEGIN
+ SELECT RAISE(ABORT,'trigger disposition events are immutable');
+END;
+CREATE TRIGGER trigger_disposition_events_immutable_delete
+BEFORE DELETE ON trigger_disposition_events BEGIN
+ SELECT RAISE(ABORT,'trigger disposition events are immutable');
+END;
+CREATE TABLE policy_versions (
+ policy_version TEXT PRIMARY KEY CHECK(length(trim(policy_version))>0),
+ revision INTEGER NOT NULL UNIQUE CHECK(revision>=1),
+ mode TEXT NOT NULL CHECK(mode IN ('off','observe','auto')),
+ policy_json TEXT NOT NULL CHECK(json_valid(policy_json)),
+ policy_hash TEXT NOT NULL CHECK(length(policy_hash)=64),
+ created_at TEXT NOT NULL,
+ created_by_json TEXT NOT NULL CHECK(json_valid(created_by_json))
+);
+CREATE TRIGGER policy_versions_immutable_update
+BEFORE UPDATE ON policy_versions BEGIN
+ SELECT RAISE(ABORT,'policy revisions are immutable');
+END;
+CREATE TRIGGER policy_versions_immutable_delete
+BEFORE DELETE ON policy_versions BEGIN
+ SELECT RAISE(ABORT,'policy revisions are immutable');
+END;
+CREATE TABLE policy_rules (
+ policy_version TEXT NOT NULL REFERENCES policy_versions(policy_version) ON DELETE RESTRICT,
+ rule_id TEXT NOT NULL CHECK(length(trim(rule_id))>0),
+ rule_json TEXT NOT NULL CHECK(json_valid(rule_json)),
+ PRIMARY KEY(policy_version,rule_id)
+);
+CREATE TABLE source_policies (
+ policy_version TEXT NOT NULL REFERENCES policy_versions(policy_version) ON DELETE RESTRICT,
+ source_instance_id TEXT NOT NULL REFERENCES source_instances(source_instance_id) ON DELETE RESTRICT,
+ policy_json TEXT NOT NULL CHECK(json_valid(policy_json)),
+ PRIMARY KEY(policy_version,source_instance_id)
+);
+CREATE TRIGGER policy_rules_immutable_update
+BEFORE UPDATE ON policy_rules BEGIN
+ SELECT RAISE(ABORT,'policy rule snapshots are immutable');
+END;
+CREATE TRIGGER policy_rules_immutable_delete
+BEFORE DELETE ON policy_rules BEGIN
+ SELECT RAISE(ABORT,'policy rule snapshots are immutable');
+END;
+CREATE TRIGGER source_policies_immutable_update
+BEFORE UPDATE ON source_policies BEGIN
+ SELECT RAISE(ABORT,'source policy snapshots are immutable');
+END;
+CREATE TRIGGER source_policies_immutable_delete
+BEFORE DELETE ON source_policies BEGIN
+ SELECT RAISE(ABORT,'source policy snapshots are immutable');
+END;
+CREATE TABLE policy_current (
+ singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+ policy_version TEXT NOT NULL REFERENCES policy_versions(policy_version) ON DELETE RESTRICT,
+ revision INTEGER NOT NULL CHECK(revision>=1)
+);
+CREATE TABLE evaluations (
+ evaluation_id TEXT PRIMARY KEY CHECK(length(trim(evaluation_id))>0),
+ thread_id TEXT NOT NULL REFERENCES threads(thread_id) ON DELETE RESTRICT,
+ policy_version TEXT NOT NULL REFERENCES policy_versions(policy_version) ON DELETE RESTRICT,
+ state TEXT NOT NULL CHECK(state IN ('running','decided','unavailable','cancelled')),
+ trigger_batch_hash TEXT NOT NULL CHECK(length(trigger_batch_hash)=64),
+ primary_trigger_id TEXT NOT NULL REFERENCES triggers(trigger_id) ON DELETE RESTRICT,
+ strength TEXT NOT NULL CHECK(strength IN ('explicit','inferred')),
+ actor_json TEXT NOT NULL CHECK(json_valid(actor_json)),
+ mandate_basis_json TEXT NOT NULL CHECK(json_valid(mandate_basis_json)),
+ thread_lifecycle_revision INTEGER NOT NULL CHECK(thread_lifecycle_revision>=1),
+ started_at TEXT NOT NULL,
+ deadline_at TEXT NOT NULL,
+ completed_at TEXT,
+ retry_count INTEGER NOT NULL DEFAULT 0 CHECK(retry_count>=0),
+ outcome_json TEXT CHECK(outcome_json IS NULL OR json_valid(outcome_json)),
+ FOREIGN KEY(thread_id) REFERENCES threads(thread_id) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX evaluations_one_running_per_thread
+ON evaluations(thread_id) WHERE state='running';
+CREATE TABLE evaluation_triggers (
+ evaluation_id TEXT NOT NULL REFERENCES evaluations(evaluation_id) ON DELETE RESTRICT,
+ ordinal INTEGER NOT NULL CHECK(ordinal>=0),
+ trigger_id TEXT NOT NULL REFERENCES triggers(trigger_id) ON DELETE RESTRICT,
+ gate_json TEXT NOT NULL CHECK(json_valid(gate_json)),
+ PRIMARY KEY(evaluation_id,trigger_id),
+ UNIQUE(evaluation_id,ordinal)
+);
+CREATE TRIGGER evaluation_triggers_immutable_update
+BEFORE UPDATE ON evaluation_triggers BEGIN
+ SELECT RAISE(ABORT,'evaluation trigger snapshots are immutable');
+END;
+CREATE TRIGGER evaluation_triggers_immutable_delete
+BEFORE DELETE ON evaluation_triggers BEGIN
+ SELECT RAISE(ABORT,'evaluation trigger snapshots are immutable');
+END;
+CREATE TABLE decisions (
+ decision_id TEXT PRIMARY KEY CHECK(length(trim(decision_id))>0),
+ evaluation_id TEXT NOT NULL UNIQUE REFERENCES evaluations(evaluation_id) ON DELETE RESTRICT,
+ thread_id TEXT NOT NULL REFERENCES threads(thread_id) ON DELETE RESTRICT,
+ policy_version TEXT NOT NULL REFERENCES policy_versions(policy_version) ON DELETE RESTRICT,
+ kind TEXT NOT NULL CHECK(kind IN ('accept','reopen','stop','ignore','unavailable')),
+ reason_json TEXT NOT NULL CHECK(json_valid(reason_json)),
+ audit_json TEXT NOT NULL CHECK(json_valid(audit_json)),
+ ticket_id TEXT REFERENCES tickets(ticket_id) ON DELETE RESTRICT,
+ created_at TEXT NOT NULL,
+ CHECK((kind IN ('accept','reopen','stop') AND ticket_id IS NOT NULL)
+    OR (kind IN ('ignore','unavailable') AND ticket_id IS NULL))
+);
+CREATE TRIGGER decisions_immutable_update
+BEFORE UPDATE ON decisions BEGIN
+ SELECT RAISE(ABORT,'decisions are immutable');
+END;
+CREATE TRIGGER decisions_immutable_delete
+BEFORE DELETE ON decisions BEGIN
+ SELECT RAISE(ABORT,'decisions are immutable');
+END;
+CREATE TABLE mandates (
+ mandate_id TEXT PRIMARY KEY CHECK(length(trim(mandate_id))>0),
+ decision_id TEXT NOT NULL UNIQUE REFERENCES decisions(decision_id) ON DELETE RESTRICT,
+ ticket_id TEXT NOT NULL UNIQUE REFERENCES tickets(ticket_id) ON DELETE RESTRICT,
+ strength TEXT NOT NULL CHECK(strength IN ('explicit','inferred')),
+ policy_version TEXT NOT NULL REFERENCES policy_versions(policy_version) ON DELETE RESTRICT,
+ trigger_id TEXT NOT NULL REFERENCES triggers(trigger_id) ON DELETE RESTRICT,
+ source_instance_id TEXT NOT NULL REFERENCES source_instances(source_instance_id) ON DELETE RESTRICT,
+ actor_json TEXT NOT NULL CHECK(json_valid(actor_json)),
+ basis_json TEXT NOT NULL CHECK(json_valid(basis_json)),
+ scope_json TEXT NOT NULL CHECK(json_valid(scope_json)),
+ granted_at TEXT NOT NULL,
+ expires_at TEXT
+);
+CREATE TRIGGER mandates_immutable_update
+BEFORE UPDATE ON mandates BEGIN
+ SELECT RAISE(ABORT,'mandates are immutable');
+END;
+CREATE TRIGGER mandates_immutable_delete
+BEFORE DELETE ON mandates BEGIN
+ SELECT RAISE(ABORT,'mandates are immutable');
+END;
+CREATE TABLE mandate_events (
+ event_id TEXT PRIMARY KEY CHECK(length(trim(event_id))>0),
+ mandate_id TEXT NOT NULL REFERENCES mandates(mandate_id) ON DELETE RESTRICT,
+ event_type TEXT NOT NULL CHECK(event_type IN ('affected','revalidated','revoked','expired')),
+ payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+ occurred_at TEXT NOT NULL,
+ actor_json TEXT NOT NULL CHECK(json_valid(actor_json))
+);
+CREATE INDEX mandate_events_mandate ON mandate_events(mandate_id,occurred_at,event_id);
+CREATE TRIGGER mandate_events_immutable_update
+BEFORE UPDATE ON mandate_events BEGIN
+ SELECT RAISE(ABORT,'mandate events are immutable');
+END;
+CREATE TRIGGER mandate_events_immutable_delete
+BEFORE DELETE ON mandate_events BEGIN
+ SELECT RAISE(ABORT,'mandate events are immutable');
+END;
+CREATE TABLE ticket_subscriptions (
+ ticket_id TEXT NOT NULL REFERENCES tickets(ticket_id) ON DELETE RESTRICT,
+ thread_id TEXT NOT NULL REFERENCES threads(thread_id) ON DELETE RESTRICT,
+ source_instance_id TEXT NOT NULL REFERENCES source_instances(source_instance_id) ON DELETE RESTRICT,
+ mode TEXT NOT NULL CHECK(mode IN ('work','context')),
+ owns_thread INTEGER NOT NULL CHECK(owns_thread IN (0,1)),
+ state TEXT NOT NULL CHECK(state IN ('active','dropped')),
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ PRIMARY KEY(ticket_id,thread_id),
+ FOREIGN KEY(thread_id,source_instance_id)
+   REFERENCES threads(thread_id,source_instance_id) ON DELETE RESTRICT
+);
+CREATE TRIGGER ticket_subscriptions_identity_immutable
+BEFORE UPDATE OF ticket_id,thread_id,source_instance_id,mode,owns_thread,created_at ON ticket_subscriptions BEGIN
+ SELECT RAISE(ABORT,'ticket subscription identity is immutable');
+END;
+CREATE TABLE ticket_inputs (
+ input_id TEXT PRIMARY KEY CHECK(length(trim(input_id))>0),
+ ticket_id TEXT NOT NULL REFERENCES tickets(ticket_id) ON DELETE RESTRICT,
+ trigger_id TEXT NOT NULL REFERENCES triggers(trigger_id) ON DELETE RESTRICT,
+ kind TEXT NOT NULL CHECK(kind IN ('trigger')),
+ context_only INTEGER NOT NULL CHECK(context_only IN (0,1)),
+ state TEXT NOT NULL CHECK(state IN ('waiting','delivered','read','handed_back')),
+ created_at TEXT NOT NULL,
+ handback_reason TEXT,
+ delivered_at TEXT,
+ read_at TEXT,
+ UNIQUE(ticket_id,trigger_id),
+ CHECK((state='handed_back' AND handback_reason IS NOT NULL)
+    OR (state<>'handed_back' AND handback_reason IS NULL))
+);
+CREATE INDEX ticket_inputs_trigger ON ticket_inputs(trigger_id,state,ticket_id);
+CREATE TRIGGER ticket_inputs_identity_immutable
+BEFORE UPDATE OF input_id,ticket_id,trigger_id,kind,context_only,created_at ON ticket_inputs BEGIN
+ SELECT RAISE(ABORT,'ticket input identity is immutable');
+END;
+"""
+
+_MIGRATION_10 = """
+CREATE TRIGGER source_instances_legacy_mapping_immutable
+BEFORE UPDATE OF legacy_source_id ON source_instances
+WHEN OLD.legacy_source_id IS NOT NULL AND NEW.legacy_source_id IS NOT OLD.legacy_source_id
+BEGIN
+ SELECT RAISE(ABORT,'legacy source mapping is immutable once bound');
+END;
+"""
+
+_MIGRATION_11 = """
+CREATE UNIQUE INDEX source_instances_legacy_source_unique
+ON source_instances(legacy_source_id)
+WHERE legacy_source_id IS NOT NULL;
+"""
+
 MIGRATIONS = (
     (1, _MIGRATION_1), (2, _MIGRATION_2), (3, _MIGRATION_3),
     (4, _MIGRATION_4), (5, _MIGRATION_5), (6, _MIGRATION_6),
-    (7, _MIGRATION_7), (8, _MIGRATION_8),
+    (7, _MIGRATION_7), (8, _MIGRATION_8), (9, _MIGRATION_9),
+    (10, _MIGRATION_10), (11, _MIGRATION_11),
 )
 
 class CoordinatorStore:
@@ -461,7 +819,8 @@ class CoordinatorStore:
             if row is None:
                 populated = any(db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
                                 for table in ("aggregate_revisions", "audit_events", "effects",
-                                              "tickets", "missions", "jobs", "assignments", "outbox_messages"))
+                                              "tickets", "missions", "jobs", "assignments", "outbox_messages", "source_instances",
+                                              "threads", "triggers", "policy_versions", "evaluations", "decisions", "mandates"))
                 if populated:
                     raise HarnessError(tr("storage.schema.invalid"), code="superagent/instance-missing")
                 db.execute(

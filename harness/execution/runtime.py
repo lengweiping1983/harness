@@ -34,7 +34,13 @@ from ..tools.schema import validate_or_raise
 from .catalog import definitions
 from .capture import BoundedProcess
 from .config import ExecutionConfig
-from .files import apply_changes, search, snapshot
+from .files import (
+    MAX_SNAPSHOT_FILE_BYTES,
+    MAX_SNAPSHOT_TOTAL_BYTES,
+    apply_changes,
+    search,
+    snapshot,
+)
 from .images import download_image, inspect_image
 from .policy import PathPolicy, fail, file_version
 from .scheduling import ExecutionGate
@@ -377,11 +383,20 @@ class ExecutionRuntime(PipelineRuntime):
         env["GIT_TERMINAL_PROMPT"] = "0"
         return env
 
+    def _snapshot(self, policy):
+        """验证快照使用独立大小预算，不扩大普通文件操作上限。"""
+        return snapshot(
+            policy,
+            self.config.max_file_bytes,
+            snapshot_max_bytes=MAX_SNAPSHOT_FILE_BYTES,
+            snapshot_max_total_bytes=MAX_SNAPSHOT_TOTAL_BYTES,
+        )
+
     async def _start_job(self, ctx, project, argv, timeout_ms, yield_ms, verification=None, output_encoding="utf-8"):
         if len([job for job in self.jobs.list_all_jobs() if job["status"] == "running"]) >= 8:
             fail("execution/job-limit", tr('execution.runtime.cc1d9c06c910'))
         timeout_ms = min(timeout_ms, self.config.max_command_ms)
-        before = snapshot(PathPolicy(project.root, self.config.home), self.config.max_file_bytes) if verification else None
+        before = self._snapshot(PathPolicy(project.root, self.config.home)) if verification else None
 
         async def launch():
             ctx.check_execution()
@@ -398,7 +413,7 @@ class ExecutionRuntime(PipelineRuntime):
             if verification:
                 evidence["command_hash"] = hashlib.sha256(json.dumps(argv).encode()).hexdigest()
                 try:
-                    evidence["after"] = snapshot(PathPolicy(project.root, self.config.home), self.config.max_file_bytes)
+                    evidence["after"] = self._snapshot(PathPolicy(project.root, self.config.home))
                     evidence["passed"] = job.status == "completed" and job.exit_code == 0 and not job.public().get("encoding_errors") and before == evidence["after"]
                 except (HarnessError, OSError):
                     evidence["passed"] = False
@@ -560,7 +575,7 @@ class ExecutionRuntime(PipelineRuntime):
     async def _finalize(self, args, ctx):
         _, project, policy = self._policy(args, ctx)
         self._assert_idle(project)
-        current = snapshot(policy, self.config.max_file_bytes)
+        current = self._snapshot(policy)
         evidence = [self.store.get_evidence(ctx.session_id, eid) for eid in args["evidence_ids"]]
         commands = self._verification(ctx.session_id, project)
         if {row.get("verification_id") for row in evidence} != set(commands):
@@ -606,7 +621,7 @@ class ExecutionRuntime(PipelineRuntime):
             head = await self._git(project.root, ["rev-parse", "HEAD"])
             result["commit"] = head["stdout"].strip()
             result["committed_files"] = paths
-            if snapshot(policy, self.config.max_file_bytes) != current:
+            if self._snapshot(policy) != current:
                 return ToolResult(content=[TextBlock(text=tr('execution.runtime.7e70f680422f'))], is_error=True,
                     data={**result, "verified": False, "error": {"code": "execution/verification-changed-after-commit", "message": tr('execution.runtime.7e3b26e408be')}})
         return result
