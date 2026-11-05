@@ -15,14 +15,16 @@ def normalize_request(body, caps, *, user_context=None, input_tokens=0):
     from ..core.errors import LlmContextLengthError
     body = dict(body)
     adjustments = []
-    requested = minimum(body.pop('max_tokens', None), body.pop('max_completion_tokens', None))
+    requested = minimum(body.pop('max_tokens', None), body.pop('max_completion_tokens', None),
+                        body.pop('max_output_tokens', None))
     window = minimum(caps.get('context_window'), user_context)
     fit = None
     if window:
         fit = window - input_tokens - context_margin(window)
         if fit <= 0:
             raise LlmContextLengthError(tr('python.request_limits.62f1fce003a0'), limit=window, preflight=True)
-    effective = minimum(requested, caps.get('max_output_tokens'), fit)
+    # 能力与上下文只约束显式预算，不能把模型容量变成每次请求的目标值。
+    effective = minimum(requested, caps.get('max_output_tokens'), fit) if requested is not None else None
     if effective is not None:
         body['max_tokens'] = effective
     if effective != requested:
@@ -53,12 +55,13 @@ def normalize_request(body, caps, *, user_context=None, input_tokens=0):
                 adjustments.append({'key': 'ui.generation.adjustment.effortDefault'})
             if 'max_tokens' in reasoning:
                 budget = positive(reasoning['max_tokens'])
+                ceiling = minimum(effective, caps.get('max_output_tokens'), fit)
                 if budget is not None and budget < (positive(caps.get('reasoning_min_tokens')) or 1):
                     budget = None
-                if budget and effective is not None and effective > 1 and caps.get('supports_reasoning_budget') is not False:
+                if budget and ceiling is not None and ceiling > 1 and caps.get('supports_reasoning_budget') is not False:
                     # 为可见输出保留空间；Anthropic 要求思考预算
                     # 严格小于总输出预算。
-                    budget = minimum(budget, effective - 1, caps.get('reasoning_max_tokens'))
+                    budget = minimum(budget, ceiling - 1, caps.get('reasoning_max_tokens'))
                     if budget >= (positive(caps.get('reasoning_min_tokens')) or 1):
                         reasoning['max_tokens'] = budget
                         reasoning.pop('effort', None)

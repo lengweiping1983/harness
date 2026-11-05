@@ -337,7 +337,7 @@ class RuntimeBridgeTests(unittest.IsolatedAsyncioTestCase):
         server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        cases = [(None, None, None), (None, 984198, 984198),
+        cases = [(None, None, None), (128000, None, None), (384000, None, None), (None, 984198, 984198),
                  (393216, 984198, 393216), (393216, 4096, 4096), (None, 2048, 2048)]
         try:
             for output_capacity, requested, expected in cases:

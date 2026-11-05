@@ -2020,24 +2020,57 @@ function streamActivity(send2, timeoutMs, clock = () => performance.now()) {
     send2({ type: "activity", network_bytes: bytes });
   };
 }
-function observeFetch(fetch3, activity) {
+function observeFetch(fetch3, activity, onFailure) {
   return async (...args) => {
+    onFailure?.(void 0);
     const response = await fetch3(...args);
     activity();
     if (!response.body) return response;
     const reader = response.body.getReader();
     let cancelled = false;
+    let errorParts = response.status >= 400 ? [] : null;
+    let errorSize = 0;
+    let observed;
+    const finishError = () => {
+      if (!errorParts) return;
+      let parsed;
+      try {
+        const bytes = new Uint8Array(errorSize);
+        let offset = 0;
+        for (const part of errorParts) {
+          bytes.set(part, offset);
+          offset += part.byteLength;
+        }
+        parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      } catch {
+        return;
+      }
+      const code = parsed?.error?.code ?? parsed?.code;
+      const traceId = parsed?.traceId ?? parsed?.error?.traceId;
+      if (response.status === 409 && code === "MODEL_CALL_FAILED") observed.headers.set("x-should-retry", "false");
+      onFailure?.({
+        status: response.status,
+        ...typeof code === "string" ? { code } : {},
+        ...typeof traceId === "string" ? { traceId } : {}
+      });
+    };
     const body = new ReadableStream({
       async pull(controller) {
         try {
           const { value, done } = await reader.read();
           if (cancelled) return;
           if (done) {
+            finishError();
             reader.releaseLock();
             controller.close();
             return;
           }
           activity(value.byteLength);
+          if (errorParts) {
+            errorSize += value.byteLength;
+            if (errorSize <= 65536) errorParts.push(value.slice());
+            else errorParts = null;
+          }
           controller.enqueue(value);
         } catch (error2) {
           reader.releaseLock();
@@ -2053,7 +2086,7 @@ function observeFetch(fetch3, activity) {
         }
       }
     }, { highWaterMark: 0 });
-    const observed = new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+    observed = new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
     for (const key of ["url", "redirected", "type"]) Object.defineProperty(observed, key, { value: response[key] });
     return observed;
   };
@@ -2072,17 +2105,24 @@ function errorIdentity(error2) {
     "Anthropic stream ended before message_stop",
     "Anthropic stream ended without a stop reason"
   ])).has(error2?.message)) code = "HARNESS_INCOMPLETE_STREAM";
-  return { name: sdkType ?? error2?.name, code };
+  const traceId = error2?.error?.traceId ?? error2?.error?.error?.traceId;
+  return {
+    name: sdkType ?? error2?.name,
+    code,
+    ...typeof traceId === "string" && traceId.length <= 65536 ? { traceId } : {}
+  };
 }
-function failure(error2, status = 0) {
+function failure(error2, status = 0, providerFailure) {
   const source = error2.harnessError ?? errorIdentity(error2);
-  const code = source.code;
+  const code = source.code ?? providerFailure?.code;
+  const traceId = source.traceId ?? providerFailure?.traceId;
   return {
     type: "failure",
     status: Number(error2.harnessStatus || error2.status || status),
     message: String(error2.errorMessage ?? error2.message ?? error2),
     ...typeof source.name === "string" ? { error_type: source.name } : {},
-    ...typeof code === "string" ? { error_code: code } : {}
+    ...typeof code === "string" ? { error_code: code } : {},
+    ...typeof traceId === "string" ? { provider_trace_id: traceId } : {}
   };
 }
 var init_stream_observation = __esm({
@@ -134680,10 +134720,20 @@ async function main() {
   const context = { ...transcript(request.messages, model), tools: request.tools ?? [] };
   const config = request.config ?? {};
   const outputCapacity = raw.max_output_tokens ?? original?.maxTokens;
-  const maxTokens = Math.min(config.max_tokens ?? outputCapacity ?? model.maxTokens, outputCapacity ?? Infinity);
+  const budgets = [
+    config.max_tokens,
+    config.extra_body?.max_tokens,
+    config.extra_body?.max_completion_tokens,
+    config.extra_body?.max_output_tokens
+  ].filter((value) => Number.isSafeInteger(value) && value > 0);
+  const requestedTokens = budgets.length ? Math.min(...budgets) : void 0;
+  const maxTokens = Math.min(requestedTokens ?? outputCapacity ?? model.maxTokens, outputCapacity ?? Infinity);
   let status = 0;
+  let providerFailure;
   const activity = streamActivity(send, connection.timeout_ms ?? 3e5);
-  globalThis.fetch = observeFetch(globalThis.fetch, activity);
+  globalThis.fetch = observeFetch(globalThis.fetch, activity, (value) => {
+    providerFailure = value;
+  });
   const stream12 = models.streamSimple(model, context, {
     signal: cancellation.signal,
     fetch: globalThis.fetch,
@@ -134697,9 +134747,12 @@ async function main() {
     maxRetries: connection.max_retries ?? 2,
     onPayload: (payload2) => {
       const body = { ...payload2, ...config.extra_body, model: payload2.model ?? model.id };
-      if (api === "openai-completions" && outputCapacity == null && config.max_tokens == null && config.extra_body?.max_tokens == null && config.extra_body?.max_completion_tokens == null) {
+      if (api === "openai-completions" || api === "openai-responses") {
+        const field = api === "openai-responses" ? "max_output_tokens" : Object.hasOwn(payload2, "max_tokens") ? "max_tokens" : "max_completion_tokens";
         delete body.max_tokens;
         delete body.max_completion_tokens;
+        delete body.max_output_tokens;
+        if (requestedTokens !== void 0 && payload2[field] !== void 0) body[field] = Math.min(payload2[field], maxTokens);
       }
       if (deepSeek) {
         const effort = config.reasoning_effort || "high";
@@ -134728,7 +134781,7 @@ async function main() {
     }
     if (event.type === "toolcall_end") send({ type: "event", event: { kind: "tool_use", tool_use: { id: event.toolCall.id, name: event.toolCall.name, input: event.toolCall.arguments, ...event.toolCall.argumentsError ? { arguments_error: event.toolCall.argumentsError } : {} } } });
     if (event.type === "error") {
-      send(failure(event.error, status));
+      send(failure(event.error, status, providerFailure));
       return;
     }
     if (event.type === "done") {

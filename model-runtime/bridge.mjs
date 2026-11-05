@@ -145,18 +145,39 @@ async function main() {
   const config = request.config ?? {};
   // 真实输出能力与运行库必需的占位容量分开，未知能力不能制造 8192 的生成限制。
   const outputCapacity = raw.max_output_tokens ?? original?.maxTokens;
-  const maxTokens = Math.min(config.max_tokens ?? outputCapacity ?? model.maxTokens, outputCapacity ?? Infinity);
+  const budgets = [config.max_tokens, config.extra_body?.max_tokens, config.extra_body?.max_completion_tokens,
+    config.extra_body?.max_output_tokens].filter(value => Number.isSafeInteger(value) && value > 0);
+  const requestedTokens = budgets.length ? Math.min(...budgets) : undefined;
+  const maxTokens = Math.min(requestedTokens ?? outputCapacity ?? model.maxTokens, outputCapacity ?? Infinity);
   let status = 0;
+  let providerFailure;
   const activity = streamActivity(send, connection.timeout_ms ?? 300000);
   // Google 等原生适配器直接使用全局 fetch；作用域限于本次所属子进程。
-  globalThis.fetch = observeFetch(globalThis.fetch, activity);
+  globalThis.fetch = observeFetch(globalThis.fetch, activity, value => {providerFailure = value;});
   const stream = models.streamSimple(model, context, {
     signal: cancellation.signal,
     fetch: globalThis.fetch,
     env: environment, temperature: config.temperature ?? undefined, maxTokens, reasoning: config.reasoning_effort ?? undefined,
     sessionId: request.session_id ?? undefined, headers: {...connection.headers, ...Object.fromEntries(Object.entries(config.extra_headers ?? {}).filter(([name]) => !['authorization', 'x-api-key', 'host', 'x-dsh-auth-token'].includes(name.toLowerCase())))},
     timeoutMs: connection.timeout_ms ?? 300000, maxRetries: connection.max_retries ?? 2,
-    onPayload: payload => { const body = {...payload, ...config.extra_body, model: payload.model ?? model.id}; if (api === 'openai-completions' && outputCapacity == null && config.max_tokens == null && config.extra_body?.max_tokens == null && config.extra_body?.max_completion_tokens == null) {delete body.max_tokens; delete body.max_completion_tokens;} if (deepSeek) {const effort = config.reasoning_effort || 'high'; if (!['off', 'low', 'high', 'max'].includes(effort)) throw Error('Unsupported DeepSeek reasoning level'); body.thinking = {type: effort === 'off' ? 'disabled' : 'enabled'}; delete body.output_config; if (effort !== 'off') body.output_config = {effort};} send({type: 'request', body, model: model.id, protocol: model.api, base_url: model.baseUrl}); return body; },
+    onPayload: payload => {
+      const body = {...payload, ...config.extra_body, model: payload.model ?? model.id};
+      if (api === 'openai-completions' || api === 'openai-responses') {
+        // 可选上限默认交给提供商；显式预算沿用适配器的字段与上下文收敛结果。
+        const field = api === 'openai-responses' ? 'max_output_tokens' : Object.hasOwn(payload, 'max_tokens') ? 'max_tokens' : 'max_completion_tokens';
+        delete body.max_tokens; delete body.max_completion_tokens; delete body.max_output_tokens;
+        if (requestedTokens !== undefined && payload[field] !== undefined) body[field] = Math.min(payload[field], maxTokens);
+      }
+      if (deepSeek) {
+        const effort = config.reasoning_effort || 'high';
+        if (!['off', 'low', 'high', 'max'].includes(effort)) throw Error('Unsupported DeepSeek reasoning level');
+        body.thinking = {type: effort === 'off' ? 'disabled' : 'enabled'};
+        delete body.output_config;
+        if (effort !== 'off') body.output_config = {effort};
+      }
+      send({type: 'request', body, model: model.id, protocol: model.api, base_url: model.baseUrl});
+      return body;
+    },
     onResponse: response => { status = response.status; activity(); },
     onProviderStreamEvent: () => activity(),
   });
@@ -168,7 +189,7 @@ async function main() {
     if (event.type === 'thinking_delta') send({type: 'event', event: {kind: 'thinking', thinking: event.delta}});
     if (event.type === 'thinking_end') { const value = event.partial.content[event.contentIndex]; if (value?.thinkingSignature) send({type: 'event', event: {kind: 'signature', signature: value.thinkingSignature}}); }
     if (event.type === 'toolcall_end') send({type: 'event', event: {kind: 'tool_use', tool_use: {id: event.toolCall.id, name: event.toolCall.name, input: event.toolCall.arguments, ...(event.toolCall.argumentsError ? {arguments_error: event.toolCall.argumentsError} : {})}}});
-    if (event.type === 'error') { send(failure(event.error, status)); return; }
+    if (event.type === 'error') { send(failure(event.error, status, providerFailure)); return; }
     if (event.type === 'done') {
       const replay = event.message.content.filter(block => block.thoughtSignature || block.thinkingSignature || block.textSignature);
       if (replay.length) send({type: 'event', event: {kind: 'reasoning_details', reasoning_details: [{type: 'harness_provider_replay', api: model.api, model: model.id, scope: model.harnessIdentity, blocks: replay}]}});

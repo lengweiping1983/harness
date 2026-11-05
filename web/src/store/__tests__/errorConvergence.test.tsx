@@ -9,7 +9,7 @@ afterEach(() => setLocale('zh-CN'))
 
 const apply = (events: StreamEvent[]) => events.reduce((state, event) => ({...state, ...reduceEvent(state, event)}), {...emptySession(), turn: 2, running: true})
 
-it.each(['llm/request', 'llm/timeout', 'llm/response', 'llm/context-length', 'agent/step-limit', 'agent/token-budget', 'session/persistence', 'run/error'])('%s converges terminal and runtime errors without losing diagnostics', code => {
+it.each(['llm/request', 'llm/timeout', 'llm/response', 'llm/context-length', 'llm/provider-model-call-failed', 'agent/step-limit', 'agent/token-budget', 'session/persistence', 'run/error'])('%s converges terminal and runtime errors without losing diagnostics', code => {
   const error = {code, message: 'Original diagnostic 原文 {value}', details: {status: 503, cause: 'Original cause 原因'}}
   const terminal = {type: 'turn/end', turn: 2, reason: 'error', error: `[${code}] ${error.message} {'status': 503}`, ...error, source_seq: 12, time: 20}
   const live = {type: 'error', ...error}

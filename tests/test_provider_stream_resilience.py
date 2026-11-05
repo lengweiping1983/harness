@@ -213,7 +213,8 @@ class ProviderStreamResilienceTests(unittest.IsolatedAsyncioTestCase):
                  (400, 'ECONNRESET', False)]
         for status, code, transient in cases:
             for language in ('en', 'zh-CN', 'en'):
-                failure = {'type': 'failure', 'status': status, 'message': 'connection reset secret', 'error_type': 'APIConnectionError', 'error_code': code}
+                failure = {'type': 'failure', 'status': status, 'message': 'connection reset secret', 'error_type': 'APIConnectionError', 'error_code': code,
+                           'provider_trace_id': 'trace-secret'}
                 process = SimpleNamespace(stdin=SimpleNamespace(write=Mock(), drain=AsyncMock()),
                     stdout=SimpleNamespace(readline=AsyncMock(side_effect=[(json.dumps(failure)+'\n').encode(), b''])), wait=AsyncMock(return_value=0))
                 with self.subTest(status=status, code=code, language=language), current_language.set(language), \
@@ -223,8 +224,75 @@ class ProviderStreamResilienceTests(unittest.IsolatedAsyncioTestCase):
                         _ = [value async for value in bridge({'operation': 'stream', 'credential': {'key': 'secret'}})]
                     self.assertEqual(caught.exception.transient, transient)
                     self.assertNotIn('secret', str(caught.exception))
+                    self.assertEqual(caught.exception.details['provider_trace_id'], 'trace-[redacted]')
                     self.assertEqual(caught.exception.details['error_code'], code)
                     self.assertIn('模型请求失败' if language == 'zh-CN' else 'Model request failed', str(caught.exception))
+
+    async def test_model_call_failure_preserves_trace_without_rotating_or_disabling_keys(self):
+        for language, nested in (('en', False), ('zh-CN', True), ('en', False)):
+            async def respond(number, reader, writer):
+                error = {'code': 'MODEL_CALL_FAILED', 'message': 'upstream model failed'}
+                body = json.dumps({'error': error, 'traceId': 'trace-fixture'} if nested else
+                                  {**error, 'traceId': 'trace-fixture'}).encode()
+                writer.write(b'HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n' + body)
+            with self.subTest(language=language, nested=nested), current_language.set(language), tempfile.TemporaryDirectory() as root:
+                async with endpoint(respond) as (url, requests):
+                    store = ProviderConnections(root)
+                    store.save([provider_fixture(url)], store.revision)
+                    adapter = OpenRouterAdapter('fixture', network_timeout=3)
+                    adapter.provider_connections = store
+                    traces = []
+                    async def traced(value):
+                        traces.append(value)
+                        return 'local-trace'
+                    with self.assertRaises(LlmError) as caught:
+                        _ = [event async for event in adapter.stream([UserMessage('test')],
+                            config=LlmCallConfig(model=IDENTITY), on_request=traced)]
+                    error = caught.exception
+                    self.assertEqual(error.code, 'llm/provider-model-call-failed')
+                    self.assertFalse(error.transient)
+                    self.assertEqual(error.details['status'], 409)
+                    self.assertEqual(error.details['error_code'], 'MODEL_CALL_FAILED')
+                    self.assertEqual(error.details['provider_trace_id'], 'trace-fixture')
+                    self.assertIn('模型请求失败' if language == 'zh-CN' else 'Model request failed', str(error))
+                    self.assertEqual(len(requests), 1)
+                    self.assertEqual(traces[-1]['observation']['error_details']['provider_trace_id'], 'trace-fixture')
+                    self.assertFalse(any(key['failed'] for key in store.providers[0]['connections'][0]['keys']))
+                    self.assertEqual(store.leases, {})
+
+    async def test_model_call_failure_keeps_completed_tool_and_turn_evidence(self):
+        async def respond(number, reader, writer):
+            if number == 1:
+                writer.write(HEADERS + chat({'tool_calls': [{'index': 0, 'id': 'call', 'type': 'function',
+                    'function': {'name': 'record', 'arguments': '{}'}}]}, 'tool_calls') + b'data: [DONE]\n\n')
+            else:
+                body = json.dumps({'code': 'MODEL_CALL_FAILED', 'message': 'upstream model failed', 'traceId': 'trace-after-tool'}).encode()
+                writer.write(b'HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n' + body)
+        with tempfile.TemporaryDirectory() as root:
+            async with endpoint(respond) as (url, requests):
+                flags = {field.name: False for field in fields(HarnessConfig) if field.name.startswith('enable_')}
+                app = Harness(HarnessConfig(api_key='fixture', model=IDENTITY, home=Path(root)/'state', cwd=root,
+                    network_timeout=3, max_retries=0, permission_policy='full_access', **flags))
+                calls = []
+                app.tools.register(ToolDefinition({'name': 'record', 'description': 'fixture', 'parameters': {'type': 'object'}},
+                    lambda args, context: calls.append(context.call_id) or 'recorded', effect='workspace_write'))
+                app.adapter.provider_connections = self.adapter(Path(root)/'providers', url, timeout=3).provider_connections
+                try:
+                    session = app.create_session()
+                    with self.assertLogs('harness.core.agent', level='ERROR'):
+                        result = await app._agent_for(session).prompt(session, 'Complete this task')
+                    self.assertEqual(result.reason, 'error')
+                    self.assertEqual(calls, ['call'])
+                    self.assertEqual(len(requests), 2)
+                    self.assertEqual(len([event for event in session.events if event.type == 'tool/result']), 1)
+                    error = session.latest('turn/end').data['reason']['error']
+                    self.assertEqual(error['code'], 'llm/provider-model-call-failed')
+                    self.assertEqual(error['details']['provider_trace_id'], 'trace-after-tool')
+                    self.assertEqual(error['details']['recoveries'], 0)
+                    self.assertIsNone(session.open_turn)
+                    self.assertEqual(app.adapter.provider_connections.leases, {})
+                finally:
+                    await app.close()
 
     async def test_agent_retries_a_real_header_timeout_with_a_finite_limit(self):
         async def respond(number, reader, writer):

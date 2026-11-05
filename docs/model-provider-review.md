@@ -1,5 +1,15 @@
 # 模型供应商实现审查
 
+## 自定义网关模型失败与默认输出预算
+
+2026-11-05 使用用户授权的 TokenRhythm 接口和同一 Key，仅发送固定的最小问答，不读取用户对话。目录明确报告 `deepseek-v4.1-flash-1017` 的输出能力为 384000、`egg-alpha` 为 128000。前者的 Chat Completions 流式请求成功；后者在 `max_completion_tokens` 为 128000、256 和省略时均返回 HTTP 409／`MODEL_CALL_FAILED`。移除 `store`、`stream_options` 的最简流式及非流式请求、改用 `max_tokens`、Responses 最小请求也返回相同错误。因此已排除 Harness 历史、工具定义和大输出上限是该错误的必要触发条件，但不能凭公开错误推断网关内部路由、账号权限或上游的具体故障。修复后的真实 Harness 分发再次确认 DeepSeek 未发送输出上限仍返回 `OK`，Egg 未发送输出上限仍失败，诊断保留 `provider_trace_id=trace_46efb38d-aaa5-4d9a-9e11-c9b40d50271b`。远端 Egg 的可用性仍需服务商核查，不能记录为修复通过。[平台接入文档](https://tokenrhythm.studio/docs/api-integration) 要求保留 `traceId` 排障；[错误码文档](https://tokenrhythm.studio/docs/errors) 未列出此 409 业务码，没有据此扩大自动重试的依据。
+
+源码链路为 `provider_runtime.provider_stream` → 发行 `bridge.mjs` → pi-ai 请求与重试器 → SDK／fetch。原来的 `normalize_request` 在没有业务预算时直接选择模型输出能力，桥接又把它作为显式 `maxTokens` 传入；因此目录能力变成每次请求的输出上限。`extra_body` 在桥接最后合并，原先还能覆盖已收敛的预算。当前共享规范化与桥接将未指定预算保持为未指定，Chat Completions／Responses 在最终正文省略可选上限；显式预算及三种字段别名统一收敛，必填 Messages 容量保持。[Chat Completions 参数文档](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create) 明确 `max_completion_tokens` 是可选上限，包含可见输出及推理 Token，并非请求实际用量。
+
+隔离回环还确认 pi-ai 的 `retryProviderRequest` 将所有 409 默认列为可重试，接口重试为 2 时，一次逻辑调用实际发送三次；OpenAI SDK 在提取嵌套 `error` 时会丢弃响应顶层的 `traceId`。`stream-observation.mjs` 现对已消费的错误正文最多额外保留 64 KiB，不改变原始正文；只对明确的 409／`MODEL_CALL_FAILED` 设置运行库不重试提示，并将顶层或嵌套诊断交回桥接。`_provider_failure` 校验、脱敏并归档 trace，分类为 `llm/provider-model-call-failed`；错误卡片、运行历史与恢复入口沿显式错误码消费双语提示，其他瞬时错误仍走原规则。
+
+对应回归：`test_output_budget.py` 覆盖未设置预算、三种别名、输入预检、思考预算、直接 SDK 及发行桥接的 Responses／Messages 请求；`test_output_budget_cannot_expand_model_output_capacity` 覆盖缓存目录能力及显式预算。`test_model_call_failure_preserves_trace_without_rotating_or_disabling_keys` 通过真实发行桥接核对平铺／嵌套错误、英中英、只发送一次、Key 状态和归档；`test_model_call_failure_keeps_completed_tool_and_turn_evidence` 经真实智能体验证失败前工具只执行一次、轮次与 trace 保留。Node 回归核对原始字节、有界诊断、其他冲突／限流／服务故障的重试提示保持；`providerModelFailure.test.tsx` 和 `errorConvergence.test.tsx` 的对应错误码用例核对实际错误组件、实时／历史投影与英中英消费。仅执行这些针对性用例，未执行全量、生产 Web 构建、浏览器或桌面专项；运行库与双语生成产物已由源生成。
+
 ## 流活动、超时与恢复诊断
 
 `provider_runtime.bridge` 原先把读取超时与进程退出、NDJSON 解析错误一起改写为不可恢复的 `llm/provider-runtime`，丢弃原异常；`provider_stream` 又将归档中的错误类型、代码与首事件时间固定为空。已核对的失败记录在请求发出约 180.9 秒后结束，解析事件为零、恢复次数为零；旧记录没有底层错误证据，不能证明当时是本机网络中断还是上游等待。
@@ -103,7 +113,7 @@
 - 生成配置原先暴露单次思考／总输出字符限制，并在普通 SSE、原生桥接与订阅工作器中执行；普通传输还会因有效进展超时停止，工具循环和收尾纠正也有固定次数终止。现移除对应配置、环境入口、SettingsPatch 字段、实时限制快照及运行拦截，仅保留默认无限的步骤／Token 预算及默认 180 秒网络超时。`test_generation_policy.py` 核对默认值、协议字段、心跳流、重复并行读取与多次收尾纠正；`test_adapter_stream_cleanup.py` 保留网络超时和全部所属流收尾，`test_plan_completion.py` 继续以显式步骤预算验证未审批时不可写入。设置页公共输入焦点改为边界内单层描边；本机页面读取确认三项设置及焦点无阴影、无外圈。
 
 - 轮次接收 `length`／`max_tokens` 截断响应后，原先由 `Agent._prompt` 统计正文为空或与上一段相同的次数，累计三次便抛出 Harness 自有的 `llm/output-continuation-stalled`，原生供应商仅返回思考时也会命中。现移除该固定次数终止及其计数状态，继续保留各段响应、续写关联和主动停止。`test_output_continuation.py` 核对五段相同正文／原生思考截断后仍能完成，以及多次续写后用户取消仍结束唯一轮次；旧错误卡片保留历史诊断呈现。
-- 输出能力未知而上下文较大时，`provider_runtime.provider_stream` 的 `normalize_request` 会用上下文余量生成请求预算；`bridge.mjs` 原先将其直接传给 `streamSimple`，覆盖模型的输出能力／回退值。pi-ai 的 `buildBaseOptions` 只按上下文收敛显式预算，因而可能发送 `max_completion_tokens: 984198`。DeepSeek Harness 的 `llm-pi-ai/src/adapter.ts` 与 `catalog.ts` 区分模型输出能力和请求默认预算；当前桥接补充请求预算与模型输出能力取最小值，保留较小业务预算。进一步核对可视化长参数后，未知能力且未设置预算的 Chat Completions 请求改为省略上限，避免把运行库占位 8192 当作生成限制；已知能力继续收敛，显式预算保持原意。`test_output_budget_cannot_expand_model_output_capacity` 通过发行桥接与回环 HTTP 核对未知能力、大请求预算、已知输出能力和较小显式预算，确认日志与实际发送的上限一致；未据此宣称在线供应商验收。
+- 输出能力未知而上下文较大时，`provider_runtime.provider_stream` 的 `normalize_request` 曾用上下文余量生成请求预算；`bridge.mjs` 将其直接传给 `streamSimple`，覆盖模型输出能力／回退值，可能发送 `max_completion_tokens: 984198`。先前修复将显式预算收敛到模型能力，并在未知能力、未设置预算的 Chat Completions 请求中省略上限。后续发现已知能力仍被当成默认预算，现统一采用本页“自定义网关模型失败与默认输出预算”的规则。`test_output_budget_cannot_expand_model_output_capacity` 保留缓存目录能力、大请求预算及较小显式预算断言，并补充已知容量、未设置预算时不发送上限的回归；日志与实际正文同时核对。
 - Qwen Token Plan CN 的 `deepseek-v4.1-flash-1017` 继承了推理能力，但不在固定目录中且缺少 `supportsDeveloperRole: false`。`bridge.mjs` 将系统提示交给 pi-ai 后，Completions 的默认检测把推理模型提示转成 `developer`，造成供应商 400 拒绝。旧 Python 转换层一直使用 `system`；DeepSeek Harness 的 `llm-pi-ai/src/context.ts` 同样将开发者消息映射到系统消息，`catalog.ts` 的 `resolveModelCompat` 提供接口／模型级逐字段覆盖。桥接现在为三个 Qwen Token Plan 入口提供系统角色默认值，保留目录及显式配置的覆盖顺序。`test_qwen_snapshot_instruction_role_reaches_actual_request` 通过发行桥接与回环 HTTP 核对新快照、已有缓存、无缓存、原生／显式 Completions、接口／模型覆盖和其他供应商，并确认日志请求体与实际发送内容一致；不代表在线模型验收。
 - 相同接口的多个模型原先各自拥有 Key；现在接口共享状态，`test_provider_connections` 核对跨模型失败标记与显式重置。
 - 混合目录不能套用首模型的地址；接口留空地址时保留模型自己的地址与 API，显式覆盖才应用接口配置。

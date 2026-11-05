@@ -58,7 +58,7 @@ def _provider_failure(value, request):
     if type(status) is not int or not isinstance(message, str):
         raise ValueError
     details = {'status': status, 'phase': 'provider'}
-    for name in ('error_type', 'error_code'):
+    for name in ('error_type', 'error_code', 'provider_trace_id'):
         field = value.get(name)
         if field is not None:
             if not isinstance(field, str):
@@ -69,10 +69,10 @@ def _provider_failure(value, request):
     for secret in secrets:
         if secret:
             message = message.replace(secret, '[redacted]')
-            for name in ('error_type', 'error_code'):
+            for name in ('error_type', 'error_code', 'provider_trace_id'):
                 if name in details:
                     details[name] = details[name].replace(secret, '[redacted]')
-    for name in ('error_type', 'error_code'):
+    for name in ('error_type', 'error_code', 'provider_trace_id'):
         if name in details:
             details[name] = details[name][:128]
     transport_failure = status < 400 and (details.get('error_code') in _NETWORK_CODES
@@ -81,6 +81,8 @@ def _provider_failure(value, request):
         return LlmTimeoutError(tr('python.adapter.9432086171d5'), provider_message=message, **details)
     if status < 400 and details.get('error_code') == 'HARNESS_INCOMPLETE_STREAM':
         return LlmError(tr('models.request.failed', reason=message), code='llm/incomplete-response', transient=True, **details)
+    if status == 409 and details.get('error_code') == 'MODEL_CALL_FAILED':
+        return LlmError(tr('models.request.failed', reason=message), code='llm/provider-model-call-failed', **details)
     classified_connection = details.get('error_type') in {'APIConnectionError', *_TIMEOUT_TYPES} and details.get('error_code')
     return LlmError(tr('models.request.failed', reason=message), code='llm/request' if transport_failure else 'llm/provider',
         transient=transport_failure or not classified_connection and _is_transient_failure(status, message), **details)
@@ -249,10 +251,14 @@ async def provider_stream(adapter, messages, *, config, tools=None, on_attempt=N
     for item in wire_messages:
         if item['role'] == 'tool':
             item['is_error'] = tool_errors.get(item['tool_call_id'], False)
-    normalized, _adjustments = normalize_request({'max_tokens': config.max_tokens}, caps, user_context=adapter.context_window, input_tokens=adapter.estimate_context(messages) + adapter.estimate_context(tools or []))
+    budget_fields = {'max_tokens', 'max_completion_tokens', 'max_output_tokens'}
+    from .capabilities import minimum
+    requested = minimum(config.max_tokens, *(config.extra_body.get(name) for name in budget_fields))
+    normalized, _adjustments = normalize_request({'max_tokens': requested}, caps, user_context=adapter.context_window, input_tokens=adapter.estimate_context(messages) + adapter.estimate_context(tools or []))
     from dataclasses import replace
-    # 未声明请求预算且输出能力未知时，让供应商使用自己的默认值，不能把上下文余额当输出上限。
-    config = replace(config, max_tokens=normalized.get('max_tokens') if config.max_tokens is not None or caps['max_output_tokens'] else None)
+    # 三种协议字段统一收敛，扩展正文不能在桥接合并时覆盖预算。
+    config = replace(config, max_tokens=normalized.get('max_tokens'),
+                     extra_body={name: value for name, value in config.extra_body.items() if name not in budget_fields})
     available = [k for k in connection['keys'] if k['enabled'] and not k['failed']]
     if connection['auth']['type'] == 'api_key' and not available:
         raise LlmError(tr('models.keys.exhausted'), code='llm/key-exhausted')

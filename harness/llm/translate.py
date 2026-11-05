@@ -227,7 +227,8 @@ def build_request(
         body["tool_choice"] = "auto"
     from .capabilities import minimum
     extra = dict(config.extra_body)
-    limits = [body.get('max_tokens'), extra.pop('max_tokens', None), extra.pop('max_completion_tokens', None)]
+    limits = [body.get('max_tokens'), extra.pop('max_tokens', None), extra.pop('max_completion_tokens', None),
+              extra.pop('max_output_tokens', None)]
     requested = minimum(*limits)
     body.pop('max_tokens', None)
     if requested is not None:
