@@ -87,13 +87,6 @@ def build_router(ctx):
     def stop(request):
         return response(service(request).stop())
 
-    @router.post('/api/v1/mcp-service/tunnel')
-    def tunnel(request):
-        try:
-            return response(service(request).configure_tunnel(request.json()))
-        except McpServiceError as exc:
-            raise BadRequest(str(exc), code='mcp/tunnel-config', details={'copy': {'key': exc.key, 'params': exc.values}}) from exc
-
     @router.post('/api/v1/mcp-service/password')
     def password(request):
         try:

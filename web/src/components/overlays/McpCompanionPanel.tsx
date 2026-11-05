@@ -1,10 +1,11 @@
 import {useEffect, useRef, useState} from 'react'
-import {Copy, Eye, EyeOff} from 'lucide-react'
+import {Copy} from 'lucide-react'
 import {t} from '@/i18n'
 import {noticeText} from '@/lib/noticeText'
 import {mcpCompanionConfigure, mcpCompanionToken, type McpServiceState} from '@/lib/api'
 import {usePageVisible} from '@/hooks/usePageVisible'
 import {Button} from '@/components/ui/primitives'
+import {SecretInput} from '@/components/ui/SecretInput'
 import type {ResourceText} from '@/types'
 
 export function McpCompanionPanel({state, changing, onChange, onBusy}: {state: McpServiceState | null; changing: boolean; onChange: (state: McpServiceState) => void; onBusy: (busy: boolean) => void}) {
@@ -66,7 +67,7 @@ export function McpCompanionPanel({state, changing, onChange, onBusy}: {state: M
     <p role="status" className="text-xs text-muted">{t(companion ? statuses[companion.status] : 'ui.mcpService.loading')}</p>
     {companion && <>
       <label className="block text-sm text-ink">{t('ui.companion.address')}<div className="mt-2 flex gap-2"><input readOnly aria-label={t('ui.companion.address')} value={companion.endpoint} className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink"/><Button size="sm" variant="secondary" onClick={()=>void copy(companion.endpoint)}><Copy size={14}/>{t('ui.mcpService.copy')}</Button></div></label>
-      <label className="block text-sm text-ink">{t('ui.companion.token')}<div className="mt-2 flex flex-wrap gap-2"><input readOnly aria-label={t('ui.companion.token')} autoComplete="off" value={secret || companion.token_mask} className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink"/><Button size="sm" variant="secondary" disabled={busy || companion.status!=='running'} onClick={()=>void reveal(true)}>{secret?<EyeOff size={14}/>:<Eye size={14}/>} {t(secret?'ui.mcpService.hide':'ui.mcpService.show')}</Button><Button size="sm" variant="secondary" disabled={busy || companion.status!=='running'} onClick={()=>void reveal(false)}><Copy size={14}/>{t('ui.mcpService.copy')}</Button></div></label>
+      <label className="block text-sm text-ink">{t('ui.companion.token')}<div className="mt-2 flex gap-2"><SecretInput containerClassName="flex-1" readOnly aria-label={t('ui.companion.token')} autoComplete="off" value={secret || companion.token_mask} className="bg-surface text-sm" concealedType="text" revealed={!!secret} toggleDisabled={busy || companion.status!=='running'} toggleBusy={busy} onToggleReveal={()=>void reveal(true)} /><Button size="sm" variant="secondary" disabled={busy || companion.status!=='running'} onClick={()=>void reveal(false)}><Copy size={14}/>{t('ui.mcpService.copy')}</Button></div></label>
       <label className="block text-sm text-ink">{t('ui.companion.extension', {version:companion.extension_version})}<div className="mt-2 flex gap-2"><input readOnly value={companion.extension_path} className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink"/><Button size="sm" variant="secondary" onClick={()=>void copy(companion.extension_path)}><Copy size={14}/>{t('ui.mcpService.copy')}</Button></div></label>
       <p className="text-xs leading-relaxed text-muted">{t('ui.companion.install')}</p>
       {companion.error && <p role="alert" className="text-sm text-danger">{companion.error_copy ? noticeText(companion.error_copy) : companion.error}</p>}

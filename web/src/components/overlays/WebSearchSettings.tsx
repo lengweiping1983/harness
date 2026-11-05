@@ -1,3 +1,4 @@
+import {SecretInput} from '@/components/ui/SecretInput'
 import type { ResourceText } from '@/types'
 import { noticeText } from '@/lib/noticeText'
 import { Switch } from '@/components/ui/primitives'
@@ -57,7 +58,7 @@ export function WebSearchSettings() {
       {providers.map(name => <fieldset key={name} className="space-y-3 rounded-lg border border-line p-3" disabled={busy}>
         <legend className="px-1 text-xs font-medium">{name === 'deepseek' ? 'DeepSeek' : 'Brave Search API'}</legend>
         <label className="flex items-center gap-2 text-xs"><Switch checked={draft[name].enabled} onChange={event => edit({ ...draft, [name]: { ...draft[name], enabled: event.target.checked } })} />{t(`ui.webSearch.${name}.enable`)}</label>
-        <label className="block space-y-1 text-xs"><span>{t('ui.webSearch.apiKeyLabel', {provider: name === 'deepseek' ? 'DeepSeek' : 'Brave Search'})}</span><input type="password" autoComplete="new-password" className="ui-field w-full" value={draft[name].key} placeholder={settings[`${name}_web_api_key_mask`] ? t('ui.components.overlays.ModelConnections.94fcf2ddcd2b', { p0: settings[`${name}_web_api_key_mask`]! }) : t('ui.webSearch.enterKey')} onChange={event => edit({ ...draft, [name]: { ...draft[name], key: event.target.value } })} /></label>
+        <label className="block space-y-1 text-xs"><span>{t('ui.webSearch.apiKeyLabel', {provider: name === 'deepseek' ? 'DeepSeek' : 'Brave Search'})}</span><SecretInput autoComplete="new-password" className="ui-field w-full" value={draft[name].key} placeholder={settings[`${name}_web_api_key_mask`] ? t('ui.components.overlays.ModelConnections.94fcf2ddcd2b', { p0: settings[`${name}_web_api_key_mask`]! }) : t('ui.webSearch.enterKey')} onChange={event => edit({ ...draft, [name]: { ...draft[name], key: event.target.value } })} /></label>
       </fieldset>)}
       <p className="text-2xs text-muted">{t('ui.webSearch.keyNote')}</p>
       <div className="flex flex-wrap items-center gap-3"><Button size="sm" disabled={busy || providers.some(name => draft[name].enabled && !draft[name].key.trim() && !settings[`${name}_web_api_key_configured`])} onClick={() => void save()}>{t(busy ? 'ui.webSearch.saving' : 'ui.webSearch.save')}</Button><span role="status" className="text-xs text-muted">{noticeText(message)}</span></div>

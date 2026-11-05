@@ -224,6 +224,27 @@ it('puts the provider save toolbar before every field and restores the source on
   expect(writes()).toHaveLength(0)
 })
 
+it('uses the shared inline visibility control for provider keys and secret environment values', async () => {
+  await loaded()
+  button(render(), 'ui.providers.edit').props.onClick()
+  const entry = nodes(render()).find(node => node.type === ConnectionEditor)!
+  for (const locale of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(locale)
+    const html = renderToStaticMarkup(entry)
+    expect(html).toContain(`aria-label="${t('ui.providers.showKey')}"`)
+    expect(html).toContain('absolute inset-y-1 right-1')
+    expect(html).toContain('pr-11')
+    const env = renderToStaticMarkup(<ConnectionEditor {...entry.props} connection={{...entry.props.connection,
+      auth: {type: 'environment', env: {API_TOKEN: 'fixture-token', REGION: 'fixture-region'}}}}
+      template={{...entry.props.template, env: ['API_TOKEN', 'REGION']}} />)
+    expect(env).toContain(`aria-label="${t('ui.secrets.show')}"`)
+    expect(env).toContain('type="password"')
+    expect(env).toContain('value="fixture-token"')
+    expect(env).toContain('value="fixture-region"')
+  }
+  expect(writes()).toHaveLength(0)
+})
+
 it('confirms deletion at the owning model row, cancels without writing, and removes only that selection', async () => {
   await loaded()
   const remove = () => modelActions().find(node => node.props['aria-label'] === t('ui.providers.removeModelNamed', {name: 'Model 原文'}))!.props.onClick()

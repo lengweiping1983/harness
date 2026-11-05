@@ -2,10 +2,11 @@ import type { ResourceText } from '@/types'
 import { noticeText } from '@/lib/noticeText'
 import { usePageVisible } from '@/hooks/usePageVisible'
 import { useEffect, useRef, useState } from 'react'
-import { Copy, Eye, EyeOff } from 'lucide-react'
+import { Copy } from 'lucide-react'
 import { t, useLocale } from '@/i18n'
-import { mcpServiceConfigure, mcpServicePassword, mcpServiceStart, mcpServiceStatus, mcpServiceStop, type McpServiceState } from '@/lib/api'
+import { mcpServicePassword, mcpServiceStart, mcpServiceStatus, mcpServiceStop, type McpServiceState } from '@/lib/api'
 import { Button } from '@/components/ui/primitives'
+import { SecretInput } from '@/components/ui/SecretInput'
 import {McpCompanionPanel} from './McpCompanionPanel'
 
 const statusKeys = { stopped: 'ui.mcpService.stopped', starting: 'ui.mcpService.starting', running: 'ui.mcpService.running', stopping: 'ui.mcpService.stopping', failed: 'ui.mcpService.failed' }
@@ -64,15 +65,15 @@ export function McpServicePanel() {
     return () => { controller.abort(); clearTimeout(timer) }
   }, [visible])
 
-  async function change(action: 'start' | 'stop' | 'save') {
+  async function change(action: 'start' | 'stop') {
     if (working.current) return
     working.current = true
     setBusy(true); setError(''); setReadError(''); setNotice(''); setPassword(''); generation.current++
     try {
       const settings = {mode, public_url: publicUrl, origin_port: Number(originPort), ...(token ? {token} : {})}
-      const result = await (action === 'stop' ? mcpServiceStop() : action === 'save' ? mcpServiceConfigure(settings) : mcpServiceStart(settings))
+      const result = await (action === 'stop' ? mcpServiceStop() : mcpServiceStart(settings))
       if (!mounted.current) return
-      if (result.ok) { edited.current = false; setToken(''); hydrate(result.data); setState(result.data); if (result.data.workspaces) setWorkspaces(result.data.workspaces); if (action === 'save') setNotice({key: 'ui.mcpService.saved'}) }
+      if (result.ok) { edited.current = false; setToken(''); hydrate(result.data); setState(result.data); if (result.data.workspaces) setWorkspaces(result.data.workspaces) }
       else setError(result.copy ?? result.message)
     } finally { working.current = false; if (mounted.current) setBusy(false) }
   }
@@ -113,7 +114,7 @@ export function McpServicePanel() {
           <label className="block text-sm text-ink">{t('ui.mcpService.hostname')}<input type="url" value={publicUrl} onChange={event => { edited.current = true; setPublicUrl(event.target.value) }} placeholder="https://mcp.example.com" className="mt-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" /></label>
           <label className="block text-sm text-ink">{t('ui.mcpService.originPort')}<input type="number" min="1024" max="65535" value={originPort} onChange={event => { edited.current = true; setOriginPort(event.target.value) }} className="mt-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" /></label>
           <p className="text-xs leading-relaxed text-muted">{t('ui.mcpService.originHint', {port: originPort})}</p>
-          <label className="block text-sm text-ink">{t('ui.mcpService.tunnelToken')}<input type="password" autoComplete="new-password" spellCheck={false} value={token} placeholder={state?.tunnel?.token_mask ?? ''} onChange={event => { edited.current = true; setToken(event.target.value) }} className="mt-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" /></label>
+          <label className="block text-sm text-ink">{t('ui.mcpService.tunnelToken')}<SecretInput containerClassName="mt-2" autoComplete="new-password" spellCheck={false} value={token} placeholder={state?.tunnel?.token_mask ?? ''} onChange={event => { edited.current = true; setToken(event.target.value) }} className="bg-surface text-sm" /></label>
           {!state?.tunnel?.has_token && <p className="text-xs leading-relaxed text-muted">{t('ui.mcpService.tokenPrivate')}</p>}
         </>}
       </fieldset>
@@ -122,14 +123,11 @@ export function McpServicePanel() {
       {state?.reconnecting && <p role="status" className="text-sm text-warn">{t('ui.mcpService.reconnecting')}</p>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span role="status" className="text-sm text-muted">{state ? t(state.status === 'starting' && state.tunnel?.mode === 'named' ? 'ui.mcpService.startingNamed' : statusKeys[state.status]) : t('ui.mcpService.loading')}</span>
-        <div className="flex flex-wrap gap-2">
-          {!running && <Button size="sm" variant="secondary" disabled={!state || changing} onClick={() => void change('save')}>{t('ui.mcpService.save')}</Button>}
           <Button size="sm" variant={running ? 'secondary' : 'primary'} disabled={!state || busy || state.status === 'stopping' || (!running && state.status !== 'starting' && cooling)} loading={busy || state?.status === 'stopping'} onClick={() => void change(running || state?.status === 'starting' ? 'stop' : 'start')}>{running || state?.status === 'starting' ? t('ui.mcpService.stop') : t('ui.mcpService.start')}</Button>
-        </div>
       </div>
       {running && <div className="space-y-4">
         {([['ui.mcpService.local', state.local_url], [state.tunnel?.mode === 'named' ? 'ui.mcpService.publicNamed' : 'ui.mcpService.public', state.public_url]] as const).map(([label, url]) => <div key={label}><p className="mb-2 text-sm font-medium text-ink">{t(label)}</p><div className="flex items-center gap-2"><input aria-label={t(label)} readOnly value={url} className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" /><Button size="sm" variant="secondary" onClick={() => void copy(url)} aria-label={t('ui.mcpService.copyAddress')}><Copy size={14} />{t('ui.mcpService.copy')}</Button></div></div>)}
-        <div><p className="mb-2 text-sm font-medium text-ink">{t('ui.mcpService.password')}</p><div className="flex flex-wrap items-center gap-2"><input aria-label={t('ui.mcpService.password')} readOnly autoComplete="off" value={password || state.password_mask || ''} className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" /><Button size="sm" variant="secondary" disabled={secretBusy} onClick={() => void secret(true)}>{password ? <EyeOff size={14} /> : <Eye size={14} />}{password ? t('ui.mcpService.hide') : t('ui.mcpService.show')}</Button><Button size="sm" variant="secondary" disabled={secretBusy} onClick={() => void secret(false)}><Copy size={14} />{t('ui.mcpService.copy')}</Button></div></div>
+        <div><p className="mb-2 text-sm font-medium text-ink">{t('ui.mcpService.password')}</p><div className="flex items-center gap-2"><SecretInput containerClassName="flex-1" aria-label={t('ui.mcpService.password')} readOnly autoComplete="off" value={password || state.password_mask || ''} className="bg-surface text-sm" concealedType="text" revealed={!!password} toggleDisabled={secretBusy} toggleBusy={secretBusy} onToggleReveal={() => void secret(true)} /><Button size="sm" variant="secondary" disabled={secretBusy} onClick={() => void secret(false)}><Copy size={14} />{t('ui.mcpService.copy')}</Button></div></div>
         <p className="text-xs leading-relaxed text-muted">{t('ui.mcpService.connectionHint')}</p>
         <p className="text-xs leading-relaxed text-muted">{t('ui.mcpService.lifecycleHint')}</p>
         {state?.tunnel?.mode !== 'named' && <p className="text-xs leading-relaxed text-muted">{t('ui.mcpService.temporaryHint')}</p>}

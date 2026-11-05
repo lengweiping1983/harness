@@ -10,7 +10,7 @@
   <section class="panel connection-panel">
     <div class="section-heading"><span class="section-number">01</span><div><h2 data-key="connection_heading"></h2><p data-key="connection_caption"></p></div></div>
     <label data-key="endpoint" for="endpoint"></label><input id="endpoint" value="http://127.0.0.1:8877/" spellcheck="false">
-    <label data-key="token" for="token"></label><input id="token" type="password" autocomplete="off">
+    <label data-key="token" for="token"></label><div class="secret-input"><input id="token" type="password" autocomplete="off"><button id="token-toggle" type="button" data-aria-key="show_token" aria-controls="token" aria-pressed="false"><svg data-secret-icon="show" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><svg data-secret-icon="hide" hidden aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A11 11 0 0 1 12 5c7 0 10 7 10 7a15 15 0 0 1-3 4M6.5 6.5A17 17 0 0 0 2 12s3 7 10 7a12 12 0 0 0 5.5-1.5"/></svg></button></div>
     <button id="connect" data-key="connect" disabled></button>
   </section>
   <section class="panel session-panel">

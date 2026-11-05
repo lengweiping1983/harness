@@ -1,5 +1,7 @@
 import {afterEach, beforeEach, expect, it, vi} from 'vitest'
 import {McpServicePanel} from '../McpServicePanel'
+import {McpCompanionPanel} from '../McpCompanionPanel'
+import {SecretInput} from '@/components/ui/SecretInput'
 import {setLocale, t} from '@/i18n'
 
 const hooks = vi.hoisted(() => ({cursor: 0, slots: [] as any[], effects: [] as (() => void)[], cleanups: [] as (() => void)[]}))
@@ -30,7 +32,7 @@ function render() {
   for (const effect of hooks.effects.splice(0)) effect()
   return tree
 }
-const field = (kind: string) => nodes(render()).find(node => kind === 'select' ? node.type === 'select' : node.type === 'input' && node.props.type === kind)
+const field = (kind: string) => nodes(render()).find(node => kind === 'select' ? node.type === 'select' : (kind === 'password' ? node.type === SecretInput && !node.props.readOnly : node.type === 'input' && node.props.type === kind))
 const button = (key: string) => nodes(render()).find(node => typeof node.type === 'function' && text(node) === t(key))
 async function loaded() {render(); await vi.waitFor(() => expect(button('ui.mcpService.start').props.disabled).toBeFalsy())}
 
@@ -40,8 +42,10 @@ beforeEach(() => {
     tunnel: {mode: 'quick', public_url: '', origin_port: 18765, has_token: false, token_mask: ''}}
   vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit) => {
     if (options.method === 'POST') {
-      const body = JSON.parse(String(options.body)); writes.push({path, body})
-      if (rejectSave) return Response.json({code: 'mcp/tunnel-config', message: 'original', details: {copy: {key: 'ui.mcpService.error.configureRunning', params: {}}}}, {status: 400})
+      const body = options.body ? JSON.parse(String(options.body)) : undefined; writes.push({path, body})
+      if (path.endsWith('/password')) return Response.json({password: 'fixture-password'})
+      if (path.endsWith('/companion/token')) return Response.json({token: 'fixture-pairing-token'})
+      if (rejectSave) return Response.json({code: 'mcp/tunnel-config', message: 'original', details: {copy: {key: 'ui.mcpService.error.tunnelConfig', params: {}}}}, {status: 400})
       const tunnel = path.endsWith('/start') ? body.tunnel : body
       privateToken = tunnel.token || privateToken
       saved = {...saved, status: path.endsWith('/start') ? 'starting' : 'stopped',
@@ -52,18 +56,19 @@ beforeEach(() => {
 })
 afterEach(async () => {unmount(); vi.unstubAllGlobals(); await setLocale('en')})
 
-it('saves settings without starting, restores them on reopen and starts using the saved token', async () => {
+it('automatically saves settings on start, restores them on reopen and reuses the saved token', async () => {
   await loaded()
   field('select').props.onChange({target: {value: 'named'}})
   field('url').props.onChange({target: {value: 'https://mcp.example.test'}})
   field('number').props.onChange({target: {value: '19000'}})
   field('password').props.onChange({target: {value: 'fixture-private-token'}})
-  button('ui.mcpService.save').props.onClick()
-  await vi.waitFor(() => expect(text(render())).toContain(t('ui.mcpService.saved')))
-  expect(writes).toEqual([{path: '/api/v1/mcp-service/tunnel', body: {mode: 'named', public_url: 'https://mcp.example.test', origin_port: 19000, token: 'fixture-private-token'}}])
+  expect(nodes(render()).some(node => text(node) === 'Save settings')).toBe(false)
+  button('ui.mcpService.start').props.onClick()
+  await vi.waitFor(() => expect(field('password').props.value).toBe(''))
+  expect(writes).toEqual([{path: '/api/v1/mcp-service/start', body: {scope: 'all', tunnel: {mode: 'named', public_url: 'https://mcp.example.test', origin_port: 19000, token: 'fixture-private-token'}}}])
   expect(field('password').props.value).toBe('')
   expect(field('password').props.placeholder).toBe(saved.tunnel.token_mask)
-  unmount(); await loaded()
+  unmount(); saved.status = 'stopped'; await loaded()
   expect(field('select').props.value).toBe('named')
   expect(field('url').props.value).toBe('https://mcp.example.test')
   expect(field('number').props.value).toBe('19000')
@@ -73,16 +78,54 @@ it('saves settings without starting, restores them on reopen and starts using th
   expect(privateToken).toBe('fixture-private-token')
 })
 
-it('keeps drafts on a refused save and translates the same error without repeating the write', async () => {
+it('keeps drafts on a refused start and translates the same error without repeating the write', async () => {
   await loaded(); rejectSave = true
   field('select').props.onChange({target: {value: 'named'}})
   field('password').props.onChange({target: {value: 'draft-token'}})
-  button('ui.mcpService.save').props.onClick()
+  button('ui.mcpService.start').props.onClick()
   await vi.waitFor(() => expect(nodes(render()).find(node => node.props.role === 'alert')).toBeTruthy())
   for (const locale of ['en', 'zh-CN', 'en'] as const) {
     await setLocale(locale)
-    expect(text(nodes(render()).find(node => node.props.role === 'alert'))).toBe(t('ui.mcpService.error.configureRunning'))
+    expect(text(nodes(render()).find(node => node.props.role === 'alert'))).toBe(t('ui.mcpService.error.tunnelConfig'))
     expect(field('password').props.value).toBe('draft-token')
   }
   expect(writes).toHaveLength(1)
+})
+
+it('reveals the MCP password through the shared input control and hides it without another request', async () => {
+  saved.status = 'running'; saved.password_mask = 'fi••••rd'
+  render()
+  const secret = () => nodes(render()).find(node => node.type === SecretInput && node.props.readOnly)!
+  await vi.waitFor(() => expect(secret()).toBeDefined())
+  expect(secret().props.value).toBe('fi••••rd')
+  secret().props.onToggleReveal()
+  await vi.waitFor(() => expect(secret().props.revealed).toBe(true))
+  expect(secret().props.value).toBe('fixture-password')
+  secret().props.onToggleReveal()
+  expect(secret().props.revealed).toBe(false)
+  expect(secret().props.value).toBe('fi••••rd')
+  expect(writes).toEqual([{path: '/api/v1/mcp-service/password', body: undefined}])
+})
+
+it('uses the same controlled input for pairing tokens and keeps unavailable reveal controls disabled', async () => {
+  saved.companion = {enabled: true, port: 8877, status: 'stopped', endpoint: '', token_mask: 'pa••••en',
+    executor: '', external: false, error: '', error_copy: null, extension_path: '/fixture/extension', extension_version: '1.0.0'}
+  const companion = () => {
+    hooks.cursor = 0
+    const tree = McpCompanionPanel({state: saved, changing: false, onChange: value => {saved = value}, onBusy: () => {}})
+    for (const effect of hooks.effects.splice(0)) effect()
+    return tree
+  }
+  const secret = () => nodes(companion()).find(node => node.type === SecretInput)!
+  expect(secret().props.toggleDisabled).toBe(true)
+  expect(writes).toHaveLength(0)
+  saved.companion.status = 'running'
+  expect(secret().props.toggleDisabled).toBe(false)
+  secret().props.onToggleReveal()
+  await vi.waitFor(() => expect(secret().props.revealed).toBe(true))
+  expect(secret().props.value).toBe('fixture-pairing-token')
+  secret().props.onToggleReveal()
+  expect(secret().props.revealed).toBe(false)
+  expect(secret().props.value).toBe('pa••••en')
+  expect(writes).toEqual([{path: '/api/v1/mcp-service/companion/token', body: undefined}])
 })

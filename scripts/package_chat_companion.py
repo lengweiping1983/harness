@@ -10,7 +10,7 @@ import tempfile
 import zipfile
 
 
-ASSETS = ('manifest.json', 'background.mjs', 'client.mjs', 'content.js', 'page.mjs',
+ASSETS = ('manifest.json', 'background.mjs', 'client.mjs', 'content.js', 'page.mjs', 'secret-input.mjs',
           'popup.html', 'popup.css', 'popup.mjs', '_locales/en/messages.json', '_locales/zh_CN/messages.json')
 GUIDE = ('install_unpack', 'install_chrome', 'install_pin', 'install_backend', 'install_command',
          'setup_bridge', 'setup_pair', 'setup_chat', 'setup_remote', 'install_safety')

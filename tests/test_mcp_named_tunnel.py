@@ -26,17 +26,23 @@ class NamedTunnelTests(unittest.TestCase):
                 project.mkdir()
                 service = McpService(root / 'private')
                 settings = {**self.settings(), 'mode': mode}
-                with patch.object(service, '_spawn') as spawn:
-                    saved = service.configure_tunnel(settings)
-                    spawn.assert_not_called()
-                self.assertEqual(saved['status'], 'stopped')
+                try:
+                    with patch.object(service, '_launch') as launch, patch.object(service, '_spawn') as spawn:
+                        service.start(project, tunnel=settings)
+                        service._thread.join(timeout=3)
+                        self.assertFalse(service._thread.is_alive())
+                        launch.assert_called_once()
+                        spawn.assert_not_called()
+                        saved = service.snapshot()
+                    self.assertEqual(saved['status'], 'starting')
+                finally:
+                    service.stop()
                 self.assertEqual(saved['tunnel']['mode'], mode)
                 self.assertEqual(saved['tunnel']['public_url'], settings['public_url'])
                 self.assertTrue(saved['tunnel']['token_mask'])
                 self.assertNotIn(settings['token'], json.dumps(saved))
                 recreated = McpService(root / 'private')
                 self.assertEqual(recreated.snapshot()['tunnel'], saved['tunnel'])
-                recreated.configure_tunnel({**settings, 'token': ''})
                 launched = []
                 try:
                     with patch.object(recreated, '_launch', side_effect=lambda *args: launched.append(recreated._launch_tunnel)):
@@ -49,32 +55,31 @@ class NamedTunnelTests(unittest.TestCase):
                 finally:
                     recreated.stop()
 
-    def test_saving_settings_is_local_only_and_rejects_running_or_corrupt_configuration(self):
+    def test_start_is_local_only_and_preserves_corrupt_configuration(self):
         from types import SimpleNamespace
         from harness.web.api.mcp_service import build_router
         from harness.web.errors import ApiError, BadRequest
         from harness.web.router import Request
         with tempfile.TemporaryDirectory() as directory:
             service = McpService(directory)
-            ctx = SimpleNamespace(mcp_service=service)
-            handler, params = build_router(ctx).resolve('POST', '/api/v1/mcp-service/tunnel')
+            ctx = SimpleNamespace(mcp_service=service, harness=SimpleNamespace(config=SimpleNamespace(home=directory)),
+                                  workspaces=Mock(return_value=Mock()))
+            handler, params = build_router(ctx).resolve('POST', '/api/v1/mcp-service/start')
             def request(host='localhost:8765'):
-                return Request('POST', '/api/v1/mcp-service/tunnel', {}, {'Host': host}, json.dumps(self.settings()).encode(), client_ip='127.0.0.1')
+                return Request('POST', '/api/v1/mcp-service/start', {}, {'Host': host},
+                               json.dumps({'scope': 'all', 'tunnel': self.settings()}).encode(), client_ip='127.0.0.1')
             with self.assertRaises(ApiError):
                 handler(request('foreign.example'), **params)
             self.assertFalse(service.home.exists())
-            response = handler(request(), **params)
-            self.assertEqual(response.headers['Cache-Control'], 'no-store')
-            self.assertNotIn(self.settings()['token'], response.body.decode())
+            try:
+                with patch.object(service, '_launch'):
+                    response = handler(request(), **params)
+                    service._thread.join(timeout=3)
+                self.assertEqual(response.headers['Cache-Control'], 'no-store')
+                self.assertNotIn(self.settings()['token'], response.body.decode())
+            finally:
+                service.stop()
             path = service.home / 'tunnel.json'
-            original = path.read_bytes()
-            for status in ('starting', 'running', 'stopping'):
-                service._state['status'] = status
-                with self.assertRaises(BadRequest) as caught:
-                    handler(request(), **params)
-                self.assertEqual(caught.exception.details['copy']['key'], 'ui.mcpService.error.configureRunning')
-                self.assertEqual(path.read_bytes(), original)
-            service._state['status'] = 'stopped'
             path.write_bytes(b'corrupt original')
             with self.assertRaises(BadRequest):
                 handler(request(), **params)

@@ -212,17 +212,6 @@ class McpService:
         """登记一次全部项目策略；以后由执行器实时跟随本机注册表。"""
         return self.start(self.source, workspace_registry=str(Path(registry).resolve()), tunnel=tunnel)
 
-    def configure_tunnel(self, value):
-        """独立保存下次启动配置，不启动服务或改动已运行实例。"""
-        with self._lock:
-            if self._state['status'] in {'starting', 'running', 'stopping'}:
-                raise McpServiceError('ui.mcpService.error.configureRunning')
-            previous, raw = read_tunnel(self.home / 'tunnel.json')
-            settings = validate_tunnel(value, previous)
-            self._private_home()
-            self._save_config(self.home / 'tunnel.json', settings, raw)
-            return self.snapshot()
-
     def _private_home(self):
         """仅收紧新建的私密目录，绝不修改项目目录的权限。"""
         self.home.mkdir(parents=True, exist_ok=True)

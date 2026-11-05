@@ -1,5 +1,6 @@
 import {canonicalChat} from './page.mjs';
 import {api} from './client.mjs';
+import {mountSecretInput} from './secret-input.mjs';
 let messages = {};
 let busy = false;
 let connected = false;
@@ -11,6 +12,7 @@ let checkedAt = 0;
 let sessions = [];
 const reasons = {status: 'not_enabled', 'connection-status': 'not_connected'};
 const element = id => document.getElementById(id);
+const renderTokenVisibility = mountSecretInput(element('token'), element('token-toggle'), key => messages[key]?.message);
 function renderTarget() {
   const target = sessions.find(session => session.project_id === element('session').value);
   element('target-session').textContent = target ? messages.target_session.message.replace('{title}', target.title).replace('{project}', target.project_id) : '';
@@ -38,6 +40,7 @@ function updateControls() {
   element('start').disabled = busy || !connected || !element('session').value;
   element('stop').disabled = stopping;
   for (const id of ['endpoint', 'token', 'session']) element(id).disabled = busy;
+  element('token-toggle').disabled = busy;
 }
 async function localize(language) {
   const generation = ++localeGeneration;
@@ -47,6 +50,7 @@ async function localize(language) {
   document.documentElement.lang = language === 'zh_CN' ? 'zh-CN' : 'en';
   for (const node of document.querySelectorAll('[data-key]')) node.textContent = messages[node.dataset.key].message;
   for (const node of document.querySelectorAll('[data-aria-key]')) node.setAttribute('aria-label', messages[node.dataset.ariaKey].message);
+  renderTokenVisibility();
   for (const [target, key] of Object.entries(reasons)) show(key, target);
   renderCheckedAt();
   renderTarget();

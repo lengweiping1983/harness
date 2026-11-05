@@ -1177,12 +1177,10 @@ def openapi(templates: list[str]) -> dict[str, Any]:
                                {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'minimum': 1, 'maximum': 20000, 'default': 20000}}])
             operation['responses']['200']['content'] = {'application/json': {'schema': {'type': 'object', 'required': ['evidence'], 'properties': {'evidence': {'$ref': '#/components/schemas/PlanEvidencePage'}}}}}
             operation['responses']['404'] = {'description': tr('python.protocol.ea072e932613')}
-        if path in {'/api/v1/mcp-service', '/api/v1/mcp-service/start', '/api/v1/mcp-service/stop', '/api/v1/mcp-service/companion', '/api/v1/mcp-service/tunnel'}:
+        if path in {'/api/v1/mcp-service', '/api/v1/mcp-service/start', '/api/v1/mcp-service/stop', '/api/v1/mcp-service/companion'}:
             operation['responses']['200']['content'] = {'application/json': {'schema': {'$ref': '#/components/schemas/McpServiceState'}}}
         if path == '/api/v1/mcp-service/start':
             operation['requestBody'] = {'required': True, 'content': {'application/json': {'schema': {'$ref': '#/components/schemas/McpServiceStart'}}}}
-        if path == '/api/v1/mcp-service/tunnel':
-            operation['requestBody'] = {'required': True, 'content': {'application/json': {'schema': {'$ref': '#/components/schemas/McpTunnelSettings'}}}}
         if path == '/api/v1/mcp-service/password':
             operation['responses']['200']['content'] = {'application/json': {'schema': {'type': 'object', 'required': ['password'], 'properties': {'password': {'type': 'string'}}}}}
         if path == '/api/v1/mcp-service/companion':

@@ -4974,8 +4974,7 @@
   "ui.providers.modelNotInCatalog": "Not currently listed in the available model catalog.",
   "ui.sidebar.projectsRetrying": "Reading projects again…",
   "ui.sidebar.retryProjects": "Retry reading projects",
-  "ui.mcpService.save": "Save settings",
-  "ui.mcpService.saved": "Settings saved. Next time, just start the server.",
   "ui.mcpService.savedHint": "Starting saves settings automatically. Saved tokens and the login password are reused.",
-  "ui.mcpService.error.configureRunning": "Stop the MCP server before saving settings."
+  "ui.secrets.show": "Show password or key",
+  "ui.secrets.hide": "Hide password or key"
 }
