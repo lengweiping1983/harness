@@ -54,6 +54,56 @@ test('a timed out fixed probe cannot allow execution or be reported as success',
   await assert.rejects(() => requireAcademySandbox({sandbox: 'seatbelt'}, {probe: async () => raw}), infrastructure)
 })
 
+test('probe evidence records the actual launch once and returns isolated snapshots for success and rejection', async () => {
+  for (const raw of [receipt(), receipt({passed: false, reason: 'sandbox-probe-failed',
+    execution: {...execution, status: 'failed', exit_code: 71, stdout: '', stderr: 'original rejection'}}, 1)]) {
+    let release, calls = 0
+    const check = createAcademySandboxCheck({probe: () => {calls++; return new Promise(resolve => {release = resolve})}})
+    assert.equal(check.snapshot(), null, 'Reading evidence must not launch the probe')
+    const waiting = Promise.allSettled([check({sandbox: 'seatbelt'}), check({sandbox: 'seatbelt'})])
+    await Promise.resolve()
+    const running = check.snapshot()
+    assert.equal(running.status, 'running')
+    assert.ok(Number.isFinite(Date.parse(running.started)))
+    assert.equal(running.finished, undefined)
+    release(raw)
+    const results = await waiting
+    assert.deepEqual(results.map(result => result.status), [raw.code ? 'rejected' : 'fulfilled', raw.code ? 'rejected' : 'fulfilled'])
+    const finished = check.snapshot()
+    assert.equal(finished.status, 'completed', 'A nonzero process receipt is still a completed probe, not a passing probe')
+    assert.equal(finished.started, running.started)
+    assert.ok(Date.parse(finished.finished) >= Date.parse(finished.started))
+    assert.deepEqual(finished.receipt, raw)
+    if (raw.code) assert.equal(results[0].reason.probe, raw)
+    const original = structuredClone(finished)
+    finished.receipt.stdout = 'changed by consumer'
+    raw.stderr = 'changed by producer'
+    assert.deepEqual(check.snapshot(), original)
+    await Promise.allSettled([check({sandbox: 'seatbelt'})])
+    assert.equal(calls, 1, 'Inspecting or later consuming evidence must not relaunch the probe')
+    assert.deepEqual(check.snapshot(), original)
+  }
+})
+
+test('probe evidence distinguishes a launch exception and unavailable backend without inventing execution receipts', async () => {
+  const original = Error('original process supervision failure')
+  let calls = 0
+  const check = createAcademySandboxCheck({probe: async () => {calls++; throw original}})
+  await assert.rejects(check({sandbox: 'unavailable'}), infrastructure)
+  assert.equal(check.snapshot(), null)
+  assert.equal(calls, 0)
+  await assert.rejects(check({sandbox: 'seatbelt'}), error => error === original)
+  const evidence = check.snapshot()
+  assert.equal(evidence.status, 'error')
+  assert.equal(evidence.error.message, original.message)
+  assert.equal(evidence.error.stack, original.stack)
+  assert.equal(evidence.receipt, undefined)
+  evidence.error.message = 'changed by consumer'
+  assert.equal(check.snapshot().error.message, original.message)
+  await assert.rejects(check({sandbox: 'seatbelt'}), error => error === original)
+  assert.equal(calls, 1)
+})
+
 test('one worker shares a single probe across scenes and concurrent waiters, including a failed probe', async () => {
   for (const raw of [receipt(), receipt({passed: false, reason: 'sandbox-probe-failed',
     execution: {...execution, status: 'failed', exit_code: 71, stdout: '', stderr: 'original rejection'}}, 1)]) {

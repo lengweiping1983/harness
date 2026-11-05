@@ -25,6 +25,7 @@ test('input identity distinguishes a dirty precommit baseline from identical com
     await writeFile(path.join(directory, 'scene.mjs'), 'after\n')
     await writeFile(path.join(directory, 'untracked.mjs'), 'untracked\n')
     const dirty = inputIdentity(directory)
+    assert.deepEqual(inputIdentity(directory), dirty, 'An unchanged dirty tree still matches its recorded input identity')
     assert.equal(dirty.revision, clean.revision)
     assert.deepEqual(dirty.changed, ['scene.mjs', 'untracked.mjs'])
     assert.notEqual(dirty.fingerprint, clean.fingerprint)
@@ -90,18 +91,39 @@ test('preflight, transport and shutdown errors cannot produce a passing suite', 
   assert.deepEqual(crashed.infrastructure.map(error => error.message), ['worker crashed', 'cleanup unconfirmed'])
 })
 
-test('real worker protocol keeps results paired and drains a normal worker without launching browsers', async () => {
+test('real worker protocol preserves probe evidence and process identity through results and shutdown without launching browsers', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'harness-worker-test-'))
   let worker
   try {
     const file = path.join(directory, 'worker.mjs')
-    await writeFile(file, `process.on('message', message => {
-      if(message.type==='run') process.send({type:'result',name:message.name,durationMs:1});
-      else {process.send({type:'closed',stats:{viteStarts:1}});process.disconnect()}
-    });process.send({type:'ready',version:'fixture'});`)
+    await writeFile(file, `const executionContext = {pid: process.pid, parentPid: process.ppid, executable: process.execPath};
+    let academySandboxProbe = null;
+    const stats = () => ({viteStarts: 1, executionContext, academySandboxProbe});
+    process.on('message', message => {
+      if(message.type==='run') {
+        academySandboxProbe = {status: 'completed', receipt: {code: message.name === 'rejected-smoke.mjs' ? 1 : 0,
+          stdout: 'original raw sandbox receipt', stderr: ''}};
+        process.send({type:'result',name:message.name,durationMs:1,stats:stats(),
+          ...(academySandboxProbe.receipt.code ? {error: {message: 'controlled sandbox probe rejection', infrastructure: true}} : {})});
+      } else {process.send({type:'closed',stats:stats()});process.disconnect()}
+    });process.send({type:'ready',version:'fixture',stats:stats()});`)
     worker = await startWorker(0, {workerFile: file, executablePath: 'fixture', timeoutMs: 1000, logs: directory})
+    assert.equal(worker.summary().academySandboxProbe, null)
+    assert.equal(worker.summary().executionContext.parentPid, process.pid)
+    assert.equal(worker.summary().executionContext.executable, process.execPath)
     assert.equal((await worker.run('original-smoke.mjs')).durationMs, 1)
-    await worker.close(); worker = undefined
+    const success = worker.summary()
+    assert.equal(success.academySandboxProbe.receipt.code, 0)
+    success.academySandboxProbe.receipt.stdout = 'changed by consumer'
+    assert.equal(worker.summary().academySandboxProbe.receipt.stdout, 'original raw sandbox receipt')
+    const rejection = await worker.run('rejected-smoke.mjs')
+    assert.equal(rejection.durationMs, 1)
+    assert.ok(isInfrastructureError(rejection.error))
+    const rejected = worker.summary()
+    assert.equal(rejected.academySandboxProbe.receipt.code, 1)
+    await worker.close()
+    assert.deepEqual(worker.summary(), rejected, 'Shutdown must retain the actual probe receipt and original worker identity')
+    worker = undefined
   } finally {await worker?.close(); await rm(directory, {recursive: true, force: true})}
 })
 

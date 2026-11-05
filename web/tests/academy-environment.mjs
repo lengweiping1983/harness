@@ -27,15 +27,26 @@ function probeFailure(raw, infrastructure) {
 
 /** 同一验证工作进程拥有一次预检；成功、失败及并发等待均不重放探针。 */
 export function createAcademySandboxCheck({probe = probeSandbox} = {}) {
-  let pending
-  return async project => {
+  let pending, evidence = null
+  const launch = async () => {
+    evidence = {status: 'running', started: new Date().toISOString()}
+    try {
+      const receipt = await probe()
+      evidence = {...evidence, status: 'completed', receipt: structuredClone(receipt)}
+      return receipt
+    } catch (error) {
+      evidence = {...evidence, status: 'error', error: {name: error?.name ?? 'Error', message: error?.message ?? String(error), stack: error?.stack}}
+      throw error
+    } finally {evidence.finished = new Date().toISOString()}
+  }
+  const check = async project => {
     assert.ok(['seatbelt', 'bubblewrap', 'unavailable'].includes(project?.sandbox), 'Academy project must report its current sandbox backend')
     if (project.sandbox === 'unavailable') {
       const error = Error('Academy execution requires an available OS sandbox (Linux bubblewrap or macOS seatbelt); this environment is not verified')
       error.browserInfrastructure = true
       throw error
     }
-    const raw = await (pending ??= Promise.resolve().then(probe))
+    const raw = await (pending ??= Promise.resolve().then(launch))
     assert.ok(Number.isInteger(raw?.code) && typeof raw.stdout === 'string' && typeof raw.stderr === 'string', 'Invalid Academy probe process receipt')
     const report = JSON.parse(raw.stdout)
     assert.equal(typeof report?.passed, 'boolean', 'Invalid Academy probe result')
@@ -58,6 +69,8 @@ export function createAcademySandboxCheck({probe = probeSandbox} = {}) {
     assert.equal(raw.stderr, '', 'Academy probe must not emit unreported errors')
     if (!passed) throw probeFailure(raw, true)
   }
+  check.snapshot = () => structuredClone(evidence)
+  return check
 }
 
 export const requireAcademySandbox = createAcademySandboxCheck()

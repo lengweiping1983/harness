@@ -181,7 +181,7 @@ export async function startWorker(index, {executablePath, timeoutMs, logs,
         } finally {clearTimeout(timer)}
       } finally {await dispose()}
     },
-    summary: () => ({index: index + 1, version, ...lastStats}),
+    summary: () => ({index: index + 1, version, ...structuredClone(lastStats)}),
   }
 }
 
