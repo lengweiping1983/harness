@@ -6,7 +6,7 @@
 ## 目录约定
 
 ```
-desktop/hex-engine/
+harness/resources/hex/
   README.md                       # 本说明
   <平台>-<架构>/
     hex                           # macOS/Linux 可执行文件名
@@ -16,7 +16,7 @@ desktop/hex-engine/
     engine.json                   # 版本、来源、sha256、平台架构
 ```
 
-平台标签与 `prepare-voice.mjs` 的 `platformTag()` 保持一致：
+平台标签与 `desktop/hex-engine-manifest.mjs` 的 `platformTag()` 保持一致：
 `macos-arm64`、`macos-x86_64`、`windows-x86_64`、`windows-arm64`。
 
 当前已登记：
@@ -32,12 +32,14 @@ desktop/hex-engine/
 ## 查找优先级（打包时）
 
 1. `HARNESS_HEX_BINARY` 环境变量（显式覆盖，绝对路径或相对仓库根目录）；
-2. **本目录**下对应平台标签的二进制（默认，唯一带版本清单的来源）；
-3. `harness/resources/hex/<tag>/hex`（已有的运行时工作副本，仅作兼容回退）。
+2. **本目录**下对应平台标签的二进制及 `engine.json`（默认）。
 
-`harness/resources/hex/` 与 `output/` 仍被 `.gitignore` 忽略，属于构建期工作副本，
-不要作为长期依赖来源。打包会把本目录的引擎复制到
-`harness/resources/hex/<tag>/hex`（运行时查找路径，由 `harness` 核心代码决定）。
+本目录是源码运行和打包共用的唯一资源来源，纳入版本库，不在源码树内另建工作副本。
+`build_support.BuildPy` 只把本机平台子目录写入 wheel（包含引擎、许可证和清单），
+且在重建时刷新构建副本，避免其他平台或已删除资源残留；sdist 保留全部平台资源。
+有本机引擎的 wheel 使用本机平台标签，没有本机引擎时不会仅因其他平台资源而标记为本机包。
+桌面准备默认只读校验本目录；`HARNESS_HEX_BINARY` 只替换最终安装暂存副本，
+不改写本目录中的二进制、许可证或清单。`output/` 仍仅存放可删除的临时输出。
 
 ## 升级引擎（标准流程）
 
@@ -50,7 +52,7 @@ node scripts/vendor-hex-engine.mjs /path/to/hex.exe --version 3.4.0 \
   --source 'https://github.com/anomalyco/hex/releases/download/v3.4.0/hex-3.4.0-windows-x64.exe'
 
 # 核对改动后提交（注意二进制体积约 60–70MB）
-git add desktop/hex-engine
+git add harness/resources/hex
 ```
 
 脚本会校验 Mach-O / PE 头中的平台与 CPU、运行 `--version` 读取二进制自报版本并与
@@ -82,5 +84,5 @@ CommandLineTools 14.2 且系统禁用 `sandbox-exec`）或 Windows 的 MSVC 与 
 全部平台适配，因此该源码目录已移除：Windows 与 macOS 打包默认都不再有任何编译
 步骤，`HARNESS_HEX_BINARY` 也不需要设置。
 
-遗漏后果是明确的：缺少 `desktop/hex-engine/<tag>/engine.json` 时，
+遗漏后果是明确的：缺少 `harness/resources/hex/<tag>/engine.json` 时，
 `scripts/bootstrap-desktop-build.mjs` 会直接拒绝打包，而不是静默回退到编译。

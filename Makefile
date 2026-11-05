@@ -73,7 +73,7 @@ hex-vendor:
 	@echo "  node scripts/vendor-hex-engine.mjs /path/to/hex.exe --check --version 3.3.0"
 	@echo "  node scripts/vendor-hex-engine.mjs /path/to/hex.exe --version 3.3.0 --source URL"
 	@echo "  node desktop/hex-engine-manifest.mjs --check .   # 按当前平台做清单预检"
-	@echo "完成后执行 git add desktop/hex-engine；详见 desktop/hex-engine/README.md"
+	@echo "完成后执行 git add harness/resources/hex；详见 harness/resources/hex/README.md"
 
 # 打包前的环境预检：检出 npm ci 未完整展开的依赖、缺失的平台二进制与 electron/dist。
 # npm run package 会自动执行修复版；此目标用于 CI 或人工只读核对。

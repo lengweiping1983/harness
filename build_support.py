@@ -1,14 +1,41 @@
-"""将唯一系统技能目录作为 wheel 的同级资源分发。"""
+"""分发系统技能和本机平台的 Hex 语音资源。"""
 from pathlib import Path
+import platform
 import shutil
+import sys
 
 from setuptools.command.build_py import build_py
 from setuptools.command.bdist_wheel import bdist_wheel
 
 
+def hex_platform_tag():
+    """与运行时及桌面脚本使用相同的平台资源标签。"""
+    system = {'darwin': 'macos', 'win32': 'windows', 'linux': 'linux'}.get(sys.platform, sys.platform)
+    machine = platform.machine().lower()
+    arch = {'aarch64': 'arm64', 'amd64': 'x86_64'}.get(machine, machine)
+    return f'{system}-{arch}'
+
+
 class BuildPy(build_py):
-    """保持源码、wheel 与桌面包的系统技能路径一致。"""
+    """保持技能路径一致，避免 wheel 携带其他平台的引擎。"""
+
+    def find_data_files(self, package, src_dir):
+        """源码发行包保留全部引擎，wheel 仅选择当前平台子目录。"""
+        root = Path(__file__).resolve().parent / 'harness' / 'resources' / 'hex'
+        files = super().find_data_files(package, src_dir)
+        return [file for file in files if not Path(file).resolve().is_relative_to(root)
+                or Path(file).resolve().relative_to(root).parts[0] == hex_platform_tag()]
+
     def run(self):
+        source_hex = Path(__file__).resolve().parent / 'harness' / 'resources' / 'hex'
+        built_hex = Path(self.build_lib).resolve() / 'harness' / 'resources' / 'hex'
+        if built_hex.resolve().is_relative_to(source_hex.resolve()) or source_hex.resolve().is_relative_to(built_hex.resolve()):
+            raise RuntimeError('Build output overlaps Hex engine source')
+        if any(directory.is_symlink() for directory in (built_hex, built_hex.parent, built_hex.parent.parent)):
+            raise RuntimeError('Hex engine build output must not contain symbolic links')
+        # 只刷新构建副本，防止切换平台或删除资源后复用旧引擎。
+        if built_hex.exists():
+            shutil.rmtree(built_hex)
         super().run()
         source = Path(__file__).resolve().parent / '.harness' / 'skills'
         if source.exists() and not source.is_dir():
@@ -39,8 +66,8 @@ class BdistWheel(bdist_wheel):
 
     def finalize_options(self):
         super().finalize_options()
-        root = Path(__file__).resolve().parent / 'harness' / 'resources' / 'hex'
-        if any(path.is_file() for path in root.rglob('*')):
+        root = Path(__file__).resolve().parent / 'harness' / 'resources' / 'hex' / hex_platform_tag()
+        if (root / ('hex.exe' if sys.platform == 'win32' else 'hex')).is_file():
             self.root_is_pure = False
 
     def get_tag(self):

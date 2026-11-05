@@ -669,6 +669,8 @@ workflow 的 Node 子进程由 Python 为本次启动设置 `HARNESS_WORKFLOW_LA
 
 语音输入与全局听写的当前入口、模型及打包约束统一见[语音输入](hex-stt.md)。常规 Web 单测包含 `VoiceButton`、`VoiceInputPage` 和独立录音浮窗 `VoiceCapture` 的真实组件逻辑回归；原生快捷键、系统粘贴及桌面打包分支由桌面目录的显式专项覆盖，不随常规入口启动。GitHub 安装包更新的状态回归位于 `desktop/tests/installer-updates.test.mjs`，也属于桌面专项。
 
+`tests/test_hex_build.py` 通过隔离发行夹具核对唯一 Hex 资源目录的本机 wheel 筛选、许可证与清单、重建不残留旧资源及 sdist 全平台保留；`desktop/tests/hex-engine-manifest.test.mjs` 核对源文件身份保持、缺清单拒绝与版本／内容校验，`release-language.test.mjs` 核对自备引擎仅覆盖安装暂存副本。它们不代表完整桌面构建或跨平台实机验收。
+
 `node web/tests/native-browser-feedback-smoke.mjs` 使用真实 BrowserPanel 和受控桌面桥验证非法地址提示的中英文往返、主题尺寸变化、外部原文及地址草稿保留，并断言没有导航请求和重复bind；不替代Electron实机回归。
 
 `process-group-smoke.mjs` 同时验证真实对话流式光标和底部扫光在英中英、明暗/窄宽配对矩阵中的实时减少动效偏好；检查伪元素计算动画、静态指示仍存在及原回答保持。展开过程组后，各条思考仍收起，键盘可独立展开完整原文并再次收起。紧凑布局断言使用文件修改与长命令，核对相邻行没有额外纵向空带、点击区域及收展箭头紧跟可见文字；过程组、思考与工具摘要均按文字实际边界检查箭头间距，长命令截断后仍保留箭头，并移除工具行的新增修饰类，确认图标、标签和箭头仍在同一行；浅色宽屏另保存截图供目视检查。该浏览器专项仍须明确选择后执行。`processPresentation.test.tsx` 使用真实思考和工具组件核对原文、流式与截断提示、失败图标及独立详情关联，并仅编译实际工具摘要的基础工具类，覆盖新增修饰样式尚未加载时缺少横向布局的回归。后者不替代浏览器几何验收。

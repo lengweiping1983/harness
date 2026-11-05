@@ -1,4 +1,4 @@
-import {open, mkdir, copyFile, writeFile} from 'node:fs/promises'
+import {open, mkdir, copyFile, writeFile, rm} from 'node:fs/promises'
 import {existsSync} from 'node:fs'
 import {createHash} from 'node:crypto'
 import path from 'node:path'
@@ -26,35 +26,18 @@ export async function prepareVoice({root, staging, platform, arch, execute, copy
   const tag = platformTag(platform, arch)
   const filename = platform === 'win32' ? 'hex.exe' : 'hex'
   const relative = path.join('harness/resources/hex', tag, filename)
-  const destination = path.join(root, relative)
-  // 引擎来源优先级：显式环境变量 > 随版本库分发的预编译引擎 > 本机编译产物。
-  // desktop/hex-engine/ 是纳入版本库的长期依赖来源，也是唯一带版本清单的来源；
-  // harness/resources/hex/ 只是打包期工作副本（被 .gitignore 忽略），不能作为
-  // 长期来源，否则清理产物后即无法打包，也无法保证版本。
-  const vendored = path.join(root, 'desktop/hex-engine', tag, filename)
-  const fromVendored = !binary && existsSync(vendored)
-  const source = binary ? path.resolve(root, binary)
-    : fromVendored ? vendored : destination
+  // 源码与运行时共用包内资源目录；准备阶段只读取，不再创建第二份源码工作副本。
+  const source = binary ? path.resolve(root, binary) : path.join(root, relative)
   if (!existsSync(source)) throw Error(copy('desktop.release.voiceMissing', {path:source}))
-  // 版本库引擎必须同时带 engine.json 清单；清单里的 sha256 用于证明复制进包的
-  // 就是登记过的那份二进制，避免 harness/resources/hex/ 里残留的旧版本被误用。
-  const manifest = fromVendored ? readEngineManifest(root, tag) : null
-  if (fromVendored && !manifest) throw Error(copy('desktop.release.voiceMismatch', {platform, arch}))
+  const manifest = !binary ? readEngineManifest(root, tag) : null
+  if (!binary && !manifest) throw Error(copy('desktop.release.voiceMismatch', {platform, arch}))
   let identity
   try {identity = await voiceBinaryIdentity(source)} catch (cause) {throw Error(copy('desktop.release.voiceMismatch', {platform, arch}), {cause})}
   if (identity.platform !== platform || identity.arch !== arch) throw Error(copy('desktop.release.voiceMismatch', {platform, arch}))
-  await mkdir(path.dirname(destination), {recursive:true})
-  if (source !== destination) await copyFile(source, destination)
-  // 许可证与第三方声明随识别引擎分发；用户数据和模型不参与构建复制。
-  // 依次查引擎同目录（版本库预编译引擎）、Hex.app 的 Contents/Resources。
-  const engineDir = path.dirname(source)
-  const hexAppResources = path.basename(engineDir) === 'MacOS' && path.basename(path.dirname(engineDir)) === 'Contents'
-    ? path.join(engineDir, '../Resources') : null
-  const licenseDirs = [engineDir, hexAppResources].filter(Boolean)
-  for (const name of ['LICENSE','THIRD_PARTY_NOTICES.md']) {
-    const target = path.join(path.dirname(destination), name)
-    const file = licenseDirs.map(dir => path.join(dir, name)).find(candidate => existsSync(candidate))
-    if (file && path.resolve(file) !== path.resolve(target)) await copyFile(file, target)
+  const digest = await voiceDigest(source)
+  if (manifest && digest !== manifest.sha256) {
+    throw Error(copy('desktop.release.voiceMismatch', {platform, arch}),
+      {cause: Error(`引擎内容与版本库清单不符: ${tag} 期望 ${manifest.sha256}，实际 ${digest}`)})
   }
   const helpers = path.join(staging, 'voice')
   await mkdir(helpers, {recursive:true})
@@ -68,18 +51,33 @@ export async function prepareVoice({root, staging, platform, arch, execute, copy
     }
   }
   else await copyFile(path.join(root, 'desktop/voice-native.ps1'), path.join(helpers, 'voice-native.ps1'))
-  const digest = await voiceDigest(destination)
-  if (manifest && digest !== manifest.sha256) {
-    throw Error(copy('desktop.release.voiceMismatch', {platform, arch}),
-      {cause: Error(`引擎内容与版本库清单不符: ${tag} 期望 ${manifest.sha256}，实际 ${digest}`)})
-  }
   const metadata = {path:relative.replaceAll('\\','/'), sha256:digest, ...identity}
   // 版本与来源随运行时元数据一起写入，verify-runtime 会用它核对打包前的引擎，
-  // 让引擎被替换、版本回退或工作副本残留旧版本在打包阶段就暴露。
+  // 让引擎被替换或版本回退在打包阶段就暴露。
   if (manifest) {
     metadata.version = manifest.version
     metadata.source = manifest.source
   }
   await writeFile(path.join(helpers, 'engine.json'), JSON.stringify(metadata) + '\n')
   return metadata
+}
+
+/** 显式自备引擎只覆盖安装暂存副本，不修改版本库中的引擎及清单。 */
+export async function stageVoiceOverride({root, staging, binary, metadata, copy}) {
+  const source = path.resolve(root, binary)
+  if (await voiceDigest(source) !== metadata.sha256) {
+    throw Error(copy('desktop.release.voiceMismatch', metadata))
+  }
+  const destination = path.join(staging, 'site', metadata.path)
+  await rm(path.dirname(destination), {recursive:true, force:true})
+  await mkdir(path.dirname(destination), {recursive:true})
+  await copyFile(source, destination)
+  // 自备引擎许可证来自同目录或 Hex.app Resources，不沿用默认引擎的声明。
+  const directory = path.dirname(source)
+  const resources = path.basename(directory) === 'MacOS' && path.basename(path.dirname(directory)) === 'Contents'
+    ? path.join(directory, '../Resources') : null
+  for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
+    const file = [directory, resources].filter(Boolean).map(dir => path.join(dir, name)).find(candidate => existsSync(candidate))
+    if (file) await copyFile(file, path.join(path.dirname(destination), name))
+  }
 }

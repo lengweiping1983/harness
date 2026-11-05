@@ -92,10 +92,4 @@ node_modules/
 # Playwright MCP 验证产物
 .playwright-mcp/
 
-# hex 语音服务二进制（打包期工作副本，由 desktop/prepare-voice.mjs 从
-# desktop/hex-engine/ 复制而来，随 wheel 分发，不入库）
-harness/resources/hex/
-
-# 桌面打包用的官方预编译 Hex 引擎随源码库分发，必须保持可跟踪。
-# 它不能放在 output/（会被清理）；harness/resources/hex/ 与 output/ 仍只是构建期工作副本。
-!desktop/hex-engine/
+# Hex 官方预编译引擎统一存放在 harness/resources/hex/，随源码库分发。

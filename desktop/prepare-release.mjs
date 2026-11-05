@@ -4,7 +4,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url'
 import path from 'node:path'
 import {runCommand} from './setup.mjs'
 import {setupCopy} from './setup-copy.mjs'
-import {prepareVoice} from './prepare-voice.mjs'
+import {prepareVoice, stageVoiceOverride} from './prepare-voice.mjs'
 
 // uv 托管的 CPython 用绝对链接指向安装目录；原样复制到暂存后，链接仍指向应用包外的
 // 构建目录。codesign --strict 把这种链接判为非法目标并拒绝封签，因此按源目录换算成
@@ -73,6 +73,7 @@ export async function prepareRelease({root = fileURLToPath(new URL('../', import
   if (!existsSync(electronDist)) throw Error(copy('desktop.release.electronMissing', {path:electronDist}))
   await run('uv', ['pip', 'install', '--python', python, '--target', path.join(staging, 'site'), '--require-hashes', '--requirements', path.join(root, 'desktop/requirements.lock')], {cwd:root})
   await run('uv', ['pip', 'install', '--python', python, '--target', path.join(staging, 'site'), '--no-deps', '.'], {cwd:root})
+  if (voiceBinary) await stageVoiceOverride({root, staging, binary:voiceBinary, metadata:voice, copy})
   // PYTHONPATH 指向的目录不会被 site 处理，依赖里的 .pth（pywin32 靠它注册 win32/lib 与 DLL 目录）
   // 因此不生效，pywintypes 无法导入。让暂存 site 目录按 site 语义加载自身，保证打包运行时与构建自检一致。
   await writeFile(path.join(staging, 'site', 'sitecustomize.py'), 'import os, site\nsite.addsitedir(os.path.dirname(os.path.abspath(__file__)))\n')

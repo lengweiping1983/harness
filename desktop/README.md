@@ -84,7 +84,7 @@ Windows 原生顶栏显式验收入口为 `node desktop/tests/windows-titlebar-s
 
 安装版内置 CPython 3.14.10、锁定依赖、内置技能、前端及 Hex 识别引擎，无需用户安装 Python、Node.js 或 npm；语音输入与全局听写由 Harness 自己管理，无需另行安装 Hex；入口及边界见[语音输入](../docs/hex-stt.md)。Git 与用户项目所需 SDK 由项目环境提供。应用更新不清理或迁移会话、凭据及用户设置。
 
-构建要求 Node.js 22+、npm、uv，并在目标系统和目标 CPU 架构上执行；macOS 另需 Swift 编译器构建原生输入辅助程序（引擎本身不编译）。识别引擎**取自随版本库分发的 `desktop/hex-engine/<平台>-<架构>/`**，不在打包时编译；也可用 `HARNESS_HEX_BINARY` 显式指定匹配系统与 CPU 的合法预编译引擎，已存在的 `harness/resources/hex/` 工作副本只作为最后回退。缺失或身份不匹配时拒绝打包，运行时不要求用户安装独立 Hex。保留的手动构建工作流使用 uv 0.13.6，本机 uv 0.11.5 也可读取仓库固定的下载清单，不依赖其内置目录是否包含 CPython 3.14.10：
+构建要求 Node.js 22+、npm、uv，并在目标系统和目标 CPU 架构上执行；macOS 另需 Swift 编译器构建原生输入辅助程序（引擎本身不编译）。识别引擎**取自随版本库分发的 `harness/resources/hex/<平台>-<架构>/`**，不在打包时编译；也可用 `HARNESS_HEX_BINARY` 显式指定匹配系统与 CPU 的合法预编译引擎。缺失或身份不匹配时拒绝打包，运行时不要求用户安装独立 Hex。保留的手动构建工作流使用 uv 0.13.6，本机 uv 0.11.5 也可读取仓库固定的下载清单，不依赖其内置目录是否包含 CPython 3.14.10：
 
 ```sh
 npm --prefix model-runtime ci
@@ -100,33 +100,9 @@ npm --prefix desktop run package
 
 ### 随版本库分发的 Hex 引擎
 
-`desktop/hex-engine/` 是打包的长期引擎来源，**纳入版本库**；`output/` 会被清理，`harness/resources/hex/` 只是打包期工作副本（两者都被 `.gitignore` 忽略），不要作为依赖来源。目录内每个平台子目录含二进制、`LICENSE`、`THIRD_PARTY_NOTICES.md` 和记录版本／来源／SHA-256 的 `engine.json`。查找优先级：
+`harness/resources/hex/` 是源码运行和打包共用的唯一引擎资源目录，纳入版本库，同时保留 macOS 与 Windows 平台子目录。默认准备流程直接校验该目录中的引擎，不再复制到另一份源码目录；wheel 只包含本机平台的引擎、许可证和清单，sdist 保留全部平台资源。打包仍须在目标系统和 CPU 上执行。
 
-1. `HARNESS_HEX_BINARY`（显式覆盖，绝对路径或相对仓库根目录）；
-2. `desktop/hex-engine/<tag>/hex`（默认，`tag` 为 `macos-arm64`、`windows-x86_64` 等）；
-3. `harness/resources/hex/<tag>/hex`（已存在的运行时工作副本，仅作兼容回退）。
-
-已登记的平台：
-
-| tag | 引擎 | 版本 | 来源 |
-| --- | --- | --- | --- |
-| `windows-x86_64` | `hex.exe`（win32/x64 PE） | **3.3.0** | 官方 v3.3.0 release `hex-3.3.0-windows-x64.exe` |
-| `macos-arm64` | `hex`（darwin/arm64 Mach-O） | 3.3.0 | 官方 macOS DMG |
-
-升级引擎用标准脚本，它会校验 Mach-O／PE 头中的平台与 CPU、读取二进制自报版本并与 `--version` 严格比对、计算 SHA-256、复制许可证、清除 macOS 隔离属性并重写 `engine.json`：
-
-```sh
-node scripts/vendor-hex-engine.mjs /path/to/hex.exe --check --version 3.3.0   # 先只读校验
-node scripts/vendor-hex-engine.mjs /path/to/hex.exe \
-  --version 3.3.0 --source 'https://github.com/anomalyco/hex/releases/download/v3.3.0/hex-3.3.0-windows-x64.exe'
-git add desktop/hex-engine
-```
-
-`desktop/hex-engine-manifest.mjs` 是清单与完整性的单一实现：登记脚本复检、`bootstrap-desktop-build.mjs` 预检、`prepare-voice.mjs` 复制校验、`verify-runtime.mjs` 打包前核对都共用它，避免各处 PE 解析不一致（例如 `e_lfanew` 大于 128 时旧解析越界）。从版本库引擎取件时，`runtime.json` 与 `voice/engine.json` 会写入 `version`／`source`，打包前再与 `engine.json` 核对版本和 SHA-256，不一致直接拒绝打包，防止工作副本残留或误用旧版本引擎。校验只针对当前打包平台，不跨平台比较版本。可单独预检：`node desktop/hex-engine-manifest.mjs --check . windows-x86_64`。
-
-`.gitattributes` 已把该目录标记为 `binary`，禁止文本／换行转换；打包前自举会核对 `engine.json` 的 SHA-256，不一致立即报错。二进制约 60–70 MB，升级时留意仓库体积。
-
-两个平台都不需要 Rust／CMake／MSVC／Vulkan SDK：仓库曾内置 Hex 上游源码（3.2.0）并本地编译，Windows 侧依赖 MSVC 与 Vulkan 后端、macOS 侧依赖 Apple SDK 与 SwiftPM 沙箱，编译门槛高且产物版本落后于官方发布；该源码目录已移除，打包统一取用官方预编译 3.3.0。打包时 `prepare-voice.mjs` 会把版本库引擎复制到 `harness/resources/hex/<tag>/hex`（运行时查找路径由 `harness` 核心代码决定，保持不变），因此本地无需任何引擎编译工具链。macOS 仍需 Xcode 命令行工具，但那只是用 `swiftc` 编译原生输入辅助程序 `desktop/voice-native.swift`，与引擎无关。
+`HARNESS_HEX_BINARY` 可显式覆盖本次打包来源，只替换安装暂存目录，不改写版本库资源。目录约定、已登记平台、升级脚本与清单校验命令统一见 [Hex 资源说明](../harness/resources/hex/README.md)。macOS 仍需 `swiftc` 编译原生输入辅助程序 `desktop/voice-native.swift`。
 
 ### 构建环境自举与已知踩坑
 
@@ -188,7 +164,7 @@ Windows 的 GitHub 分支仍由用户选择打开官方 EXE 下载地址，下�
 
 ## 自动构建与发布位置
 
-当前私有仓库暂停 Actions，不要求启用远端 CI。`.github/workflows/desktop-build.yml` 保留为未来恢复时的手动模板，只有 `workflow_dispatch` 入口，不由标签触发。**两个平台都直接使用随版本库分发的 `desktop/hex-engine/<平台>-<架构>/`（官方 3.3.0），不执行 `cargo build`、不设置 `HARNESS_HEX_BINARY`，也不需要 Rust／CMake／MSVC／Vulkan SDK**；打包前先运行 `hex-engine-manifest.mjs --check` 核对引擎清单。官方 v3.3.0 未提供 macOS x64 资产，故 macOS Intel 目标暂不在矩阵内；官方日后提供时登记 `desktop/hex-engine/macos-x86_64/` 即可恢复。当前不执行安装包冒烟，模板未因此被视为跨平台实机验收。工作流只上传 Actions artifacts，不创建 Release 或发布外部资产。
+当前私有仓库暂停 Actions，不要求启用远端 CI。`.github/workflows/desktop-build.yml` 保留为未来恢复时的手动模板，只有 `workflow_dispatch` 入口，不由标签触发。**两个平台都直接使用随版本库分发的 `harness/resources/hex/<平台>-<架构>/`（官方 3.3.0），不执行 `cargo build`、不设置 `HARNESS_HEX_BINARY`，也不需要 Rust／CMake／MSVC／Vulkan SDK**；打包前先运行 `hex-engine-manifest.mjs --check` 核对引擎清单。官方 v3.3.0 未提供 macOS x64 资产，故 macOS Intel 目标暂不在矩阵内；官方日后提供时登记 `harness/resources/hex/macos-x86_64/` 即可恢复。当前不执行安装包冒烟，模板未因此被视为跨平台实机验收。工作流只上传 Actions artifacts，不创建 Release 或发布外部资产。
 
 汇总器 `release-assets.mjs` 接受包含各平台子目录的输入，要求同一稳定版本、Windows x64 的 EXE、Mac arm64 的 DMG 和 ZIP，以及每个安装文件的 blockmap。核对清单中的大小、SHA-512 和复制后的字节，合并 Mac `latest-mac.yml`，并生成覆盖安装文件与 blockmap 的 `SHA512SUMS`；缺失、冲突或混入其他版本立即失败。输出目录必须为空，不能覆盖旧发布目录。恢复工作流后，其 `Harness-release-assets` artifact 使用同一汇总器。这些是本地／工作流核对产物；当前 GitHub 发布只上传安装包，客户端不依赖该汇总目录的清单或 ZIP。
 
