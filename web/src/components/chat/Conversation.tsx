@@ -628,7 +628,7 @@ export function Conversation({
                       onClick={event => { holdDisclosure(row.id, event.currentTarget); setToolRunState(current => ({ sessionId, values: { ...(current.sessionId === sessionId ? current.values : {}), [row.id]: !row.open } })) }}
                       className="activity-summary conversation-activity bg-raised/40">
                       {row.thoughts === row.count && !row.running ? <Brain aria-hidden className="h-4 w-4 shrink-0" /> : <ToolActivityIcon kind={row.activityKind} running={!!row.running} failed={!!row.failed} className={cn('h-4 w-4 shrink-0', row.failed && 'text-danger')} />}
-                      <span className="min-w-0 flex-1">
+                      <span className="min-w-0">
                         <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                           <span className="min-w-0 break-words font-medium">{row.label}</span>
                           <span className="min-w-0 break-words text-xs text-faint">{row.summary}</span>

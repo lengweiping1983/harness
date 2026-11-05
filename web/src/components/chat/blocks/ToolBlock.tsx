@@ -79,8 +79,8 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
       >
         <ToolActivityIcon kind={activity.kind} name={block.name} running={running} skipped={skipped} failed={failed} />
         <span className="min-w-0 max-w-full truncate" title={activity.label}>{images.length && block.status !== 'running' ? t(block.status === 'error' ? 'ui.toolBlock.imagesPartial' : 'ui.toolBlock.imagesViewed', {count: images.length}) : activity.label}</span>
-        {activity.detail ? <span className={cn('min-w-0 truncate text-faint', !isWidget && 'flex-1')} title={activity.detail}>{activity.detail}</span> : null}
-        <ChevronRight aria-hidden className={cn('h-3.5 w-3.5 shrink-0 text-faint transition-transform duration-200', !isWidget && 'ml-auto', open && 'rotate-90')} />
+        {activity.detail ? <span className="min-w-0 truncate text-faint" title={activity.detail}>{activity.detail}</span> : null}
+        <ChevronRight aria-hidden className={cn('h-3.5 w-3.5 shrink-0 text-faint transition-transform duration-200', open && 'rotate-90')} />
       </button>
 
       {todoIssue ? <div role="note" className="ml-5 mb-2 space-y-1 rounded-md border border-line bg-raised p-3 text-xs leading-reading">

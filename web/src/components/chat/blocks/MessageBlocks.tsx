@@ -352,7 +352,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ block }: { block: Thi
         {block.author && <AgentAvatar src={teamAuthorAvatar(block.author, sessionId)} name={block.author.display_name} className="h-5 w-5 rounded-full text-2xs" />}
         {block.speaker && !block.author && <><AgentAvatar src={agentSpeakerAvatar(block.speaker, sessionId)} name={block.speaker.display_name} className="h-5 w-5 rounded-full text-2xs" /><span>{block.speaker.display_name}</span></>}
         <Brain aria-hidden className="h-4 w-4 shrink-0 text-brand" />
-        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
           <span>{t("ui.components.chat.blocks.MessageBlocks.a62acb184f47")}</span>
           {block.partial ? <span className="text-faint">{t("ui.components.chat.blocks.MessageBlocks.9f76fd20a5ba")}</span> : null}
           {streaming ? (
