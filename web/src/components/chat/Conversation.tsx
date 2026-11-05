@@ -623,18 +623,22 @@ export function Conversation({
                   )
                 }
                 if (row.kind === 'tool-run') {
-                  return <div key={row.id} data-index={item.index} data-row-id={row.id} data-anchor-row="" data-tool-run-turn={row.turn} ref={restoreSettled ? virtualizer.measureElement : undefined} className="py-1">
+                  return <div key={row.id} data-index={item.index} data-row-id={row.id} data-anchor-row="" data-tool-run-turn={row.turn} ref={restoreSettled ? virtualizer.measureElement : undefined}>
                     <button type="button" aria-expanded={row.open} aria-label={t("ui.components.chat.Conversation.114bc8bcfc39", {p0: (row.summary)})} title={t("ui.components.chat.Conversation.4203e873a132")}
                       onClick={event => { holdDisclosure(row.id, event.currentTarget); setToolRunState(current => ({ sessionId, values: { ...(current.sessionId === sessionId ? current.values : {}), [row.id]: !row.open } })) }}
-                      className="activity-summary flex-wrap gap-y-1">
+                      className="activity-summary conversation-activity bg-raised/40">
                       {row.thoughts === row.count && !row.running ? <Brain aria-hidden className="h-4 w-4 shrink-0" /> : <ToolActivityIcon kind={row.activityKind} running={!!row.running} failed={!!row.failed} className={cn('h-4 w-4 shrink-0', row.failed && 'text-danger')} />}
-                      <span className="min-w-0 break-words">{row.label}</span>
-                      <span className="min-w-0 break-words text-faint">{row.summary}</span>
-                      <ChevronRight aria-hidden className={cn('h-3.5 w-3.5 shrink-0 transition-transform', row.open && 'rotate-90')} />
-                      {(row.running || row.failed || row.skipped || row.background) ? <span className="ml-5 flex w-full flex-wrap gap-x-2 text-2xs">
-                        {row.running ? <span>{t("ui.components.chat.Conversation.dc9591e56d50")}{row.running}</span> : null}{row.failed ? <span className="text-danger">{t("ui.components.chat.Conversation.28384d7afd2e")}{row.failed}</span> : null}
-                        {row.skipped ? <span>{t("ui.components.chat.Conversation.71e95b289aad")}{row.skipped}</span> : null}{row.background ? <span>{t("ui.components.chat.Conversation.baecf258a042")}{row.background}</span> : null}
-                      </span> : null}
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                          <span className="min-w-0 break-words font-medium">{row.label}</span>
+                          <span className="min-w-0 break-words text-xs text-faint">{row.summary}</span>
+                        </span>
+                        {(row.running || row.failed || row.skipped || row.background) ? <span className="flex flex-wrap gap-x-2 text-2xs">
+                          {row.running ? <span>{t("ui.components.chat.Conversation.dc9591e56d50")}{row.running}</span> : null}{row.failed ? <span className="text-danger">{t("ui.components.chat.Conversation.28384d7afd2e")}{row.failed}</span> : null}
+                          {row.skipped ? <span>{t("ui.components.chat.Conversation.71e95b289aad")}{row.skipped}</span> : null}{row.background ? <span>{t("ui.components.chat.Conversation.baecf258a042")}{row.background}</span> : null}
+                        </span> : null}
+                      </span>
+                      <ChevronRight aria-hidden className={cn('h-3.5 w-3.5 shrink-0 transition-transform duration-200', row.open && 'rotate-90')} />
                     </button>
                   </div>
                 }
@@ -660,7 +664,7 @@ export function Conversation({
                     data-row-id={row.id}
                     data-anchor-row={row.kind === 'block' ? '' : undefined}
                     ref={restoreSettled ? virtualizer.measureElement : undefined}
-                    className={cn(row.kind === 'block' && (row.block.kind === 'tool' || row.block.kind === 'assistant') ? 'py-0.5' : row.kind === 'block' && row.block.kind === 'thinking' ? 'py-1' : 'py-1.5')}
+                    className={cn(row.kind === 'block' && (row.block.kind === 'thinking' || row.block.kind === 'tool' && row.block.name !== 'show_widget') ? 'py-0' : row.kind === 'block' && (row.block.kind === 'tool' || row.block.kind === 'assistant') ? 'py-0.5' : 'py-1.5')}
                   >
                     {row.kind === 'changes' ? <FileChangesCard id={row.id} files={row.files} sessionId={sessionId} turn={row.turn} pending={row.pending} /> : <MessageRow block={row.block} context={context} hideActions={row.block.kind === 'assistant' && row.block.turn !== undefined && turns[row.block.turn]?.reason === 'completed' && turns[row.block.turn]?.endSeq !== undefined && row.block.sourceSeq === turns[row.block.turn]?.finalResponseSeq} />}
                   </div>

@@ -348,18 +348,20 @@ export const ThinkingBlock = memo(function ThinkingBlock({ block }: { block: Thi
       className="group animate-fade-in"
       open={open}
     >
-      <summary onClick={(event) => { event.preventDefault(); toggle() }} className="activity-summary cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+      <summary onClick={(event) => { event.preventDefault(); toggle() }} className="activity-summary conversation-activity cursor-pointer list-none [&::-webkit-details-marker]:hidden">
         {block.author && <AgentAvatar src={teamAuthorAvatar(block.author, sessionId)} name={block.author.display_name} className="h-5 w-5 rounded-full text-2xs" />}
         {block.speaker && !block.author && <><AgentAvatar src={agentSpeakerAvatar(block.speaker, sessionId)} name={block.speaker.display_name} className="h-5 w-5 rounded-full text-2xs" /><span>{block.speaker.display_name}</span></>}
-        <Brain aria-hidden className="h-3.5 w-3.5 shrink-0 text-brand" />
-        <span>{t("ui.components.chat.blocks.MessageBlocks.a62acb184f47")}</span>
-        {block.partial ? <span className="text-faint">{t("ui.components.chat.blocks.MessageBlocks.9f76fd20a5ba")}</span> : null}
-        {streaming ? (
-          <span className="inline-flex items-center gap-1 text-brand">
-            <Dots />
-            <span>{t("ui.components.chat.blocks.MessageBlocks.dc9591e56d50")}</span>
-          </span>
-        ) : null}
+        <Brain aria-hidden className="h-4 w-4 shrink-0 text-brand" />
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span>{t("ui.components.chat.blocks.MessageBlocks.a62acb184f47")}</span>
+          {block.partial ? <span className="text-faint">{t("ui.components.chat.blocks.MessageBlocks.9f76fd20a5ba")}</span> : null}
+          {streaming ? (
+            <span className="inline-flex items-center gap-1 text-brand">
+              <Dots />
+              <span>{t("ui.components.chat.blocks.MessageBlocks.dc9591e56d50")}</span>
+            </span>
+          ) : null}
+        </span>
         <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-faint transition-transform duration-200 group-open:rotate-90" />
       </summary>
       <div className="ml-5 border-l border-line py-3 pl-4">

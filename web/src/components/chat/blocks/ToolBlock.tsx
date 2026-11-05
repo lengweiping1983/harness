@@ -75,12 +75,12 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
         onClick={toggle}
         aria-expanded={open}
         aria-controls={detailId}
-        className={cn('flex min-h-8 w-full items-center gap-2 rounded-md px-1 py-1 text-left text-compact leading-5 focus-visible:outline-brand', open && 'font-medium text-ink', failed && !skipped ? 'text-danger' : 'text-muted')}
+        className={cn(isWidget ? 'flex min-h-8 w-full items-center gap-2 rounded-md px-1 py-1 text-left text-compact leading-5 focus-visible:outline-brand' : 'conversation-activity', open && 'font-medium text-ink', failed && !skipped ? 'text-danger' : 'text-muted hover:text-ink')}
       >
         <ToolActivityIcon kind={activity.kind} name={block.name} running={running} skipped={skipped} failed={failed} />
         <span className="min-w-0 max-w-full truncate" title={activity.label}>{images.length && block.status !== 'running' ? t(block.status === 'error' ? 'ui.toolBlock.imagesPartial' : 'ui.toolBlock.imagesViewed', {count: images.length}) : activity.label}</span>
         {activity.detail ? <span className={cn('min-w-0 truncate text-faint', !isWidget && 'flex-1')} title={activity.detail}>{activity.detail}</span> : null}
-        <ChevronRight aria-hidden className={cn('h-3 w-3 shrink-0 text-faint', !isWidget && 'ml-auto', open && 'rotate-90')} />
+        <ChevronRight aria-hidden className={cn('h-3.5 w-3.5 shrink-0 text-faint transition-transform duration-200', !isWidget && 'ml-auto', open && 'rotate-90')} />
       </button>
 
       {todoIssue ? <div role="note" className="ml-5 mb-2 space-y-1 rounded-md border border-line bg-raised p-3 text-xs leading-reading">

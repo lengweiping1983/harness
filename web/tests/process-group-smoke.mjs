@@ -45,6 +45,20 @@ await browserScenario(async({server,browser})=>{
   const thought=page.locator('[data-row-id="thought-0"] details')
   await thought.waitFor()
   assert.equal(await thought.evaluate(node=>node.open),false)
+  const layout=await page.evaluate(()=>{
+   const controls=['thought-0','tool-0','thought-1','tool-1'].map(id=>document.querySelector(`[data-row-id="${id}"] .conversation-activity`))
+   return controls.map(node=>{
+    const row=node.closest('[data-row-id]'),rect=node.getBoundingClientRect(),rowRect=row.getBoundingClientRect()
+    const arrow=node.querySelector('.lucide-chevron-right').getBoundingClientRect()
+    return {top:rect.top,bottom:rect.bottom,height:rect.height,outer:rowRect.height-rect.height,right:rect.right-arrow.right}
+   })
+  })
+  for(const [index,row] of layout.entries()){
+   assert.ok(row.height>=24&&row.height<=28.5,`Compact activity hit area: ${row.height}`)
+   assert.ok(Math.abs(row.outer)<0.5,`Repeated vertical padding: ${row.outer}`)
+   assert.ok(row.right>=3&&row.right<=5,`Disclosure arrow must align with the right inset: ${row.right}`)
+   if(index)assert.ok(Math.abs(row.top-layout[index-1].bottom)<0.5,'Adjacent process rows must not leave blank bands')
+  }
   await thought.locator('summary').focus();await page.keyboard.press('Enter')
   await page.waitForFunction(()=>document.querySelector('[data-row-id="thought-0"] details')?.open===true)
   assert.equal(await thought.locator('.md').textContent(),'原'.repeat(299))
