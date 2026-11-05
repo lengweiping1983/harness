@@ -382,6 +382,8 @@ python -m venv .run/semantic-eval
 
 MCP 服务及隧道准备的自有错误用 `McpServiceError` 保存资源键和参数，状态接口读取时按当前语言解析；普通异常诊断保留原文，即使恰好与产品文案相同也不反向匹配。启动线程继承本次调用上下文，线程创建失败明确进入失败状态。`tests/test_mcp_service_resource_identity.py` 覆盖真实启动线程的语言、状态序列化、原文边界、意外退出仅回收一次及线程启动失败，使用隔离目录和故障屏障，不启动进程或下载依赖。
 
+`tests/test_mcp_named_tunnel.py` 的配置保存回归通过实际管理路由与隔离目录核对独立保存、实例重建、免重填启动、遮罩、运行中拒绝及损坏原件保留；托管启动使用真实登录凭据存储与服务替身核对密码复用。`McpServicePanel.test.tsx` 调用实际组件事件和共享 HTTP 传输，核对保存、重开回填、空令牌复用和同实例英中英错误呈现，不代表浏览器布局验收。
+
 `tests/test_preset_skill_resource_identity.py` 验证四个预设与已持有摘要视图按显式键反复切换语言、安装参数嵌套副本隔离、外部原文恰等于产品文案时不被翻译，以及可选系统发现路径下的技能目录/加载/网页投影保持原文。真实 Harness 安装仅使用临时目录，核对首次配套技能模板及重装不覆盖用户编辑，不连接远端服务。
 
 工具分类保存显式资源键，分类名称在目录读取时解析；未被当前目录或图标消费链使用的分类 hint 已移除。工具标题保持注册原值，不按文案内容或执行函数模块推断翻译所有权。`tests/test_tool_catalog_resource_identity.py` 验证同一分类实例反复切换语言，以及标题恰等于产品文案时仍保持原文；工具名和分类 ID 不变。其中后台任务工具经 `tool_catalog` 输出集合名称“后台任务 / Background tasks”，英中英回归核对三个公开工具与后台任务面板使用同一名称，保留术语一致性检查。
@@ -397,6 +399,8 @@ MCP 服务及隧道准备的自有错误用 `McpServiceError` 保存资源键和
 ## 独立执行器语言回归
 
 `tests/test_execution_pipeline.py` 使用隔离项目、真实进程与持久回执验证顺序执行、失败停止、图片交付后自动接续、技能变化、取消和重启恢复；`tests/test_chat_companion.py` 验证普通聊天回环桥的归属、只读状态、配对、诊断及持久发送意图。`test_chat_companion_package.py` 核对交付 ZIP 根清单、双语说明、源字节、逐文件摘要及确定性输出。`chatgpt-companion.test.mjs` 核对扩展后台防重发、一次生成与交付、等待原因及连续空闲重置，`chatgpt-companion-client.test.mjs` 区分传输、配对、服务拒绝与损坏响应；`chatgpt-companion-smoke.mjs` 通过真实浏览器及受控 DOM 核对发送回执、纯图片身份、草稿、附件、输入法和页面变化，并覆盖无旧消息标记的登录态角色标题、动态提交按钮、隐藏 composer 及发送前附件变更。`chatgpt-companion-extension-smoke.mjs` 加载实际交付 ZIP 解压后的 Manifest V3 扩展，使用登录态结构夹具验证配对拒绝、连接恢复、停止、明暗主题及语言往返，受控挂起旧语言读取、设置读取、连接诊断和绑定响应，核对当前界面及停止状态不被迟到结果覆盖。它们不连接外部 ChatGPT 账户，不能证明当前站点适配和原生图片交付可用；实际客户端验收边界见 [网页开发与自动接续](chatgpt-development.md)。
+
+接续桥的 `claim` 在所有阶段及英中英调用中只生成“继续”；唯一编号独立持久化。页面适配器曾依赖消息包含正文确认发送，短正文会命中历史消息；`chatgpt-companion-send.test.mjs` 以受控节点核对新增消息、精确正文和角色标题排除，`chatgpt-companion.test.mjs` 核对未知结果即使存在历史同文消息也暂停，仅补交本机已确认的同编号回执。桥的针对性回归另覆盖已证实未发送意图显式重试时采用当前短正文，保持原意图编号，不改写未知结果。
 
 独立执行器配置支持 `language: auto | zh-CN | en`（默认 auto），MCP 初始化说明、目录与调用处理在服务创建时绑定解析后的配置语言，异步任务继承该上下文，处理结束恢复外层上下文。`tests/test_executor_language_binding.py` 验证配置读写边界、初始化与两个协议入口。
 

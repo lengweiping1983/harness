@@ -7599,10 +7599,7 @@
   "execution.companion.launch.port_occupied": "端口 {port} 已被其他服务占用，未停止或覆盖现有进程。",
   "execution.companion.launch.starting": "正在使用配置 {config} 启动本机接续桥（端口 {port}）。",
   "execution.companion.launch.key_invalid": "本机接续桥配对码文件无效；原文件未修改，请检查执行器运行目录。",
-  "execution.companion.prompt": "[Harness 自动接续 {marker}] 请继续本聊天中当前已授权的开发目标。先调用 harness_session_resume，session_id={sid}。{action}依据已保存检查点和真实回执继续；不要重放结果不明的写入或命令。缺少工具或审批时明确报告具体阻塞。目标完成后核对当前输入并使用 harness_finalize，不要为了持续运行而另造任务。",
-  "execution.companion.phase.continue": "检查最新输出，执行有依据的下一步；已确认失败时先定位再修改代码。",
-  "execution.companion.phase.generate": "检查待处理图片需求，使用 ChatGPT 原生生图，再通过 harness_image_deliver 交付真实文件。生成图片不等于已交付文件。",
-  "execution.companion.phase.deliver": "本聊天中观察到新的助手图片。先确认它符合待处理需求，再通过 harness_image_deliver 交付该真实文件并继续。不要编造文件地址，也不要仅因尚未交付就重复生图。",
+  "execution.companion.prompt": "继续",
   "ui.academy.quickCheck": "做个小自测",
   "ui.academy.notesDisclosure": "记下我的发现",
   "ui.academy.feedbackDisclosure": "获取详细点评",
@@ -8548,5 +8545,9 @@
   "ui.providers.catalogUnavailable": "模型目录读取失败：{reason}。已保存的模型仍可编辑或移除。",
   "ui.providers.modelNotInCatalog": "暂未出现在可用模型目录中。",
   "ui.sidebar.projectsRetrying": "正在重新读取项目…",
-  "ui.sidebar.retryProjects": "重试读取项目"
+  "ui.sidebar.retryProjects": "重试读取项目",
+  "ui.mcpService.save": "保存配置",
+  "ui.mcpService.saved": "配置已保存，下次直接启动即可。",
+  "ui.mcpService.savedHint": "启动时自动保存配置；已保存的令牌和登录密码会继续使用。",
+  "ui.mcpService.error.configureRunning": "请先停止 MCP 服务，再保存配置。"
 }

@@ -99,7 +99,7 @@ class Companion:
                     or not isinstance(row[2], str) or not re.fullmatch(r'[0-9a-f]{64}', row[2])
                     or row[3] not in {'continue', 'generate', 'deliver'}
                     or row[4] not in {'dispatching', 'confirmed', 'not_sent'}
-                    or not isinstance(row[5], str) or row[0] not in row[5]
+                    or not isinstance(row[5], str) or not row[5]
                     or type(row[6]) not in (int, float) or not math.isfinite(row[6])):
                 raise ValueError(tr('execution.store.invalid_record'))
 
@@ -251,8 +251,7 @@ class Companion:
             if phase not in {'continue', 'generate', 'deliver'} or (state['state'] == 'image') != (phase in {'generate', 'deliver'}):
                 raise ValueError(tr('execution.companion.invalid'))
             dispatch = secrets.token_hex(16)
-            prompt = tr('execution.companion.prompt', marker=dispatch, sid=state['session_id'],
-                        action=tr('execution.companion.phase.' + phase))
+            prompt = tr('execution.companion.prompt')
             with self.database() as db, db:
                 count = db.execute('SELECT COUNT(*) FROM dispatches WHERE binding_id=?', (binding,)).fetchone()[0]
                 if count >= 100:
@@ -262,8 +261,8 @@ class Companion:
                 if existing:
                     if existing[2] != 'not_sent':
                         raise ValueError(tr('execution.companion.changed'))
-                    dispatch, prompt = existing[:2]
-                    db.execute("UPDATE dispatches SET status='dispatching' WHERE id=?", (dispatch,))
+                    dispatch = existing[0]
+                    db.execute("UPDATE dispatches SET status='dispatching',prompt=? WHERE id=?", (prompt, dispatch))
                 else:
                     db.execute('INSERT INTO dispatches VALUES(?,?,?,?,?,?,?)', (dispatch, binding, milestone, phase, 'dispatching', prompt, time.time()))
             return {'id': dispatch, 'prompt': prompt}

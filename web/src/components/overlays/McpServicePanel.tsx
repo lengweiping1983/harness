@@ -4,7 +4,7 @@ import { usePageVisible } from '@/hooks/usePageVisible'
 import { useEffect, useRef, useState } from 'react'
 import { Copy, Eye, EyeOff } from 'lucide-react'
 import { t, useLocale } from '@/i18n'
-import { mcpServicePassword, mcpServiceStart, mcpServiceStatus, mcpServiceStop, type McpServiceState } from '@/lib/api'
+import { mcpServiceConfigure, mcpServicePassword, mcpServiceStart, mcpServiceStatus, mcpServiceStop, type McpServiceState } from '@/lib/api'
 import { Button } from '@/components/ui/primitives'
 import {McpCompanionPanel} from './McpCompanionPanel'
 
@@ -64,14 +64,15 @@ export function McpServicePanel() {
     return () => { controller.abort(); clearTimeout(timer) }
   }, [visible])
 
-  async function change(start: boolean) {
+  async function change(action: 'start' | 'stop' | 'save') {
     if (working.current) return
     working.current = true
     setBusy(true); setError(''); setReadError(''); setNotice(''); setPassword(''); generation.current++
     try {
-      const result = await (start ? mcpServiceStart({mode, public_url: publicUrl, origin_port: Number(originPort), ...(token ? {token} : {})}) : mcpServiceStop())
+      const settings = {mode, public_url: publicUrl, origin_port: Number(originPort), ...(token ? {token} : {})}
+      const result = await (action === 'stop' ? mcpServiceStop() : action === 'save' ? mcpServiceConfigure(settings) : mcpServiceStart(settings))
       if (!mounted.current) return
-      if (result.ok) { edited.current = false; setToken(''); hydrate(result.data); setState(result.data); setWorkspaces(result.data.workspaces || []) }
+      if (result.ok) { edited.current = false; setToken(''); hydrate(result.data); setState(result.data); if (result.data.workspaces) setWorkspaces(result.data.workspaces); if (action === 'save') setNotice({key: 'ui.mcpService.saved'}) }
       else setError(result.copy ?? result.message)
     } finally { working.current = false; if (mounted.current) setBusy(false) }
   }
@@ -116,11 +117,15 @@ export function McpServicePanel() {
           {!state?.tunnel?.has_token && <p className="text-xs leading-relaxed text-muted">{t('ui.mcpService.tokenPrivate')}</p>}
         </>}
       </fieldset>
+      <p className="text-xs text-muted">{t('ui.mcpService.savedHint')}</p>
       {cooling && <p role="status" className="text-sm text-warn">{t('ui.mcpService.cooldown')}</p>}
       {state?.reconnecting && <p role="status" className="text-sm text-warn">{t('ui.mcpService.reconnecting')}</p>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span role="status" className="text-sm text-muted">{state ? t(state.status === 'starting' && state.tunnel?.mode === 'named' ? 'ui.mcpService.startingNamed' : statusKeys[state.status]) : t('ui.mcpService.loading')}</span>
-        <Button size="sm" variant={running ? 'secondary' : 'primary'} disabled={!state || busy || state.status === 'stopping' || (!running && state.status !== 'starting' && cooling)} loading={busy || state?.status === 'stopping'} onClick={() => void change(!(running || state?.status === 'starting'))}>{running || state?.status === 'starting' ? t('ui.mcpService.stop') : t('ui.mcpService.start')}</Button>
+        <div className="flex flex-wrap gap-2">
+          {!running && <Button size="sm" variant="secondary" disabled={!state || changing} onClick={() => void change('save')}>{t('ui.mcpService.save')}</Button>}
+          <Button size="sm" variant={running ? 'secondary' : 'primary'} disabled={!state || busy || state.status === 'stopping' || (!running && state.status !== 'starting' && cooling)} loading={busy || state?.status === 'stopping'} onClick={() => void change(running || state?.status === 'starting' ? 'stop' : 'start')}>{running || state?.status === 'starting' ? t('ui.mcpService.stop') : t('ui.mcpService.start')}</Button>
+        </div>
       </div>
       {running && <div className="space-y-4">
         {([['ui.mcpService.local', state.local_url], [state.tunnel?.mode === 'named' ? 'ui.mcpService.publicNamed' : 'ui.mcpService.public', state.public_url]] as const).map(([label, url]) => <div key={label}><p className="mb-2 text-sm font-medium text-ink">{t(label)}</p><div className="flex items-center gap-2"><input aria-label={t(label)} readOnly value={url} className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" /><Button size="sm" variant="secondary" onClick={() => void copy(url)} aria-label={t('ui.mcpService.copyAddress')}><Copy size={14} />{t('ui.mcpService.copy')}</Button></div></div>)}

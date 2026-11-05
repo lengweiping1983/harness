@@ -7599,10 +7599,7 @@
   "execution.companion.launch.port_occupied": "Port {port} is occupied by another service; no process was stopped or replaced.",
   "execution.companion.launch.starting": "Starting the local companion with {config} on port {port}.",
   "execution.companion.launch.key_invalid": "The local companion pairing file is invalid; the original file was not changed. Check the executor home.",
-  "execution.companion.prompt": "[Harness continuation {marker}] Continue the current authorized development goal in this chat. First call harness_session_resume with session_id={sid}. {action} Use the saved checkpoint and actual receipts. Do not replay uncertain writes or commands. If a tool or approval is unavailable, report the specific blocker. When the goal is achieved, verify current inputs and use harness_finalize; do not create work merely to keep running.",
-  "execution.companion.phase.continue": "Inspect the latest output and continue the next justified step. Diagnose known failures before changing code.",
-  "execution.companion.phase.generate": "Inspect the pending image request. Use ChatGPT native image generation, then deliver the real file through harness_image_deliver. Generating an image is not proof of file delivery.",
-  "execution.companion.phase.deliver": "A new assistant image was observed in this chat. Confirm it matches the pending request, then deliver that actual file through harness_image_deliver and continue. Do not fabricate a file URL or generate another image solely because delivery is pending.",
+  "execution.companion.prompt": "继续",
   "ui.academy.quickCheck": "Check your understanding",
   "ui.academy.notesDisclosure": "Record your observation",
   "ui.academy.feedbackDisclosure": "Get detailed feedback",
@@ -8548,5 +8545,9 @@
   "ui.providers.catalogUnavailable": "Could not read the model catalog: {reason}. Saved models can still be edited or removed.",
   "ui.providers.modelNotInCatalog": "Not currently listed in the available model catalog.",
   "ui.sidebar.projectsRetrying": "Reading projects again…",
-  "ui.sidebar.retryProjects": "Retry reading projects"
+  "ui.sidebar.retryProjects": "Retry reading projects",
+  "ui.mcpService.save": "Save settings",
+  "ui.mcpService.saved": "Settings saved. Next time, just start the server.",
+  "ui.mcpService.savedHint": "Starting saves settings automatically. Saved tokens and the login password are reused.",
+  "ui.mcpService.error.configureRunning": "Stop the MCP server before saving settings."
 }

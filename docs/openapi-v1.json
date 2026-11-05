@@ -5434,6 +5434,62 @@
         ]
       }
     },
+    "/api/v1/mcp-service/tunnel": {
+      "post": {
+        "operationId": "post_api_v1_mcp_service_tunnel",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServiceState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpTunnelSettings"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/mcp-service/password": {
       "post": {
         "operationId": "post_api_v1_mcp_service_password",

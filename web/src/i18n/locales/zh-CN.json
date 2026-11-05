@@ -4973,5 +4973,9 @@
   "ui.providers.catalogUnavailable": "模型目录读取失败：{reason}。已保存的模型仍可编辑或移除。",
   "ui.providers.modelNotInCatalog": "暂未出现在可用模型目录中。",
   "ui.sidebar.projectsRetrying": "正在重新读取项目…",
-  "ui.sidebar.retryProjects": "重试读取项目"
+  "ui.sidebar.retryProjects": "重试读取项目",
+  "ui.mcpService.save": "保存配置",
+  "ui.mcpService.saved": "配置已保存，下次直接启动即可。",
+  "ui.mcpService.savedHint": "启动时自动保存配置；已保存的令牌和登录密码会继续使用。",
+  "ui.mcpService.error.configureRunning": "请先停止 MCP 服务，再保存配置。"
 }

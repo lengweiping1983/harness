@@ -18,6 +18,93 @@ class NamedTunnelTests(unittest.TestCase):
     def settings(self, port=18765):
         return {'mode': 'named', 'public_url': 'https://mcp.example.test', 'origin_port': port, 'token': 'private-fixture-token'}
 
+    def test_saved_settings_survive_recreation_and_start_without_reentering_secrets(self):
+        for mode in ('quick', 'named'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                project = root / 'project'
+                project.mkdir()
+                service = McpService(root / 'private')
+                settings = {**self.settings(), 'mode': mode}
+                with patch.object(service, '_spawn') as spawn:
+                    saved = service.configure_tunnel(settings)
+                    spawn.assert_not_called()
+                self.assertEqual(saved['status'], 'stopped')
+                self.assertEqual(saved['tunnel']['mode'], mode)
+                self.assertEqual(saved['tunnel']['public_url'], settings['public_url'])
+                self.assertTrue(saved['tunnel']['token_mask'])
+                self.assertNotIn(settings['token'], json.dumps(saved))
+                recreated = McpService(root / 'private')
+                self.assertEqual(recreated.snapshot()['tunnel'], saved['tunnel'])
+                recreated.configure_tunnel({**settings, 'token': ''})
+                launched = []
+                try:
+                    with patch.object(recreated, '_launch', side_effect=lambda *args: launched.append(recreated._launch_tunnel)):
+                        recreated.start(project)
+                        recreated._thread.join(timeout=3)
+                        self.assertFalse(recreated._thread.is_alive())
+                    self.assertEqual(launched, [settings])
+                    recreated.stop()
+                    self.assertEqual(read_tunnel(service.home / 'tunnel.json')[0], settings)
+                finally:
+                    recreated.stop()
+
+    def test_saving_settings_is_local_only_and_rejects_running_or_corrupt_configuration(self):
+        from types import SimpleNamespace
+        from harness.web.api.mcp_service import build_router
+        from harness.web.errors import ApiError, BadRequest
+        from harness.web.router import Request
+        with tempfile.TemporaryDirectory() as directory:
+            service = McpService(directory)
+            ctx = SimpleNamespace(mcp_service=service)
+            handler, params = build_router(ctx).resolve('POST', '/api/v1/mcp-service/tunnel')
+            def request(host='localhost:8765'):
+                return Request('POST', '/api/v1/mcp-service/tunnel', {}, {'Host': host}, json.dumps(self.settings()).encode(), client_ip='127.0.0.1')
+            with self.assertRaises(ApiError):
+                handler(request('foreign.example'), **params)
+            self.assertFalse(service.home.exists())
+            response = handler(request(), **params)
+            self.assertEqual(response.headers['Cache-Control'], 'no-store')
+            self.assertNotIn(self.settings()['token'], response.body.decode())
+            path = service.home / 'tunnel.json'
+            original = path.read_bytes()
+            for status in ('starting', 'running', 'stopping'):
+                service._state['status'] = status
+                with self.assertRaises(BadRequest) as caught:
+                    handler(request(), **params)
+                self.assertEqual(caught.exception.details['copy']['key'], 'ui.mcpService.error.configureRunning')
+                self.assertEqual(path.read_bytes(), original)
+            service._state['status'] = 'stopped'
+            path.write_bytes(b'corrupt original')
+            with self.assertRaises(BadRequest):
+                handler(request(), **params)
+            self.assertEqual(path.read_bytes(), b'corrupt original')
+
+    def test_managed_restart_reuses_the_original_login_password(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from harness.execution.config import ExecutionConfig, ProjectConfig
+        from harness.mcp_server.auth import LocalOAuthProvider
+        from harness.mcp_server.managed import _run
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / 'project'
+            project.mkdir()
+            config = ExecutionConfig(Path(directory) / 'state', {'project': ProjectConfig(project)})
+            args = SimpleNamespace(public_url='https://mcp.example.test', port=18765, local_port=18766)
+            server = SimpleNamespace(started=True, serve=AsyncMock())
+            with patch('harness.mcp_server.server.create_http_app'), patch('uvicorn.Server', return_value=server), patch('threading.Thread'):
+                _run(config, args)
+                secret = config.home.parent / 'password.json'
+                original = secret.read_bytes()
+                password = json.loads(original)['password']
+                with patch.object(LocalOAuthProvider, 'initialize_login', side_effect=AssertionError('must reuse saved password')):
+                    _run(config, args)
+                self.assertEqual(secret.read_bytes(), original)
+                service = McpService(Path(directory).parent)
+                service.home = config.home.parent
+                with patch.object(service, 'snapshot', return_value={'status': 'running'}):
+                    self.assertEqual(service.password(), password)
+
     def test_current_configuration_is_strict_and_secrets_are_not_public(self):
         valid = self.settings()
         for key, values in {'mode': ['invalid', None], 'public_url': ['http://mcp.example.test', 'https://user:password@mcp.example.test', 'https://mcp.example.test/mcp', 'https://mcp.example.test?x=1'], 'origin_port': [True, '18765', 0, 65536], 'token': ['a b', None]}.items():

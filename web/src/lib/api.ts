@@ -40,15 +40,17 @@ import type {McpTunnelSettings, McpServiceState} from './protocol.generated'
 export type {McpServiceState} from './protocol.generated'
 
 export const mcpServiceStatus = (signal?: AbortSignal) => request<McpServiceState>('/api/v1/mcp-service', { signal })
-export const mcpServiceStart = async (tunnel?: McpTunnelSettings) => {
-  const result = await request<McpServiceState>('/api/v1/mcp-service/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'all', ...(tunnel ? {tunnel} : {}) }) })
+const mcpTunnelWrite = async (path: string, body: unknown) => {
+  const result = await request<McpServiceState>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!result.ok && result.code === 'mcp/tunnel-config' && result.details && typeof result.details === 'object') {
     const copy = (result.details as {copy?: {key?: unknown; params?: unknown}}).copy
-    const keys = ['ui.mcpService.error.tunnelConfig', 'ui.mcpService.error.tunnelConfigFile', 'ui.mcpService.error.cleanupPending', 'ui.mcpService.error.configChanged']
+    const keys = ['ui.mcpService.error.tunnelConfig', 'ui.mcpService.error.tunnelConfigFile', 'ui.mcpService.error.cleanupPending', 'ui.mcpService.error.configChanged', 'ui.mcpService.error.configureRunning']
     if (copy && typeof copy.key === 'string' && keys.includes(copy.key) && copy.params && typeof copy.params === 'object' && !Array.isArray(copy.params) && Object.keys(copy.params).length === 0) return {...result, copy: {key: copy.key}}
   }
   return result
 }
+export const mcpServiceStart = (tunnel?: McpTunnelSettings) => mcpTunnelWrite('/api/v1/mcp-service/start', {scope: 'all', ...(tunnel ? {tunnel} : {})})
+export const mcpServiceConfigure = (tunnel: McpTunnelSettings) => mcpTunnelWrite('/api/v1/mcp-service/tunnel', tunnel)
 export const mcpServiceStop = () => request<McpServiceState>('/api/v1/mcp-service/stop', { method: 'POST', timeout: 30_000 })
 export const mcpServicePassword = () => request<{ password: string }>('/api/v1/mcp-service/password', { method: 'POST' })
 export const mcpCompanionConfigure = (settings: {enabled: boolean; port: number}) => request<McpServiceState>('/api/v1/mcp-service/companion', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(settings)})

@@ -96,6 +96,12 @@ function userMessages(doc) {
   return messageNodes(doc, 'user');
 }
 
+function messageBody(node) {
+  const body = node.cloneNode(true);
+  for (const heading of body.querySelectorAll('h4[data-conversation-role]')) heading.remove();
+  return body.textContent.trim();
+}
+
 export function inspectPage(doc, expectedUrl, currentUrl, composing = false, recentlyActive = false) {
   if (canonicalChat(currentUrl) !== expectedUrl) return {ready: false, reason: 'wrong_chat'};
   const messages = userMessages(doc);
@@ -124,6 +130,8 @@ export async function sendOnce(doc, expectedUrl, getUrl, prompt, guard, insert =
   if (!currentEditor || !form) return {outcome: 'not_sent', reason: 'unsupported_page'};
   if (canonicalChat(getUrl()) !== expectedUrl) return {outcome: 'not_sent', reason: 'wrong_chat'};
   if (hasAttachments(form) || busy(doc, form)) return {outcome: 'not_sent', reason: 'busy'};
+  const before = userMessages(doc);
+  const previousMatches = before.filter(node => messageBody(node) === prompt).length;
   const inserted = insert(() => {
     currentEditor.focus();
     if ('value' in currentEditor) {
@@ -146,7 +154,8 @@ export async function sendOnce(doc, expectedUrl, getUrl, prompt, guard, insert =
       const confirmUntil = Date.now() + 10000;
       while (Date.now() < confirmUntil) {
         if (canonicalChat(getUrl()) !== expectedUrl) return {outcome: 'unknown', reason: 'wrong_chat'};
-        if (userMessages(doc).some(node => node.textContent.includes(prompt))) return {outcome: 'confirmed'};
+        const messages = userMessages(doc);
+        if (messages.length > before.length && messages.filter(node => messageBody(node) === prompt).length > previousMatches) return {outcome: 'confirmed'};
         await new Promise(resolve => setTimeout(resolve, 200));
       }
       return {outcome: 'unknown', reason: 'send_unconfirmed'};
