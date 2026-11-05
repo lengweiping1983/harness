@@ -24,8 +24,9 @@ SCHEMAS: dict[str, dict[str, Any]] = {
     'VoiceTranscript': {'type': 'object', 'required': ['transcript'], 'additionalProperties': False,
                         'properties': {'transcript': {'type': 'string'}}},
     'VoiceDictationCapabilities': {'type': 'object', 'additionalProperties': False,
-        'required': ['available', 'platform', 'download_url', 'reason'], 'properties': {
-            'available': {'type': 'boolean'}, 'platform': {'type': 'string', 'enum': ['macos', 'windows', 'unsupported']},
+        'required': ['available', 'cpu_supported', 'platform', 'download_url', 'reason'], 'properties': {
+            'available': {'type': 'boolean'}, 'cpu_supported': {'type': 'boolean'},
+            'platform': {'type': 'string', 'enum': ['macos', 'windows', 'unsupported']},
             'download_url': {'type': ['string', 'null']},
             'reason': {'anyOf': [{'type': 'null'}, {'$ref': '#/components/schemas/ResourceCopy'}]}}},
     'VoiceDictationOpen': {'type': 'object', 'additionalProperties': False, 'required': ['requested'],

@@ -19240,12 +19240,16 @@
         "additionalProperties": false,
         "required": [
           "available",
+          "cpu_supported",
           "platform",
           "download_url",
           "reason"
         ],
         "properties": {
           "available": {
+            "type": "boolean"
+          },
+          "cpu_supported": {
             "type": "boolean"
           },
           "platform": {

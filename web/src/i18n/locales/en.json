@@ -4891,6 +4891,8 @@
   "ui.voice.global.saveUnconfirmed": "Could not confirm saving. Check the current state before saving again.",
   "ui.voice.global.shortcutUnavailable": "This shortcut is unavailable. Choose a different key combination.",
   "ui.voice.global.unsupported": "Global dictation is available in Harness for macOS and Windows.",
+  "ui.voice.global.cpuUnsupported": "Voice input requires AVX2 support on Windows and is unavailable on this computer.",
+  "ui.voice.global.cpuCheckFailed": "Windows CPU support for voice input could not be confirmed.",
   "ui.voice.global.busy": "Dictation or a settings change is still in progress. Try again after it finishes.",
   "ui.voice.global.pasteUnconfirmed": "Text is on the clipboard, but paste was not confirmed. Paste it manually; it will not be retried.",
   "ui.voice.global.inactive": "This dictation is no longer active. Its result was not inserted.",

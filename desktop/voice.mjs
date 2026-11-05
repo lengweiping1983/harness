@@ -20,7 +20,7 @@ function voiceFailure(error) {
 
 /** 全局听写仅由 Harness 的主进程、录音窗口和所属操作共同拥有。 */
 export class DesktopVoice {
-  constructor({app, BrowserWindow, globalShortcut, clipboard, screen, systemPreferences, shell, systemPermissions, getWindow, getURL, preload, nativePath, platform = process.platform}) {
+  constructor({app, BrowserWindow, globalShortcut, clipboard, screen, systemPreferences, shell, systemPermissions, getWindow, getURL, preload, nativePath, platform = process.platform, fetchCapabilities = fetch}) {
     Object.assign(this, {app, BrowserWindow, globalShortcut, clipboard, screen, systemPreferences, shell, systemPermissions, getWindow, getURL, preload, nativePath, platform})
     this.preferences = {version:1, enabled:false, shortcut:DEFAULT_SHORTCUT}
     this.file = path.join(app.getPath('userData'), 'voice.json')
@@ -35,6 +35,8 @@ export class DesktopVoice {
     this.captureFailure = null
     this.context = null
     this.receipt = null
+    this.supported = ['darwin','win32'].includes(platform)
+    this.fetchCapabilities = fetchCapabilities
   }
   trusted(event, window) {
     return Boolean(window && !window.isDestroyed() && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame && new URL(event.senderFrame.url).origin === new URL(this.getURL()).origin)
@@ -57,7 +59,7 @@ export class DesktopVoice {
     }).finally(() => {this.receipt?.cleanup(); this.receipt = null})
   }
   snapshot() {
-    return {supported:['darwin','win32'].includes(this.platform), enabled:Boolean(this.registered), shortcut:this.preferences.shortcut,
+    return {supported:this.supported, enabled:Boolean(this.registered), shortcut:this.preferences.shortcut,
       accessibility:this.permission(), phase:this.active?.phase ?? (this.insertion ? 'finishing' : 'idle'), error:this.failure}
   }
   validate(value) {
@@ -66,6 +68,26 @@ export class DesktopVoice {
     return value
   }
   async initialize() {
+    if (this.platform === 'win32') {
+      this.supported = false
+      try {
+        const response = await this.fetchCapabilities(new URL('/api/v1/voice/dictation', this.getURL()),
+          {signal:AbortSignal.timeout(5000), redirect:'error'})
+        if (!response.ok) throw new VoiceError('cpuCheckFailed')
+        const capabilities = await response.json()
+        if (typeof capabilities.cpu_supported !== 'boolean') throw new VoiceError('cpuCheckFailed')
+        if (!capabilities.cpu_supported) {
+          this.failure = capabilities.reason?.key === 'ui.voice.global.cpuUnsupported'
+            ? {key:'ui.voice.global.cpuUnsupported'} : {key:'ui.voice.global.cpuCheckFailed'}
+          return
+        }
+        this.supported = true
+      } catch (error) {
+        this.failure = {key:'ui.voice.global.cpuCheckFailed'}
+        console.error('Voice CPU capability check failed:', error)
+        return
+      }
+    }
     try {
       let handle
       try {handle = await open(this.file, 'r')} catch (error) {if (error.code === 'ENOENT') return; throw error}
@@ -83,7 +105,8 @@ export class DesktopVoice {
     } catch (error) {this.failure = error.copy ?? {key:'ui.voice.global.settingsInvalid'}; console.error('Voice settings failed:', error)}
   }
   register(shortcut) {
-    if (this.closed || !['darwin','win32'].includes(this.platform)) throw new VoiceError('unsupported')
+    if (!this.supported) throw new VoiceError(this.failure?.key === 'ui.voice.global.cpuUnsupported' ? 'cpuUnsupported' : 'unsupported')
+    if (this.closed) throw new VoiceError('unsupported')
     try {if (!this.globalShortcut.register(shortcut, () => {void this.toggle().catch(error => this.fail(error))})) throw new VoiceError('shortcutUnavailable')}
     catch (cause) {throw cause instanceof VoiceError ? cause : new VoiceError('shortcutUnavailable', cause)}
     this.registered = shortcut
@@ -94,6 +117,7 @@ export class DesktopVoice {
     return this.pending
   }
   async save(value) {
+    if (!this.supported) throw new VoiceError(this.failure?.key === 'ui.voice.global.cpuUnsupported' ? 'cpuUnsupported' : 'unsupported')
     let next
     try {next = this.validate({version:1, ...value})} catch (cause) {throw new VoiceError('shortcutInvalid', cause)}
     if (this.closed || this.active || this.insertion) throw new VoiceError('busy')
@@ -167,7 +191,7 @@ export class DesktopVoice {
     return window
   }
   async toggle() {
-    if (this.closed || !this.registered || this.insertion) return
+    if (!this.supported || this.closed || !this.registered || this.insertion) return
     if (this.getWindow()?.isFocused() && this.context?.composing) return
     if (this.active) {
       if (this.active.phase === 'recording') {this.active.phase = 'processing'; this.window.webContents.send('voice-action', {action:'stop', id:this.active.id})}

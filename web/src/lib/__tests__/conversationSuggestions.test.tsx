@@ -6,10 +6,12 @@ import {useDraftStore} from '@/store/drafts'
 import {setLocale, t} from '@/i18n'
 
 const fixture = vi.hoisted(() => ({
+  voiceSupported: true,
   voiceTranscript: undefined as undefined | ((text: string) => void),
   choose: undefined as undefined | ((text: string) => void),
   pending: {current: null as null | {text: string; caret: number; draftKey: string}},
 }))
+vi.mock('@/hooks/useVoiceInputSupported', () => ({useVoiceInputSupported: () => fixture.voiceSupported}))
 
 // 静态呈现不执行布局副作用；焦点目标由输入编辑器的独立生命周期实现。
 vi.mock('react', async original => {
@@ -51,7 +53,7 @@ const keys = ['b2b6ca2ea1f1', '8eb6b977850f', '0ac196393e3f', '20061c1959d0']
 
 beforeEach(() => {
   vi.stubGlobal('window', {})
-  fixture.choose = undefined; fixture.pending.current = null
+  fixture.choose = undefined; fixture.pending.current = null; fixture.voiceTranscript = undefined; fixture.voiceSupported = true
   useAppStore.setState({...initialApp, activeSessionId: null, activeWorkspaceId: null, workspaces: [], newSessionRevision: 1, sessionCreating: false})
   useDraftStore.setState({...initialDrafts, bySession: {}, submissions: {}})
 })
@@ -117,6 +119,17 @@ it('places voice input immediately before send in the actual composer', async ()
     expect(microphone).toBeGreaterThan(0)
     expect(send).toBeGreaterThan(microphone)
     expect(html.slice(microphone, send)).not.toContain('data-lucide="scissors"')
+  }
+})
+
+it('omits voice input and its recording component when the server CPU is unsupported', async () => {
+  fixture.voiceSupported = false
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(language)
+    const html = renderToStaticMarkup(<Composer {...props} />)
+    expect(html).not.toContain(`aria-label="${t('ui.voice.start')}"`)
+    expect(html).toContain(`aria-label="${t('ui.components.chat.Composer.edecf0ae6e51')}"`)
+    expect(fixture.voiceTranscript).toBeUndefined()
   }
 })
 

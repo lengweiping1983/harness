@@ -8,7 +8,7 @@ import sys
 import threading
 
 from .i18n import tr
-from .tools.builtin.hex_tools import HexToolError, hex_binary_path
+from .tools.builtin.hex_tools import HexToolError, hex_binary_path, hex_cpu_supported, require_hex_cpu
 
 
 _launch_lock = threading.Lock()
@@ -26,7 +26,14 @@ def dictation_capabilities() -> dict:
         arch = 'arm64' if platform.machine().lower() in {'arm64', 'aarch64'} else 'x64'
         download = f'https://anoma.ly/hex/download/windows-{arch}-setup'
     reason = None
-    if system == 'unsupported':
+    try:
+        cpu_supported = hex_cpu_supported()
+    except HexToolError as error:
+        cpu_supported = False
+        reason = error.copy
+    if not cpu_supported:
+        reason = reason or {'key': 'ui.voice.global.cpuUnsupported'}
+    elif system == 'unsupported':
         reason = {'key': 'ui.voice.dictation.unsupported'}
     else:
         try:
@@ -37,13 +44,15 @@ def dictation_capabilities() -> dict:
             reason = error.copy
             if reason is None:
                 raise
-    return {'available': reason is None, 'platform': system, 'download_url': download, 'reason': reason}
+    return {'available': reason is None, 'cpu_supported': cpu_supported, 'platform': system,
+            'download_url': download, 'reason': reason}
 
 
 def open_dictation() -> None:
     """显式打开独立原生应用；接受打开请求不代表模型及权限已就绪。"""
     global _app_process
     with _launch_lock:
+        require_hex_cpu()
         binary = hex_binary_path()
         if not binary.is_file():
             raise HexToolError(tr('ui.voice.dictation.missing'), copy={'key': 'ui.voice.dictation.missing'})
@@ -93,6 +102,7 @@ def main() -> int:
             return 2
         return 0
     try:
+        require_hex_cpu()
         binary = hex_binary_path()
     except HexToolError as error:
         print(str(error), file=sys.stderr)

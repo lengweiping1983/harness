@@ -58,7 +58,11 @@ SDK／源码未携带引擎时仍可显式复用已有 Hex 安装。Windows 指�
 
 转写成功的 `Server-Timing` 响应头分别记录 `voice_queue`、`voice_prepare`、`voice_inference`，单位为毫秒，用于区分管理器排队、准备和引擎请求耗时，不包含音频和转写正文。引擎请求计时包含本机 HTTP 及引擎内部等待，不能直接当作纯计算耗时。语音接口返回 `route/not-found` 时，界面提示检查运行后端与应用版本并重启，不增加旧路由兼容或自动重放请求；当前路由是否可用仍应核对实际运行服务。
 
-`GET /api/v1/voice/dictation` 只读报告是否找到引擎及平台，不宣称模型或权限就绪。显式原生适配入口 `POST /api/v1/voice/dictation/open` 和 `harness-voice` 仍供源码／SDK 使用，调用 Hex 自身的应用与命令树；Harness 桌面全局听写不使用这些启动入口。它们保留系统应用身份、显式命令参数、未知打开结果只读回查及不重复启动的边界。
+`GET /api/v1/voice/dictation` 只读报告平台、CPU 准入 `cpu_supported`、引擎是否可用 `available` 及资源型原因，不宣称模型或权限就绪。Windows 引擎要求 AVX2，后端通过 [`IsProcessorFeaturePresent(PF_AVX2_INSTRUCTIONS_AVAILABLE)`](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-isprocessorfeaturepresent) 查询系统实际提供的能力，不启动 Hex 试探，也不按 CPU 名称推断；其他平台不要求 AVX2。该系统标志由 Windows 10 2004 及以后版本支持，系统未报告支持或查询失败时不开放语音入口；查询失败使用独立的错误资源。
+
+界面在确认 CPU 准入后才挂载输入区录音按钮及其快捷键，并在设置导航、搜索、定向页面和命令面板提供语音输入页。Windows 不支持 AVX2 或能力尚未确认时隐藏这些入口；引擎缺失与 CPU 不支持保持区别，支持的机器仍可查看引擎缺失提示。能力观察只在相关界面可见时进行，关闭或隐藏后的迟到结果失效。桌面主进程在恢复已保存的全局快捷键前读取同一能力；不支持或读取失败时不注册快捷键、不打开录音浮窗，保留原有 `voice.json`。服务管理器在准备、转写及复用服务前同样检查 CPU 准入，拒绝时不启动引擎。
+
+显式原生适配入口 `POST /api/v1/voice/dictation/open` 和 `harness-voice` 仍供源码／SDK 使用，调用 Hex 自身的应用与命令树，也受 CPU 准入限制；Harness 桌面全局听写不使用这些启动入口。它们保留系统应用身份、显式命令参数、未知打开结果只读回查及不重复启动的边界。
 
 智能体工具 `transcribe_audio` 接收 `audio_path`、可选 `model` 和 `language`，默认与界面相同。相对路径必须具有调用工作目录，读取最多 64 MiB，效果为 `execute`。服务管理器串行拥有完整准备与转写，取消等待仍等待已开始的线程收尾。
 
@@ -69,6 +73,8 @@ SDK／源码未携带引擎时仍可显式复用已有 Hex 安装。Windows 指�
 `VoiceButton.test.tsx` 覆盖录音、真实音量归属、重复操作、组合输入、跨对话及全局草稿回执；固定每次转写显示首次下载提示、往返对话接收旧结果及重复插入等触发条件。`VoiceCapture.test.tsx` 经真实浮窗组件覆盖就绪与开始竞争、单次提交、取消／替换／卸载后的迟到结果、延迟麦克风授权、未确认插入及授权引导不显示重复技术详情。`VoiceInputPage.test.tsx` 使用真实页面验证只读打开、显式保存、英中英切换、无独立安装入口、未知保存只回查及迟到读取隔离，并核对 macOS／Windows 快捷键字段、默认说明和保存值；`desktopVoice.test.ts` 覆盖显示别名转换与字面 Control 不变为 Command。
 
 `desktop/tests/voice-feedback.test.mjs` 使用受控系统权限拒绝经过 `DesktopVoice.toggle`、浮窗就绪回执、事件发布及 `voiceReply`，核对只传授权资源、不读取原目标，并保留真实外部诊断及嵌套自有错误的边界；不申请真实系统权限或启动录音。
+
+`tests/test_voice_cpu.py` 使用 Win32 API 替身核对 AVX2 标志、系统调用失败与原异常、其他平台准入，以及能力读取、准备、转写、原生打开和 CLI 拒绝后的无启动及数据保持。`useVoiceInputSupported.test.ts` 经过共享 HTTP 验证 CPU 回执、缺失引擎、失败及隐藏后的迟到响应；`conversationSuggestions.test.tsx` 与 `voiceVisibility.test.tsx` 核对真实输入区、设置导航／搜索／定向页面和命令面板的英中英可见性。`desktop/tests/voice-cpu.test.mjs` 保留全局听写恢复、能力读取失败、快捷键与配置原件的针对性回归，属于显式桌面专项；这些替身与组件回归不代替 Windows 实机验收。
 
 `tests/test_hex_tools.py`、`tests/test_voice_api.py` 与 `tests/test_voice_windows.py` 保留本机边界、音频准入、认证、SSE、取消及失败收尾，并验证随包引擎不被损坏的外部安装覆盖。模型准备回归核对 `auto` 在准备和转写中的一致性、并发复用、认证端点替换、失败失效及不重放；API 回归经过实际应用装配检查语音路由，并核对准备准入及阶段计时。`VoiceButton.test.tsx`、`VoiceCapture.test.tsx` 验证录音期间准备、停止等待、失败不上传与取消隔离；`VoiceInputPage.test.tsx`、`desktopVoice.test.ts` 验证实际按键捕获与只读字段；`voiceApi.test.ts` 保留准备回执校验和缺失路由的资源反馈。桌面目录保留安装包完整性与更新状态回归；全局听写主进程、系统快捷键及原生输入链路仍需显式桌面专项和实机验收，不能以组件单测代替。
 

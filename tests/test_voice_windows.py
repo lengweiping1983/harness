@@ -50,6 +50,7 @@ class WindowsVoiceDiscoveryTests(unittest.TestCase):
 
     def test_bad_pointer_is_preserved_and_does_not_disable_harness_construction(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(hex_tools.sys, 'platform', 'win32'), \
+             patch.object(hex_tools, 'hex_cpu_supported', return_value=True), \
              patch.dict(os.environ, {'APPDATA': tmp}), patch.object(hex_tools.subprocess, 'Popen') as spawn:
             root = Path(tmp)/'hex'
             root.mkdir()
@@ -140,6 +141,7 @@ class WindowsVoiceProcessTests(unittest.TestCase):
             kernel = self.api()
             manager = hex_tools.HexServiceManager(discovery=fake.discovery)
             with patch.object(hex_tools.sys, 'platform', 'win32'), \
+                 patch.object(hex_tools, 'hex_cpu_supported', return_value=True), \
                  patch.object(hex_tools, '_windows_process_api', return_value=kernel), \
                  patch.object(hex_tools.os, 'kill') as kill, \
                  patch.object(hex_tools.subprocess, 'Popen') as spawn:

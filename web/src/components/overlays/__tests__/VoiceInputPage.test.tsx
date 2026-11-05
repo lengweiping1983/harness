@@ -21,7 +21,7 @@ vi.mock('react', async original => ({...await original<typeof import('react')>()
   useSyncExternalStore:(_subscribe:unknown,snapshot:() => unknown) => snapshot(),
 }))
 vi.mock('@/i18n', async original => {const module=await original<typeof import('@/i18n')>(); return {...module,useLocale:module.getLocale}})
-const capabilities={available:true,platform:'macos',download_url:'https://anoma.ly/hex/download/macos-arm64-dmg',reason:null}
+const capabilities={available:true,cpu_supported:true,platform:'macos',download_url:'https://anoma.ly/hex/download/macos-arm64-dmg',reason:null}
 const status={supported:true,enabled:false,shortcut:'Control+Alt+Space',accessibility:false,phase:'idle',error:null}
 const bridge={status:vi.fn(),configure:vi.fn(),permission:vi.fn()}
 const fetchMock=vi.fn<typeof fetch>()

@@ -71,6 +71,29 @@ def _platform_tag() -> str:
     return f"{system}-{arch}"
 
 
+def hex_cpu_supported() -> bool:
+    """Windows 引擎要求系统可用的 AVX2；只查询系统能力，不执行引擎。"""
+    if sys.platform != 'win32':
+        return True
+    try:
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        feature = kernel32.IsProcessorFeaturePresent
+        feature.argtypes = [ctypes.c_uint32]
+        feature.restype = ctypes.c_int
+        # PF_AVX2_INSTRUCTIONS_AVAILABLE 同时反映操作系统提供的指令集能力。
+        return bool(feature(40))
+    except (OSError, AttributeError) as error:
+        copy = {'key': 'ui.voice.global.cpuCheckFailed'}
+        raise HexToolError(tr(copy['key']), copy=copy) from error
+
+
+def require_hex_cpu() -> None:
+    """在读取服务状态或启动进程前拒绝不满足指令集要求的调用。"""
+    if not hex_cpu_supported():
+        copy = {'key': 'ui.voice.global.cpuUnsupported'}
+        raise HexToolError(tr(copy['key']), copy=copy)
+
+
 def hex_binary_path() -> Path:
     """优先随包引擎；macOS 与 Windows 可复用用户显式安装的原生 Hex。"""
     name = "hex.exe" if sys.platform == "win32" else "hex"
@@ -344,6 +367,7 @@ class HexServiceManager:
         """锁内只启动一次；每次准入重新核对存活端点。"""
         if self._closed:
             raise HexToolError(tr('ui.voice.closed'))
+        require_hex_cpu()
         if self._owned_document is not None:
             document = self._owned_document
             if self._process.poll() is None and self._probe(document):

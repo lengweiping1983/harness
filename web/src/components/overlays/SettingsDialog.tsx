@@ -1,6 +1,7 @@
 import { noticeText } from '@/lib/noticeText'
 import {handlePageNavigationKeyDown} from '@/lib/tabNavigation'
-import {SETTINGS_GROUPS, SETTINGS_PAGES, type SettingsPage, type SettingsGroup} from '@/lib/settingsCatalog'
+import {SETTINGS_GROUPS, SETTINGS_PAGES, availableSettingsPages, type SettingsPage, type SettingsGroup} from '@/lib/settingsCatalog'
+import {useVoiceInputSupported} from '@/hooks/useVoiceInputSupported'
 import { t, useLocale } from '@/i18n'
 import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
@@ -103,13 +104,15 @@ export function SettingsDialog() {
   const open = useAppStore((s) => s.settingsOpen)
   const target = useAppStore((s) => s.settingsTarget)
   const setOpen = useAppStore((s) => s.setSettingsOpen)
-  const [page, setPage] = useState<Page>('general')
+  const voiceSupported = useVoiceInputSupported(open)
+  const [selectedPage, setPage] = useState<Page>('general')
+  const page = selectedPage === 'voice' && !voiceSupported ? 'general' : selectedPage
   const [agentKind, setAgentKind] = useState<'all' | 'agent' | 'team'>('all')
   const [shortcutQuery, setShortcutQuery] = useState('')
   const [settingsQuery, setSettingsQuery] = useState('')
   const [expandedGroups, setExpandedGroups] = useState<SettingsGroup[]>(() => SETTINGS_GROUPS.map(group => group.id))
   const contentRef = useRef<HTMLElement | null>(null)
-  const matchingPages = searchCommands(SETTINGS_PAGES.map(item => ({
+  const matchingPages = searchCommands(availableSettingsPages(voiceSupported).map(item => ({
     ...item,
     title: t(item.labelKey),
     keywords: t(item.keywordsKey),

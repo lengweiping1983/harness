@@ -44,6 +44,7 @@ import { reasoningSelection } from '@/lib/reasoningSelection'
 import { DropOverlay } from './AttachmentDraft'
 import { PermissionMenu } from './PermissionMenu'
 import { VoiceButton } from './VoiceButton'
+import {useVoiceInputSupported} from '@/hooks/useVoiceInputSupported'
 import { ScreenshotButton } from './ScreenshotButton'
 import { useChatStore } from '@/store/chat'
 import { queuedTeamAddress, validTeamAddress, type TeamAddress } from '@/lib/agentMount'
@@ -104,6 +105,7 @@ export function Composer({
   onPaste,
 }: ComposerProps) {
   const locale = useLocale()
+  const voiceSupported = useVoiceInputSupported()
 
   const sessionId = useAppStore((s) => s.activeSessionId)
   const waitingInput = useChatStore(s => sessionId ? pendingReplyInput(s.sessions[sessionId]?.blocks ?? []) : null)
@@ -460,11 +462,11 @@ export function Composer({
                   {stopBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5 fill-current" />}
                 </Button>
               ) : null}
-              <VoiceButton editor={taRef} disabled={disconnected || controlBusy} onTranscript={text => {
+              {voiceSupported && <VoiceButton editor={taRef} disabled={disconnected || controlBusy} onTranscript={text => {
                 const draft = useDraftStore.getState().bySession[draftKey]?.text ?? ''
                 setValue(draft + (draft && !/\s$/.test(draft) ? ' ' : '') + text)
                 scheduleFrame(() => {resize(); taRef.current?.focus()})
-              }} />
+              }} />}
               {!running || hasContent ? (
                 <ComposerSendButton
                   disabled={!canSend || controlBusy}

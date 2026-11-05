@@ -4891,6 +4891,8 @@
   "ui.voice.global.saveUnconfirmed": "保存结果未确认，请先核对当前状态后再保存。",
   "ui.voice.global.shortcutUnavailable": "此快捷键不可用，请选择其他组合。",
   "ui.voice.global.unsupported": "全局听写适用于 macOS 和 Windows 版 Harness。",
+  "ui.voice.global.cpuUnsupported": "Windows 语音输入需要支持 AVX2，此电脑无法使用语音输入。",
+  "ui.voice.global.cpuCheckFailed": "无法确认此 Windows 电脑是否满足语音输入的 CPU 要求。",
   "ui.voice.global.busy": "听写或设置变更仍在进行，请在结束后重试。",
   "ui.voice.global.pasteUnconfirmed": "文字已在剪贴板中，但粘贴未确认。请手动粘贴，不会自动重试。",
   "ui.voice.global.inactive": "本次听写已失效，结果未插入。",

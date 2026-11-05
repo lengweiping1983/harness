@@ -176,6 +176,7 @@ class VoiceDictationTests(unittest.TestCase):
                 with self.subTest(system=system, machine=machine), \
                      patch.object(voice.sys, 'platform', system), \
                      patch.object(voice.platform, 'machine', return_value=machine), \
+                     patch.object(voice, 'hex_cpu_supported', return_value=True), \
                      patch.object(voice, 'hex_binary_path', return_value=binary), \
                      patch.object(voice, 'open_dictation') as launch:
                     missing = voice.dictation_capabilities()
@@ -184,6 +185,7 @@ class VoiceDictationTests(unittest.TestCase):
                     binary.touch()
                     available = voice.dictation_capabilities()
                     self.assertTrue(available['available'])
+                    self.assertTrue(available['cpu_supported'])
                     self.assertIsNone(available['reason'])
                     self.assertEqual(available['platform'], platform)
                     self.assertTrue(available['download_url'].endswith(suffix))
@@ -214,8 +216,10 @@ class VoiceDictationTests(unittest.TestCase):
             binary.touch()
             shell = SimpleNamespace(startfile=Mock())
             with patch.object(voice.sys, 'platform', 'win32'), \
+                 patch.object(voice, 'require_hex_cpu') as check_cpu, \
                  patch.object(voice, 'hex_binary_path', return_value=binary), patch.object(voice, 'os', shell):
                 voice.open_dictation()
+            check_cpu.assert_called_once_with()
             shell.startfile.assert_called_once_with(str(binary), arguments='app')
 
     def test_source_binary_is_detached_and_reaped_without_duplicate_launch(self):

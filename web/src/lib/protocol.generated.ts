@@ -7,6 +7,7 @@ export interface VoiceTranscript {
 }
 export interface VoiceDictationCapabilities {
   available: boolean
+  cpu_supported: boolean
   platform: 'macos' | 'windows' | 'unsupported'
   download_url: string | null
   reason: null | ResourceCopy

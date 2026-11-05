@@ -25,3 +25,5 @@ export const SETTINGS_PAGES = [
   {id: 'automations', group: 'advanced', labelKey: 'ui.components.overlays.SettingsDialog.3c39e9bde120', keywordsKey: 'ui.settings.keywords.automations', icon: 'Clock3'},
 ] as const satisfies ReadonlyArray<{id: string; group: SettingsGroup; labelKey: string; keywordsKey: string; icon: string}>
 export type SettingsPage = typeof SETTINGS_PAGES[number]['id']
+
+export const availableSettingsPages = (voiceSupported: boolean) => SETTINGS_PAGES.filter(page => page.id !== 'voice' || voiceSupported)

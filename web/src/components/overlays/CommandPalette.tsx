@@ -1,7 +1,8 @@
 import { noticeText } from '@/lib/noticeText'
 import {failureText} from '@/lib/resourceError'
 import {INSPECTOR_PANELS} from '@/lib/inspectorPanels'
-import {SETTINGS_PAGES} from '@/lib/settingsCatalog'
+import {availableSettingsPages} from '@/lib/settingsCatalog'
+import {useVoiceInputSupported} from '@/hooks/useVoiceInputSupported'
 import { t, useLocale } from '@/i18n'
 import { useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from 'react'
 import {
@@ -49,6 +50,7 @@ export function CommandPalette() {
   const locale = useLocale()
 
   const open = useAppStore((s) => s.commandOpen)
+  const voiceSupported = useVoiceInputSupported(open)
   const setOpen = useAppStore((s) => s.setCommandOpen)
   const sessions = useAppStore((s) => s.sessions)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
@@ -108,7 +110,7 @@ export function CommandPalette() {
         icon: <FileCode className="h-3.5 w-3.5" />,
         run: () => useAppStore.getState().setQuickOpen(true),
       }] : []),
-      ...SETTINGS_PAGES.map(({id: target, labelKey, keywordsKey}) => ({
+      ...availableSettingsPages(voiceSupported).map(({id: target, labelKey, keywordsKey}) => ({
         id: `settings-${target}`,
         title: t(labelKey),
         keywords: t(keywordsKey),
@@ -187,6 +189,7 @@ export function CommandPalette() {
     return out
   }, [
     activeSessionId,
+    voiceSupported,
     create,
     select,
     sessions,
