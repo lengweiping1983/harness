@@ -134674,7 +134674,8 @@ async function main() {
   const cached = connection.model_catalog?.find((model2) => model2.id === raw.model);
   const original = connection.model_catalog !== void 0 ? cached ? { ...models.getModel(request.provider, raw.model), ...cached } : void 0 : deepSeek ? deepSeekModels.find((model2) => model2.id === raw.model) : models.getModel(request.provider, raw.model);
   const knownApis = [...new Set((connection.model_catalog ?? provider?.getModels() ?? []).map((model2) => model2.api).filter(Boolean))];
-  const api = (deepSeek ? "anthropic-messages" : connection.protocol) || original?.api || (knownApis.length === 1 ? knownApis[0] : void 0);
+  const endpointApi = request.provider === "openrouter" ? "openai-completions" : void 0;
+  const api = (deepSeek ? "anthropic-messages" : connection.protocol) || original?.api || endpointApi || (knownApis.length === 1 ? knownApis[0] : void 0);
   if (!api) throw Error("The model needs an explicit API protocol");
   const roleCompat = api === "openai-completions" && ["qwen-token-plan", "qwen-token-plan-cn", "qwen-token-plan-individual"].includes(request.provider) ? { supportsDeveloperRole: false } : {};
   const model = {

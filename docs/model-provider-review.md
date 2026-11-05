@@ -1,5 +1,13 @@
 # 模型供应商实现审查
 
+## OpenRouter 目录外模型协议选择
+
+触发条件是选择 `stealth/crouton-alpha` 等固定目录之外的聊天模型，接口保留原生协议，所选模型又没有缓存协议元数据。2026-11-05 核对随包目录确认 OpenRouter 同时包含 `anthropic-messages` 与 `openai-completions`，且没有 Crouton Alpha。原 `bridge.mjs` 仅检查接口声明、所选模型元数据和目录是否只有一种协议；因此在发出 HTTP 请求前抛出 `The model needs an explicit API protocol`，表现为 `status=0`。空缓存、缺少协议的匹配条目及混合缓存也会触发；仅剩其他模型的 Messages 缓存时，还会把其他模型的唯一协议误用于当前新模型。
+
+已通过 [OpenRouter 模型页](https://openrouter.ai/stealth/crouton-alpha) 和公开 `GET /api/v1/models` 确认该模型存在，目录报告上下文为 1048576，支持工具调用。[官方 API 文档](https://openrouter.ai/docs/api_reference/overview) 提供统一 Chat Completions 入口。调用链为配置发现／保存 → `ProviderConnections.resolve` → `provider_runtime.provider_stream` → 随包 Node 桥接；发现路由原本已为新模型补充端点协议，缺陷位于运行时处理无该元数据的模型。当前桥接增加 OpenRouter 专用端点默认值，接口显式协议和匹配模型声明仍优先，不修改用户配置，也不向其他混合协议提供商扩展猜测规则。源与发行桥接由 `model-runtime/build.mjs` 同步生成。
+
+`test_openrouter_protocol.py` 先在原发行桥接复现失败，再核对无缓存、空缓存、缺少协议、单一及混合缓存的真实请求路径、认证、模型身份、正文、工具调用、用量和终止原因；同时保留不默认填满输出能力的断言。另核对显式 Completions／Responses、缓存及内置 Messages 的优先级、其他混合提供商发送前拒绝，以及配置原字节和 Key 租约收尾。`test_openrouter_discovery_persists_protocol_for_a_new_chat_model` 通过真实发现路由、保存及重开核对协议和能力元数据。4 项针对性用例通过。未使用在线账号生成，未执行全量、生产 Web 构建、浏览器或桌面专项；公开目录读取成功不代表在线模型调用验收通过。
+
 ## 自定义网关模型失败与默认输出预算
 
 2026-11-05 使用用户授权的 TokenRhythm 接口和同一 Key，仅发送固定的最小问答，不读取用户对话。目录明确报告 `deepseek-v4.1-flash-1017` 的输出能力为 384000、`egg-alpha` 为 128000。前者的 Chat Completions 流式请求成功；后者在 `max_completion_tokens` 为 128000、256 和省略时均返回 HTTP 409／`MODEL_CALL_FAILED`。移除 `store`、`stream_options` 的最简流式及非流式请求、改用 `max_tokens`、Responses 最小请求也返回相同错误。因此已排除 Harness 历史、工具定义和大输出上限是该错误的必要触发条件，但不能凭公开错误推断网关内部路由、账号权限或上游的具体故障。修复后的真实 Harness 分发再次确认 DeepSeek 未发送输出上限仍返回 `OK`，Egg 未发送输出上限仍失败，诊断保留 `provider_trace_id=trace_46efb38d-aaa5-4d9a-9e11-c9b40d50271b`。远端 Egg 的可用性仍需服务商核查，不能记录为修复通过。[平台接入文档](https://tokenrhythm.studio/docs/api-integration) 要求保留 `traceId` 排障；[错误码文档](https://tokenrhythm.studio/docs/errors) 未列出此 409 业务码，没有据此扩大自动重试的依据。

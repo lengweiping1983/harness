@@ -108,7 +108,9 @@ async function main() {
   const cached = connection.model_catalog?.find(model => model.id === raw.model);
   const original = connection.model_catalog !== undefined ? (cached ? {...models.getModel(request.provider, raw.model), ...cached} : undefined) : deepSeek ? deepSeekModels.find(model => model.id === raw.model) : models.getModel(request.provider, raw.model);
   const knownApis = [...new Set((connection.model_catalog ?? provider?.getModels() ?? []).map(model => model.api).filter(Boolean))];
-  const api = (deepSeek ? 'anthropic-messages' : connection.protocol) || original?.api || (knownApis.length === 1 ? knownApis[0] : undefined);
+  // OpenRouter 为目录外聊天模型提供统一的 Chat Completions 入口；目录混用协议不代表新模型必须手选。
+  const endpointApi = request.provider === 'openrouter' ? 'openai-completions' : undefined;
+  const api = (deepSeek ? 'anthropic-messages' : connection.protocol) || original?.api || endpointApi || (knownApis.length === 1 ? knownApis[0] : undefined);
   if (!api) throw Error('The model needs an explicit API protocol');
   // Qwen 的日期快照和手工模型可能不在固定目录中，仍沿用端点的角色限制。
   // 仅提供协议默认值；目录、接口和模型的显式声明依次覆盖。

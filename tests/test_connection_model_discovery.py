@@ -117,6 +117,31 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertNotIn('maxTokens', fresh)
         self.assertNotIn('thinkingLevelMap', rows['unrelated-model'])
 
+    def test_openrouter_discovery_persists_protocol_for_a_new_chat_model(self):
+        """新匿名模型通过真实发现路由和配置重开保留端点协议。"""
+        server = CatalogServer({'data': [{'id': 'stealth/crouton-alpha', 'context_length': 1048576,
+            'architecture': {'input_modalities': ['text', 'image', 'video', 'file', 'audio']}}]})
+        try:
+            result = self.discover('openrouter', server.url)
+        finally:
+            server.close()
+        self.assertFalse(result['fallback'])
+        self.assertEqual(len(result['models']), 1)
+        model = result['models'][0]
+        self.assertEqual(model['id'], 'stealth/crouton-alpha')
+        self.assertEqual(model['api'], 'openai-completions')
+        self.assertEqual(model['baseUrl'], server.url)
+        self.assertEqual(model['contextWindow'], 1048576)
+        self.assertEqual(model['input'], ['text', 'image', 'video'])
+        connection = connection_fixture('openrouter', server.url)
+        connection['model_catalog'] = result['models']
+        connection['models'][0]['model'] = model['id']
+        store = self.host.provider_connections
+        store.save([{'id': 'supplier', 'type': 'openrouter', 'name': 'OpenRouter', 'connections': [connection]}], store.revision)
+        reopened = ProviderConnections(store.home)
+        self.assertEqual(reopened.providers[0]['connections'][0]['model_catalog'], [model])
+        self.assertEqual(reopened.catalog()[0]['context_window'], 1048576)
+
     def test_reported_metadata_aliases_reach_discovered_models(self):
         """通过真实发现路由核对容量和输入类型，不把未报告值补造成已知。"""
         server = CatalogServer({'data': [
