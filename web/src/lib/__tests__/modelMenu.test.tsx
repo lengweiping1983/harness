@@ -51,7 +51,7 @@ it('uses the default until a model is chosen and retains manual choices across p
 
 it('shows the selected reasoning level beside the compact model name through English Chinese English', async () => {
   const id = 'harness/supplier/endpoint/crouton'
-  useAppStore.setState({models: [{id, label: 'stealth/crouton-alpha', supports_reasoning: true, reasoning_efforts: ['high', 'max']}],
+  useAppStore.setState({models: [{id, label: 'stealth/crouton-alpha', provider: 'supplier', supports_reasoning: true, reasoning_efforts: ['high', 'max']}],
     defaultModel: id, defaultReasoningEffort: 'max'})
   for (const locale of ['en', 'zh-CN', 'en'] as const) {
     await setLocale(locale)
@@ -73,7 +73,7 @@ it('follows conversation reasoning overrides and explicit model default without 
     {id: 'default', reasoning_effort: null, metadata: {reasoning_effort: ''}},
     {id: 'inherited', metadata: {}},
   ] as SessionSummary[]
-  useAppStore.setState({models: [{id, label: 'Egg', supports_reasoning: true, reasoning_efforts: ['high', 'max']}], defaultModel: id,
+  useAppStore.setState({models: [{id, label: 'Egg', provider: 'test', supports_reasoning: true, reasoning_efforts: ['high', 'max']}], defaultModel: id,
     defaultReasoningEffort: 'max', sessions})
   for (const [activeSessionId, effort] of [['override', 'high'], ['default', t('ui.components.chat.ModelPicker.9a36b187cea4')], ['inherited', 'max']]) {
     useAppStore.setState({activeSessionId})
@@ -85,7 +85,7 @@ it('follows conversation reasoning overrides and explicit model default without 
 
 it('marks pending and unknown reasoning saves and unsupported choices without changing selection', () => {
   const id = 'model'
-  useAppStore.setState({models: [{id, label: 'Egg', supports_reasoning: true, reasoning_efforts: ['high']}], defaultModel: id,
+  useAppStore.setState({models: [{id, label: 'Egg', provider: 'test', supports_reasoning: true, reasoning_efforts: ['high']}], defaultModel: id,
     defaultReasoningEffort: 'max'})
   expect(renderToStaticMarkup(<ModelSeat />)).toContain(t('ui.models.reasoningUnsupported', {effort: 'max'}))
   for (const save of [{pending: true, error: null, unconfirmed: false}, {pending: false, error: 'Original failure', unconfirmed: true}]) {
@@ -94,12 +94,12 @@ it('marks pending and unknown reasoning saves and unsupported choices without ch
   }
   useAppStore.setState({activeSessionId: 'override', sessions: [{id: 'override', reasoning_effort: 'high', metadata: {reasoning_effort: 'high'}}] as SessionSummary[]})
   expect(renderToStaticMarkup(<ModelSeat />)).toContain(t('ui.models.reasoningSelection', {effort: 'high'}))
-  useAppStore.setState({activeSessionId: null, defaultReasoningEffort: null, defaultReasoningSave: null, models: [{id, label: 'Plain', supports_reasoning: false, reasoning_efforts: []}]})
+  useAppStore.setState({activeSessionId: null, defaultReasoningEffort: null, defaultReasoningSave: null, models: [{id, label: 'Plain', provider: 'test', supports_reasoning: false, reasoning_efforts: []}]})
   expect(renderToStaticMarkup(<ModelSeat />)).not.toContain(t('ui.components.chat.ModelPicker.8cf0105d35ee'))
 })
 
 it('allows selecting an explicitly reported single reasoning level', () => {
-  const single = [{id: 'single', label: 'Egg', supports_reasoning: true, reasoning_efforts: ['max']}]
+  const single = [{id: 'single', label: 'Egg', provider: 'test', supports_reasoning: true, reasoning_efforts: ['max']}]
   const html = renderToStaticMarkup(<ModelMenu models={single} current="single" effort="max" onClose={() => undefined} />)
   expect(html).toContain('role="group" aria-label="' + t('ui.components.chat.ModelPicker.8cf0105d35ee') + '"')
   expect(html).toContain('>max</button>')

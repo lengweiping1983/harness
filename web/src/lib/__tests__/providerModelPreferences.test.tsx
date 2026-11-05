@@ -51,7 +51,7 @@ it('keeps saved model rows and their actions when the runtime catalog is empty, 
   const before = JSON.stringify(configured)
   for (const language of ['en', 'zh-CN', 'en'] as const) {
     setLocale(language)
-    const actions = vi.fn((connection, model) => <button>{t('ui.providers.editModelNamed', {name: model.name})}</button>)
+    const actions = vi.fn((_connection, model) => <button>{t('ui.providers.editModelNamed', {name: model.name})}</button>)
     const html = renderToStaticMarkup(<ProviderModelPreferences provider={configured} models={[]} renderActions={actions} />)
     expect(html).toContain('Flash 原文')
     expect(html).toContain(t('ui.models.contextSize', {count: '64k'}))

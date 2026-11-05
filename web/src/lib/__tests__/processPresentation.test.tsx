@@ -26,7 +26,7 @@ it('紧凑思考摘要保留折叠语义、截断和流式提示，原文不进�
     setLocale(locale)
     for (const streaming of [false, true]) {
       const original = 'Original thought 原文😀'
-      const html = renderToStaticMarkup(<ThinkingBlock block={{kind:'thinking', id:'compact-thought', at:1, text:original, partial:true, streaming}} />)
+      const html = renderToStaticMarkup(<ThinkingBlock block={{kind:'thinking', id:'compact-thought', at:1, text:original, partial:'stopped', streaming}} />)
       const summary = html.match(/<summary\b[^>]*>([\s\S]*?)<\/summary>/)?.[1]
       expect(summary).toContain(t('ui.components.chat.blocks.MessageBlocks.a62acb184f47'))
       expect(summary).toContain(t('ui.components.chat.blocks.MessageBlocks.9f76fd20a5ba'))
