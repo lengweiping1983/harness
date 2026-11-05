@@ -75,7 +75,7 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
         onClick={toggle}
         aria-expanded={open}
         aria-controls={detailId}
-        className={cn('flex w-full min-w-0 items-center gap-2 rounded-md px-1 text-left text-compact leading-5 focus-visible:outline-brand', isWidget ? 'min-h-8 py-1' : 'conversation-activity min-h-7 py-0.5', open && 'font-medium text-ink', failed && !skipped ? 'text-danger' : 'text-muted hover:text-ink')}
+        className={cn('flex w-full min-w-0 items-center gap-2 rounded-md px-1 text-left text-compact leading-5 focus-visible:outline-brand', isWidget ? 'min-h-8 py-1' : 'conversation-activity min-h-6 gap-1.5 py-0.5', open && 'font-medium text-ink', failed && !skipped ? 'text-danger' : 'text-muted hover:text-ink')}
       >
         <ToolActivityIcon kind={activity.kind} name={block.name} running={running} skipped={skipped} failed={failed} />
         <span className="min-w-0 max-w-full truncate" title={activity.label}>{images.length && block.status !== 'running' ? t(block.status === 'error' ? 'ui.toolBlock.imagesPartial' : 'ui.toolBlock.imagesViewed', {count: images.length}) : activity.label}</span>

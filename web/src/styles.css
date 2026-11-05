@@ -164,7 +164,7 @@ body {
 
 /* 修饰类只调整密度与交互反馈；工具摘要的横向布局由组件基础类保证。 */
 .conversation-activity {
-  @apply min-h-7 py-0.5 transition-colors duration-150 hover:bg-raised/70 focus-visible:bg-raised/70 focus-visible:outline-brand active:bg-raised;
+  @apply min-h-6 gap-1.5 py-0.5 transition-colors duration-150 hover:bg-raised/70 focus-visible:bg-raised/70 focus-visible:outline-brand active:bg-raised;
 }
 
 /* Browser-style tabs share a surface with their content, without pill outlines. */

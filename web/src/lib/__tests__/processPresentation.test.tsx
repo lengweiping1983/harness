@@ -16,9 +16,9 @@ it('新增修饰样式尚未加载时，工具摘要仍具备完整横向布局'
   const css = await postcss([tailwindcss({content:[{raw:html, extension:'html'}], corePlugins:{preflight:false}})]).process('@tailwind utilities;', {from:undefined})
   const declarations: Record<string, string> = {}
   css.root.walkRules(rule => {
-    if (classes.has(rule.selector.slice(1))) rule.walkDecls(declaration => {declarations[declaration.prop] = declaration.value})
+    if (classes.has(rule.selector.slice(1).replace(/\\(.)/g, '$1'))) rule.walkDecls(declaration => {declarations[declaration.prop] = declaration.value})
   })
-  expect(declarations).toMatchObject({display:'flex', width:'100%', 'min-width':'0px', 'align-items':'center', gap:'0.5rem'})
+  expect(declarations).toMatchObject({display:'flex', width:'100%', 'min-width':'0px', 'align-items':'center', gap:'0.375rem', 'min-height':'1.5rem', 'padding-top':'0.125rem', 'padding-bottom':'0.125rem'})
 })
 
 it('紧凑思考摘要保留折叠语义、截断和流式提示，原文不进入摘要', () => {

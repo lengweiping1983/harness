@@ -56,7 +56,7 @@ await browserScenario(async({server,browser})=>{
    const textRight=text.scrollWidth>text.clientWidth?text.getBoundingClientRect().right:Math.min(last.right,text.getBoundingClientRect().right)
    return arrow.getBoundingClientRect().left-textRight
   })
-  assert.ok(groupGap>=7&&groupGap<=9,`Process disclosure must follow summary text: ${groupGap}`)
+  assert.ok(groupGap>=5&&groupGap<=7,`Process disclosure must follow summary text: ${groupGap}`)
   for(const decorated of [true,false]){
   const layout=await page.evaluate(decorated=>{
    const controls=['thought-0','tool-0','thought-1','tool-1'].map(id=>document.querySelector(`[data-row-id="${id}"] :is(summary, button)`))
@@ -75,9 +75,9 @@ await browserScenario(async({server,browser})=>{
    })
   },decorated)
   for(const [index,row] of layout.entries()){
-   assert.ok(row.height>=24&&row.height<=28.5,`Compact activity hit area: ${row.height}`)
+   assert.ok(row.height>=24&&row.height<=24.5,`Compact activity hit area: ${row.height}`)
    assert.ok(Math.abs(row.outer)<0.5,`Repeated vertical padding: ${row.outer}`)
-   assert.ok(row.arrowGap>=7&&row.arrowGap<=9,`Disclosure arrow must follow visible text: ${row.arrowGap}`)
+   assert.ok(row.arrowGap>=5&&row.arrowGap<=7,`Disclosure arrow must follow visible text: ${row.arrowGap}`)
    for(const offset of [row.iconOffset,row.labelOffset,row.arrowOffset])assert.ok(Math.abs(offset)<0.5,`Icon, label and arrow must share one row: ${offset}`)
    if(index)assert.ok(Math.abs(row.top-layout[index-1].bottom)<0.5,'Adjacent process rows must not leave blank bands')
   }
