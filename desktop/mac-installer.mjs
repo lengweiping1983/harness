@@ -12,27 +12,47 @@ export class InstallerFailure extends Error {
 }
 
 /** 传输只写入本次独占目录，完整大小和 GitHub SHA-256 均确认后才交付。 */
-export async function downloadInstaller({fetch, asset, directory, signal, progress}) {
+export async function downloadInstaller({fetch, asset, directory, signal, progress, idleTimeoutMs = 30000}) {
   if (!/^sha256:[a-f0-9]{64}$/.test(asset.digest || '')) throw new InstallerFailure('updateIntegrityFailed')
-  const response = await fetch(asset.browser_download_url, {signal, redirect:'follow'})
-  if (!response.ok) {await response.body?.cancel(); throw new InstallerFailure('updateHttpFailure', Error(String(response.status)), {status:response.status})}
-  if (!response.body) throw new InstallerFailure('updateIntegrityFailed')
-  const filename = path.join(directory, 'installer.dmg')
-  const file = await open(filename, 'wx', 0o600)
-  let size = 0
-  const hash = createHash('sha256')
+  const idle = new AbortController()
+  const downloadSignal = signal ? AbortSignal.any([signal, idle.signal]) : idle.signal
+  let timer, file
+  const active = () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => idle.abort(Object.assign(Error('UPDATE_DOWNLOAD_IDLE_TIMEOUT'), {name:'TimeoutError'})), idleTimeoutMs)
+  }
+  progress(null, {phase:'connecting', received:0, total:asset.size})
+  active()
   try {
+    downloadSignal.throwIfAborted()
+    const response = await fetch(asset.browser_download_url, {signal:downloadSignal, redirect:'follow'})
+    if (!response.ok) {await response.body?.cancel(); throw new InstallerFailure('updateHttpFailure', Error(String(response.status)), {status:response.status})}
+    if (!response.body) throw new InstallerFailure('updateIntegrityFailed')
+    const filename = path.join(directory, 'installer.dmg')
+    file = await open(filename, 'wx', 0o600)
+    let size = 0
+    const hash = createHash('sha256')
     for await (const chunk of response.body) {
+      downloadSignal.throwIfAborted()
+      if (!chunk.byteLength) continue
+      active()
       size += chunk.byteLength
       if (size > asset.size) throw new InstallerFailure('updateIntegrityFailed')
       hash.update(chunk)
       await file.writeFile(chunk)
-      progress(Math.min(99, Math.floor(size * 100 / asset.size)))
+      downloadSignal.throwIfAborted()
+      progress(Math.min(99.9, size * 100 / asset.size), {phase:'downloading', received:size, total:asset.size})
     }
+    downloadSignal.throwIfAborted()
+    clearTimeout(timer)
+    progress(100, {phase:'verifying', received:size, total:asset.size})
     if (size !== asset.size || `sha256:${hash.digest('hex')}` !== asset.digest) throw new InstallerFailure('updateIntegrityFailed')
     await file.sync()
-  } finally {await file.close()}
-  return filename
+    return filename
+  } catch (error) {
+    if (downloadSignal.aborted) throw downloadSignal.reason
+    throw error
+  } finally {clearTimeout(timer); await file?.close()}
 }
 
 /** 脚本在主进程实际退出后替换同目录应用；旧包保留为备份，不触及用户资料。 */
@@ -129,6 +149,7 @@ export class MacInstaller {
         const executable = await value(plist, 'CFBundleExecutable')
         if (!/^[A-Za-z0-9._-]+$/.test(executable)) throw new InstallerFailure('updateInvalidRelease')
         await this.command('/usr/bin/lipo', [path.join(source, 'Contents/MacOS', executable), '-verify_arch', this.arch === 'arm64' ? 'arm64' : 'x86_64'])
+        progress(100, {phase:'preparing', received:asset.size, total:asset.size})
         staging = await mkdtemp(path.join(path.dirname(target), '.harness-update-'))
         const staged = path.join(staging, 'Harness.app')
         await this.command('/usr/bin/ditto', [source, staged])

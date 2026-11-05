@@ -4944,5 +4944,9 @@
   "ui.llm.opencodeLocalProfileExecutableChanged": "本机 OpenCode 可执行文件已变化，接口资料不再匹配。可执行文件：{executable}；资料：{profile}。请使用 python -m harness.llm.opencode_local --executable <上述可执行文件路径> --profile <上述资料路径> --refresh-backup <未使用的备份路径> 显式刷新并保留原件，然后继续当前任务。",
   "ui.llm.opencodeLocalProfileRefreshFailed": "无法刷新本机 OpenCode 接口资料：{profile}。请检查文件权限、资料是否被其他程序修改，以及备份路径 {backup} 是否未被占用；替换结果以当前文件为准，请先核对状态。",
   "ui.modelFailure.localProfileRequired": "本机 OpenCode 接口资料需要处理",
-  "ui.modelFailure.localProfileHint": "已有执行任务已保留。请按技术详情检查或显式刷新本机接口资料，再继续当前任务。"
+  "ui.modelFailure.localProfileHint": "已有执行任务已保留。请按技术详情检查或显式刷新本机接口资料，再继续当前任务。",
+  "ui.desktop.menu.updateConnectingMenu": "正在连接更新服务器…",
+  "ui.desktop.menu.updateVerifyingMenu": "正在校验更新…",
+  "ui.desktop.menu.updatePreparingMenu": "正在准备安装更新…",
+  "ui.desktop.menu.updateTransferMenu": "正在下载更新… {percent}%（{received} / {total}）"
 }

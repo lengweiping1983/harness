@@ -8515,5 +8515,9 @@
   "ui.llm.opencodeLocalProfileRefreshFailed": "Could not refresh the local OpenCode profile: {profile}. Check file permissions, whether another program changed the profile, and that backup path {backup} is unused. Inspect the current files to confirm the replacement state before retrying.",
   "llm.opencode_local.refresh_help": "Explicitly refresh an existing profile: validate the new profile, then preserve the original at this unused backup path; failures are not retried automatically.",
   "ui.modelFailure.localProfileRequired": "The local OpenCode profile needs attention",
-  "ui.modelFailure.localProfileHint": "The existing execution task is preserved. Check or explicitly refresh the local profile as described in the technical details, then continue the current task."
+  "ui.modelFailure.localProfileHint": "The existing execution task is preserved. Check or explicitly refresh the local profile as described in the technical details, then continue the current task.",
+  "ui.desktop.menu.updateConnectingMenu": "Connecting to Update Server…",
+  "ui.desktop.menu.updateVerifyingMenu": "Verifying Update…",
+  "ui.desktop.menu.updatePreparingMenu": "Preparing Update…",
+  "ui.desktop.menu.updateTransferMenu": "Downloading Update… {percent}% ({received} / {total})"
 }

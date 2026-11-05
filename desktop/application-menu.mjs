@@ -1,10 +1,38 @@
-export function applicationMenu({platform = process.platform, text, command, ready = true, updateState = 'idle', updateProgress = null}) {
+function updateLabel({text, state, progress, phase, received = 0, total}) {
+  if (state === 'downloading') {
+    const key = {connecting:'updateConnectingMenu', verifying:'updateVerifyingMenu', preparing:'updatePreparingMenu'}[phase]
+    if (key) return text(key)
+    if (Number.isFinite(total) && total > 0) {
+      const size = bytes => {
+        const index = Math.min(3, Math.floor(Math.log(Math.max(1, bytes)) / Math.log(1024)))
+        return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${['B','KB','MB','GB'][index]}`
+      }
+      return text('updateTransferMenu').replace('{percent}', Math.max(0, Math.min(100, progress || 0)).toFixed(1)).replace('{received}', size(received)).replace('{total}', size(total))
+    }
+    if (Number.isFinite(progress)) return `${text('updateDownloadingMenu')} ${progress}%`
+  }
+  return text({checking:'updateCheckingMenu', available:'updateAvailableMenu', downloading:'updateDownloadingMenu', downloaded:'updateReadyMenu'}[state] || 'checkUpdates')
+}
+
+/** 复用原生菜单项，下载通知不替换 AppKit 正在展示的菜单树。 */
+export function refreshUpdateMenu(menu, snapshot, text) {
+  const item = menu?.getMenuItemById('harness-updates')
+  if (!item) return
+  item.label = updateLabel({text, ...snapshot})
+  item.enabled = !['checking','downloading'].includes(snapshot.state)
+}
+
+export function updateDockProgress({state, phase, progress}) {
+  if (state !== 'downloading') return -1
+  return ['connecting','verifying','preparing'].includes(phase) || !Number.isFinite(progress) ? 2 : progress / 100
+}
+
+export function applicationMenu({platform = process.platform, text, command, ready = true, updateState = 'idle', updateProgress = null, updatePhase = null, updateReceived = 0, updateTotal = null}) {
   const item = (key, action, accelerator) => ({label:text(key), accelerator, enabled:ready, click:() => command(action)})
   const role = (key, value) => ({label:text(key), role:value})
   const settings = item('settings', 'settings', 'CommandOrControl+,')
   const about = {...item('about', 'about'), enabled:true}
-  const updates = item({checking:'updateCheckingMenu', available:'updateAvailableMenu', downloading:'updateDownloadingMenu', downloaded:'updateReadyMenu'}[updateState] || 'checkUpdates', 'updates')
-  if (updateState === 'downloading' && Number.isFinite(updateProgress)) updates.label += ` ${updateProgress}%`
+  const updates = {...item('checkUpdates', 'updates'), id:'harness-updates', label:updateLabel({text, state:updateState, progress:updateProgress, phase:updatePhase, received:updateReceived, total:updateTotal})}
   updates.enabled = !['checking','downloading'].includes(updateState)
   return [
     ...(platform === 'darwin' ? [{label:'Harness', submenu:[about, settings, {type:'separator'}, role('hide', 'hide'), role('hideOthers', 'hideOthers'), role('unhide', 'unhide'), {type:'separator'}, role('quit', 'quit')]}] : []),

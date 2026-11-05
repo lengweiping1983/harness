@@ -14,7 +14,7 @@ import {updateDialogOptions, updateFailureOptions} from './update-dialogs.mjs'
 import {readFileSync} from 'node:fs'
 import {DesktopVoice, voiceReply} from './voice.mjs'
 import {attachApplicationPermissions} from './application-permissions.mjs'
-import {applicationMenu, attachMenuLifecycle, configureMenuDefaults} from './application-menu.mjs'
+import {applicationMenu, refreshUpdateMenu, updateDockProgress, attachMenuLifecycle, configureMenuDefaults} from './application-menu.mjs'
 import {attachMenuShortcutGuard} from './shortcuts.mjs'
 import {windowChrome, attachWindowChrome} from './window-chrome.mjs'
 import {configureAboutPanel} from './about-panel.mjs'
@@ -119,11 +119,8 @@ async function startDesktop() {
   const metadata = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
   const updateFetch = createUpdateFetch(session.fromPartition('harness-updates', {cache:false}))
   updates = metadata.harnessUpdateSource?.provider === 'github'
-    ? new InstallerUpdates({source:metadata.harnessUpdateSource, version:app.getVersion(), packaged:app.isPackaged, fetch:updateFetch, installer:process.platform === 'darwin' ? new MacInstaller({fetch:updateFetch, appPath:path.resolve(path.dirname(app.getPath('exe')), '../..'), cachePath:path.join(app.getPath('home'), 'Library', 'Caches', 'Harness', 'updates')}) : null, notify:() => {
-      if (!window.isDestroyed()) window.setProgressBar(updates.state === 'downloading' ? (updates.progress || 0) / 100 : -1)
-      installMenu(menuReady)
-    }})
-    : new DesktopUpdates({updater:updaterPackage.autoUpdater, nativeUpdater:process.platform === 'darwin' ? nativeAutoUpdater : null, packaged:app.isPackaged, notify:() => installMenu(menuReady)})
+    ? new InstallerUpdates({source:metadata.harnessUpdateSource, version:app.getVersion(), packaged:app.isPackaged, fetch:updateFetch, installer:process.platform === 'darwin' ? new MacInstaller({fetch:updateFetch, appPath:path.resolve(path.dirname(app.getPath('exe')), '../..'), cachePath:path.join(app.getPath('home'), 'Library', 'Caches', 'Harness', 'updates')}) : null, notify:refreshUpdates})
+    : new DesktopUpdates({updater:updaterPackage.autoUpdater, nativeUpdater:process.platform === 'darwin' ? nativeAutoUpdater : null, packaged:app.isPackaged, notify:refreshUpdates})
   let updateDialog = false
   async function showUpdates() {
     if (updateDialog) return
@@ -179,10 +176,16 @@ async function startDesktop() {
     if (!leave) installRequested = false
     return leave
   })
+  function refreshUpdates() {
+    if (window.isDestroyed()) return
+    const snapshot = updates.snapshot()
+    window.setProgressBar(updateDockProgress(snapshot))
+    if (menuText) refreshUpdateMenu(Menu.getApplicationMenu(), snapshot, key => menuText[key])
+  }
   function installMenu(ready) {
     menuReady = ready
     if (!menuText || window.isDestroyed()) return
-    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenu({text:key => menuText[key], ready, updateState:updates.state, updateProgress:updates.progress, command:action => {
+    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenu({text:key => menuText[key], ready, updateState:updates.state, updateProgress:updates.progress, updatePhase:updates.phase, updateReceived:updates.received, updateTotal:updates.total, command:action => {
       if (action === 'updates') {void showUpdates(); return}
       if (action === 'about') {app.showAboutPanel(); return}
       window.webContents.send('desktop-command', action)
@@ -192,7 +195,7 @@ async function startDesktop() {
   attachWindowChrome({window, ipcMain, Menu, origin})
   ipcMain.handle('desktop-menu', (event, labels) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) throw Error('Untrusted menu request')
-    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','screenshot','screenshotHidden','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','updateInstallerDetail','updateMacInstallerDetail','updateMacDownloaded','updateInstallFailed','updateIntegrityFailed','updateInstallLocation','updateCurrentSignatureInvalid','updateNetworkDetail','updateNetworkDns','updateNetworkProxy','updateNetworkTls','updateNetworkOffline','updateNetworkTimeout','updateNetworkConnection','updateOpenFailed','updateRetry','updateNetworkSettings','updateUnpublished','updatePlatformUnavailable','updateSourceUnavailable','updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure','openReleasePage','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
+    const keys = ['about','settings','hide','hideOthers','unhide','quit','file','newChat','screenshot','screenshotHidden','edit','undo','redo','cut','copy','paste','selectAll','view','commands','sidebar','inspector','files','terminal','browser','fullscreen','window','minimize','zoom','front','help','shortcuts','checkUpdates','updateDevelopment','updateCurrent','updateAvailable','updateDownloaded','updateFailed','updateInstallerDetail','updateMacInstallerDetail','updateMacDownloaded','updateInstallFailed','updateIntegrityFailed','updateInstallLocation','updateCurrentSignatureInvalid','updateNetworkDetail','updateNetworkDns','updateNetworkProxy','updateNetworkTls','updateNetworkOffline','updateNetworkTimeout','updateNetworkConnection','updateOpenFailed','updateRetry','updateNetworkSettings','updateUnpublished','updatePlatformUnavailable','updateSourceUnavailable','updateInvalidRelease','updateMetadataTooLarge','updateHttpFailure','openReleasePage','downloadUpdate','later','ok','updateAvailableMenu','openProject','updateCheckingMenu','updateDownloadingMenu','updateConnectingMenu','updateVerifyingMenu','updatePreparingMenu','updateTransferMenu','updateReadyMenu','unsavedChanges','keepEditing','discardLeave','contextOpenLink','contextCopyLink','contextInspect','quitInstall']
     if (!labels || keys.some(key => typeof labels[key] !== 'string' || !labels[key].trim() || labels[key].length > 120)) throw Error('Invalid menu labels')
     menuText = Object.fromEntries(keys.map(key => [key, labels[key]]))
     installMenu(true)

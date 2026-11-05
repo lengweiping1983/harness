@@ -23,7 +23,7 @@ test('installer download verifies actual bytes, rejects missing digest, truncati
   const progress = []
   const file = await downloadInstaller({fetch:async () => new Response(bytes),asset,directory:root,signal:new AbortController().signal,progress:value => progress.push(value)})
   assert.deepEqual(await readFile(file), bytes)
-  assert.deepEqual(progress,[99])
+  assert.deepEqual(progress,[null,99.9,100])
   for (const [index, payload] of [bytes.subarray(1),Buffer.concat([bytes,bytes]),Buffer.alloc(bytes.length)].entries()) {
     const directory = path.join(root,String(index)); await mkdir(directory)
     await assert.rejects(downloadInstaller({fetch:async () => new Response(payload),asset,directory,progress:()=>{}}), error => error.menuKey === 'updateIntegrityFailed')

@@ -20,7 +20,7 @@ test('metadata and installer share the Chromium session with cookies disabled an
     calls.push({request,options})
     return request===url?Response.json({tag_name:'v1.1.0',draft:false,prerelease:false,assets:[asset]}):new Response(bytes)
   },resolveProxy:assert.fail},{directFetch:assert.fail})
-  const signal=new AbortController().signal
+  const controller=new AbortController(),signal=controller.signal
   const updates=new InstallerUpdates({source:{provider:'github',owner:'owner',repo:'releases'},version:'1.0.0',platform:'darwin',arch:'arm64',packaged:true,fetch,installer:{prepare:async(asset,_version,progress)=>downloadInstaller({fetch,asset,directory,signal,progress})}})
   assert.equal((await updates.check()).state,'available')
   await updates.download()
@@ -28,7 +28,9 @@ test('metadata and installer share the Chromium session with cookies disabled an
   assert.deepEqual(await readFile(path.join(directory,'installer.dmg')),bytes)
   assert.equal(calls.length,2)
   assert.equal(calls[0].options.redirect,'error');assert.equal(calls[1].options.redirect,'follow')
-  assert.equal(calls[1].options.signal,signal)
+  assert.equal(calls[1].options.signal.aborted,false)
+  controller.abort()
+  assert.equal(calls[1].options.signal.aborted,true)
   for(const {options} of calls){assert.equal(options.credentials,'omit');assert.equal(options.cache,'no-store')}
 })
 test('a Chromium DNS failure can use one Node fallback only when the system explicitly reports DIRECT',async()=>{

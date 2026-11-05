@@ -42,6 +42,9 @@ export class InstallerUpdates {
     this.notify = notify
     this.installer = installer
     this.progress = null
+    this.phase = null
+    this.received = 0
+    this.total = null
     this.asset = null
     this.state = packaged ? 'idle' : 'development'
     this.pending = null
@@ -49,14 +52,15 @@ export class InstallerUpdates {
     this.downloadUrl = null
     this.reason = null
   }
-  snapshot() {return {state:this.state, version:this.version, progress:this.progress, mode:'installer', downloadUrl:this.downloadUrl, reason:this.reason}}
+  snapshot() {return {state:this.state, version:this.version, progress:this.progress, phase:this.phase, received:this.received, total:this.total, mode:'installer', downloadUrl:this.downloadUrl, reason:this.reason}}
   setState(state) {this.state = state; this.notify(state)}
   check() {
     if (!this.packaged) return Promise.resolve(this.snapshot())
     if (this.pending) return this.pending
     if (this.state === 'downloaded') return Promise.resolve(this.snapshot())
     this.asset = null
-    this.progress = null
+    this.progress = this.phase = this.total = null
+    this.received = 0
     this.version = this.downloadUrl = this.reason = null
     this.pending = Promise.resolve().then(async () => {
       const {owner, repo} = this.source
@@ -92,12 +96,19 @@ export class InstallerUpdates {
   download() {
     if (this.pending) return this.state === 'downloading' ? this.pending : Promise.reject(new UpdateFailure('updateInvalidRelease'))
     if (this.state !== 'available' || !this.installer || !this.asset) return Promise.reject(new UpdateFailure('updateInvalidRelease'))
-    this.progress = 0
+    this.progress = null
+    this.phase = 'connecting'
+    this.received = 0
+    this.total = this.asset.size
     this.pending = Promise.resolve().then(async () => {
-      await this.installer.prepare(this.asset, this.version, progress => {
-        if (this.progress !== progress) {this.progress = progress; this.notify(this.state)}
+      await this.installer.prepare(this.asset, this.version, (progress, details = {}) => {
+        this.progress = progress
+        this.phase = details.phase || 'downloading'
+        if (details.received !== undefined) this.received = details.received
+        this.notify(this.state)
       })
       this.progress = 100
+      this.phase = 'ready'
       this.setState('downloaded')
       return this.snapshot()
     }).catch(error => {this.setState('error'); throw error}).finally(() => {this.pending = null})
