@@ -4962,5 +4962,16 @@
   "ui.desktop.menu.updateVerifyingMenu": "Verifying Update…",
   "ui.desktop.menu.updatePreparingMenu": "Preparing Update…",
   "ui.desktop.menu.updateTransferMenu": "Downloading Update… {percent}% ({received} / {total})",
-  "ui.files.outsideWorkspace": "This file is outside the current project and cannot be previewed or downloaded here."
+  "ui.files.outsideWorkspace": "This file is outside the current project and cannot be previewed or downloaded here.",
+  "ui.providers.editProvider": "Edit provider",
+  "ui.providers.editModel": "Edit model",
+  "ui.providers.editModelNamed": "Edit model {name}",
+  "ui.providers.removeModelNamed": "Delete model {name}",
+  "ui.providers.removeModelConfirm": "Remove model {name} from this connection?",
+  "ui.providers.modelEditContext": "{provider} · {model}",
+  "ui.providers.confirmRemoveModel": "Remove model",
+  "ui.providers.catalogUnavailable": "Could not read the model catalog: {reason}. Saved models can still be edited or removed.",
+  "ui.providers.modelNotInCatalog": "Not currently listed in the available model catalog.",
+  "ui.sidebar.projectsRetrying": "Reading projects again…",
+  "ui.sidebar.retryProjects": "Retry reading projects"
 }

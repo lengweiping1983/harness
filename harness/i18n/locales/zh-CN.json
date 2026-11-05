@@ -8537,5 +8537,16 @@
   "prompt.artifact_output": "- 生成 SVG、图片、HTML、文档等最终文件时，默认使用本对话工作目录内的相对路径；不要把 /tmp、/private/tmp 或系统临时目录中的文件作为项目交付物。临时目录只用于可丢弃的中间数据。若为了生成或验证而写入文件，应直接在项目内保存最终版，验证命令与交付引用使用同一个实际文件，并核对工具回执中的路径。用户明确指定其它保存位置时遵循其要求，如实说明该位置；项目外文件不能通过当前项目的文件面板下载。用户仅要求对话演示或明确要求不写文件时，遵循其输出要求；对话预览本身不代表文件已保存。",
   "fs.write.outside_workspace": "文件已成功写入项目外：{path}。本对话工作目录为 {root}；当前项目的文件面板不能预览或下载此文件。不要重复执行已成功的写入。若它是最终交付物且用户未指定项目外位置，请将最终版另存到工作目录内的相对路径，再验证并引用项目内文件；不会自动移动原件。",
   "present.outside_workspace": "不能将项目外文件声明为当前项目的交付物：{path}。请先将最终版保存到本对话工作目录 {root} 内，再使用项目内路径调用 present。原文件未移动或复制；若用户明确指定项目外位置，请在回复中如实说明该位置及当前项目无法提供下载。",
-  "ui.files.outsideWorkspace": "文件位于当前项目之外，无法在此预览或下载。"
+  "ui.files.outsideWorkspace": "文件位于当前项目之外，无法在此预览或下载。",
+  "ui.providers.editProvider": "编辑提供商",
+  "ui.providers.editModel": "编辑模型",
+  "ui.providers.editModelNamed": "编辑模型 {name}",
+  "ui.providers.removeModelNamed": "删除模型 {name}",
+  "ui.providers.removeModelConfirm": "从此接口移除模型 {name}？",
+  "ui.providers.modelEditContext": "{provider} · {model}",
+  "ui.providers.confirmRemoveModel": "移除模型",
+  "ui.providers.catalogUnavailable": "模型目录读取失败：{reason}。已保存的模型仍可编辑或移除。",
+  "ui.providers.modelNotInCatalog": "暂未出现在可用模型目录中。",
+  "ui.sidebar.projectsRetrying": "正在重新读取项目…",
+  "ui.sidebar.retryProjects": "重试读取项目"
 }

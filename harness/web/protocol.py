@@ -19,6 +19,13 @@ from ..academy.protocol import SCHEMAS as ACADEMY_SCHEMAS, ENDPOINTS as ACADEMY_
 PERSONALITY_CODE = {'anyOf': [{'type': 'string', 'enum': list(STYLE_CODES)}, {'type': 'null'}]}
 
 SCHEMAS: dict[str, dict[str, Any]] = {
+    'WorkspaceRecord': {'type': 'object', 'required': ['id', 'path', 'name', 'color'], 'properties': {
+        'id': {'type': 'string', 'minLength': 1}, 'path': {'type': 'string', 'minLength': 1},
+        'name': {'type': 'string'}, 'color': {'type': 'string'}, 'exists': {'type': 'boolean'},
+        'created_at': {'type': 'number'}, 'last_used_at': {'type': 'number'}}},
+    'WorkspaceCatalog': {'type': 'object', 'required': ['workspaces', 'default'], 'properties': {
+        'workspaces': {'type': 'array', 'items': {'$ref': '#/components/schemas/WorkspaceRecord'}},
+        'default': {'type': 'string'}}},
     'VoicePreparation': {'type': 'object', 'required': ['ready'], 'additionalProperties': False,
                          'properties': {'ready': {'const': True}}},
     'VoiceTranscript': {'type': 'object', 'required': ['transcript'], 'additionalProperties': False,
@@ -976,6 +983,8 @@ def openapi(templates: list[str]) -> dict[str, Any]:
         parameters = [{"name": name, "in": "path", "required": True, "schema": {"type": "string"}} for name in re.findall(r"{([^}]+)}", path)]
         parameters.append({"name": "X-Request-ID", "in": "header", "schema": {"type": "string"}})
         collaboration_response = None
+        if path == '/api/v1/workspaces' and method == 'GET':
+            operation['responses']['200']['content'] = {'application/json': {'schema': {'$ref': '#/components/schemas/WorkspaceCatalog'}}}
         if path == '/api/v1/workspace-options' and method == 'GET':
             parameters.append({'name': 'path', 'in': 'query', 'required': True, 'schema': {'type': 'string', 'minLength': 1}})
             operation['responses']['200']['content'] = {'application/json': {'schema': {'$ref': '#/components/schemas/WorkspaceOptions'}}}

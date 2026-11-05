@@ -123,15 +123,17 @@ export function providerCatalogChanges(previous: readonly CatalogModel[], fresh:
   return {added: [...after].filter(id => !before.has(id)).length, retired: [...before].filter(id => !after.has(id)).length}
 }
 
-/** 按配置身份匹配可用模型，保持接口与模型顺序，不依据展示名称猜测归属。 */
+/** 按配置身份列出全部已保存模型，运行目录只补充元数据，不决定管理行是否存在。 */
 export function providerModelGroups(provider: ModelProvider, models: ModelInfo[]) {
   const catalog = new Map(models.map(model => [model.id, model]))
   return provider.connections.map(connection => ({
     id: connection.id,
     name: connection.name,
-    models: connection.models.flatMap(model => {
-      const entry = catalog.get(`harness/${provider.id}/${connection.id}/${model.id}`)
-      return entry ? [entry] : []
+    models: connection.models.map(model => {
+      const id = `harness/${provider.id}/${connection.id}/${model.id}`
+      return catalog.get(id) ?? {id, label: model.name || model.model, provider: provider.name,
+        ...(model.context_window ? {context_window: model.context_window} : {}),
+        ...(model.max_output_tokens ? {max_output: model.max_output_tokens} : {})}
     }),
   })).filter(group => group.models.length)
 }

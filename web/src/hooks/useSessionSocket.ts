@@ -8,7 +8,7 @@ import type {
   AttachmentInfo, StreamEvent, SessionDetail } from '@/types'
 import { api } from '@/lib/api'
 import { SessionSocket } from '@/lib/ws'
-import { defaultReasoningBlocked, useAppStore } from '@/store/app'
+import { defaultReasoningBlocked, recoverProjectCatalog, useAppStore } from '@/store/app'
 import { useChatStore } from '@/store/chat'
 import type { TeamAddress } from '@/lib/agentMount'
 import { useDraftStore } from '@/store/drafts'
@@ -117,6 +117,7 @@ export function useSessionSocket(sessionId: string | null, readOnly = false): Se
           return
         }
         if (type === 'ready') {
+          if (!readOnly) void recoverProjectCatalog()
           ready.current = true
           recovering = false
           if (raw.snapshot) {

@@ -1,4 +1,4 @@
-import {useMemo} from 'react'
+import {useMemo, type ReactNode} from 'react'
 import {t, useLocale} from '@/i18n'
 import type {ModelInfo} from '@/types'
 import {noticeText} from '@/lib/noticeText'
@@ -27,7 +27,15 @@ export function DefaultModelFeedback() {
   </>
 }
 
-export function ModelPreferences({models, grouped = true, heading = true}: {models: ModelInfo[]; grouped?: boolean; heading?: boolean}) {
+export function ModelPreferences({models, grouped = true, heading = true, renderActions, renderFeedback, modelElements, isAvailable}: {
+  models: ModelInfo[]
+  grouped?: boolean
+  heading?: boolean
+  renderActions?: (model: ModelInfo) => ReactNode
+  renderFeedback?: (model: ModelInfo) => ReactNode
+  modelElements?: Map<string, HTMLDivElement>
+  isAvailable?: (model: ModelInfo) => boolean
+}) {
   const locale = useLocale()
 
   const defaultModel = useAppStore((s) => s.defaultModel)
@@ -54,22 +62,25 @@ export function ModelPreferences({models, grouped = true, heading = true}: {mode
             const visible = visibility[model.id] !== false
             const isDefault = model.id === defaultModel
             const visibilitySave = visibilitySaves[model.id]
+            const feedback = renderFeedback?.(model)
+            const available = isAvailable?.(model) ?? true
             return (
               <div
                 key={model.id}
-                className={cn("grid grid-cols-form-row items-start gap-x-3 gap-y-2 px-3 py-2 sm:flex sm:items-center sm:gap-3", heading ? "rounded-xl border border-line" : "rounded-lg bg-raised")}
+                ref={modelElements ? element => {if (element) modelElements.set(model.id, element); else modelElements.delete(model.id)} : undefined}
+                className={cn("grid grid-cols-form-row items-center gap-x-3 gap-y-2 px-3 py-2 sm:grid-cols-model-row", heading ? "rounded-xl border border-line" : "rounded-lg bg-raised")}
               >
                 <button
                   type="button"
                   role="switch"
                   aria-checked={visible}
-                  disabled={visibilitySave?.pending}
+                  disabled={!available || visibilitySave?.pending}
                   aria-busy={visibilitySave?.pending || undefined}
                   onClick={() => void setModelVisibility(model.id, !visible)}
                   className={cn(
                     'relative flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors focus-visible:ring-2 focus-visible:ring-brand',
                     visible ? 'border-brand bg-brand' : 'border-line-strong bg-raised',
-                    'disabled:cursor-wait disabled:opacity-50',
+                    'disabled:opacity-50', visibilitySave?.pending ? 'disabled:cursor-wait' : 'disabled:cursor-not-allowed',
                   )}
                   aria-label={t(visible ? 'ui.settings.models.hideNamed' : 'ui.settings.models.showNamed', {model: model.label})}
                 >
@@ -80,6 +91,7 @@ export function ModelPreferences({models, grouped = true, heading = true}: {mode
                   <p className="text-xs font-medium text-ink [overflow-wrap:anywhere] sm:truncate">{model.label}</p>
                   {!model.id.startsWith('harness/') ? <p className="text-2xs text-faint [overflow-wrap:anywhere] sm:truncate">{model.id}</p> : null}
                   <p className="text-2xs text-faint">{model.context_window ? t('ui.models.contextSize', {count: formatNumber(model.context_window)}) : t('ui.models.contextUnknown')}</p>
+                  {!available ? <p className="text-2xs text-muted">{t('ui.providers.modelNotInCatalog')}</p> : null}
                   {visibilitySave?.pending ? <p role="status" aria-label={t("ui.components.overlays.SettingsDialog.dd9d81b48619")} className="mt-1 text-2xs text-muted">{t(visibilitySave.target ? 'ui.settings.models.showing' : 'ui.settings.models.hiding', {model: model.label})}</p> : null}
                   {!visibilitySave?.pending && visibilitySave?.error ? <div role="alert" aria-label={t("ui.components.overlays.SettingsDialog.cc6f6f1dda23")} className="mt-1 space-y-1 text-2xs text-danger [overflow-wrap:anywhere]">
                     <p>{visibilitySave.unconfirmed ? t("ui.components.overlays.SettingsDialog.3b189be96200") : t("ui.components.overlays.SettingsDialog.cbbbe96b2b34")}</p>
@@ -88,15 +100,19 @@ export function ModelPreferences({models, grouped = true, heading = true}: {mode
                   </div> : null}
                 </div>
 
+                <div className="col-start-2 flex flex-wrap items-center gap-1.5 sm:col-start-3 sm:justify-end">
                 <Button
                   size="xs"
-                  className={cn("col-start-2 justify-self-start sm:shrink-0", isDefault && "disabled:opacity-100")}
+                  className={cn("shrink-0", isDefault && "disabled:opacity-100")}
                   variant={isDefault ? 'subtle' : 'secondary'}
-                  disabled={isDefault || modelSaving}
+                  disabled={!available || isDefault || modelSaving}
                   onClick={() => void setDefaultModel(model.id)}
                 >
                   {modelSaving && modelSave?.target === model.id ? t("ui.components.overlays.SettingsDialog.ff509c9ba052") : isDefault ? t("ui.components.overlays.SettingsDialog.ba336585f0a2") : t("ui.components.overlays.SettingsDialog.357211096f78")}
                 </Button>
+                {renderActions?.(model)}
+                </div>
+                {feedback ? <div className="col-span-full">{feedback}</div> : null}
               </div>
             )
           })}

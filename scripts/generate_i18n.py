@@ -27,7 +27,8 @@ def main() -> int:
                 failures.append(str(destination.relative_to(ROOT)))
         else:
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(content, encoding='utf-8')
+            if not destination.exists() or destination.read_text(encoding='utf-8') != content:
+                destination.write_text(content, encoding='utf-8')
     # 启动占位和失败提示不能依赖尚未下载的完整语言包。
     destination = ROOT / 'web' / 'src' / 'i18n' / 'startup.generated.json'
     content = json.dumps(startup, ensure_ascii=False, indent=2) + '\n'
@@ -35,7 +36,8 @@ def main() -> int:
         if not destination.exists() or destination.read_text(encoding='utf-8') != content:
             failures.append(str(destination.relative_to(ROOT)))
     else:
-        destination.write_text(content, encoding='utf-8')
+        if not destination.exists() or destination.read_text(encoding='utf-8') != content:
+            destination.write_text(content, encoding='utf-8')
     if failures:
         print('前端语言资源未同步，请运行 python3 scripts/generate_i18n.py：' + ', '.join(failures))
         return 1

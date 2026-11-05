@@ -4145,7 +4145,14 @@
         "operationId": "get_api_v1_workspaces",
         "responses": {
           "200": {
-            "description": "操作成功"
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCatalog"
+                }
+              }
+            }
           },
           "400": {
             "description": "稳定错误码",
@@ -19211,6 +19218,58 @@
   },
   "components": {
     "schemas": {
+      "WorkspaceRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "path",
+          "name",
+          "color"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "last_used_at": {
+            "type": "number"
+          }
+        }
+      },
+      "WorkspaceCatalog": {
+        "type": "object",
+        "required": [
+          "workspaces",
+          "default"
+        ],
+        "properties": {
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceRecord"
+            }
+          },
+          "default": {
+            "type": "string"
+          }
+        }
+      },
       "VoicePreparation": {
         "type": "object",
         "required": [

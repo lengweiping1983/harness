@@ -41,9 +41,28 @@ it('keeps identically named providers and endpoints separate by their full stabl
   expect(providerModelGroups(multiple, models).map(group => group.models.map(model => model.id))).toEqual([
     ['harness/one/endpoint/flash'], ['harness/one/second/flash'],
   ])
-  expect(providerModelGroups(provider, [models[0]])).toEqual([])
+  expect(providerModelGroups(provider, [models[0]])[0].models).toEqual([{id: models[1].id, label: 'Flash 原文', provider: provider.name}])
   const unavailable = {...provider, connections: [{...provider.connections[0], models: [...provider.connections[0].models, {...provider.connections[0].models[0], id: 'missing'}]}]}
-  expect(providerModelGroups(unavailable, models)[0].models).toEqual([models[1]])
+  expect(providerModelGroups(unavailable, models)[0].models.map(model => model.id)).toEqual([models[1].id, 'harness/one/endpoint/missing'])
+})
+
+it('keeps saved model rows and their actions when the runtime catalog is empty, without inventing selectable models', () => {
+  const configured = {...provider, connections: [{...provider.connections[0], models: [{...provider.connections[0].models[0], context_window: 64000}]}]}
+  const before = JSON.stringify(configured)
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    setLocale(language)
+    const actions = vi.fn((connection, model) => <button>{t('ui.providers.editModelNamed', {name: model.name})}</button>)
+    const html = renderToStaticMarkup(<ProviderModelPreferences provider={configured} models={[]} renderActions={actions} />)
+    expect(html).toContain('Flash 原文')
+    expect(html).toContain(t('ui.models.contextSize', {count: '64k'}))
+    expect(actions).toHaveBeenCalledWith(configured.connections[0], configured.connections[0].models[0])
+    expect(html.match(/<button[^>]*role="switch"[^>]*>/)?.[0]).toContain('disabled=""')
+    expect(html.match(/<button[^>]*disabled=""[^>]*>/g)).toHaveLength(2)
+    expect(html).not.toContain('harness/')
+    expect(fixture.state.setDefaultModel).not.toHaveBeenCalled()
+    expect(fixture.state.setModelVisibility).not.toHaveBeenCalled()
+  }
+  expect(JSON.stringify(configured)).toBe(before)
 })
 
 it('renders one provider model list without repeated provider headings or internal IDs through English, Chinese, English', () => {
@@ -72,6 +91,24 @@ it('retains separate connection headings and model order within the provider', (
   expect(html.indexOf('Flash 原文')).toBeLessThan(html.indexOf('Second 接口'))
   expect(html.indexOf('Second 接口')).toBeLessThan(html.indexOf('Second connection'))
   expect(html).toContain(t('ui.models.contextUnknown'))
+})
+
+it('delivers row actions and inline feedback to the full provider connection model identity through English Chinese English', () => {
+  const multiple = {...provider, connections: [provider.connections[0], {...provider.connections[0], id: 'second'}]}
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    setLocale(language)
+    const actions = vi.fn((connection, model) => <button aria-label={t('ui.providers.editModelNamed', {name: model.name})} data-owner={connection.id}>{t('ui.providers.edit')}</button>)
+    const feedback = vi.fn((connection, model) => connection.id === 'second' ? <p role="status">{t('ui.providers.removeModelConfirm', {name: model.name})}</p> : null)
+    const html = renderToStaticMarkup(<ProviderModelPreferences provider={multiple} models={models} renderActions={actions} renderFeedback={feedback} />)
+    expect(actions.mock.calls.map(([connection, model]) => [connection.id, model.id])).toEqual([['endpoint', 'flash'], ['second', 'flash']])
+    expect(html).toContain('data-owner="endpoint"')
+    expect(html).toContain('data-owner="second"')
+    expect(html).toContain(t('ui.providers.removeModelConfirm', {name: 'Flash 原文'}))
+    expect(html.match(/role="status"/g)).toHaveLength(1)
+    expect(html).not.toContain('Other provider')
+    expect(html).not.toContain('harness/')
+    expect(fixture.state.setDefaultModel).not.toHaveBeenCalled()
+  }
 })
 
 it('keeps hidden switches and their pending or failed feedback in the owning model list', () => {

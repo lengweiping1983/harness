@@ -111,6 +111,7 @@ export default {
       gridTemplateColumns: {
         detail: 'auto minmax(0, 1fr)',
         'form-row': '2.25rem minmax(0, 1fr)',
+        'model-row': '2.25rem minmax(0, 1fr) auto',
         settings: '10rem minmax(0, 1fr)',
         'hook-form': 'minmax(0, 1fr) 100px',
         search: 'minmax(0, 1fr) minmax(0, 2fr)',

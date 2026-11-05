@@ -1,6 +1,7 @@
 import {useSessionNotificationStore} from '@/store/sessionNotifications'
 import {SessionListSkeleton} from './SessionListSkeleton'
 import {failureText} from '@/lib/resourceError'
+import {noticeText} from '@/lib/noticeText'
 import {SessionRunningIndicator} from '@/components/chat/SessionRunningIndicator'
 import {useSessionRunning} from '@/store/sessionActivity'
 import { t, useLocale } from '@/i18n'
@@ -33,7 +34,7 @@ import {
   type GroupMode,
   type SidebarGroup,
 } from '@/lib/sidebarGroups'
-import { useAppStore } from '@/store/app'
+import { recoverProjectCatalog, useAppStore } from '@/store/app'
 import { ContextActionMenu, type ContextMenuAnchor } from '@/components/ui/ContextActionMenu'
 import { RenameDialog } from '@/components/overlays/RenameDialog'
 import { ApiError, isUnconfirmedWrite, runtimeRequest } from '@/lib/http'
@@ -88,6 +89,8 @@ export function ProjectSidebar() {
 
   const sessions = useAppStore((s) => s.sessions)
   const workspaces = useAppStore((s) => s.workspaces)
+  const workspacesError = useAppStore((s) => s.workspacesError)
+  const workspacesLoading = useAppStore((s) => s.workspacesLoading)
   const loading = useAppStore((s) => s.sessionsLoading || s.workspacesLoading)
   const activeId = useAppStore((s) => s.activeSessionId)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
@@ -117,9 +120,22 @@ export function ProjectSidebar() {
   )
 
   const groups = useMemo(
-    () => searchSidebarGroups(sessions.filter((s) => Boolean(s.metadata?.archived) === showArchived), workspaces, mode, collapsed, query),
-    [sessions, workspaces, mode, collapsed, query, showArchived, locale],
+    () => searchSidebarGroups(sessions.filter((s) => Boolean(s.metadata?.archived) === showArchived), workspaces,
+      !workspaces.length && (workspacesError || workspacesLoading) ? 'flat' : mode, collapsed, query),
+    [sessions, workspaces, workspacesError, workspacesLoading, mode, collapsed, query, showArchived, locale],
   )
+
+  useEffect(() => {
+    const recover = () => {void recoverProjectCatalog()}
+    window.addEventListener('online', recover)
+    window.addEventListener('focus', recover)
+    document.addEventListener('visibilitychange', recover)
+    return () => {
+      window.removeEventListener('online', recover)
+      window.removeEventListener('focus', recover)
+      document.removeEventListener('visibilitychange', recover)
+    }
+  }, [])
 
   useEffect(() => {
     try {
@@ -190,6 +206,7 @@ export function ProjectSidebar() {
         <WorkspaceAction action="collapse-left" label={t('ui.sidebar.collapse')} data-panel-toggle="left" aria-controls="project-sidebar" onClick={() => useAppStore.getState().toggleSidebar()} />
         <IconButton
           label={t("ui.components.sidebar.ProjectSidebar.aee887434131")}
+          disabled={loading}
           onClick={() => {
             void refreshSessions()
             void refreshWorkspaces()
@@ -205,6 +222,10 @@ export function ProjectSidebar() {
       </header>
 
       {storageError ? <p role="alert" className="px-3 pb-2 text-xs text-warn">{t('ui.sidebar.preferencesUnconfirmed')}</p> : null}
+      {workspacesError ? <div role={workspacesLoading ? 'status' : 'alert'} className="mx-3 mb-2 space-y-2 rounded-lg bg-raised p-3 text-xs">
+        <p className="text-muted">{t(workspacesLoading ? 'ui.sidebar.projectsRetrying' : 'ui.store.app.a2de8299587b')}</p>
+        {!workspacesLoading ? <><p tabIndex={0} className="max-h-16 overflow-y-auto text-warn [overflow-wrap:anywhere]">{noticeText(workspacesError)}</p><Button size="sm" onClick={() => void refreshWorkspaces()}>{t('ui.sidebar.retryProjects')}</Button></> : null}
+      </div> : null}
 
       {/* 搜索 + 分组方式 */}
       <div className="px-3 pb-2">

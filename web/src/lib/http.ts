@@ -77,6 +77,28 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
 }
 
+/** 仅供显式目录 GET 使用；重试共享总截止时间，取消与协议错误不重试。 */
+export async function readRequest<T>(path: string, options: Omit<RequestOptions, 'method' | 'body'> = {}): Promise<ApiResult<T>> {
+  const deadline = Date.now() + (options.timeout ?? 20_000)
+  const delays = [250, 750, 1500, 3000]
+  for (let attempt = 0; ; attempt++) {
+    const result = await request<T>(path, {...options, method: 'GET', timeout: Math.max(1, deadline - Date.now())})
+    if (result.ok || options.signal?.aborted || attempt >= delays.length
+      || !(result.status === 0 && result.code === 'network' || [408, 500, 502, 503, 504].includes(result.status))
+      || Date.now() + delays[attempt] >= deadline) return result
+    await new Promise<void>(resolve => {
+      const finish = () => {clearTimeout(timer); options.signal?.removeEventListener('abort', finish); resolve()}
+      const timer = setTimeout(finish, delays[attempt])
+      options.signal?.addEventListener('abort', finish, {once: true})
+      if (options.signal?.aborted) finish()
+    })
+    if (options.signal?.aborted) {
+      const copy: ResourceCopy = {key: 'ui.lib.api.282c4cfbc8fd'}
+      return {ok: false, status: 0, code: 'cancelled', message: t(copy.key), copy}
+    }
+  }
+}
+
 export async function unwrap<T>(pending: Promise<ApiResult<T>>): Promise<T> {
   const result = await pending
   if (!result.ok) throw new ApiError(result)

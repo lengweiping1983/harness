@@ -4962,5 +4962,16 @@
   "ui.desktop.menu.updateVerifyingMenu": "正在校验更新…",
   "ui.desktop.menu.updatePreparingMenu": "正在准备安装更新…",
   "ui.desktop.menu.updateTransferMenu": "正在下载更新… {percent}%（{received} / {total}）",
-  "ui.files.outsideWorkspace": "文件位于当前项目之外，无法在此预览或下载。"
+  "ui.files.outsideWorkspace": "文件位于当前项目之外，无法在此预览或下载。",
+  "ui.providers.editProvider": "编辑提供商",
+  "ui.providers.editModel": "编辑模型",
+  "ui.providers.editModelNamed": "编辑模型 {name}",
+  "ui.providers.removeModelNamed": "删除模型 {name}",
+  "ui.providers.removeModelConfirm": "从此接口移除模型 {name}？",
+  "ui.providers.modelEditContext": "{provider} · {model}",
+  "ui.providers.confirmRemoveModel": "移除模型",
+  "ui.providers.catalogUnavailable": "模型目录读取失败：{reason}。已保存的模型仍可编辑或移除。",
+  "ui.providers.modelNotInCatalog": "暂未出现在可用模型目录中。",
+  "ui.sidebar.projectsRetrying": "正在重新读取项目…",
+  "ui.sidebar.retryProjects": "重试读取项目"
 }

@@ -31,7 +31,7 @@ import type {
   WorkspacePayload,
 } from '@/types'
 
-import { request } from './http'
+import { request, readRequest } from './http'
 import type { ApiFailure } from './http'
 export { ApiError, unwrap } from './http'
 export type { ApiFailure, ApiResult } from './http'
@@ -55,6 +55,8 @@ export const mcpCompanionConfigure = (settings: {enabled: boolean; port: number}
 export const mcpCompanionToken = () => request<{token: string}>('/api/v1/mcp-service/companion/token', {method: 'POST'})
 
 const get = <T,>(path: string) => request<T>(path)
+type CatalogReadOptions = {retry?: boolean}
+const catalogGet = <T,>(path: string, options?: CatalogReadOptions) => options?.retry ? readRequest<T>(path) : get<T>(path)
 const post = <T,>(path: string, body?: unknown, init?: RequestInit & { timeout?: number }) =>
   request<T>(path, {
     ...init,
@@ -83,10 +85,10 @@ export const api = {
   screenshot: (hideWindow: boolean, windowToken: string) =>
     post<{ cancelled: true } | { cancelled: false; data: string }>('/api/v1/screenshot', { hideWindow, windowToken }, { timeout: 155_000 }),
   /* 状态 */
-  status: () => get<StatusPayload>('/api/v1/status'),
-  tools: () => get<{ tools: ToolSchema[] }>('/api/v1/tools'),
-  skills: () => get<{ skills: SkillInfo[] }>('/api/v1/skills'),
-  models: () => get<ModelCatalog>('/api/v1/models'),
+  status: (options?: CatalogReadOptions) => catalogGet<StatusPayload>('/api/v1/status', options),
+  tools: (options?: CatalogReadOptions) => catalogGet<{ tools: ToolSchema[] }>('/api/v1/tools', options),
+  skills: (options?: CatalogReadOptions) => catalogGet<{ skills: SkillInfo[] }>('/api/v1/skills', options),
+  models: (options?: CatalogReadOptions) => catalogGet<ModelCatalog>('/api/v1/models', options),
 
   contextAudit: (id: string, through?: number, before?: number, signal?: AbortSignal, agentId?: string) =>
     request<ContextAudit>('/api/v1/sessions/' + encodeURIComponent(id) + '/context?' + new URLSearchParams({
@@ -137,7 +139,7 @@ export const api = {
     '/api/v1/sessions/' + encodeURIComponent(id) + '/requests/' + encodeURIComponent(traceId) + '/export',
 
   /* 会话 */
-  listSessions: () => get<{ sessions: SessionSummary[] }>('/api/v1/sessions'),
+  listSessions: (options?: CatalogReadOptions) => catalogGet<{ sessions: SessionSummary[] }>('/api/v1/sessions', options),
   searchConversation: (id: string, query: string, options: { signal?: AbortSignal; through?: number; before?: number } = {}) => {
     const params = new URLSearchParams({ q: query })
     if (options.through !== undefined) params.set('through', String(options.through))
@@ -166,7 +168,7 @@ export const api = {
     request<{ evidence: import('@/types').GoalEvidencePage }>('/api/v1/sessions/' + encodeURIComponent(id) + '/goal/' + encodeURIComponent(goalId) + '/evidence/' + seq + '?offset=' + offset, { signal }),
 
   /* 运行时设置 */
-  settings: () => get<{ settings: UiSettings }>('/api/v1/ui-settings'),
+  settings: (options?: CatalogReadOptions) => catalogGet<{ settings: UiSettings }>('/api/v1/ui-settings', options),
   updateSettings: (body: Partial<UiSettings>) =>
     patchMethod<{ settings: UiSettings; rejected: string[] }>('/api/v1/ui-settings', body),
 
@@ -229,7 +231,7 @@ export const api = {
     post<TerminalStopPayload>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(terminalId)}/stop`, {}),
 
   /* 项目（Workspace）：会话之上的目录分组层 */
-  listWorkspaces: () => get<{ workspaces: WorkspaceInfo[]; default: string }>('/api/v1/workspaces'),
+  listWorkspaces: (options?: CatalogReadOptions) => catalogGet<{ workspaces: WorkspaceInfo[]; default: string }>('/api/v1/workspaces', options),
   registerWorkspace: (body: { path: string; name?: string; color?: string }) =>
     post<{ workspace: WorkspaceInfo }>('/api/v1/workspaces', body),
   mkdirWorkspace: (parent: string, name: string) =>
@@ -239,14 +241,14 @@ export const api = {
   unregisterWorkspace: (id: string) => del<{ deleted: string }>('/api/v1/workspaces/' + encodeURIComponent(id)),
 
   /* 目录浏览 */
-  workspace: (path?: string, root?: string | null, options?: {offset?: number; query?: string; signal?: AbortSignal}) => {
+  workspace: (path?: string, root?: string | null, options?: {offset?: number; query?: string; signal?: AbortSignal; retry?: boolean}) => {
     const qs = new URLSearchParams()
     if (path) qs.set('path', path)
     if (root) qs.set('root', root)
     if (options?.offset) qs.set('offset', String(options.offset))
     if (options?.query) qs.set('q', options.query)
     const suffix = qs.toString() ? '?' + qs.toString() : ''
-    return request<WorkspacePayload>('/api/v1/workspace' + suffix, { signal: options?.signal })
+    return (options?.retry ? readRequest<WorkspacePayload> : request<WorkspacePayload>)('/api/v1/workspace' + suffix, {signal: options?.signal})
   },
   openFile: (path: string, root: string | null, action: 'default' | 'terminal' | 'folder') =>
     post<{ requested: boolean; action: string }>('/api/v1/file/open', { path, root, action }),
@@ -275,10 +277,10 @@ export const api = {
 /** 一次性抓齐目录类数据；单项失败降级，不阻塞首屏。 */
 export async function loadCatalogs() {
   const [status, tools, skills, workspace] = await Promise.all([
-    api.status(),
-    api.tools(),
-    api.skills(),
-    api.workspace(),
+    api.status({retry: true}),
+    api.tools({retry: true}),
+    api.skills({retry: true}),
+    api.workspace(undefined, undefined, {retry: true}),
   ])
   const failed = [status, tools, skills, workspace].filter((r) => r.ok === false)
   return {

@@ -8537,5 +8537,16 @@
   "prompt.artifact_output": "- When generating final SVG, image, HTML, document, or other files, default to relative paths inside this conversation's working directory. Do not use files in /tmp, /private/tmp, or the system temporary directory as project deliverables; temporary directories are for disposable intermediate data. If you write files for generation or verification, save the final version directly in the project. Verify and reference that same actual file, checking the path in the tool receipt. Follow an explicitly requested alternative destination and report it accurately; files outside the project cannot be downloaded through its file panel. Follow requests for an in-conversation demo or no file writes; a conversation preview alone does not mean a file was saved.",
   "fs.write.outside_workspace": "The file was successfully written outside the project: {path}. This conversation's working directory is {root}; its file panel cannot preview or download this file. Do not repeat the successful write. If this is a final deliverable and the user did not request an outside destination, save the final version separately at a relative path inside the working directory, then verify and reference the project file. The original will not be moved automatically.",
   "present.outside_workspace": "Cannot declare a file outside the project as its deliverable: {path}. First save the final version inside this conversation's working directory {root}, then call present with the project path. The original was not moved or copied. If the user explicitly requested an outside destination, report that location and explain that this project cannot provide its download.",
-  "ui.files.outsideWorkspace": "This file is outside the current project and cannot be previewed or downloaded here."
+  "ui.files.outsideWorkspace": "This file is outside the current project and cannot be previewed or downloaded here.",
+  "ui.providers.editProvider": "Edit provider",
+  "ui.providers.editModel": "Edit model",
+  "ui.providers.editModelNamed": "Edit model {name}",
+  "ui.providers.removeModelNamed": "Delete model {name}",
+  "ui.providers.removeModelConfirm": "Remove model {name} from this connection?",
+  "ui.providers.modelEditContext": "{provider} · {model}",
+  "ui.providers.confirmRemoveModel": "Remove model",
+  "ui.providers.catalogUnavailable": "Could not read the model catalog: {reason}. Saved models can still be edited or removed.",
+  "ui.providers.modelNotInCatalog": "Not currently listed in the available model catalog.",
+  "ui.sidebar.projectsRetrying": "Reading projects again…",
+  "ui.sidebar.retryProjects": "Retry reading projects"
 }

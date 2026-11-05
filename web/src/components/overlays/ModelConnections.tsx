@@ -1,8 +1,8 @@
-import {useEffect, useRef, useState} from 'react'
+import {useEffect, useRef, useState, type ReactNode} from 'react'
 import {DefaultModelFeedback, ModelPreferences} from './ModelPreferences'
-import {Plus, Eye, EyeOff, Trash2, ChevronUp, ChevronDown, ListPlus, RefreshCw} from 'lucide-react'
+import {Plus, Eye, EyeOff, Trash2, ChevronUp, ChevronDown, ListPlus, RefreshCw, Pencil} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
-import type {ModelInfo, ResourceText} from '@/types'
+import type {ModelCatalog, ModelInfo, ResourceText} from '@/types'
 import {runtimeRequest} from '@/lib/http'
 import {failureText} from '@/lib/resourceError'
 import {noticeText} from '@/lib/noticeText'
@@ -16,8 +16,8 @@ import {Switch} from './ExtensionCatalogControls'
 import type {ProviderChoice} from './ProviderPickers'
 import {ModelPagination, ModelPicker, ProviderPicker} from './ProviderPickers'
 import {ManualModelEditor, ProviderModelFields} from './ProviderModelEditor'
-import type {CatalogModel, ModelProvider, ProviderConnection, ProviderSnapshot, ProviderTemplate} from '@/lib/providerConnections'
-import {providerDraftForTemplate, providerModelGroups, providerCatalogChanges, reconcileProviderModels, providerConnectionIssue, sortProviderChoices, providerConfigurationState, validProviderEndpoint, maskProviderKey, moveProviderItem, newProviderConnection, newProviderKey, providerPayload} from '@/lib/providerConnections'
+import type {CatalogModel, ModelProvider, ProviderConnection, ProviderModel, ProviderSnapshot, ProviderTemplate} from '@/lib/providerConnections'
+import {providerDraftForTemplate, providerModelGroups, providerCatalogChanges, reconcileProviderModels, providerConnectionIssue, sortProviderChoices, providerConfigurationState, validProviderEndpoint, validProviderModelId, maskProviderKey, moveProviderItem, newProviderConnection, newProviderKey, providerPayload} from '@/lib/providerConnections'
 
 export function KiloFreeNotice() {
   useLocale()
@@ -25,6 +25,7 @@ export function KiloFreeNotice() {
 }
 
 const field = 'w-full min-w-0 rounded-lg border border-line bg-canvas px-3 py-2 text-xs'
+type ModelTarget = {providerId: string; connectionId: string; modelId: string}
 
 export function ModelConnections() {
   useLocale()
@@ -33,6 +34,8 @@ export function ModelConnections() {
   const [snapshot, setSnapshot] = useState<ProviderSnapshot | null>(null)
   const [templates, setTemplates] = useState<ProviderTemplate[]>([])
   const [draft, setDraft] = useState<ModelProvider | null>(null)
+  const [editingModel, setEditingModel] = useState<ModelTarget | null>(null)
+  const [removingModel, setRemovingModel] = useState<ModelTarget | null>(null)
   const [adding, setAdding] = useState(false)
   const [subscription, setSubscription] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -46,20 +49,47 @@ export function ModelConnections() {
   const owner = useRef(0)
   const lock = useRef(false)
   const editor = useRef<HTMLFormElement>(null)
+  const root = useRef<HTMLElement>(null)
+  const modelElements = useRef(new Map<string, HTMLDivElement>())
+  const returnTarget = useRef<ModelTarget | {providerId: string} | null>(null)
+  useEffect(() => {
+    if (!visible) return
+    if (draft) {
+      editor.current?.scrollIntoView({block: 'start'})
+      editor.current?.querySelector<HTMLInputElement>('input')?.focus({preventScroll: true})
+    } else if (returnTarget.current) {
+      const target = returnTarget.current
+      const provider = Array.from(root.current?.querySelectorAll<HTMLElement>('[data-provider-id]') ?? []).find(row => row.dataset.providerId === target.providerId)
+      const row = 'modelId' in target ? modelElements.current.get(`harness/${target.providerId}/${target.connectionId}/${target.modelId}`) : provider
+      row?.scrollIntoView({block: 'nearest'})
+      row?.querySelector<HTMLButtonElement>('[data-edit-action]')?.focus({preventScroll: true})
+      returnTarget.current = null
+    }
+  }, [draft?.id, editingModel?.connectionId, editingModel?.modelId, visible])
   useEffect(() => {
     if (!visible) return
     const generation = ++owner.current
     const controller = new AbortController()
-    void Promise.all([runtimeRequest<ProviderSnapshot>('/connection', 'GET', undefined, {signal: controller.signal}), runtimeRequest<{providers: ProviderTemplate[]}>('/connection/providers', 'GET', undefined, {signal: controller.signal}), runtimeRequest<{accounts: Array<{logged_in: boolean; pending: boolean}>}>('/codex-gateway', 'GET', undefined, {signal: controller.signal})]).then(([next, catalog, accounts]) => {
-      if (owner.current === generation) {setSnapshot(next); setTemplates(catalog.providers); setSubscription(accounts.accounts.some(account => account.logged_in || account.pending))}
+    void Promise.all([
+      runtimeRequest<ProviderSnapshot>('/connection', 'GET', undefined, {signal: controller.signal}),
+      runtimeRequest<{providers: ProviderTemplate[]}>('/connection/providers', 'GET', undefined, {signal: controller.signal}),
+      runtimeRequest<{accounts: Array<{logged_in: boolean; pending: boolean}>}>('/codex-gateway', 'GET', undefined, {signal: controller.signal}),
+      runtimeRequest<ModelCatalog>('/models', 'GET', undefined, {signal: controller.signal}).then(data => ({data}), failure => ({error: failureText(failure)})),
+    ]).then(([next, catalog, accounts, modelCatalog]) => {
+      if (owner.current !== generation) return
+      setSnapshot(next); setTemplates(catalog.providers); setSubscription(accounts.accounts.some(account => account.logged_in || account.pending))
+      if ('data' in modelCatalog) useAppStore.setState({models: modelCatalog.data.models, defaultModel: modelCatalog.data.active})
+      else setError({template: {key: 'ui.providers.catalogUnavailable', params: {reason: modelCatalog.error}}})
     }).catch(failure => {if (!controller.signal.aborted && owner.current === generation) setError(failureText(failure))})
     return () => {++owner.current; controller.abort()}
   }, [visible, loadAttempt])
   const persist = async (providers: ModelProvider[]) => {
     if (lock.current || activeProbes.current || !snapshot) return
+    if (editingModel && modelIssue) return
     const invalid = draft?.connections.find(connection => providerConnectionIssue(connection))
     if (invalid) {
       setCredentialIssue({connection: invalid.id, key: providerConnectionIssue(invalid)!})
+      if (editingModel) setError({key: providerConnectionIssue(invalid)!})
       const pane = editor.current?.querySelector<HTMLDetailsElement>(`details[data-connection-id="${invalid.id}"]`)
       if (pane) {pane.open = true; pane.scrollIntoView({block: 'nearest'})}
       return
@@ -70,7 +100,7 @@ export function ModelConnections() {
     try {
       const result = await runtimeRequest<{routing: ProviderSnapshot}>('/connection', 'PATCH', {providers: providerPayload(providers), revision: snapshot.revision})
       connectionChanged()
-      if (owner.current === generation) {setSnapshot(result.routing); setDraft(null); setCredentialIssue(null); setSaved(true)}
+      if (owner.current === generation) {setSnapshot(result.routing); setDraft(null); setEditingModel(null); setRemoving(null); setRemovingModel(null); setCredentialIssue(null); setSaved(true)}
       try {
         const models = await runtimeRequest<{models: import('@/types').ModelInfo[]; active: string}>('/models')
         if (owner.current === generation) useAppStore.setState({models: models.models, defaultModel: models.active})
@@ -83,41 +113,108 @@ export function ModelConnections() {
   const choices = sortProviderChoices<ProviderChoice>([{id: 'codex-account-pool', name: t('ui.codexGateway.accountsTitle'), keywords: 'OpenAI Codex ChatGPT'}, ...templates.filter(row => row.id !== 'openai-codex').map(row => ({id: row.id, name: row.name, keywords: ''}))])
   const configuredProviders = snapshot?.providers ?? []
   const template = templates.find(row => row.id === draft?.type)
-  return <section className="space-y-4" aria-label={t('ui.providers.title')}>
-    <header className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="ui-section-title">{t('ui.providers.title')}</h3><p className="mt-1 text-xs text-muted">{t('ui.providers.description')}</p><p className="mt-1 text-xs text-muted">{t('ui.components.overlays.SettingsDialog.60044c2733c0')}</p></div><Button size="sm" disabled={busy || !!draft || !snapshot} onClick={() => {setAdding(true); setSaved(false)}}><Plus className="h-4 w-4" />{t('ui.providers.add')}</Button></header>
-    {error ? <p role="alert" className="text-xs text-danger">{noticeText(error)}</p> : null}
+  const modelConnection = draft?.connections.find(connection => connection.id === editingModel?.connectionId)
+  const modelDraft = modelConnection?.models.find(model => model.id === editingModel?.modelId)
+  const modelIssue = !modelDraft ? null : !validProviderModelId(modelDraft.model) ? 'ui.providers.invalidModelId'
+    : modelConnection?.models.some(model => model.id !== modelDraft.id && model.model === modelDraft.model.trim()) ? 'ui.providers.duplicateModel'
+    : [modelDraft.context_window, modelDraft.max_output_tokens].some(value => value !== undefined && (!Number.isSafeInteger(value) || value < 1)) ? 'ui.providers.invalidModelCapacity' : null
+  const edit = (provider: ModelProvider, target: ModelTarget | null = null) => {
+    if (lock.current || draft || !visible) return
+    returnTarget.current = target ?? {providerId: provider.id}
+    setEditingModel(target); setDraft(structuredClone(provider)); setRemoving(null); setRemovingModel(null); setSaved(false); setError('')
+  }
+  const cancel = () => {if (lock.current) return; setDraft(null); setEditingModel(null); setError(''); setCredentialIssue(null)}
+  const saveDraft = () => {
+    if (!draft) return
+    const next = modelDraft ? {...draft, connections: draft.connections.map(connection => connection.id === editingModel?.connectionId ? {...connection, models: connection.models.map(model => model.id === modelDraft.id ? {...model, model: model.model.trim(), name: model.name.trim() || model.model.trim()} : model)} : connection)} : draft
+    return persist(configuredProviders.some(provider => provider.id === next.id) ? configuredProviders.map(provider => provider.id === next.id ? next : provider) : [...configuredProviders, next])
+  }
+  return <section ref={root} className="space-y-4" aria-label={t('ui.providers.title')}>
+    {!draft ? <header className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="ui-section-title">{t('ui.providers.title')}</h3><p className="mt-1 text-xs text-muted">{t('ui.providers.description')}</p><p className="mt-1 text-xs text-muted">{t('ui.components.overlays.SettingsDialog.60044c2733c0')}</p></div><Button size="sm" disabled={busy || !snapshot} onClick={() => {setAdding(true); setSaved(false)}}><Plus className="h-4 w-4" />{t('ui.providers.add')}</Button></header> : null}
+    {error && !draft ? <div className="space-y-2"><p role="alert" className="text-xs text-danger">{noticeText(error)}</p>{snapshot ? <Button size="sm" onClick={() => {setError(''); setLoadAttempt(value => value + 1)}}>{t('ui.providers.retryLoading')}</Button> : null}</div> : null}
+    {saved ? <SaveStatus phase="saved" /> : null}
     {!snapshot ? error ? <Button size="sm" onClick={() => {setError(''); setLoadAttempt(value => value + 1)}}>{t('ui.providers.retryLoading')}</Button> : <p role="status" className="text-xs text-muted">{t('ui.providers.loading')}</p> : null}
-    {adding ? <ProviderPicker choices={choices} onClose={() => setAdding(false)} onPick={id => {setAdding(false); setSaved(false); if (id === 'codex-account-pool') {setSubscription(true); return} const selected = templates.find(row => row.id === id); if (!selected) return; setDraft(providerDraftForTemplate(selected, configuredProviders))}} /> : null}
+    {adding ? <ProviderPicker choices={choices} onClose={() => setAdding(false)} onPick={id => {setAdding(false); setSaved(false); if (id === 'codex-account-pool') {setSubscription(true); return} const selected = templates.find(row => row.id === id); if (!selected) return; setEditingModel(null); setError(''); setDraft(providerDraftForTemplate(selected, configuredProviders))}} /> : null}
     <DefaultModelFeedback />
-    {subscription ? <CodexGatewayAccounts /> : null}
+    {subscription && !draft ? <CodexGatewayAccounts /> : null}
     {snapshot && !snapshot.providers.length && !subscription && !draft && !adding ? <div className="rounded-xl border border-dashed border-line p-6 text-center text-xs text-muted">{t('ui.providers.empty')}</div> : null}
-    {sortProviderChoices(configuredProviders).filter(provider => provider.id !== draft?.id).map(provider => <section key={provider.id} aria-label={provider.name} className="overflow-hidden rounded-xl border border-line">
+    {!draft ? sortProviderChoices(configuredProviders).map(provider => <section key={provider.id} data-provider-id={provider.id} aria-label={provider.name} className="overflow-hidden rounded-xl border border-line">
       <div className="flex flex-wrap items-center justify-between gap-3 p-4">
         <div className="min-w-0 flex-1"><h4 className="ui-card-title break-words">{provider.name}</h4><p className="mt-1 text-xs text-muted">{t('ui.providers.summary', {state: t(`ui.providers.state.${providerConfigurationState(provider)}`), models: provider.connections.reduce((count, connection) => count + connection.models.length, 0)})}</p></div>
-        <div className="flex gap-2"><Button size="sm" disabled={busy || !!draft} onClick={() => {setDraft(structuredClone(provider)); setRemoving(null); setSaved(false)}}>{t('ui.providers.edit')}</Button><Button size="sm" disabled={busy || !!draft} aria-label={t('ui.providers.removeNamed', {name: provider.name})} onClick={() => setRemoving(provider.id)}><Trash2 className="h-4 w-4" /></Button></div>
+        <div className="flex gap-2"><Button size="sm" data-edit-action disabled={busy} onClick={() => edit(provider)}>{t('ui.providers.edit')}</Button><Button size="sm" variant="ghost" disabled={busy} aria-label={t('ui.providers.removeNamed', {name: provider.name})} onClick={() => {setRemoving(provider.id); setRemovingModel(null)}}><Trash2 className="h-4 w-4" /></Button></div>
+        {removing === provider.id ? <div className="w-full"><RemovalConfirmation message={t('ui.providers.removeConfirm', {name: provider.name})} confirmLabel={t('ui.providers.confirmRemove')} busy={busy} onConfirm={() => persist(configuredProviders.filter(row => row.id !== provider.id))} onCancel={() => setRemoving(null)} /></div> : null}
       </div>
-      <ProviderModelPreferences provider={provider} models={models} />
-      {removing === provider.id ? <div className="mx-4 mb-4 flex flex-wrap items-center gap-2 border-t border-line pt-3"><p className="w-full text-xs text-muted">{t('ui.providers.removeConfirm', {name: provider.name})}</p><Button size="sm" variant="danger" disabled={busy} onClick={() => {setRemoving(null); void persist(configuredProviders.filter(row => row.id !== provider.id))}}>{t('ui.providers.confirmRemove')}</Button><Button size="sm" disabled={busy} onClick={() => setRemoving(null)}>{t('ui.providers.cancel')}</Button></div> : null}
-    </section>)}
-    {draft && template ? <form ref={editor} onInvalid={event => {let parent = event.target instanceof HTMLElement ? event.target.parentElement : null; while (parent) {if (parent instanceof HTMLDetailsElement) parent.open = true; parent = parent.parentElement}}} autoComplete="off" onSubmit={event => event.preventDefault()} className="space-y-4 rounded-xl border border-brand/30 bg-surface p-4"><label className="block space-y-1 text-xs"><span>{t('ui.providers.supplierName')}</span><input className={field} value={draft.name} onChange={event => setDraft({...draft, name: event.target.value})} disabled={busy} /></label>
+      <ProviderModelPreferences provider={provider} models={models} modelElements={modelElements.current}
+        renderActions={(connection, model) => <>
+          <Button size="xs" variant="ghost" data-edit-action disabled={busy} aria-label={t('ui.providers.editModelNamed', {name: model.name || model.model})} icon={<Pencil aria-hidden className="h-3.5 w-3.5" />} onClick={() => edit(provider, {providerId: provider.id, connectionId: connection.id, modelId: model.id})}>{t('ui.providers.edit')}</Button>
+          <Button size="xs" variant="ghost" disabled={busy} aria-label={t('ui.providers.removeModelNamed', {name: model.name || model.model})} title={t('ui.providers.removeModelNamed', {name: model.name || model.model})} onClick={() => {setRemoving(null); setRemovingModel({providerId: provider.id, connectionId: connection.id, modelId: model.id})}}><Trash2 aria-hidden className="h-3.5 w-3.5" /></Button>
+        </>}
+        renderFeedback={(connection, model) => removingModel?.providerId === provider.id && removingModel.connectionId === connection.id && removingModel.modelId === model.id ? <RemovalConfirmation
+          message={t('ui.providers.removeModelConfirm', {name: model.name || model.model})} confirmLabel={t('ui.providers.confirmRemoveModel')} busy={busy}
+          onConfirm={() => persist(configuredProviders.map(row => row.id === provider.id ? {...row, connections: row.connections.map(item => item.id === connection.id ? {...item, models: item.models.filter(value => value.id !== model.id)} : item)} : row))}
+          onCancel={() => setRemovingModel(null)}
+        /> : null}
+      />
+    </section>) : null}
+    {draft && (editingModel ? modelDraft : template) ? <form ref={editor} onInvalid={event => {let parent = event.target instanceof HTMLElement ? event.target.parentElement : null; while (parent) {if (parent instanceof HTMLDetailsElement) parent.open = true; parent = parent.parentElement}}} autoComplete="off" onSubmit={event => event.preventDefault()} className="rounded-xl border border-line bg-surface">
+      <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-t-xl border-b border-line bg-surface p-4">
+        <div className="min-w-0 flex-1"><h3 className="ui-section-title">{t(editingModel ? 'ui.providers.editModel' : 'ui.providers.editProvider')}</h3><p className="mt-1 break-words text-xs text-muted">{modelDraft ? t('ui.providers.modelEditContext', {provider: draft.name, model: modelDraft.name || modelDraft.model}) : draft.name}</p></div>
+        <div className="flex flex-wrap items-center gap-2"><Button size="sm" disabled={busy} onClick={cancel}>{t('ui.providers.cancel')}</Button><Button size="sm" variant="primary" disabled={busy || probeCount > 0 || !!modelIssue || !draft.name.trim() || !draft.connections.length} loading={busy} onClick={saveDraft}>{t('ui.providers.save')}</Button>{busy ? <SaveStatus phase="saving" /> : null}</div>
+        {error ? <p role="alert" tabIndex={0} className="max-h-24 w-full overflow-y-auto text-xs text-danger [overflow-wrap:anywhere]">{noticeText(error)}</p> : null}
+      </header>
+      <div className="space-y-4 p-4">
+      {modelDraft ? <>
+        <ProviderModelFields value={modelDraft} disabled={busy} onChange={value => setDraft(current => current ? {...current, connections: current.connections.map(connection => connection.id === editingModel?.connectionId ? {...connection, models: connection.models.map(model => model.id === value.id ? value : model)} : connection)} : current)} />
+        {modelIssue ? <p role="alert" className="text-xs text-danger">{t(modelIssue)}</p> : null}
+        <p className="text-xs text-muted">{t('ui.providers.metadataHint')}</p>
+      </> : template ? <>
+      <label className="block space-y-1 text-xs"><span>{t('ui.providers.supplierName')}</span><input className={field} value={draft.name} onChange={event => setDraft({...draft, name: event.target.value})} disabled={busy} /></label>
       {draft.connections.map((connection, index) => <ConnectionEditor key={connection.id} connection={connection} template={template} busy={busy} removable={draft.connections.length > 1} initiallyOpen={index === 0 || !snapshot?.providers.some(provider => provider.connections.some(row => row.id === connection.id))} stored={!!snapshot?.providers.some(provider => provider.connections.some(row => row.id === connection.id))} onProbeStateChange={pending => {activeProbes.current = Math.max(0, activeProbes.current + (pending ? 1 : -1)); setProbeCount(activeProbes.current)}} validationIssue={credentialIssue?.connection === connection.id ? credentialIssue.key : undefined} onValidation={key => setCredentialIssue({connection: connection.id, key})} onChange={next => {setDraft(current => current?.id === draft.id ? {...current, connections: current.connections.map(row => row.id === next.id ? next : row)} : current); if (credentialIssue?.connection === next.id && !providerConnectionIssue(next)) setCredentialIssue(null)}} onRemove={() => setDraft({...draft, connections: draft.connections.filter((_, position) => position !== index)})} providerId={draft.id} onRefresh={next => {if (next) setSnapshot(next)}} />)}
       {template.id !== 'kilo-free' ? <details><summary className="cursor-pointer text-xs text-muted">{t('ui.providers.additionalConnections')}</summary><div className="mt-3"><Button size="sm" disabled={busy} onClick={() => setDraft({...draft, connections: [...draft.connections, newProviderConnection(template)]})}>{t('ui.providers.addConnection')}</Button></div></details> : null}
-      <div className="sticky bottom-0 z-10 -mx-4 -mb-4 flex flex-wrap items-center gap-2 rounded-b-xl border-t border-line bg-surface px-4 py-3"><Button disabled={busy || probeCount > 0 || !draft.name.trim() || !draft.connections.length} onClick={() => void persist([...(snapshot?.providers.filter(provider => provider.id !== draft.id) ?? []), draft])}>{t('ui.providers.save')}</Button><Button disabled={busy} onClick={() => {setDraft(null); setError(''); setCredentialIssue(null)}}>{t('ui.providers.cancel')}</Button>{busy ? <SaveStatus phase="saving" /> : null}</div>
+      </> : null}
+      </div>
     </form> : null}
-    {saved ? <SaveStatus phase="saved" /> : null}
-    <ModelPreferences models={models.filter(model => !model.id.startsWith('harness/'))} />
+    {!draft ? <ModelPreferences models={models.filter(model => !model.id.startsWith('harness/'))} /> : null}
   </section>
 }
 
+/** 确认区紧邻来源操作靠右排列，长名称与窄容器可自然换行。 */
+export function RemovalConfirmation({message, confirmLabel, busy, onConfirm, onCancel}: {
+  message: string
+  confirmLabel: string
+  busy: boolean
+  onConfirm: () => void | Promise<void>
+  onCancel: () => void
+}) {
+  useLocale()
+  return <div role="group" aria-label={message} className="ml-auto flex w-fit max-w-full flex-col items-end gap-2 rounded-lg border border-line bg-surface p-3">
+    <p className="max-w-sm text-right text-xs text-muted [overflow-wrap:anywhere]">{message}</p>
+    <div className="flex max-w-full flex-wrap justify-end gap-2">
+      <Button size="sm" disabled={busy} onClick={onCancel}>{t('ui.providers.cancel')}</Button>
+      <Button size="sm" variant="danger" disabled={busy} loading={busy} onClick={onConfirm}>{confirmLabel}</Button>
+    </div>
+  </div>
+}
+
 /** 以稳定身份归属模型，同名提供商和接口不会合并。 */
-export function ProviderModelPreferences({provider, models}: {provider: ModelProvider; models: ModelInfo[]}) {
+export function ProviderModelPreferences({provider, models, renderActions, renderFeedback, modelElements}: {
+  provider: ModelProvider
+  models: ModelInfo[]
+  renderActions?: (connection: ProviderConnection, model: ProviderModel) => ReactNode
+  renderFeedback?: (connection: ProviderConnection, model: ProviderModel) => ReactNode
+  modelElements?: Map<string, HTMLDivElement>
+}) {
   const groups = providerModelGroups(provider, models)
+  const available = new Set(models.map(model => model.id))
   if (!groups.length) return null
   return <div className="space-y-3 border-t border-line px-4 pb-4 pt-3">
-    {groups.map(group => <section key={group.id} aria-label={provider.connections.length > 1 ? group.name : undefined} className="space-y-2">
+    {groups.map(group => {
+      const connection = provider.connections.find(row => row.id === group.id)!
+      const source = new Map(connection.models.map(model => [`harness/${provider.id}/${connection.id}/${model.id}`, model]))
+      return <section key={group.id} aria-label={provider.connections.length > 1 ? group.name : undefined} className="space-y-2">
       {provider.connections.length > 1 ? <h5 className="ui-group-title break-words">{group.name}</h5> : null}
-      <ModelPreferences models={group.models} grouped={false} heading={false} />
-    </section>)}
+      <ModelPreferences models={group.models} grouped={false} heading={false} modelElements={modelElements} isAvailable={model => available.has(model.id)} renderActions={renderActions ? model => renderActions(connection, source.get(model.id)!) : undefined} renderFeedback={renderFeedback ? model => renderFeedback(connection, source.get(model.id)!) : undefined} />
+    </section>})}
   </div>
 }
 

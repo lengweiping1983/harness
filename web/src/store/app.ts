@@ -142,6 +142,7 @@ interface AppState {
    */
   workspaces: WorkspaceInfo[]
   workspacesLoading: boolean
+  workspacesError: ResourceText
   activeWorkspaceId: string | null
 
   /** 模型目录：composer 的 model seat、/model 菜单、设置页共用。 */
@@ -426,6 +427,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   workspaces: [],
   workspacesLoading: false,
+  workspacesError: '',
   activeWorkspaceId: null,
 
   models: [],
@@ -492,10 +494,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       let catalogTicket = languageTicket
       const [initialCatalog, sessions, workspaces, initialModels, settings] = await Promise.all([
         loadCatalogs(),
-        api.listSessions(),
-        api.listWorkspaces(),
-        api.models(),
-        api.settings(),
+        api.listSessions({retry: true}),
+        api.listWorkspaces({retry: true}),
+        api.models({retry: true}),
+        api.settings({retry: true}),
       ])
       let catalog = initialCatalog
       let models = initialModels
@@ -503,7 +505,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // 语言已被更新时，只重新读取目录，旧启动设置不能撤销新选择。
       while (catalogTicket !== languageEpoch) {
         catalogTicket = languageEpoch
-        const [currentCatalog, currentModels] = await Promise.all([loadCatalogs(), api.models()])
+        const [currentCatalog, currentModels] = await Promise.all([loadCatalogs(), api.models({retry: true})])
         catalog = currentCatalog
         models = currentModels
       }
@@ -511,7 +513,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       let previousSession: string | null = null
       try { previousSession = localStorage.getItem('harness.active-session.v1') } catch { /* Preferences are optional. */ }
       const selectedSession = get().activeSessionId ?? (list.some((s) => s.id === previousSession) ? previousSession : null) ?? list[0]?.id ?? null
-      const wsList = workspacesTicket === workspaceListRequest ? workspaces.ok ? workspaces.data.workspaces ?? [] : [] : get().workspaces
+      const wsList = workspacesTicket === workspaceListRequest && workspaces.ok ? workspaces.data.workspaces : get().workspaces
       const modelCatalog: ModelCatalog | null = models.ok ? models.data : null
       set({
         status: catalog.status,
@@ -520,6 +522,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         workspace: catalog.workspace,
         sessions: list,
         workspaces: wsList,
+        workspacesError: workspacesTicket === workspaceListRequest ? workspaces.ok ? '' : workspaces.copy ?? workspaces.message : get().workspacesError,
         models: modelCatalog?.models ?? [],
         modelProviders: modelCatalog?.providers ?? [],
         defaultModel: modelCatalog?.active ?? '',
@@ -706,12 +709,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   refreshWorkspaces: async () => {
     const ticket = ++workspaceListRequest
     set({ workspacesLoading: true })
-    const result = await api.listWorkspaces()
+    const result = await api.listWorkspaces({retry: true})
     if (ticket !== workspaceListRequest) return
     set({ workspacesLoading: false })
     if (result.ok) {
-      set({ workspaces: result.data.workspaces ?? [] })
+      set(state => ({ workspaces: result.data.workspaces, workspacesError: '',
+        ...(state.activeWorkspaceId === null && state.activeSessionId ? {activeWorkspaceId: workspaceOfSession(state.sessions, state.activeSessionId, result.data.workspaces)} : {}) }))
     } else {
+      set({workspacesError: result.copy ?? result.message})
       get().toast({ title: {key: 'ui.store.app.a2de8299587b'}, description: result.copy ?? result.message, tone: 'danger' })
     }
   },
@@ -1195,6 +1200,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   dismissToast: (id) => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
 
 }))
+
+/** 服务恢复、回到页面及网络上线共用准入，只补读失败目录，不并发重读。 */
+export function recoverProjectCatalog() {
+  const state = useAppStore.getState()
+  if (state.booting || state.workspacesLoading || !state.workspacesError || typeof document !== 'undefined' && document.hidden) return
+  return state.refreshWorkspaces()
+}
 
 useAppStore.subscribe((state, previous) => {
   if (state.inspectorTab !== previous.inspectorTab) {
