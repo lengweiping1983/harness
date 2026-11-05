@@ -8,7 +8,8 @@ import textwrap
 import unittest
 from unittest.mock import Mock, patch
 
-from scripts.run_python_tests import DiagnosticTestResult, check_environment, environment_identity, main, positive_seconds
+from scripts.run_python_tests import (DiagnosticTestResult, academy_sandbox_preflight, check_environment,
+                                      environment_identity, main, positive_seconds)
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -92,6 +93,7 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_empty_suite_fails(self):
         with (patch('sys.argv', ['run_python_tests.py']), patch('scripts.run_python_tests.check_environment'),
+              patch('scripts.run_python_tests.academy_sandbox_preflight', return_value=None),
               patch('unittest.defaultTestLoader.discover', return_value=unittest.TestSuite())):
             self.assertEqual(main(), 1)
 
@@ -113,6 +115,7 @@ class DiscoveryTests(unittest.TestCase):
 
         error = io.StringIO()
         with (patch('sys.argv', ['run_python_tests.py']), patch.object(Path, 'mkdir', broken),
+              patch('scripts.run_python_tests.academy_sandbox_preflight', return_value=None),
               patch('unittest.defaultTestLoader.discover') as discover, contextlib.redirect_stderr(error)):
             self.assertEqual(main(), 1)
         discover.assert_not_called()
@@ -126,6 +129,7 @@ class DiscoveryTests(unittest.TestCase):
             with (self.subTest(failure=failure), patch('sys.argv', ['run_python_tests.py']),
                   patch('scripts.run_python_tests.sys.platform', 'darwin'),
                   patch('harness.core.macos_process.resident_memory_kib') as measure,
+                  patch('scripts.run_python_tests.academy_sandbox_preflight', return_value=None),
                   patch('unittest.defaultTestLoader.discover') as discover, contextlib.redirect_stderr(error)):
                 if isinstance(failure, Exception):
                     measure.side_effect = failure
@@ -151,6 +155,7 @@ class DiscoveryTests(unittest.TestCase):
         runner.run.return_value.wasSuccessful.return_value = False
         suite = unittest.TestSuite([unittest.FunctionTestCase(lambda: None)])
         with (patch('sys.argv', ['run_python_tests.py']), patch('scripts.run_python_tests.check_environment'),
+              patch('scripts.run_python_tests.academy_sandbox_preflight', return_value=None),
               patch('unittest.defaultTestLoader.discover', return_value=suite),
               patch('unittest.TextTestRunner', return_value=runner)):
             self.assertEqual(main(), 1)
@@ -159,3 +164,61 @@ class DiscoveryTests(unittest.TestCase):
     def test_identity_reports_loaded_customization_without_vendor_inference(self):
         with patch.dict('sys.modules', {'sitecustomize': Mock(__file__='/fixture/sitecustomize.py')}):
             self.assertEqual(environment_identity()['sitecustomize'], '/fixture/sitecustomize.py')
+
+    def test_sandbox_preflight_failure_stops_before_discovery_with_raw_receipt(self):
+        """课程沙箱启动被拒时整体失败并保留结构化回执，未执行项不算通过。"""
+        receipt = {'passed': False, 'reason': 'sandbox-probe-failed',
+                   'execution': {'exit_code': 71, 'stderr': 'sandbox_apply: Operation not permitted'}}
+        error = io.StringIO()
+        with (patch('sys.argv', ['run_python_tests.py']), patch('scripts.run_python_tests.check_environment'),
+              patch('scripts.run_python_tests.academy_sandbox_preflight', return_value=receipt),
+              patch('unittest.defaultTestLoader.discover') as discover, contextlib.redirect_stderr(error)):
+            self.assertEqual(main(), 1)
+        discover.assert_not_called()
+        self.assertIn('测试尚未发现或执行', error.getvalue())
+        self.assertIn('sandbox-probe-failed', error.getvalue())
+        self.assertIn('Operation not permitted', error.getvalue())
+
+    def test_sandbox_preflight_passing_keeps_normal_discovery(self):
+        """沙箱可用时预检不改变聚合入口行为，仍完整发现并执行用例。"""
+        runner = Mock()
+        runner.run.return_value.wasSuccessful.return_value = True
+        suite = unittest.TestSuite([unittest.FunctionTestCase(lambda: None)])
+        with (patch('sys.argv', ['run_python_tests.py']), patch('scripts.run_python_tests.check_environment'),
+              patch('scripts.run_python_tests.academy_sandbox_preflight', return_value=None),
+              patch('unittest.defaultTestLoader.discover', return_value=suite),
+              patch('unittest.TextTestRunner', return_value=runner)):
+            self.assertEqual(main(), 0)
+        runner.run.assert_called_once_with(suite)
+
+    def test_sandbox_preflight_ready_probe_allows_discovery(self):
+        """探针实测通过时放行，不跳过也不改写业务用例。"""
+        ready = {'passed': True, 'reason': 'ready', 'execution': {}}
+        runner = Mock()
+        runner.run.return_value.wasSuccessful.return_value = True
+        suite = unittest.TestSuite([unittest.FunctionTestCase(lambda: None)])
+        with (patch('sys.argv', ['run_python_tests.py']), patch('scripts.run_python_tests.check_environment'),
+              patch('harness.academy.runtime.AcademyRuntime.backend', return_value='seatbelt'),
+              patch('scripts.check_academy_sandbox.check_sandbox', return_value=ready) as probe,
+              patch('unittest.defaultTestLoader.discover', return_value=suite) as discover,
+              patch('unittest.TextTestRunner', return_value=runner)):
+            self.assertEqual(main(), 0)
+        probe.assert_called_once_with()
+        discover.assert_called_once()
+        runner.run.assert_called_once_with(suite)
+
+    def test_sandbox_preflight_skips_platforms_without_an_isolator(self):
+        """隔离器未安装的平台沿用各用例既有 skipIf，不阻断常规回归。"""
+        with (patch('harness.academy.runtime.AcademyRuntime.backend', return_value='unavailable'),
+              patch('scripts.check_academy_sandbox.check_sandbox') as probe):
+            self.assertIsNone(academy_sandbox_preflight())
+        probe.assert_not_called()
+
+    def test_sandbox_preflight_preserves_probe_exceptions(self):
+        """探针自身异常保留原错误，不静默放行也不伪造通过。"""
+        with (patch('harness.academy.runtime.AcademyRuntime.backend', return_value='seatbelt'),
+              patch('scripts.check_academy_sandbox.check_sandbox', side_effect=PermissionError('原始启动拒绝'))):
+            report = academy_sandbox_preflight()
+        self.assertFalse(report['passed'])
+        self.assertEqual(report['reason'], 'sandbox-probe-error')
+        self.assertIn('原始启动拒绝', report['error']['message'])

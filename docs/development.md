@@ -44,7 +44,7 @@ Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/de
 |---|---|
 | `python -W error::RuntimeWarning scripts/run_python_tests.py` | 对话、文件保护与恢复、SDK 观察隔离与混合行尾、待办作用域及合并、目标／计划、流解析、运行与关闭、队列及成员回归 |
 | `python scripts/check_text_encoding.py` | 自有源码严格 UTF-8、运行库文本 I/O 编码检查；排除任意 research 目录 |
-| `python scripts/check_academy_sandbox.py` | 显式实测当前上下文中的课程沙箱启动；只使用临时项目，失败返回非零并保留原始回执，不执行业务测试 |
+| `python scripts/check_academy_sandbox.py` | 显式实测当前上下文中的课程沙箱启动；只使用临时项目，失败返回非零并保留原始回执，不执行业务测试；同一固定探针已接入 Python 聚合入口，在用例发现前判定基础设施可用性 |
 | `python scripts/lint.py` | Python 语法、未使用导入 |
 | `python scripts/generate_i18n.py --check` | 双语资源生成同步 |
 | `python scripts/generate_protocol.py --check` | OpenAPI 和 TypeScript 契约生成同步 |
@@ -60,7 +60,7 @@ Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/de
 
 新增 Python 用例放在 `tests/test_*.py`；前端用例放在 `web/src/**/*.test.ts` 或 `.test.tsx`；桌面用例放在 `desktop/tests/**/*.test.mjs`。Node 发现脚本递归收集 .test.mjs 后传入显式文件列表，空目录不会启动 Node 默认发现。Python 和浏览器发现为空时失败；Node 独立发现器对空目录明确提示，不把空套件作为业务验收。Vitest 当前没有启用 --passWithNoTests。
 
-Python 聚合入口在发现测试前输出实际解释器、版本、基础安装目录、平台、UTF-8 模式、已加载的 `sitecustomize` 来源及 `os.open` 的目录句柄能力。随后在独立临时目录核对 `mkdir(exist_ok=True)` 和递归创建语义；macOS 另通过 `harness.core.macos_process.resident_memory_kib` 调用系统 `libproc.proc_pid_rusage` 读取本进程内存，与课程运行器共用原生监督接口，不启动 `/bin/ps`。预检失败保留原异常栈、返回非零并明确说明未执行测试，不生成业务通过结论。`tests/test_test_discovery.py` 覆盖代理错误、原生观察拒绝／非法读数、空发现及业务失败传播。预检只说明这些基础能力可用，不代表所有沙箱限制均已排除；仍须完整执行业务回归。解释器目录名称和宿主沙箱开关都不能单独证明失败归因，需结合原始异常调用链及同输入复测；大量用例通过也不能替代对剩余失败的定位。
+Python 聚合入口在发现测试前输出实际解释器、版本、基础安装目录、平台、UTF-8 模式、已加载的 `sitecustomize` 来源及 `os.open` 的目录句柄能力。随后在独立临时目录核对 `mkdir(exist_ok=True)` 和递归创建语义；macOS 另通过 `harness.core.macos_process.resident_memory_kib` 调用系统 `libproc.proc_pid_rusage` 读取本进程内存，与课程运行器共用原生监督接口，不启动 `/bin/ps`。预检失败保留原异常栈、返回非零并明确说明未执行测试，不生成业务通过结论。`tests/test_test_discovery.py` 覆盖代理错误、原生观察拒绝／非法读数、空发现及业务失败传播。预检只说明这些基础能力可用，不代表所有沙箱限制均已排除；仍须完整执行业务回归。课程沙箱可用性另由 `scripts/check_academy_sandbox.py` 的固定探针实测，聚合入口在用例发现前调用：隔离器程序存在但宿主拒绝应用收紧型 profile 时输出结构化 `sandbox-probe-failed` 回执并整体返回非零，不把未执行用例算作通过，不降级为无隔离执行，也不把这些执行场景改成跳过；隔离器未安装的平台沿用各用例既有 `skipIf`。`tests/test_test_discovery.py` 覆盖探针失败、探针异常、沙箱可用与未安装隔离器四种分支；探针异常同样保留原错误。缺少沙箱时仍须修复环境，预检只负责准确报出基础设施不可用，不能替代在可用环境完整执行业务回归。解释器目录名称和宿主沙箱开关都不能单独证明失败归因，需结合原始异常调用链及同输入复测；大量用例通过也不能替代对剩余失败的定位。
 
 `test_session_view_control_failures.py` 的宿主夹具提供对话投影实际消费的 `_active_team_runs`，在完整、对话和窗口视图分别核对计划／待答问题的原始读取异常与合法空态、活动快照；夹具缺字段造成的 `AttributeError` 不能当作已覆盖目标读取失败。模型流回环夹具在超时与取消后以 EOF 或 `ConnectionResetError` 确认对端断开，其他读取错误继续传播；`test_disconnect_observer_accepts_reset_but_preserves_other_read_failures` 固定注入这些分支，真实取消用例仍核对连接释放、单次请求和 Key 租约收尾。
 

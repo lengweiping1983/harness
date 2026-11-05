@@ -70,6 +70,28 @@ def check_environment() -> None:
             raise ValueError(f'proc_pid_rusage 返回无效内存读数：{measured!r}')
 
 
+def academy_sandbox_preflight() -> dict | None:
+    """实测课程沙箱能否真正启动；返回失败回执，通过或未安装隔离器时返回 None。
+
+    隔离器程序存在但宿主拒绝应用收紧型 profile 时，依赖真实沙箱的用例会全部
+    报出与产品逻辑无关的失败。此处在用例发现前给出结构化回执，让聚合入口以
+    「基础设施不可用」明确失败，而不是把环境限制误报成业务回归；未执行的用例
+    不算通过，也不会降级为无隔离执行。隔离器未安装的平台沿用各用例既有 skipIf。
+    """
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from harness.academy.runtime import AcademyRuntime
+    from scripts.check_academy_sandbox import check_sandbox
+    if AcademyRuntime.backend() == 'unavailable':
+        return None
+    try:
+        report = check_sandbox()
+    except Exception as exc:
+        return {'passed': False, 'reason': 'sandbox-probe-error',
+                'error': {'type': type(exc).__name__, 'message': str(exc)}}
+    return None if report['passed'] else report
+
+
 def environment_identity() -> dict:
     """输出实际解释器及启动注入来源，为失败归因保留证据。"""
     customization = sys.modules.get('sitecustomize')
@@ -93,6 +115,11 @@ def main() -> int:
     except (OSError, ValueError, subprocess.SubprocessError):
         print('Python 环境预检失败；测试尚未发现或执行。原始异常：', file=sys.stderr)
         traceback.print_exc()
+        return 1
+    sandbox = academy_sandbox_preflight()
+    if sandbox is not None:
+        print('Python 课程沙箱预检失败；测试尚未发现或执行。原始回执：', file=sys.stderr)
+        print(json.dumps(sandbox, ensure_ascii=False), file=sys.stderr)
         return 1
     suite = unittest.defaultTestLoader.discover(str(ROOT / 'tests'), top_level_dir=str(ROOT))
     count = suite.countTestCases()
