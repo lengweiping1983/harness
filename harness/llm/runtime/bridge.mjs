@@ -134693,7 +134693,8 @@ async function main() {
     reasoning: raw.reasoning_efforts === false ? false : raw.reasoning_efforts ? true : original?.reasoning ?? !!(original?.thinkingLevelMap || original?.reasoningEfforts?.length),
     compat: { ...roleCompat, ...original?.compat, ...connection.compat, ...raw.compat }
   };
-  if (raw.reasoning_efforts && raw.reasoning_efforts !== false) model.thinkingLevelMap = { ...Object.fromEntries(["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((level) => [level, null])), ...Object.fromEntries(Object.entries(raw.reasoning_efforts).map(([level, value]) => [level, level === "off" && value === null ? void 0 : value])) };
+  const declaredEfforts = raw.reasoning_efforts ?? (original?.reasoningEfforts ? Object.fromEntries(original.reasoningEfforts.map((level) => [level, original.thinkingLevelMap?.[level] ?? (level === "off" ? null : level)])) : void 0);
+  if (declaredEfforts && declaredEfforts !== false) model.thinkingLevelMap = { ...Object.fromEntries(["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((level) => [level, null])), ...Object.fromEntries(Object.entries(declaredEfforts).map(([level, value]) => [level, level === "off" && value === null ? void 0 : value])) };
   if (deepSeek) {
     let auth;
     if (request.provider === "deepseek-account") {
@@ -134749,6 +134750,10 @@ async function main() {
     onPayload: (payload2) => {
       const body = { ...payload2, ...config.extra_body, model: payload2.model ?? model.id };
       if (api === "openai-completions" || api === "openai-responses") {
+        if (config.reasoning_effort == null) {
+          if (!Object.hasOwn(config.extra_body ?? {}, "reasoning")) delete body.reasoning;
+          if (!Object.hasOwn(config.extra_body ?? {}, "reasoning_effort")) delete body.reasoning_effort;
+        }
         const field = api === "openai-responses" ? "max_output_tokens" : Object.hasOwn(payload2, "max_tokens") ? "max_tokens" : "max_completion_tokens";
         delete body.max_tokens;
         delete body.max_completion_tokens;

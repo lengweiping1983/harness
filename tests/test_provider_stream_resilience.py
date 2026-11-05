@@ -229,7 +229,7 @@ class ProviderStreamResilienceTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn('模型请求失败' if language == 'zh-CN' else 'Model request failed', str(caught.exception))
 
     async def test_model_call_failure_preserves_trace_without_rotating_or_disabling_keys(self):
-        for language, nested in (('en', False), ('zh-CN', True), ('en', False)):
+        for language, nested, thinking_format in (('en', False, 'openai'), ('zh-CN', True, 'openrouter'), ('en', False, 'openai')):
             async def respond(number, reader, writer):
                 error = {'code': 'MODEL_CALL_FAILED', 'message': 'upstream model failed'}
                 body = json.dumps({'error': error, 'traceId': 'trace-fixture'} if nested else
@@ -238,7 +238,9 @@ class ProviderStreamResilienceTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(language=language, nested=nested), current_language.set(language), tempfile.TemporaryDirectory() as root:
                 async with endpoint(respond) as (url, requests):
                     store = ProviderConnections(root)
-                    store.save([provider_fixture(url)], store.revision)
+                    value = provider_fixture(url)
+                    value['connections'][0]['models'][0].update(model='egg-alpha', reasoning_efforts={'high': 'high', 'max': 'max'}, compat={'thinkingFormat': thinking_format})
+                    store.save([value], store.revision)
                     adapter = OpenRouterAdapter('fixture', network_timeout=3)
                     adapter.provider_connections = store
                     traces = []
@@ -247,7 +249,7 @@ class ProviderStreamResilienceTests(unittest.IsolatedAsyncioTestCase):
                         return 'local-trace'
                     with self.assertRaises(LlmError) as caught:
                         _ = [event async for event in adapter.stream([UserMessage('test')],
-                            config=LlmCallConfig(model=IDENTITY), on_request=traced)]
+                            config=LlmCallConfig(model=IDENTITY, reasoning_effort='max'), on_request=traced)]
                     error = caught.exception
                     self.assertEqual(error.code, 'llm/provider-model-call-failed')
                     self.assertFalse(error.transient)
@@ -256,6 +258,13 @@ class ProviderStreamResilienceTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(error.details['provider_trace_id'], 'trace-fixture')
                     self.assertIn('模型请求失败' if language == 'zh-CN' else 'Model request failed', str(error))
                     self.assertEqual(len(requests), 1)
+                    self.assertEqual(requests[0]['model'], 'egg-alpha')
+                    if thinking_format == 'openrouter':
+                        self.assertEqual(requests[0]['reasoning'], {'effort': 'max'})
+                        self.assertNotIn('reasoning_effort', requests[0])
+                    else:
+                        self.assertEqual(requests[0]['reasoning_effort'], 'max')
+                        self.assertNotIn('reasoning', requests[0])
                     self.assertEqual(traces[-1]['observation']['error_details']['provider_trace_id'], 'trace-fixture')
                     self.assertFalse(any(key['failed'] for key in store.providers[0]['connections'][0]['keys']))
                     self.assertEqual(store.leases, {})

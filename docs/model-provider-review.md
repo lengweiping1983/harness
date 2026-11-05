@@ -18,6 +18,14 @@
 
 对应回归：`test_output_budget.py` 覆盖未设置预算、三种别名、输入预检、思考预算、直接 SDK 及发行桥接的 Responses／Messages 请求；`test_output_budget_cannot_expand_model_output_capacity` 覆盖缓存目录能力及显式预算。`test_model_call_failure_preserves_trace_without_rotating_or_disabling_keys` 通过真实发行桥接核对平铺／嵌套错误、英中英、只发送一次、Key 状态和归档；`test_model_call_failure_keeps_completed_tool_and_turn_evidence` 经真实智能体验证失败前工具只执行一次、轮次与 trace 保留。Node 回归核对原始字节、有界诊断、其他冲突／限流／服务故障的重试提示保持；`providerModelFailure.test.tsx` 和 `errorConvergence.test.tsx` 的对应错误码用例核对实际错误组件、实时／历史投影与英中英消费。仅执行这些针对性用例，未执行全量、生产 Web 构建、浏览器或桌面专项；运行库与双语生成产物已由源生成。
 
+## 推理档位与参数格式
+
+目录只用 `reasoningEfforts` 报告 `max`／`xhigh`、未附 `thinkingLevelMap`，且所选模型没有手工映射时，原桥接虽标记模型支持推理，却没有将档位列表转成运行库映射。pi-ai 的 `getSupportedThinkingLevels` 要求这两个档位有显式映射；真实发行桥接回环已复现选择 `max`／`xhigh` 都发送为 `high`，嵌套 `reasoning.effort` 同样受影响。桥接现仅按已声明列表构造映射，保留模型手工映射、明确禁用及未知能力边界；源与随包桥接由生成器同步。
+
+另一个确认的差异是未选档位时，运行库的 OpenRouter 格式会生成 `reasoning.effort=none`，与“模型默认”不发送显式强度的语义不符。最终正文现在区分默认与显式 `off`，默认时移除运行库补出的两种强度字段，调用方显式扩展保持。`ProviderModelFields` 通过现有模型 `compat.thinkingFormat` 提供平铺、嵌套及继承选择，不丢弃其他兼容配置；`ModelSeat` 消费当前对话／全局选择并直接显示级别，保留待确认和不支持状态，单档位菜单仍提供选择。
+
+`RuntimeBridgeTests.test_new_cached_model_reasoning_reaches_the_actual_request` 覆盖真实请求的列表档位、映射、两种格式、覆盖优先级、默认／关闭、显式扩展、禁用与未知能力，并核对配置原件及租约收尾。409 trace 回归同时核对两种格式均只发送所选模型一次，保留 trace、不轮换或停用 Key。`modelMenu.test.tsx` 与 `ProviderModelEditor.test.tsx` 定向核对实际组件的级别显示、对话继承、单档位、未确认状态、格式编辑和英中英资源消费。这里的回环和组件单测不能证明远端 `egg-alpha` 已恢复；未调用用户在线账号，未执行完整构建、浏览器或桌面专项。
+
 ## 流活动、超时与恢复诊断
 
 `provider_runtime.bridge` 原先把读取超时与进程退出、NDJSON 解析错误一起改写为不可恢复的 `llm/provider-runtime`，丢弃原异常；`provider_stream` 又将归档中的错误类型、代码与首事件时间固定为空。已核对的失败记录在请求发出约 180.9 秒后结束，解析事件为零、恢复次数为零；旧记录没有底层错误证据，不能证明当时是本机网络中断还是上游等待。

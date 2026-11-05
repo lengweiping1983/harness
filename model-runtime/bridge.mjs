@@ -124,7 +124,10 @@ async function main() {
     reasoning: raw.reasoning_efforts === false ? false : raw.reasoning_efforts ? true : original?.reasoning ?? !!(original?.thinkingLevelMap || original?.reasoningEfforts?.length),
     compat: {...roleCompat, ...original?.compat, ...connection.compat, ...raw.compat},
   };
-  if (raw.reasoning_efforts && raw.reasoning_efforts !== false) model.thinkingLevelMap = {...Object.fromEntries(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map(level => [level, null])), ...Object.fromEntries(Object.entries(raw.reasoning_efforts).map(([level, value]) => [level, level === 'off' && value === null ? undefined : value]))};
+  // 目录只报告档位列表时也建立完整映射，避免运行库把已声明的 max/xhigh 降为 high。
+  const declaredEfforts = raw.reasoning_efforts ?? (original?.reasoningEfforts
+    ? Object.fromEntries(original.reasoningEfforts.map(level => [level, original.thinkingLevelMap?.[level] ?? (level === 'off' ? null : level)])) : undefined);
+  if (declaredEfforts && declaredEfforts !== false) model.thinkingLevelMap = {...Object.fromEntries(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map(level => [level, null])), ...Object.fromEntries(Object.entries(declaredEfforts).map(([level, value]) => [level, level === 'off' && value === null ? undefined : value]))};
   if (deepSeek) {
     let auth;
     if (request.provider === 'deepseek-account') {
@@ -165,6 +168,11 @@ async function main() {
     onPayload: payload => {
       const body = {...payload, ...config.extra_body, model: payload.model ?? model.id};
       if (api === 'openai-completions' || api === 'openai-responses') {
+        // 模型默认不等于关闭思考；仅保留调用方显式提供的推理参数。
+        if (config.reasoning_effort == null) {
+          if (!Object.hasOwn(config.extra_body ?? {}, 'reasoning')) delete body.reasoning;
+          if (!Object.hasOwn(config.extra_body ?? {}, 'reasoning_effort')) delete body.reasoning_effort;
+        }
         // 可选上限默认交给提供商；显式预算沿用适配器的字段与上下文收敛结果。
         const field = api === 'openai-responses' ? 'max_output_tokens' : Object.hasOwn(payload, 'max_tokens') ? 'max_tokens' : 'max_completion_tokens';
         delete body.max_tokens; delete body.max_completion_tokens; delete body.max_output_tokens;

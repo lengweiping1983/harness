@@ -491,26 +491,54 @@ class RuntimeBridgeTests(unittest.IsolatedAsyncioTestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            for explicit in (False, True):
-                with tempfile.TemporaryDirectory() as root, self.subTest(explicit=explicit):
+            cases = [
+                ('mapped-high', {'thinkingLevelMap': {'low': 'low', 'high': 'high', 'max': 'max'}}, {}, {}, 'high', 'reasoning_effort', 'high'),
+                ('listed-max-flat', {'reasoningEfforts': ['low', 'high', 'xhigh', 'max']}, {}, {}, 'max', 'reasoning_effort', 'max'),
+                ('listed-xhigh-flat', {'reasoningEfforts': ['low', 'high', 'xhigh', 'max']}, {}, {}, 'xhigh', 'reasoning_effort', 'xhigh'),
+                ('listed-with-empty-map', {'reasoningEfforts': ['high', 'max'], 'thinkingLevelMap': {}}, {}, {}, 'max', 'reasoning_effort', 'max'),
+                ('listed-with-mapping', {'reasoningEfforts': ['high', 'max'], 'thinkingLevelMap': {'high': 'high', 'max': 'maximum'}}, {}, {}, 'max', 'reasoning_effort', 'maximum'),
+                ('listed-max-nested', {'reasoningEfforts': ['high', 'max']}, {}, {'thinkingFormat': 'openrouter'}, 'max', 'reasoning', {'effort': 'max'}),
+                ('model-default-nested', {'reasoningEfforts': ['off', 'high', 'max']}, {}, {'thinkingFormat': 'openrouter'}, None, None, None),
+                ('explicit-nested-extension', {'reasoningEfforts': ['high', 'max']}, {}, {'thinkingFormat': 'openrouter'}, None, 'reasoning', {'effort': 'max'}, {'reasoning': {'effort': 'max'}}),
+                ('explicit-flat-extension', {'reasoningEfforts': ['high', 'max']}, {}, {}, None, 'reasoning_effort', 'max', {'reasoning_effort': 'max'}),
+                ('explicit-off-nested', {'reasoningEfforts': ['off', 'high', 'max']}, {}, {'thinkingFormat': 'openrouter'}, 'off', 'reasoning', {'effort': 'none'}),
+                ('model-overrides-endpoint', {'reasoningEfforts': ['high', 'max']}, {'compat': {'thinkingFormat': 'openai'}}, {'thinkingFormat': 'openrouter'}, 'max', 'reasoning_effort', 'max'),
+                ('explicit-mapping', {'reasoningEfforts': ['high']}, {'reasoning_efforts': {'max': 'maximum'}}, {}, 'max', 'reasoning_effort', 'maximum'),
+                ('disabled', {'reasoningEfforts': ['high', 'max']}, {'reasoning_efforts': False}, {}, 'max', None, None),
+                ('unknown', {}, {}, {}, 'max', None, None),
+            ]
+            for name, capabilities, overrides, endpoint_compat, effort, field, parameter, *extensions in cases:
+                with tempfile.TemporaryDirectory() as root, self.subTest(case=name):
                     value = provider_fixture(f'http://127.0.0.1:{server.server_port}/v1')
                     connection = value['connections'][0]
                     connection['models'] = connection['models'][:1]
-                    connection['models'][0]['model'] = 'reasoner-new'
-                    if explicit:
-                        connection['models'][0]['reasoning_efforts'] = {'low': 'low', 'high': 'high'}
-                    connection['model_catalog'] = [{'id': 'reasoner-new', 'name': '新推理模型', 'api': 'openai-completions', 'reasoning': True,
-                        'thinkingLevelMap': {'low': 'low', 'high': 'high', 'max': 'max'}, 'contextWindow': 32000, 'maxTokens': 1000,
+                    remote = 'stealth/crouton-alpha' if field == 'reasoning' else 'egg-alpha'
+                    connection['models'][0].update(model=remote, **overrides)
+                    connection['compat'] = endpoint_compat
+                    connection['model_catalog'] = [{'id': remote, 'name': '新推理模型', 'api': 'openai-completions',
+                        **capabilities, 'contextWindow': 32000, 'maxTokens': 1000,
                         'compat': {'supportsReasoningEffort': True, 'supportsStore': False, 'supportsDeveloperRole': False}}]
                     store = ProviderConnections(root)
                     store.save([value], store.revision)
-                    self.assertIn('high', store.catalog()[0]['reasoning_efforts'])
+                    store = ProviderConnections(root)
+                    before = store.path.read_bytes()
+                    levels = store.catalog()[0]['reasoning_efforts']
+                    if effort is not None:
+                        self.assertEqual(effort in levels, field is not None)
                     adapter = OpenRouterAdapter('unused')
                     adapter.provider_connections = store
-                    events = [event async for event in adapter.stream([UserMessage('test')], config=LlmCallConfig(model='harness/supplier/endpoint/model-a', reasoning_effort='high'))]
+                    sent = len(requests)
+                    events = [event async for event in adapter.stream([UserMessage('test')], config=LlmCallConfig(model='harness/supplier/endpoint/model-a', reasoning_effort=effort, extra_body=extensions[0] if extensions else {}))]
                     self.assertEqual(''.join(event.text for event in events if event.kind == 'text'), '完成')
-                    self.assertEqual(requests[-1]['model'], 'reasoner-new')
-                    self.assertEqual(requests[-1]['reasoning_effort'], 'high')
+                    self.assertEqual(len(requests), sent + 1)
+                    self.assertEqual(requests[-1]['model'], remote)
+                    for key in ('reasoning', 'reasoning_effort'):
+                        if key == field:
+                            self.assertEqual(requests[-1][key], parameter)
+                        else:
+                            self.assertNotIn(key, requests[-1])
+                    self.assertEqual(store.path.read_bytes(), before)
+                    self.assertFalse(store.leases)
         finally:
             server.shutdown()
             server.server_close()

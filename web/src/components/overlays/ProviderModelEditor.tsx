@@ -38,6 +38,21 @@ export function ProviderModelFields({value, disabled, onChange, manual = false, 
       </label>)}</div>
     </fieldset>
     <ReasoningEditor value={value.reasoning_efforts} disabled={disabled} onChange={reasoning_efforts => onChange({...value, reasoning_efforts})} />
+    <label className="block space-y-1 text-xs">
+      <span>{t('ui.providers.reasoningFormat')}</span>
+      <select className={field} aria-label={t('ui.providers.reasoningFormat')} disabled={disabled} value={typeof value.compat?.thinkingFormat === 'string' ? value.compat.thinkingFormat : ''} onChange={event => {
+        const compat = {...value.compat}
+        if (event.target.value) compat.thinkingFormat = event.target.value
+        else delete compat.thinkingFormat
+        onChange({...value, compat})
+      }}>
+        <option value="">{t('ui.providers.inherit')}</option>
+        <option value="openai">{t('ui.providers.reasoningFormatFlat')}</option>
+        <option value="openrouter">{t('ui.providers.reasoningFormatNested')}</option>
+        {typeof value.compat?.thinkingFormat === 'string' && !['openai', 'openrouter'].includes(value.compat.thinkingFormat) ? <option value={value.compat.thinkingFormat}>{t('ui.providers.reasoningFormatOther', {format: value.compat.thinkingFormat})}</option> : null}
+      </select>
+      <span className="block text-muted">{t('ui.providers.reasoningFormatHint')}</span>
+    </label>
   </div>
 }
 

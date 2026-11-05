@@ -42,6 +42,13 @@ export function ModelSeat({
   const models = useAppStore((s) => s.models)
   const defaultModel = useAppStore((s) => s.defaultModel)
   const session = useActiveSession()
+  const effort = useAppStore(s => reasoningSelection(session, s.defaultReasoningEffort).value)
+  const reasoningUnconfirmed = useAppStore(s => {
+    const inherited = reasoningSelection(session, s.defaultReasoningEffort).inherited
+    const own = s.activeSessionId ? s.reasoningSaves[s.activeSessionId] : undefined
+    const save = own?.pending || own?.error || !inherited ? own : s.defaultReasoningSave
+    return Boolean(save?.pending || save?.unconfirmed)
+  })
   const routing = useConnectionRoutes()
   const pending = useAppStore(s => Boolean(s.modelSaves[modelSaveKey(s.activeSessionId)]
     || !session?.model && s.modelSaves[modelSaveKey(null)]))
@@ -59,17 +66,22 @@ export function ModelSeat({
   const characters = Array.from(modelName)
   const compactName = characters.length > 10 ? characters.slice(0, 9).join('') + '…' : modelName
   const label = routed ? t('ui.models.routingCandidate', {model: routeLabel ?? t('ui.models.candidateUnknown')}) : t(pending ? 'ui.models.selectionSaving' : 'ui.components.chat.ModelPicker.8b625429e269', {p0: modelDisplayName(current, models, t('ui.models.unavailableName')) || t('ui.components.chat.ModelPicker.a44f9f9fcaca')})
+  const currentInfo = models.find(model => model.id === current)
+  const reasoningLabel = !routed && (currentInfo?.supports_reasoning || effort != null)
+    ? t(reasoningUnconfirmed ? 'ui.models.reasoningUnconfirmed' : effort != null && currentInfo && !currentInfo.reasoning_efforts?.includes(effort)
+      ? 'ui.models.reasoningUnsupported' : 'ui.models.reasoningSelection', {effort: effort ?? t('ui.components.chat.ModelPicker.9a36b187cea4')}) : null
+  const accessibleLabel = reasoningLabel ? t('ui.models.selectionWithReasoning', {model: label, reasoning: reasoningLabel}) : label
 
   return (
-    <div className={cn('relative', className)}>
-      <Tooltip content={label}>
+    <div className={cn('relative max-w-full', className)}>
+      <Tooltip content={accessibleLabel}>
         <button
           type="button"
           ref={buttonRef}
           onClick={() => setOpen(!open)}
           aria-expanded={open}
           aria-haspopup="listbox"
-          aria-label={label}
+          aria-label={accessibleLabel}
           className={cn(
             'pointer-events-auto inline-flex h-7 max-w-60 items-center gap-1.5 rounded-lg border px-2 text-2xs font-medium transition-all duration-150',
             open
@@ -79,6 +91,7 @@ export function ModelSeat({
         >
           <Sparkles className="h-3.5 w-3.5 shrink-0" />
           <span className="min-w-0 truncate">{compactName}</span>
+          {reasoningLabel ? <span className="min-w-0 truncate border-l border-line pl-1.5">{reasoningLabel}</span> : null}
           {!routed && pending ? <span className="shrink-0 text-faint">{t('ui.models.selectionPending')}</span> : null}
           <ChevronDown className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-180')} />
         </button>
@@ -292,7 +305,7 @@ function ModelMenuInstance({ models, current, effort, onClose, className, title 
           {currentInfo?.max_output ? <span>{t("ui.models.outputSize", { count: formatNumber(currentInfo.max_output) })}</span> : null}
         </div>
 
-        {efforts.length > 1 ? (
+        {efforts.length > 0 ? (
           <div className="mt-2 space-y-1.5">
             <div className="flex items-center gap-1.5">
               <Gauge className="h-3 w-3 shrink-0 text-faint" />
@@ -320,8 +333,8 @@ function ModelMenuInstance({ models, current, effort, onClose, className, title 
             </div>
           </div>
         ) : null}
-        {efforts.length > 1 ? <p className="mt-1 text-2xs text-faint">{!sessionId ? t("ui.components.chat.ModelPicker.80cf6df84c71") : inheritedEffort ? t("ui.components.chat.ModelPicker.8b6340d797b6", {p0: (effort ?? t("ui.components.chat.ModelPicker.9a36b187cea4"))}) : effort == null ? t("ui.components.chat.ModelPicker.134b6ccf3343") : t("ui.components.chat.ModelPicker.73ed98a2b58f", {p0: (effort)})}</p> : null}
-        {efforts.length > 1 && sessionId ? <button type="button" disabled={inheritedEffort}
+        {efforts.length > 0 ? <p className="mt-1 text-2xs text-faint">{!sessionId ? t("ui.components.chat.ModelPicker.80cf6df84c71") : inheritedEffort ? t("ui.components.chat.ModelPicker.8b6340d797b6", {p0: (effort ?? t("ui.components.chat.ModelPicker.9a36b187cea4"))}) : effort == null ? t("ui.components.chat.ModelPicker.134b6ccf3343") : t("ui.components.chat.ModelPicker.73ed98a2b58f", {p0: (effort)})}</p> : null}
+        {efforts.length > 0 && sessionId ? <button type="button" disabled={inheritedEffort}
           onClick={() => void setReasoningEffort(null, true)} className="mt-1 text-2xs text-brand underline disabled:text-faint disabled:no-underline">
           {inheritedEffort ? t("ui.components.chat.ModelPicker.e9b3a70f9c57") : t("ui.components.chat.ModelPicker.2fb47e73f109")}
         </button> : null}
