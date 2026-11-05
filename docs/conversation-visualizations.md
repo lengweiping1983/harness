@@ -87,7 +87,7 @@ HTML 在 `sandbox="allow-scripts"` 的不透明来源 iframe 中执行，不授�
 - `tests/test_visualization_policy.py` 核对同一宿主英文→中文→英文的真实模型请求包含交付策略与当前工具说明；隔离工作区不产生文件。`toolRuns.test.ts` 与 `turnActivity.test.ts` 覆盖两层折叠、加载／成功／失败及 SVG／HTML 身份保持。
 - `tests/test_chart_widgets.py` 与 `chartSpec.test.ts` 核对五类配置、双语错误、字段唯一性、有限数、资源／原型拒绝、深度及原始配置下载身份。`chartRuntime.test.ts` 核对并发下载共享与 Vega/Lite 复用。
 - `tableData.test.ts`、`filePreviewText.test.ts` 与 `tests/test_chart_widgets.py` 覆盖表格引号／分隔符／行尾、原文、排序与边界，以及文件读取与清理错误；`table-preview-smoke.mjs` 覆盖实际 Markdown、工具和文件预览中的排序、分页、筛选、语言／主题／尺寸往返、下载、隐藏、文件身份、截断和编码拒绝。
-- `chart-spec-smoke.mjs` 使用实际 Markdown 与工具卡片逐个绘制本地运行库，检查几何内容、无外部请求、真实点击事件中的动态求值拒绝、宿主隔离、语言／主题／宽度往返和 JSON 下载，并记录就绪耗时；还验证图例切换和 Vega／Lite 滑块对真实图形与数据可见性的影响，以及状态在主题／语言／宽度变化后保留。
+- `chart-spec-smoke.mjs` 使用实际 Markdown 与工具卡片逐个绘制本地运行库，检查几何内容、无外部请求、真实点击事件中的动态求值拒绝、宿主隔离、语言／主题／宽度往返和 JSON 下载，并记录就绪耗时；还验证图例切换和 Vega／Lite 滑块对真实图形与数据可见性的影响，以及状态在主题／语言／宽度变化后保留。CSP 探针固定在沙箱可视区域内，不改变正文高度；同时核对可信点击、执行完成、`EvalError` 和强制 CSP 的 `eval` 拒绝事件，不把未触发或其他异常算作拒绝。Chart.js 分支另将实际高度更新安排在鼠标按下与松开之间，覆盖旧探针因滚动归零而松开在 Canvas、最终点击 Body 且没有结果的交错。
 - `tests/test_widget_tools.py` 核对双语工具说明、完整 HTML、SVG 结构与参数边界。
 - `tests/test_widget_flow.py` 经真实发行桥接、回环供应商流和工具注册入口，核对损坏参数未执行、模型纠正、SVG／HTML 展示事件及完整源码。
 - `svgScope.test.ts` 核对多图 ID 和引用隔离；`streaming.test.ts` 保留分段与渐进内容边界，并核对渲染块（`type="renderer"`）的识别、分段与闭合状态。

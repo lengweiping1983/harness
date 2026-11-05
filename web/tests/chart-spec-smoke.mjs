@@ -1,6 +1,72 @@
 import assert from 'node:assert/strict'
 import {browserScenario} from './browser-scenario.mjs'
 
+/** 探针不参与正文布局，避免 iframe 增高归零滚动后把按下与松开投递给不同节点。 */
+async function installEvalProbe(frame){
+ const geometry=await frame.locator('body').evaluate(()=>{
+  const before=document.body.scrollHeight,button=document.createElement('button'),events=[]
+  button.id='eval-probe';button.textContent='CSP probe'
+  button.style.cssText='position:fixed;top:0;left:0;z-index:2147483647;margin:0'
+  button.setAttribute('onclick',"this.dataset.trusted=String(event.isTrusted);try{Function('return 1')();this.dataset.result='allowed'}catch(error){this.dataset.result='blocked';this.dataset.error=error.name;this.dataset.message=error.message}this.dataset.completed='true'")
+  const record=event=>events.push({type:event.type,target:event.target?.id||event.target?.nodeName,scrollY,height:innerHeight})
+  const violation=event=>{
+   events.push({type:'csp',blocked:event.blockedURI,directive:event.effectiveDirective,disposition:event.disposition})
+   if(event.blockedURI==='eval'){
+    button.dataset.cspBlocked=event.blockedURI;button.dataset.cspDisposition=event.disposition
+   }
+  }
+  for(const type of ['pointerdown','pointerup','click'])addEventListener(type,record,true)
+  addEventListener('securitypolicyviolation',violation)
+  button.probeEvents=events
+  button.cleanupProbe=()=>{
+   for(const type of ['pointerdown','pointerup','click'])removeEventListener(type,record,true)
+   removeEventListener('securitypolicyviolation',violation)
+  }
+  document.body.append(button)
+  const rect=button.getBoundingClientRect()
+  return {before,after:document.body.scrollHeight,inViewport:rect.top>=0&&rect.left>=0&&rect.bottom<=innerHeight&&rect.right<=innerWidth}
+ })
+ assert.equal(geometry.after,geometry.before,'The CSP probe must not resize the sandbox')
+ assert.equal(geometry.inViewport,true,'The CSP probe must start inside the sandbox viewport')
+ return frame.locator('#eval-probe')
+}
+
+async function assertEvalBlocked(frame,probe,label){
+ const result=await probe.evaluate(node=>({trusted:node.dataset.trusted,completed:node.dataset.completed,result:node.dataset.result,error:node.dataset.error,message:node.dataset.message,events:node.probeEvents}))
+ const diagnostic=label+': '+JSON.stringify(result)
+ assert.equal(result.trusted,'true','The CSP probe must receive a trusted click; '+diagnostic)
+ assert.equal(result.completed,'true','The CSP probe must finish; '+diagnostic)
+ assert.equal(result.result,'blocked','Dynamic evaluation must be rejected; '+diagnostic)
+ assert.equal(result.error,'EvalError','An unrelated exception is not CSP rejection; '+diagnostic)
+ // CSP 违规事件异步投递；等待实际拒绝证据，而不是固定睡眠或仅接受任意异常。
+ await frame.locator('#eval-probe[data-csp-blocked="eval"]').waitFor({state:'attached',timeout:5000})
+ assert.equal(await probe.getAttribute('data-csp-disposition'),'enforce')
+ await probe.evaluate(node=>{node.cleanupProbe();node.remove()})
+ return result.events
+}
+
+/** 固定在按下后释放真实高度回传，覆盖旧探针松开时命中 Canvas、结果未赋值的交错。 */
+async function probeDuringResize(page,frame){
+ const iframe=page.locator('[data-tool-call-id="chart"] iframe')
+ await iframe.evaluate(node=>{node.style.maxHeight=node.clientHeight+'px'})
+ const probe=await installEvalProbe(frame)
+ await frame.locator('body').evaluate(()=>{const spacer=document.createElement('div');spacer.id='probe-resize';spacer.style.height='40px';document.body.append(spacer)})
+ await page.waitForFunction(()=>{const node=document.querySelector('[data-tool-call-id="chart"] iframe');return parseFloat(node.style.height)>parseFloat(node.style.maxHeight)})
+ await probe.scrollIntoViewIfNeeded()
+ const box=await probe.boundingBox()
+ assert.ok(box)
+ await page.mouse.move(box.x+box.width/2,box.y+box.height/2)
+ await page.mouse.down()
+ const expected=await iframe.evaluate(node=>{node.style.maxHeight='';return parseFloat(node.style.height)})
+ await page.waitForFunction(height=>document.querySelector('[data-tool-call-id="chart"] iframe').clientHeight===height,expected)
+ await page.mouse.up()
+ const events=await assertEvalBlocked(frame,probe,'chartjs resize between pointerdown and pointerup')
+ const down=events.find(event=>event.type==='pointerdown'),up=events.find(event=>event.type==='pointerup')
+ assert.equal(down?.target,'eval-probe');assert.equal(up?.target,'eval-probe')
+ assert.ok(up.height>down.height,'The iframe must actually grow between pointerdown and pointerup')
+ await frame.locator('#probe-resize').evaluate(node=>node.remove())
+}
+
 const specs={
  echarts:{xAxis:{type:'category',data:['A','B']},yAxis:{type:'value'},series:[{name:'Plan',type:'bar',data:[3,8]},{name:'Actual',type:'bar',data:[2,5]}],legend:{},tooltip:{}},
  chartjs:{type:'bar',data:{labels:['A','B'],datasets:[{label:'Count',data:[3,8]}]}},
@@ -80,9 +146,10 @@ await browserScenario(async({server,browser})=>{
   await frame.locator('#chart[data-chart-ready="true"]').waitFor()
   await page.locator('[aria-busy="false"] > iframe').waitFor()
   assert.equal(await frame.locator('body').evaluate(()=>{try{return !!parent.document}catch{return false}}),false)
-  await frame.locator('body').evaluate(()=>{const button=document.createElement('button');button.id='eval-probe';button.textContent='CSP probe';button.setAttribute('onclick',"try{Function('return 1')();window.evalAllowed=true}catch{window.evalAllowed=false}");document.body.append(button)})
-  await frame.locator('#eval-probe').click()
-  assert.equal(await frame.locator('body').evaluate(()=>window.evalAllowed),false)
+  const probe=await installEvalProbe(frame)
+  await probe.click()
+  await assertEvalBlocked(frame,probe,kind)
+  if(kind==='chartjs')await probeDuringResize(page,frame)
 
  }
  await page.evaluate(()=>window.draw('vega-lite',{data:{url:'https://example.com/data.json'},mark:'bar'}))
