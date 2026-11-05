@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from harness.app.permissions import PermissionPolicy, _redact_sensitive
+from harness.app.permissions import _redact_sensitive
 from harness.core.language import current_language
 from harness.session.events import AppendOp
 from harness.llm.types import ToolSchema
