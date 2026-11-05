@@ -42,7 +42,7 @@ FIRST_HEADING_RE = re.compile(r"^#[ \t]+(.+)$", re.MULTILINE)
 
 # 计划阶段只需要仓库事实，不应把本机凭据读进模型上下文、计划正文或审阅卡片。
 # 判定规则唯一来源是 core.redaction；此处再导出以保持既有调用方与测试不变。
-from ..core.redaction import contains_sensitive_literal, is_sensitive_reference
+from ..core.redaction import contains_sensitive_literal, is_sensitive_path, is_sensitive_reference
 
 
 def plan_policy_section() -> str:
@@ -169,8 +169,9 @@ class PlanModeController:
             return None
         name = tool.schema.name
         if name in {'read', 'glob', 'grep'}:
-            references = [args.get(key) for key in ('path', 'pattern', 'glob') if isinstance(args, dict)]
-            if any(is_sensitive_reference(value) for value in references):
+            fields = ('pattern',) if name == 'glob' else ('path', 'glob') if name == 'grep' else ('path',)
+            references = [args.get(key) for key in fields if isinstance(args, dict)]
+            if any(isinstance(value, str) and is_sensitive_path(value) for value in references):
                 return tr('python.plan_mode.sensitive_reference')
         if name in {'terminal_read', 'terminal_list', 'terminal_send', 'terminal_open'}:
             return tr('python.plan_mode.a55832dec5b4')

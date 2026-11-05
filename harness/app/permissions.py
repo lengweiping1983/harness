@@ -10,21 +10,24 @@ import uuid
 import math
 from pathlib import Path
 from dataclasses import dataclass
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from .runtime import operation_fingerprint
+from .argument_sensitivity import code_has_sensitive_reference, shell_has_sensitive_reference
 from ..llm.types import SystemMessage, UserMessage, LlmCallConfig
 from ..core.errors import HarnessError, SessionNotFoundError
 from ..core.jsonutil import to_jsonable
 from ..core.cleanup import join_cleanup, raise_cleanup_errors
 from ..core.operation_lock import OperationLock
 from ..core.redaction import (
+    is_sensitive_path as _is_sensitive_path,
     contains_sensitive_value as _contains_sensitive_value,
     redact_path as _redact_path,
     redact_sensitive as _redact_sensitive,
 )
 
-# 敏感判定与脱敏只有 core.redaction 一处实现；这里按本模块既有私有名再导出，
+# 基础敏感判定与脱敏只有 core.redaction 一处实现；这里按本模块既有私有名再导出，
 # 使审批展示、审阅证据与递归参数检查继续共用同一份规则。
 # 路径与明文凭据判定的对外入口在 core.redaction 与 app.plan_mode，不在此重复暴露。
 
@@ -36,6 +39,20 @@ _PUBLIC_TOOL_ARGUMENTS = {
     name: frozenset({'snapshot_token'})
     for name in ('todo_read', 'todo_write', 'todo_update', 'todo_bind')
 }
+
+
+def _argument_reference_checks(semantics: Mapping[str, str], arguments: Any) -> dict[str, Callable[[str], bool]]:
+    """仅由可信用途选择引用检查，秘密扫描与嵌套检查仍由核心入口执行。"""
+    checks = {
+        'text': lambda value: False,
+        'path': _is_sensitive_path,
+        'shell': shell_has_sensitive_reference,
+        'code': code_has_sensitive_reference,
+    }
+    if isinstance(arguments, dict) and arguments.get('language') in ('bash', 'sh', 'powershell'):
+        checks['code'] = shell_has_sensitive_reference
+    return {key: checks[semantic] for key, semantic in semantics.items()
+            if isinstance(semantic, str) and semantic in checks}
 
 
 class _PolicyChanged(Exception):
@@ -211,7 +228,8 @@ class PermissionPolicy:
         """冻结工具实体、执行入口和公开契约，不能靠名称复用授权。"""
         contract = to_jsonable({'schema': tool.schema.to_dict(), 'effect': tool.effect,
             'dangerous': tool.dangerous, 'approval_required': tool.approval_required,
-            'discovery_namespace': tool.discovery_namespace})
+            'discovery_namespace': tool.discovery_namespace,
+            'argument_semantics': dict(tool.argument_semantics)})
         return tool, tool.execute, operation_fingerprint('tool-authority', contract, '')
 
     def _same_authority(self, authority: tuple[Any, Any, str], tool: Any) -> bool:
@@ -377,7 +395,8 @@ class PermissionPolicy:
         snapshot = self.snapshot(ctx.session_id)
         policy = snapshot["permission_policy"]
         name = tool.schema.name
-        sensitive = _contains_sensitive_value(args, public_fields=_PUBLIC_TOOL_ARGUMENTS.get(name, frozenset()))
+        sensitive = _contains_sensitive_value(args, public_fields=_PUBLIC_TOOL_ARGUMENTS.get(name, frozenset()),
+                                              reference_checks=_argument_reference_checks(tool.argument_semantics, args))
         if sensitive:
             if policy == "full_access":
                 return tr('python.permissions.sensitive_reference')

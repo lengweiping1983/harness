@@ -222,6 +222,7 @@ def build_shell_tools(
                 },
             },
             execute=bash,
+            argument_semantics={'command': 'shell', 'cwd': 'path', 'description': 'text'},
             hook_names=('Bash',),
             execution_cwd=shell_execution_cwd,
             progress_key=command_progress_key,

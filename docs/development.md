@@ -319,6 +319,8 @@ python -m venv .run/semantic-eval
 
 修改前按 [代码生成与防回归](code-generation.md) 核对相关不变量。新增缺陷回归应先固定触发条件，再检查真实入口及实际结果；受控异步屏障优先于固定睡眠。产品语言资源、机器协议、业务写入和观察请求分别处理，不能靠统一捕获、默认值或重试掩盖错误。
 
+权限参数用途的定向回归为 `python -m unittest tests.test_permission_argument_semantics tests.test_plan_security.PlanSecurityTests.test_content_search_does_not_treat_member_names_as_file_paths`，覆盖真实临时文件写入/编辑、POSIX heredoc 写入、敏感访问的执行前拒绝、授权声明隔离，以及内容搜索和文件范围的区别。详细边界与证据见 [安全与隐私](security-privacy.md#针对性验证入口)；该命令不调用在线模型，不写入用户项目，也不代表全量或跨平台验收。
+
 审查结果同步到受影响的正式文档与源码测试，不生成临时审查文档。长期约定维护在 `AGENTS.md`，当前产品行为维护在对应 `docs/` 页面；删除 `output/` 不应丢失这些内容。
 
 `markdown-media-smoke.mjs` 使用真实 Markdown 组件，覆盖图片失败后的地址切换、旧元素错误迟到、返回原地址，以及双语反复切换、明暗主题和窄宽屏下的链接提示；用户提供的标题与替代文本保持原文。

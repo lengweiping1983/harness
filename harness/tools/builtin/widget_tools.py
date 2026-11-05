@@ -305,6 +305,7 @@ def build_widget_tools() -> list[ToolDefinition]:
                 },
             },
             execute=show_widget,
+            argument_semantics={'widget_code': 'text', 'title': 'text'},
             to_content=widget_content,
             describe=widget_display,
             # 不读写工作区、不访问外部：声明 read 使其在只读任务中可用。

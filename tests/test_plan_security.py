@@ -13,6 +13,7 @@ from harness.interaction.questions import QuestionBroker
 from harness.session.store import SessionStore
 from harness.tools.builtin.plan_tools import build_exit_plan_mode_tool
 from harness.tools.registry import ToolRunContext
+from harness.tools.builtin.fs_tools import build_fs_tools
 
 
 class PlanSecurityTests(unittest.IsolatedAsyncioTestCase):
@@ -42,6 +43,16 @@ class PlanSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(contains_sensitive_literal('Authorization: Bearer abcdefghijklmnopqrstuvwxyz012345'))
         self.assertTrue(contains_sensitive_literal('-----BEGIN PRIVATE KEY-----'))
         self.assertFalse(contains_sensitive_literal('api_key = <redacted>'))
+
+    async def test_content_search_does_not_treat_member_names_as_file_paths(self):
+        tools = {tool.schema.name: tool for tool in build_fs_tools(self.directory.name)}
+        for arguments in ({'pattern': 'event.key', 'path': '.', 'glob': '*.js'},
+                          {'pattern': '.env', 'path': '.', 'glob': '*.md'}):
+            self.assertIsNone(self.controller.guard(tools['grep'], arguments, self.ctx))
+        for name, arguments in (('grep', {'pattern': 'event.key', 'path': '.env'}),
+                                ('grep', {'pattern': 'event.key', 'glob': '**/*.key'}),
+                                ('glob', {'pattern': '**/*.key'})):
+            self.assertIsNotNone(self.controller.guard(tools[name], arguments, self.ctx))
 
     async def test_question_labels_produce_stable_option_ids(self):
         broker = QuestionBroker(EventBus())

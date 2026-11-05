@@ -34,11 +34,22 @@ MCP 与隧道 token 只通过受监督子进程环境传递，不写命令行参
 
 四种策略有明确语义：`read_only` 只允许已声明为读取的工具，并拒绝 `read`/`grep` 的工作区外路径；`request_approval` 对工作区写入、工作区外读取、命令、外部写入、危险工具、网络和未知副作用逐次请求人工决定；`auto_review` 先把精确工具、参数、工作目录、效果和用户意图交给无工具审阅模型，`allow` 才继续，`deny` 拒绝，`ask` 回到人工审批；`full_access` 是用户/宿主选择的策略，不是模型可自行升级的权限。自动审阅不替代网络限制、凭据控制或浏览器来源审批。
 
-即使选择 `full_access`，权限控制器仍递归扫描普通工具和 ACP tool-call 的参数；明显凭据路径、凭据字段、Bearer/Basic、JWT、云令牌前缀和私钥块会硬拒绝。`todo_read`、`todo_write`、`todo_update` 和 `todo_bind` 的顶层 `snapshot_token` 是公开的清单版本身份，仅豁免该字段名的凭据判定；字段值、嵌套内容及其他字段仍接受扫描，其他工具和 ACP 请求不享有此例外，快照归属与版本仍由 todo 工具验证。审批卡片、外部 Agent 详情、自动审阅输入、工作目录和审阅理由使用同一套有界脱敏，真实参数只留在受信执行链中。该规则是 fail-closed 启发式，不能被描述为完整秘密分类器。
+即使选择 `full_access`，权限控制器仍递归扫描普通工具和 ACP tool-call 的参数；敏感文件访问、凭据字段、Bearer/Basic、JWT、云令牌前缀和私钥块会硬拒绝。普通工具通过可信 `ToolDefinition.argument_semantics` 声明顶层字符串参数的用途，权限层按用途判断文件引用，不能把整份源码按路径拆词：
+
+| 用途 | 当前消费者与检查 |
+|---|---|
+| `path` | 文件路径、glob 模式与命令工作目录，按完整路径分量检查敏感名称和后缀 |
+| `text` | 文件写入/编辑正文、内容搜索表达式、可视化正文与展示说明，检查秘密字面量，不因 `event.key`、`state.secret` 等源码成员名或文档提到 `.env` 就当作文件访问 |
+| `shell` | Shell 命令与终端输入，按命令词检查路径、选项值和重定向；区分解释器代码参数及 heredoc 正文 |
+| `code` | `run_code` 与 workflow 的可执行源码，检查字符串中的敏感引用；`run_code` 的 Shell 语言沿命令检查路径处理 |
+
+`harness/app/argument_sensitivity.py` 只对直接交给 `cat`/`tee` 的 heredoc 输入使用数据正文规则；正文仍接受秘密字面量扫描，未加引号的 heredoc 还检查命令替换。解释器输入保留源码引用检查，管道、未知消费者、无法完成词法分析或超过嵌套限制的输入保持保守检查。该分析不执行输入、不读取目标文件，也不保证识别动态拼接的路径、全部 Shell 方言或任意程序的数据流，不能作为操作系统沙箱。
+
+声明只来自注册实现，复制后以只读映射保存，并纳入工具授权指纹；模型传入同名字段不能改变用途，声明变化使旧授权失效。未声明或非法用途、嵌套对象/数组以及没有可信工具声明的 ACP 请求仍按保守引用规则扫描。`todo_read`、`todo_write`、`todo_update` 和 `todo_bind` 的顶层 `snapshot_token` 是公开的清单版本身份，仅豁免该字段名的凭据判定；字段值、嵌套内容及其他字段仍接受扫描，其他工具和 ACP 请求不享有此例外，快照归属与版本仍由 todo 工具验证。审批卡片、外部 Agent 详情、自动审阅输入、工作目录和审阅理由使用同一套有界脱敏，真实参数只留在受信执行链中。秘密字面量规则和引用分析均是启发式，不能被描述为完整秘密分类器。
 
 每个临时授权绑定工具对象、完整 schema、执行函数、效果、危险标记、工作目录、参数指纹和权限作用域，默认 15 分钟后过期；参数、工具身份、权限版本或作用域任一变化都会使授权失效。撤销先从内存准入表移除，再写审计事件；审计写入失败也不恢复执行权限。审批卡片的本地化标签只用于显示，业务决定使用稳定 option ID（`allow-once`、`allow-temporarily`、`deny`）；审批期间参数变化、连接取消、审阅失败或范围不清都 fail closed。
 
-敏感判定与脱敏只有 `harness/core/redaction.py` 一处实现：路径与引用判定、明文凭据形态识别、结构化递归脱敏、纯文本脱敏与命中计数都在该模块，`harness/app/permissions.py` 与 `harness/app/plan_mode.py` 按既有名字再导出。审批展示、计划正文检查与跨代理上下文继承因此共用同一份规则，不存在某一条路径漏判的可能。脱敏只作用于展示与继承副本，不改变真实工具参数、执行指纹或落盘原件；`redact_text` 返回命中次数，使“改写了多少”成为可报告事实而不是静默行为。
+基础敏感判定与脱敏统一在 `harness/core/redaction.py` 实现：路径与保守引用判定、明文凭据形态识别、结构化递归扫描与脱敏、纯文本脱敏与命中计数都在该模块，`harness/app/permissions.py` 与 `harness/app/plan_mode.py` 按既有名字再导出。权限层按可信参数用途选择顶层字符串的引用检查，源码与命令分析由 `harness/app/argument_sensitivity.py` 提供；字段名、秘密字面量和嵌套内容仍经过核心扫描。审批展示、计划正文检查与跨智能体上下文继承共用基础规则。脱敏只作用于展示与继承副本，不改变真实工具参数、执行指纹或落盘原件；`redact_text` 返回命中次数，使“改写了多少”成为可报告事实而不是静默行为。
 
 委派边界与权限边界一起收敛。`harness/subagent/admission.py::AdmissionGate` 按整棵代理树计名额并限制派生深度：后代不再绕过并发闸，深度在创建会话之前判定，超限立即失败且不留半成品运行记录。父代理阻塞观察期间让渡名额、观察结束后召回，因此“父等子、子等名额”不会互锁；让渡与召回是显式状态迁移，取消既不丢名额也不重复计数。委派成员单调收紧 `read_only` 与工作区目录，不能通过省略覆盖而放宽。
 
@@ -50,7 +61,7 @@ MCP 与隧道 token 只通过受监督子进程环境传递，不写命令行参
 
 ## 计划模式的隐私边界
 
-计划模式是只读约束，不是秘密访问许可。`harness/app/plan_mode.py::PlanModeController.guard` 现在用启发式规则拒绝 `read`、`glob`、`grep` 对明显敏感引用的访问，包括 `.env`、凭据/令牌文件、私钥和证书容器；`.example`、`.sample`、`.template`、`.dist` 示例可以继续审查。`contains_sensitive_literal` 和 `exit_plan_mode` 还会拒绝把常见 API key、Bearer token、密码赋值或私钥头写入计划正文。启发式规则不是秘密分类器，不能替代人工审阅。计划提示词同时要求模型不要读取凭据存储、私钥、token cache、环境转储或可能包含凭据的文件；如果发现，计划只能记录“访问已拒绝”，不能粘贴内容。
+计划模式是只读约束，不是秘密访问许可。`harness/app/plan_mode.py::PlanModeController.guard` 用启发式规则拒绝 `read`、`glob`、`grep` 对明显敏感文件的访问，包括 `.env`、凭据/令牌文件、私钥和证书容器；`.example`、`.sample`、`.template`、`.dist` 示例可以继续审查。`glob.pattern` 是文件模式；`grep.path` 和 `grep.glob` 决定读取范围，`grep.pattern` 是内容表达式，不作为路径检查，搜索 `event.key` 不会据此被判成读取私钥。`contains_sensitive_literal` 和 `exit_plan_mode` 还会拒绝把常见 API key、Bearer token、密码赋值或私钥头写入计划正文。启发式规则不是秘密分类器，不能替代人工审阅。计划提示词同时要求模型不要读取凭据存储、私钥、token cache、环境转储或可能包含凭据的文件；如果发现，计划只能记录“访问已拒绝”，不能粘贴内容。
 
 计划模式还拒绝终端工具、写文件、编辑、命令、需要审批的工具和危险浏览器动作。只读 web/MCP 仍可能返回敏感数据，因此其结果也不能自动复制进计划；模型必须最小化引用并脱敏。计划版本正文带 `content_hash`，审批回执引用该摘要，计划历史和 Goal 证据不把摘要当作秘密内容，也不把摘要当作业务完成证据。
 
@@ -79,3 +90,5 @@ Harness 的本地执行器仍可能与宿主共享文件、环境和网络；除
 ## 针对性验证入口
 
 凭据与隐私相关回归包括 `tests/test_api_key_masks.py`、`tests/test_credential_integrity.py`、`tests/test_issue_boundaries.py`、`tests/test_provider_connections.py`、`tests/test_lan_language.py`、`tests/test_mcp_named_tunnel.py`、`tests/test_trace_read_work.py`、`tests/test_plan_mode_lifecycle.py`、`tests/test_plan_completion.py`、`tests/test_plan_security.py`、`tests/test_plan_integrity.py`、`tests/test_permission_sensitive.py`、`tests/test_context_inheritance_hygiene.py`、`tests/test_review_evidence_honesty.py` 和 `tests/test_subagent_admission.py`。`tests/test_permission_sensitive.py` 核对真实 todo 工具的公开快照字段、嵌套及其他工具的拒绝边界，`tests/test_todo_evidence_recovery.py` 通过真实智能体循环核对错误证据后读取快照并仅提交一次有效清单。验证应检查明文不出现在公开投影、错误、日志、计划正文和跨代理继承副本；继承载荷的脱敏计数与实际改写一致且源事件保留原件；审阅证据在截断时显式声明截断并标注委派请求方；凭据刷新/撤销失败保留原状态；敏感计划引用被拒绝；跨语言审批仍按机器 ID 判断；名额与深度超限失败且不丢名额。缺少真实 Windows Credential Manager、容器或生产网络环境时，只能报告本地替身和源码证据，不能写成实机隔离验收。
+
+源码成员名误判的防回归依据在 `tests/test_permission_argument_semantics.py`：固定 `write.content` 和 heredoc 中的 `e.key`/`ev.key` 触发形态，通过真实注册与权限入口检查英文→中文→英文，核对原始参数不改写、临时目录的实际写入/编辑字节，以及敏感路径和秘密在执行前被拒绝。命令用例同时覆盖数据正文、命令替换、解释器输入和管道，声明隔离与授权指纹另有断言；POSIX heredoc 的真实执行不代表 Windows 命令解释器实机验收。`tests/test_plan_security.py::PlanSecurityTests.test_content_search_does_not_treat_member_names_as_file_paths` 固定内容表达式与文件范围的区别。

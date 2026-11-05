@@ -296,6 +296,7 @@ def build_code_tools(
                 },
             },
             execute=run_code,
+            argument_semantics={'code': 'code'},
             execution_cwd=lambda args, ctx: Path(ctx.cwd or cwd or Path.cwd()).resolve(),
             progress_key=command_progress_key,
             to_content=run_code_to_content,

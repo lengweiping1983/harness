@@ -30,8 +30,9 @@ import logging
 import time
 from copy import copy
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from .write_scope import write_scope_denial
-from typing import Any, Awaitable, Callable, Iterable
+from typing import Any, Awaitable, Callable, Iterable, Literal, Mapping
 
 from ..core.errors import (
     ToolArgsError,
@@ -152,10 +153,12 @@ class ToolDefinition:
     :param defer_loading: 允许会话在大目录中按需提供此工具的定义，不改变执行权限。
     :param defer_always: 自动模式即使小目录也按需加载，显式全量模式仍直接提供。
     :param discovery_namespace: 可信注册来源提供的发现目录分组，不根据名称猜测副作用。
+    :param argument_semantics: 可信实现声明的顶层文本参数用途；不进入模型协议。
     """
 
     __slots__ = (
         "schema", "defer_loading", "defer_always", "discovery_namespace",
+        "argument_semantics",
         "execute",
         "to_content",
         "describe",
@@ -191,6 +194,7 @@ class ToolDefinition:
         defer_loading: bool = False,
         defer_always: bool = False,
         discovery_namespace: str | None = None,
+        argument_semantics: Mapping[str, Literal['path', 'text', 'shell', 'code']] | None = None,
     ) -> None:
         # 允许直接传 dict（{name, description, parameters}），内部统一成 ToolSchema。
         # 这样内置工具与业务工具都能用最简洁的字面量写法。
@@ -208,6 +212,7 @@ class ToolDefinition:
         self.defer_loading = defer_loading or defer_always
         self.defer_always = defer_always
         self.discovery_namespace = discovery_namespace
+        self.argument_semantics = MappingProxyType(dict(argument_semantics or {}))
         self.execute = execute
         self.to_content = to_content
         self.describe = describe
@@ -289,6 +294,7 @@ class ToolRegistry:
         approval_required: bool = False,
         cancellable: bool = False,
         idempotent: bool = False,
+        argument_semantics: Mapping[str, Literal['path', 'text', 'shell', 'code']] | None = None,
     ) -> Callable[[Callable[[Any, ToolRunContext], Any]], Callable[[Any, ToolRunContext], Any]]:
         """装饰器式注册：把一个 ``(args, ctx)`` 函数变成工具。
 
@@ -312,6 +318,7 @@ class ToolRegistry:
                 dangerous=dangerous,
                 effect=effect, approval_required=approval_required,
                 cancellable=cancellable, idempotent=idempotent,
+                argument_semantics=argument_semantics,
             )
             self.register(definition)
             return func

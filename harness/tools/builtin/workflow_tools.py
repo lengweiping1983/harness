@@ -528,6 +528,7 @@ def build_workflow_tools(
                 "parameters": _parameters(allow_background),
             },
             execute=workflow,
+            argument_semantics={'script': 'code'},
             to_content=to_content,
             describe=describe,
             concurrency_safe=False,
