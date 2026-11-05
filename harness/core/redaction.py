@@ -143,10 +143,11 @@ def redact_path(value: Any) -> Any:
     return '[redacted-path]' if is_sensitive_reference(value) else value
 
 
-def contains_sensitive_value(value: Any) -> bool:
-    """递归检查工具参数，防止嵌套参数绕过敏感操作边界。"""
+def contains_sensitive_value(value: Any, *, public_fields: frozenset[str] = frozenset()) -> bool:
+    """仅豁免当前层已声明的公开字段名，字段值及嵌套参数仍递归扫描。"""
     if isinstance(value, dict):
-        return any(SENSITIVE_FIELD_RE.search(str(key)) or contains_sensitive_value(item)
+        return any((key not in public_fields and SENSITIVE_FIELD_RE.search(str(key)))
+                   or contains_sensitive_value(item)
                    for key, item in value.items())
     if isinstance(value, (list, tuple)):
         return any(contains_sensitive_value(item) for item in value)

@@ -34,7 +34,7 @@ MCP 与隧道 token 只通过受监督子进程环境传递，不写命令行参
 
 四种策略有明确语义：`read_only` 只允许已声明为读取的工具，并拒绝 `read`/`grep` 的工作区外路径；`request_approval` 对工作区写入、工作区外读取、命令、外部写入、危险工具、网络和未知副作用逐次请求人工决定；`auto_review` 先把精确工具、参数、工作目录、效果和用户意图交给无工具审阅模型，`allow` 才继续，`deny` 拒绝，`ask` 回到人工审批；`full_access` 是用户/宿主选择的策略，不是模型可自行升级的权限。自动审阅不替代网络限制、凭据控制或浏览器来源审批。
 
-即使选择 `full_access`，权限控制器仍递归扫描普通工具和 ACP tool-call 的参数；明显凭据路径、凭据字段、Bearer/Basic、JWT、云令牌前缀和私钥块会硬拒绝。审批卡片、外部 Agent 详情、自动审阅输入、工作目录和审阅理由使用同一套有界脱敏，真实参数只留在受信执行链中。该规则是 fail-closed 启发式，不能被描述为完整秘密分类器。
+即使选择 `full_access`，权限控制器仍递归扫描普通工具和 ACP tool-call 的参数；明显凭据路径、凭据字段、Bearer/Basic、JWT、云令牌前缀和私钥块会硬拒绝。`todo_read`、`todo_write`、`todo_update` 和 `todo_bind` 的顶层 `snapshot_token` 是公开的清单版本身份，仅豁免该字段名的凭据判定；字段值、嵌套内容及其他字段仍接受扫描，其他工具和 ACP 请求不享有此例外，快照归属与版本仍由 todo 工具验证。审批卡片、外部 Agent 详情、自动审阅输入、工作目录和审阅理由使用同一套有界脱敏，真实参数只留在受信执行链中。该规则是 fail-closed 启发式，不能被描述为完整秘密分类器。
 
 每个临时授权绑定工具对象、完整 schema、执行函数、效果、危险标记、工作目录、参数指纹和权限作用域，默认 15 分钟后过期；参数、工具身份、权限版本或作用域任一变化都会使授权失效。撤销先从内存准入表移除，再写审计事件；审计写入失败也不恢复执行权限。审批卡片的本地化标签只用于显示，业务决定使用稳定 option ID（`allow-once`、`allow-temporarily`、`deny`）；审批期间参数变化、连接取消、审阅失败或范围不清都 fail closed。
 
@@ -78,4 +78,4 @@ Harness 的本地执行器仍可能与宿主共享文件、环境和网络；除
 
 ## 针对性验证入口
 
-凭据与隐私相关回归包括 `tests/test_api_key_masks.py`、`tests/test_credential_integrity.py`、`tests/test_issue_boundaries.py`、`tests/test_provider_connections.py`、`tests/test_lan_language.py`、`tests/test_mcp_named_tunnel.py`、`tests/test_trace_read_work.py`、`tests/test_plan_mode_lifecycle.py`、`tests/test_plan_completion.py`、`tests/test_plan_security.py`、`tests/test_plan_integrity.py`、`tests/test_permission_sensitive.py`、`tests/test_context_inheritance_hygiene.py`、`tests/test_review_evidence_honesty.py` 和 `tests/test_subagent_admission.py`。验证应检查明文不出现在公开投影、错误、日志、计划正文和跨代理继承副本；继承载荷的脱敏计数与实际改写一致且源事件保留原件；审阅证据在截断时显式声明截断并标注委派请求方；凭据刷新/撤销失败保留原状态；敏感计划引用被拒绝；跨语言审批仍按机器 ID 判断；名额与深度超限失败且不丢名额。缺少真实 Windows Credential Manager、容器或生产网络环境时，只能报告本地替身和源码证据，不能写成实机隔离验收。
+凭据与隐私相关回归包括 `tests/test_api_key_masks.py`、`tests/test_credential_integrity.py`、`tests/test_issue_boundaries.py`、`tests/test_provider_connections.py`、`tests/test_lan_language.py`、`tests/test_mcp_named_tunnel.py`、`tests/test_trace_read_work.py`、`tests/test_plan_mode_lifecycle.py`、`tests/test_plan_completion.py`、`tests/test_plan_security.py`、`tests/test_plan_integrity.py`、`tests/test_permission_sensitive.py`、`tests/test_context_inheritance_hygiene.py`、`tests/test_review_evidence_honesty.py` 和 `tests/test_subagent_admission.py`。`tests/test_permission_sensitive.py` 核对真实 todo 工具的公开快照字段、嵌套及其他工具的拒绝边界，`tests/test_todo_evidence_recovery.py` 通过真实智能体循环核对错误证据后读取快照并仅提交一次有效清单。验证应检查明文不出现在公开投影、错误、日志、计划正文和跨代理继承副本；继承载荷的脱敏计数与实际改写一致且源事件保留原件；审阅证据在截断时显式声明截断并标注委派请求方；凭据刷新/撤销失败保留原状态；敏感计划引用被拒绝；跨语言审批仍按机器 ID 判断；名额与深度超限失败且不丢名额。缺少真实 Windows Credential Manager、容器或生产网络环境时，只能报告本地替身和源码证据，不能写成实机隔离验收。

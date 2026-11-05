@@ -187,3 +187,6 @@ class TodoEvidenceRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reference['name'], 'read')
         self.assertIn('真实核对结果', reference['summary'])
         self.assertEqual(len(session.events_of_type('todo/write')), 1)
+        results = session.events_of_type('tool/result')
+        self.assertEqual([event.data['name'] for event in results], ['read', 'todo_write', 'todo_read', 'todo_write'])
+        self.assertFalse(results[-1].data['results'][0]['is_error'])

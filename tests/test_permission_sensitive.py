@@ -8,6 +8,8 @@ from harness.app.permissions import _redact_sensitive
 from harness.core.language import current_language
 from harness.session.events import AppendOp
 from harness.llm.types import ToolSchema
+from harness.tools.builtin.todo_state import empty_snapshot
+from harness.tools.builtin.todo_tools import TodoStore, build_todo_tools
 from harness.tools.registry import ToolDefinition
 
 
@@ -59,6 +61,47 @@ class PermissionSensitiveTests(unittest.IsolatedAsyncioTestCase):
         with current_language.set('zh-CN'):
             reason = await policy.guard(tool, {'headers': [{'Authorization': 'Bearer fixture-nested-secret'}]}, context)
         self.assertEqual(reason, '此操作引用了凭据或秘密，当前权限边界不允许继续。')
+
+    async def test_full_access_allows_public_todo_snapshot_arguments(self):
+        for language in ('en', 'zh-CN', 'en'):
+            with self.subTest(language=language), current_language.set(language):
+                host, policy, session, _, _, context, _ = permission_fixture('full_access')
+                token = empty_snapshot(session.id).token
+                tools = build_todo_tools(TodoStore(session_of=host.get_session))
+                for tool in tools:
+                    with self.subTest(tool=tool.schema.name):
+                        self.assertIsNone(await policy.guard(tool, {'snapshot_token': token}, context))
+
+    async def test_snapshot_exception_preserves_sensitive_values_and_other_fields(self):
+        host, policy, session, _, _, context, _ = permission_fixture('full_access')
+        token = empty_snapshot(session.id).token
+        tools = build_todo_tools(TodoStore(session_of=host.get_session))
+        for tool in tools:
+            for arguments in (
+                *({'snapshot_token': token, key: 'opaque-fixture-value'}
+                  for key in ('token', 'access_token', 'refresh_token', 'api_key', 'password')),
+                {'snapshot_token': {'access_token': 'opaque-fixture-value'}},
+                {'snapshot_token': ['.env']},
+                {'snapshot_token': 'Bearer fixture-secret'},
+                {'snapshot_token': 'sk-fixtureabcdefghijklmnop'},
+                {'snapshot_token': token, 'nested': {'snapshot_token': token}},
+                {'snapshot_token': token, 'todos': [{'content': 'api_key=fixture-secret'}]},
+            ):
+                with self.subTest(tool=tool.schema.name, arguments=arguments), current_language.set('zh-CN'):
+                    self.assertEqual(await policy.guard(tool, arguments, context),
+                                     '此操作引用了凭据或秘密，当前权限边界不允许继续。')
+        other = ToolDefinition(ToolSchema(name='browser', description='browser', parameters={'type': 'object'}),
+                               AsyncMock(), effect='external_write')
+        with current_language.set('zh-CN'):
+            self.assertEqual(await policy.guard(other, {'snapshot_token': token}, context),
+                             '此操作引用了凭据或秘密，当前权限边界不允许继续。')
+        host.config.enable_interaction = True
+        self.assertIsNone(await policy.external_agent_permission(context, 'fixture-agent', {
+            'toolCall': {'toolCallId': 'snapshot', 'rawInput': {'snapshot_token': token}},
+            'options': [{'optionId': 'allow', 'kind': 'allow_once', 'name': 'Allow'}],
+        }))
+        self.assertTrue(session.latest('note').data['sensitive'])
+        host.questions.ask.assert_not_awaited()
 
     async def test_external_agent_full_access_does_not_auto_allow_sensitive_call(self):
         host, policy, session, _, _, context, _ = permission_fixture('full_access')

@@ -37,7 +37,7 @@ await browserScenario(async({server,browser})=>{
    await page.getByRole('button',{name:submit,exact:true}).click()
    await page.waitForFunction(()=>window.submissions.length===1)
    await checkOriginal()
-   assert.deepEqual(await page.evaluate(()=>window.submissions[0].answers),kind==='plan'?[{id:'plan-review',selected:['Keep planning'],custom:'New input 原文'}]:[{id:'q',selected:[],custom:'New input 原文'}])
+   assert.deepEqual(await page.evaluate(()=>window.submissions[0].answers),kind==='plan'?[{id:'plan-review',selected:['Keep planning'],selected_ids:['keep-planning'],custom:'New input 原文'}]:[{id:'q',selected:[],custom:'New input 原文'}])
   }
   assert.deepEqual(errors,[]);assert.deepEqual(requests,[]);await page.close()
   console.log(kind+' '+(answered?'already answered':'new answer')+': corrupt original preserved during mount, edit, locale changes and completion')

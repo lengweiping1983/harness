@@ -32,6 +32,11 @@ from ..core.redaction import (
 #: 审阅证据里保留的用户消息条数上限；超出部分以计数与截断声明如实报告。
 MAX_REVIEW_USER_MESSAGES = 8
 
+_PUBLIC_TOOL_ARGUMENTS = {
+    name: frozenset({'snapshot_token'})
+    for name in ('todo_read', 'todo_write', 'todo_update', 'todo_bind')
+}
+
 
 class _PolicyChanged(Exception):
     """撤回尚未生效的审阅，按新的会话权限重新判断。"""
@@ -372,7 +377,7 @@ class PermissionPolicy:
         snapshot = self.snapshot(ctx.session_id)
         policy = snapshot["permission_policy"]
         name = tool.schema.name
-        sensitive = _contains_sensitive_value(args)
+        sensitive = _contains_sensitive_value(args, public_fields=_PUBLIC_TOOL_ARGUMENTS.get(name, frozenset()))
         if sensitive:
             if policy == "full_access":
                 return tr('python.permissions.sensitive_reference')

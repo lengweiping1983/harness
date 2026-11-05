@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url'
 import {fixturePython} from './python-fixture.mjs'
 import {launchBrowser} from './browser-scenario.mjs'
 import {cleanupFixture} from './fixture-cleanup.mjs'
+import {interceptSaveReceipt} from './academy-save-fixture.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const backend = spawn(fixturePython, ['-m', 'tests.academy_web_fixture'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']})
@@ -39,6 +40,17 @@ try {
   await editor.waitFor()
   const get = async path => (await page.request.get(base + '/api/v1/academy' + path)).json()
   const project = (await get('/projects')).projects[0]
+  const refreshSource = async (action, expected) => {
+    const refreshed = page.waitForRequest(request => request.method() === 'GET'
+      && request.url() === base + '/api/v1/academy/projects/' + project.id + '/source?path=main.py').then(async request => {
+      const response = await request.response()
+      assert.ok(response?.ok(), 'The editor must finish its new source read')
+      assert.equal((await response.json()).content, expected)
+    })
+    await Promise.all([refreshed, Promise.resolve().then(action)])
+    await page.waitForFunction(expected => document.querySelector('textarea[aria-label="练习代码"]')?.value === expected
+      && document.querySelector('button[aria-keyshortcuts="Control+Enter Meta+Enter"]')?.disabled === false, expected)
+  }
   const initial = await editor.inputValue()
   const saved = initial + '\n# 第一个窗口保存 / first saved version\n'
   const newer = initial + '\n# 第二个窗口的新草稿 / newer other-window draft\n'
@@ -91,8 +103,7 @@ try {
   await panel.getByText('文件已经变化，请重新读取并核对修改。', {exact: true}).waitFor()
   assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), newerBytes)
   assert.equal((await get('/projects/' + project.id + '/source?path=main.py')).content, saved)
-  await panel.getByRole('button', {name: '放弃未保存修改', exact: true}).click()
-  await page.waitForFunction(expected => document.querySelector('textarea[aria-label="练习代码"]')?.value === expected, saved)
+  await refreshSource(() => panel.getByRole('button', {name: '放弃未保存修改', exact: true}).click(), saved)
   const recover = async expected => {
     const pending = JSON.parse(await page.evaluate(() => sessionStorage.getItem('harness.academy.pending.v1')))
     assert.deepEqual(pending.sourceInput, expected)
@@ -100,7 +111,9 @@ try {
     await page.reload()
     await page.getByRole('textbox', {name: '输入消息', exact: true}).waitFor()
     if (await page.locator('#task-inspector').getAttribute('aria-hidden') === 'true') await page.keyboard.press('Control+j')
-    await panel.getByRole('button', {name: '回查操作回执', exact: true}).click()
+    await editor.waitFor()
+    const current = await get('/projects/' + project.id + '/source?path=main.py')
+    await refreshSource(() => panel.getByRole('button', {name: '回查操作回执', exact: true}).click(), current.content)
     await page.waitForFunction(() => sessionStorage.getItem('harness.academy.pending.v1') === null)
     return pending
   }
@@ -110,12 +123,14 @@ try {
     const candidate = saved + '# receipt ownership / 回执身份 ' + field + '\n'
     await editor.fill(candidate)
     await openAcademySection(panel, 'code-options')
-    await page.route(endpoint, async route => {
-      const response = await route.fetch(), value = await response.json()
-      value.result.source[field] = field === 'path' ? 'foreign.py' : 'FOREIGN_RESPONSE'
-      await route.fulfill({response, json: value})
+    await interceptSaveReceipt(page, endpoint, source => {
+      source[field] = field === 'path' ? 'foreign.py' : 'FOREIGN_RESPONSE'
+    }, async () => {
+      const listing = await page.evaluate(url => fetch(url).then(response => response.json()),
+        base + '/api/v1/academy/projects/' + project.id + '/files')
+      assert.deepEqual(listing.files.map(file => file.path), ['main.py'])
+      await panel.getByRole('button', {name: '保存修改', exact: true}).click()
     })
-    await panel.getByRole('button', {name: '保存修改', exact: true}).click()
     await panel.getByText('服务返回了无法解析的响应，请重试。', {exact: true}).waitFor()
     const beforeRecovery = writes
     await recover({path: 'main.py', content: candidate, expected_version: version})
@@ -127,12 +142,8 @@ try {
   await page.waitForFunction(() => document.querySelector('button[aria-keyshortcuts="Control+Enter Meta+Enter"]')?.disabled === false)
   await panel.locator('summary').filter({hasText: '资料与历史'}).click()
   await panel.getByRole('textbox', {name: '新文件路径', exact: true}).fill('notes.py')
-  await page.route(endpoint, async route => {
-    const response = await route.fetch(), value = await response.json()
-    value.result.source.path = 'foreign-new.py'
-    await route.fulfill({response, json: value})
-  })
-  await panel.getByRole('button', {name: '新建辅助文件', exact: true}).click()
+  await interceptSaveReceipt(page, endpoint, source => {source.path = 'foreign-new.py'},
+    () => panel.getByRole('button', {name: '新建辅助文件', exact: true}).click())
   await panel.getByText('服务返回了无法解析的响应，请重试。', {exact: true}).waitFor()
   const beforeRecovery = writes
   await recover({path: 'notes.py', content: '', expected_version: 'absent'})
@@ -140,9 +151,21 @@ try {
   assert.equal((await get('/projects/' + project.id + '/source?path=notes.py')).content, '')
   assert.equal((await get('/projects/' + project.id + '/files')).files.some(file => file.path === 'foreign-new.py' || file.path === 'foreign.py'), false)
   assert.equal(writes, 5)
+  await assert.rejects(interceptSaveReceipt(page, endpoint, assert.fail, async () => {
+    const failed = await page.evaluate(async url => {
+      try {
+        await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({request_id: crypto.randomUUID(), path: 'notes.py', content: 'invalid request must not write'})})
+        return false
+      } catch {return true}
+    }, base + '/api/v1/academy/projects/' + project.id + '/files')
+    assert.equal(failed, true)
+  }), error => error.name === 'AssertionError' && error.message.includes('HTTP 400'))
+  assert.equal(writes, 6, 'An invalid request must fail once without killing the worker or replaying a save')
+  assert.equal((await get('/projects/' + project.id + '/source?path=notes.py')).content, '')
   assert.deepEqual((await get('/projects/' + project.id + '/runs')).runs, [])
   assert.deepEqual(errors, [])
-  console.log('Academy save: two-window newer drafts, stale-version rejection, exact save/new-file receipt identity, reload recovery, no execution and no replay verified')
+  console.log('Academy save: two-window newer drafts, stale-version rejection, exact save/new-file receipt identity, reload recovery, HTTP error interception, no execution and no replay verified')
 } catch (error) {failure = error}
 finally {
   clearTimeout(timer)
