@@ -4,8 +4,22 @@ import {ThinkingBlock} from '@/components/chat/blocks/MessageBlocks'
 import {ToolBlock} from '@/components/chat/blocks/ToolBlock'
 import {setLocale, t} from '@/i18n'
 import type {ToolBlockState} from '@/types'
+import postcss from 'postcss'
+import tailwindcss from 'tailwindcss'
 
 afterEach(() => setLocale('zh-CN'))
+
+it('新增修饰样式尚未加载时，工具摘要仍具备完整横向布局', async () => {
+  const html = renderToStaticMarkup(<ToolBlock block={{kind:'tool', id:'layout-command', callId:'layout-call', at:1, name:'bash', status:'ok', input:{command:'python3 verify.py'}}} />)
+  const classes = new Set(html.match(/<button\b[^>]*class="([^"]+)"/)![1].split(/\s+/))
+  // 只编译实际组件的基础工具类，模拟热更新期间新增修饰样式尚未到达。
+  const css = await postcss([tailwindcss({content:[{raw:html, extension:'html'}], corePlugins:{preflight:false}})]).process('@tailwind utilities;', {from:undefined})
+  const declarations: Record<string, string> = {}
+  css.root.walkRules(rule => {
+    if (classes.has(rule.selector.slice(1))) rule.walkDecls(declaration => {declarations[declaration.prop] = declaration.value})
+  })
+  expect(declarations).toMatchObject({display:'flex', width:'100%', 'min-width':'0px', 'align-items':'center', gap:'0.5rem'})
+})
 
 it('紧凑思考摘要保留折叠语义、截断和流式提示，原文不进入摘要', () => {
   for (const locale of ['en', 'zh-CN', 'en'] as const) {

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
+import {mkdir} from 'node:fs/promises'
+import {fileURLToPath} from 'node:url'
 import {browserScenario} from './browser-scenario.mjs'
+const longCommand = 'python3 -c "import xml.etree.ElementTree as ET; ET.parse(\'compound-bow.svg\'); print(\'XML OK\')"'
 const entry=`
 import React from 'react'
 import {createRoot} from 'react-dom/client'
@@ -11,7 +14,7 @@ window.locale=setLocale
 useAppStore.setState({activeSessionId:'process-fixture'})
 const blocks=[299,371,3100,916,730].flatMap((count,index)=>[
  {kind:'thinking',id:'thought-'+index,turn:1,at:1,text:'原'.repeat(count)},
- ...(index<4?[{kind:'tool',id:'tool-'+index,callId:'call-'+index,turn:1,at:1,name:index%2?'acceptance_evidence':'get_goal',status:'ok',input:{}}]:[])
+ ...(index<4?[{kind:'tool',id:'tool-'+index,callId:'call-'+index,turn:1,at:1,name:index===0?'edit':index===1?'bash':index%2?'acceptance_evidence':'get_goal',status:'ok',input:index===0?{file_path:'compound-bow.svg'}:index===1?{command:${JSON.stringify(longCommand)}}:{}}]:[])
 ])
 blocks.push({kind:'assistant',id:'reply',turn:1,at:1,text:'Visible answer',streaming:true})
 createRoot(document.getElementById('root')).render(React.createElement('div',{style:{height:700,display:'flex'}},React.createElement(Conversation,{blocks,turns:{1:{turn:1,startedAt:1,startSeq:0}},running:true,streaming:true,connection:'open',readOnly:true})))
@@ -21,7 +24,7 @@ await browserScenario(async({server,browser})=>{
  await page.goto(server.resolvedUrls.local[0]+'__process-group')
  const group=page.locator('[data-tool-run-turn="1"] button')
  await group.waitFor()
- for(const locale of ['en','zh-CN','en'])for(const [dark,width] of [[false,390],[true,1440]]){
+ for(const locale of ['en','zh-CN','en'])for(const [dark,width] of [[false,390],[true,1440],[false,1440]]){
   await page.setViewportSize({width,height:900})
   await page.evaluate(({locale,dark})=>{window.locale(locale);document.documentElement.classList.toggle('dark',dark)},{locale,dark})
   await page.waitForFunction(locale=>document.querySelector('[data-tool-run-turn="1"] button')?.textContent.includes(locale==='en'?'Thinking segments: 5':'5 段思考'),locale)
@@ -45,19 +48,37 @@ await browserScenario(async({server,browser})=>{
   const thought=page.locator('[data-row-id="thought-0"] details')
   await thought.waitFor()
   assert.equal(await thought.evaluate(node=>node.open),false)
-  const layout=await page.evaluate(()=>{
-   const controls=['thought-0','tool-0','thought-1','tool-1'].map(id=>document.querySelector(`[data-row-id="${id}"] .conversation-activity`))
+  for(const decorated of [true,false]){
+  const layout=await page.evaluate(decorated=>{
+   const controls=['thought-0','tool-0','thought-1','tool-1'].map(id=>document.querySelector(`[data-row-id="${id}"] :is(summary, button)`))
    return controls.map(node=>{
+    if(node.tagName==='BUTTON')node.classList.toggle('conversation-activity',decorated)
     const row=node.closest('[data-row-id]'),rect=node.getBoundingClientRect(),rowRect=row.getBoundingClientRect()
     const arrow=node.querySelector('.lucide-chevron-right').getBoundingClientRect()
-    return {top:rect.top,bottom:rect.bottom,height:rect.height,outer:rowRect.height-rect.height,right:rect.right-arrow.right}
+    const icon=node.querySelector('svg').getBoundingClientRect(),label=node.querySelector('span').getBoundingClientRect()
+    return {top:rect.top,bottom:rect.bottom,height:rect.height,outer:rowRect.height-rect.height,right:rect.right-arrow.right,
+     iconOffset:(icon.top+icon.bottom-rect.top-rect.bottom)/2,labelOffset:(label.top+label.bottom-rect.top-rect.bottom)/2,arrowOffset:(arrow.top+arrow.bottom-rect.top-rect.bottom)/2}
    })
-  })
+  },decorated)
   for(const [index,row] of layout.entries()){
    assert.ok(row.height>=24&&row.height<=28.5,`Compact activity hit area: ${row.height}`)
    assert.ok(Math.abs(row.outer)<0.5,`Repeated vertical padding: ${row.outer}`)
    assert.ok(row.right>=3&&row.right<=5,`Disclosure arrow must align with the right inset: ${row.right}`)
+   for(const offset of [row.iconOffset,row.labelOffset,row.arrowOffset])assert.ok(Math.abs(offset)<0.5,`Icon, label and arrow must share one row: ${offset}`)
    if(index)assert.ok(Math.abs(row.top-layout[index-1].bottom)<0.5,'Adjacent process rows must not leave blank bands')
+  }
+  }
+  await page.locator('[data-row-id="tool-0"] button, [data-row-id="tool-1"] button').evaluateAll(nodes=>nodes.forEach(node=>node.classList.add('conversation-activity')))
+  if(locale==='zh-CN'&&!dark&&width===1440){
+   const directory=new URL('../../output/',import.meta.url)
+   await mkdir(directory,{recursive:true})
+   await group.evaluate(node=>node.blur())
+   await page.evaluate(()=>Promise.all(document.getAnimations().filter(animation=>animation.effect?.getTiming().iterations!==Infinity).map(animation=>animation.finished)))
+   const clip=await page.evaluate(()=>{
+    const first=document.querySelector('[data-tool-run-turn="1"]').getBoundingClientRect(),last=document.querySelector('[data-row-id="thought-4"]').getBoundingClientRect()
+    return {x:first.x-4,y:first.y-4,width:first.width+8,height:last.bottom-first.y+8}
+   })
+   await page.screenshot({path:fileURLToPath(new URL('process-group-fixed.png',directory)),clip})
   }
   await thought.locator('summary').focus();await page.keyboard.press('Enter')
   await page.waitForFunction(()=>document.querySelector('[data-row-id="thought-0"] details')?.open===true)
