@@ -15,14 +15,15 @@ import {
 import { cn, download } from '@/lib/utils'
 import {
   parseProgressiveSvg,
+  parseSvgImage,
   scopeSvg,
   patchSvg,
   strokePrep,
-  type ParsedSvg,
 } from '@/lib/progressiveSvg'
 import { createFrameThrottle, type ThrottleSink } from '@/lib/frameThrottle'
 import { normalizeLang } from '@/lib/streaming'
 import { CopyButton, IconButton, Spinner, Tooltip } from '@/components/ui/primitives'
+import {SvgImage} from '@/components/ui/SvgImage'
 import { CodeBlock } from './CodeBlock'
 import { Mermaid } from './Mermaid'
 import {DataTable} from './DataTable'
@@ -79,6 +80,10 @@ interface ProgressiveSvgViewProps {
   className?: string
 }
 
+function parsePreview(source: string, scope: string, live: boolean) {
+  return {parsed: scopeSvg(parseProgressiveSvg(source), scope), image: live ? null : parseSvgImage(source)}
+}
+
 function ProgressiveSvgView({ source, live, className }: ProgressiveSvgViewProps) {
   useLocale()
   const scope = useId().replace(/[^a-zA-Z0-9_-]/g, '')
@@ -87,7 +92,10 @@ function ProgressiveSvgView({ source, live, className }: ProgressiveSvgViewProps
   const active = pageVisible && !settingsOpen
 
   // 首次上屏立刻解析一次，避免骨架多闪一帧；之后由下面的节流器接管。
-  const [parsed, setParsed] = useState<ParsedSvg | null>(() => active ? scopeSvg(parseProgressiveSvg(source), scope) : null)
+  const [{parsed, image}, setPreview] = useState<ReturnType<typeof parsePreview>>(
+    () => active ? parsePreview(source, scope, live) : {parsed: null, image: null},
+  )
+  const [replay, setReplay] = useState(0)
   const [zoom, setZoom] = useState(false)
   const figureRef = useRef<HTMLElement | null>(null)
   useDialogFocus(figureRef, zoom, () => setZoom(false))
@@ -102,7 +110,7 @@ function ProgressiveSvgView({ source, live, className }: ProgressiveSvgViewProps
   useEffect(() => {
     if (!live || !active) return
     const sink = createFrameThrottle<string>((value) => {
-      setParsed(scopeSvg(parseProgressiveSvg(value), scope))
+      setPreview(parsePreview(value, scope, true))
     })
     sinkRef.current = sink
     // 前沿提交：画布马上出现，不等第一个节流窗口。
@@ -120,13 +128,13 @@ function ProgressiveSvgView({ source, live, className }: ProgressiveSvgViewProps
       // 围栏闭合：终值必须立刻、精确地画出来，不走节流。
       // （此时上面那个 effect 的 cleanup 已经先跑过，节流器已销毁，不会再有
       //   迟到的回调把中间态覆盖回来。）
-      setParsed(scopeSvg(parseProgressiveSvg(source), scope))
+      setPreview(parsePreview(source, scope, false))
       return
     }
     sinkRef.current?.push(source)
   }, [live, source, active])
 
-  const markup = parsed?.markup ?? ''
+  const markup = image?.markup ?? parsed?.markup ?? ''
 
   // Incremental drawing reflects received geometry, including growing paths.
   //
@@ -135,9 +143,9 @@ function ProgressiveSvgView({ source, live, className }: ProgressiveSvgViewProps
   // 重播。patchSvg 只改动真正变化的那一个节点，于是「画到哪、动到哪」。
   useEffect(() => {
     const host = hostRef.current
-    if (!active || !host || !parsed?.root) return
+    if (!active || image || !host || !parsed?.root) return
     patchSvg(host, parsed.root)
-  }, [parsed, active])
+  }, [parsed, image, active])
 
   const renderable = Boolean(markup)
 
@@ -180,6 +188,7 @@ function ProgressiveSvgView({ source, live, className }: ProgressiveSvgViewProps
                 label={t("ui.components.markdown.LiveChart.ad9a4e83ff36")}
                 size="xs"
                 onClick={() => {
+                  if (image) { setReplay(value => value + 1); return }
                   const host = hostRef.current
                   if (host) strokePrep(host, true)
                 }}
@@ -214,7 +223,7 @@ function ProgressiveSvgView({ source, live, className }: ProgressiveSvgViewProps
           zoom && 'h-zoom',
         )}
       >
-        {renderable ? (
+        {image ? <SvgImage markup={image.markup} alt="SVG" replay={replay} /> : renderable ? (
           // 空宿主：patchSvg 负责往里填。绝不能让 React 管 children，
           // 否则下一次渲染会把这棵增量长出来的 SVG 冲掉。
           <div

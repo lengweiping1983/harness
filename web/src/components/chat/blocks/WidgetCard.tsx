@@ -10,8 +10,9 @@ import { Check, Code, Copy, Download, Eye, Image, ImageDown, Maximize2, Minimize
 import { cn, copyText } from '@/lib/utils'
 import { IconButton, Spinner } from '@/components/ui/primitives'
 import { HtmlSandboxFrame } from '@/components/ui/HtmlSandboxFrame'
+import {SvgImage} from '@/components/ui/SvgImage'
 import { useAppStore } from '@/store/app'
-import { parseProgressiveSvg, scopeSvg } from '@/lib/progressiveSvg'
+import { parseProgressiveSvg, parseSvgImage, scopeSvg } from '@/lib/progressiveSvg'
 import { widgetFileName, type WidgetPayload, type WidgetPreview } from '@/lib/widgetPayload'
 
 /**
@@ -19,7 +20,7 @@ import { widgetFileName, type WidgetPayload, type WidgetPreview } from '@/lib/wi
  *
  * 两种载体两条渲染路径，安全边界各不相同：
  * - SVG：复用 progressiveSvg 的清洗管线（剥 script/事件属性/危险 URL）
- *   后内联进对话 DOM，与 ```svg 围栏同一消毒口径，直接继承页面主题；
+ *   后静态图内联；样式／动画图与 ```svg 围栏共用隔离图片上下文；
  * - HTML：共享的 HtmlSandboxFrame（opaque origin 沙箱 + 主题注入 + 高度回传）。
  *
  * 图片导出只对 SVG 开放：HTML 在 opaque origin 沙箱里，宿主读不到内容，
@@ -100,7 +101,8 @@ const WidgetContent = memo(function WidgetContent({ payload, previewCode, active
     () => (payload.kind === 'svg' ? scopeSvg(parseProgressiveSvg(payload.code), scope) : null),
     [payload.kind, payload.code, scope],
   )
-  const svgText = parsed?.root ? parsed.markup : null
+  const image = useMemo(() => payload.kind === 'svg' ? parseSvgImage(payload.code) : null, [payload.kind, payload.code])
+  const svgText = image?.markup ?? (parsed?.root ? parsed.markup : null)
 
   const notifyExportFailure = () => useAppStore.getState().toast({
     title: t('ui.widget.exportFailed'),
@@ -170,7 +172,7 @@ const WidgetContent = memo(function WidgetContent({ payload, previewCode, active
   )
 
   const body = payload.kind === 'svg' ? (
-    svgText ? (
+    image ? <div className="widget-host grid place-items-center overflow-auto bg-canvas p-4"><SvgImage markup={image.markup} alt={payload.title} /></div> : svgText ? (
       <div className="widget-host grid place-items-center overflow-auto bg-canvas p-4 [&_svg]:h-auto [&_svg]:max-w-full" dangerouslySetInnerHTML={{ __html: svgText }} />
     ) : (
       <div>

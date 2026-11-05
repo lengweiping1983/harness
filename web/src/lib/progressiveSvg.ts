@@ -40,12 +40,16 @@ const BLOCKED_TAGS = new Set([
   'audio',
   'video',
   'animate',
+  'animatecolor',
+  'animatemotion',
+  'animatetransform',
   'set',
   'handler',
   'listener',
   'style',
 ])
 
+const IMAGE_TAGS = new Set(['style', 'animate', 'animatecolor', 'animatemotion', 'animatetransform', 'set'])
 const URL_ATTRS = new Set(['href', 'xlink:href', 'src', 'from', 'to', 'values'])
 
 const SAFE_URL =
@@ -132,11 +136,12 @@ function presentationStyle(value: string): string {
   }).filter(Boolean).join(';')
 }
 
-function keepAttr(name: string, value: string, tagName: string): boolean {
+function keepAttr(name: string, value: string, tagName: string, image = false): boolean {
   if (isEventAttr(name)) return false
   const lower = name.toLowerCase()
+  if (image && ['from', 'to', 'values'].includes(lower) && !safePresentation(value.replace(/[\r\n\t]/g, ' '))) return false
   if (['fill', 'stroke', 'filter', 'clip-path', 'mask', 'cursor', 'color', 'marker-start', 'marker-mid', 'marker-end'].includes(lower) && !safePresentation(value)) return false
-  if (URL_ATTRS.has(lower) && !SAFE_URL.test(value.trim())) return false
+  if (URL_ATTRS.has(lower) && !(image && ['from', 'to', 'values'].includes(lower)) && !SAFE_URL.test(value.trim())) return false
   // `<use>`/`image` 指向外部文件会发起请求，也一并拦掉非 data/相对路径。
   if (tagName === 'use' && lower === 'href') {
     return value.trim().startsWith('#')
@@ -145,7 +150,7 @@ function keepAttr(name: string, value: string, tagName: string): boolean {
 }
 
 /** 把原始属性串解析成 `{ name: value }`，顺带完成白名单清洗。 */
-function parseAttrs(raw: string, tagName: string): SvgAttrs {
+function parseAttrs(raw: string, tagName: string, image = false): SvgAttrs {
   const out: SvgAttrs = {}
   ATTR_RE.lastIndex = 0
   let match: RegExpExecArray | null
@@ -153,8 +158,8 @@ function parseAttrs(raw: string, tagName: string): SvgAttrs {
     // 两个属性之间夹杂的裸文本（畸形输出）直接丢掉。
     const name = match[1]!
     const value = match[2] ?? match[3] ?? match[4] ?? ''
-    if (!keepAttr(name, value, tagName)) continue
-    if (name.toLowerCase() === 'style') {
+    if (!keepAttr(name, value, tagName, image)) continue
+    if (!image && name.toLowerCase() === 'style') {
       const safe = presentationStyle(value)
       if (safe) out[name] = safe
     } else out[name] = value
@@ -186,6 +191,16 @@ function escapeXml(value: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+}
+
+/** 图片按 XML 解码文本，避免重新序列化后把 &amp; 等实体显示成源码。 */
+function decodeXmlText(value: string): string {
+  const named: Record<string, string> = {amp: '&', lt: '<', gt: '>', quot: '"', apos: "'"}
+  return value.replace(/&(amp|lt|gt|quot|apos|#\d+|#x[\da-fA-F]+);/g, (raw, entity: string) => {
+    if (!entity.startsWith('#')) return named[entity]!
+    const code = entity[1] === 'x' ? Number.parseInt(entity.slice(2), 16) : Number(entity.slice(1))
+    return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : raw
+  })
 }
 
 /* ============================ 提取 / 修补 ============================ */
@@ -292,9 +307,10 @@ function firstAttr(tagText: string, name: string): string | null {
 }
 
 /** 删掉 script / foreignObject 这类整段内容（而不是只删标签壳）。 */
-function dropBlockedElements(source: string): string {
+function dropBlockedElements(source: string, image = false): string {
   let out = source
   for (const tag of BLOCKED_TAGS) {
+    if (image && IMAGE_TAGS.has(tag)) continue
     const paired = new RegExp(`<${tag}\\b[\\s\\S]*?<\\/${tag}\\s*>`, 'gi')
     out = out.replace(paired, '')
     out = out.replace(new RegExp(`<\\/${tag}\\s*>`, 'gi'), '')
@@ -341,7 +357,43 @@ export function parseProgressiveSvg(source: string): ParsedSvg | null {
   return repair(source.slice(span.start, span.end))
 }
 
-function repair(svgChunk: string): ParsedSvg | null {
+/**
+ * 完整的样式／动画 SVG 仅供 img 使用，不返回可插入宿主的节点树。
+ * 图片上下文隔离 CSS，禁用脚本及外部资源；不能把此 markup 内联进 DOM。
+ */
+export function parseSvgImage(source: string): Omit<ParsedSvg, 'root'> | null {
+  if (!/<(?:style|animate(?:color|motion|transform)?|set)\b|\banimation(?:-[\w-]+)?\s*:/i.test(source)) return null
+  const span = extractSvg(source)
+  if (!span) return null
+  const parsed = repair(source.slice(span.start, span.end), true)
+  if (!parsed?.root) return null
+  parsed.root.attrs.xmlns = SVG_NS
+  parsed.root.attrs['xmlns:xlink'] = 'http://www.w3.org/1999/xlink'
+  const cleanAnimations = (node: SvgNode) => {
+    node.children = node.children.filter(child => {
+      if (child.kind === 'text') return true
+      const tag = child.tag.toLowerCase()
+      if (IMAGE_TAGS.has(tag) && tag !== 'style' && tag !== 'animatemotion') {
+        const attribute = Object.entries(child.attrs).find(([key]) => key.toLowerCase() === 'attributename')?.[1]?.toLowerCase()
+        // 下载后独立打开也不能通过 SMIL 修改链接、事件或任意内联样式。
+        if (!attribute || !ANIMATED_ATTRIBUTES.has(attribute)) return false
+      }
+      cleanAnimations(child)
+      return true
+    })
+  }
+  cleanAnimations(parsed.root)
+  const {root, ...metadata} = parsed
+  return {...metadata, markup: serialize([root])}
+}
+
+const ANIMATED_ATTRIBUTES = new Set([
+  ...PRESENTATION_CSS, 'transform', 'viewbox', 'x', 'y', 'x1', 'y1', 'x2', 'y2',
+  'cx', 'cy', 'r', 'rx', 'ry', 'width', 'height', 'd', 'points', 'pathlength',
+  'offset', 'stop-color', 'stop-opacity', 'dx', 'dy', 'rotate',
+])
+
+function repair(svgChunk: string, image = false): ParsedSvg | null {
   const complete = /<\/svg\s*>\s*$/i.test(svgChunk.trim())
 
   // 1) 去注释（保留合法内容）。
@@ -351,7 +403,7 @@ function repair(svgChunk: string): ParsedSvg | null {
   text = cutPartialTail(text)
 
   // 3) 丢掉被禁标签的整段。
-  text = dropBlockedElements(text)
+  text = dropBlockedElements(text, image)
 
   const rootChildren: SvgChild[] = []
   const stack: Array<{ tag: string; children: SvgChild[] }> = []
@@ -366,6 +418,7 @@ function repair(svgChunk: string): ParsedSvg | null {
     // 纯缩进/换行不产生文本节点，否则每个元素后面都挂一个空白 Text，
     // 增量补丁的比较会一直「相等但无意义」。
     if (!raw.trim()) return
+    if (image) raw = decodeXmlText(raw)
     const last = current()
     const prev = last[last.length - 1]
     // 同一段文本被 token 切开时直接接上，避免逐字插入 Text 节点。
@@ -424,7 +477,7 @@ function repair(svgChunk: string): ParsedSvg | null {
     const name = nameMatch[1]!
     const lower = name.toLowerCase()
 
-    if (BLOCKED_TAGS.has(lower) || lower.includes(':')) {
+    if ((BLOCKED_TAGS.has(lower) && !(image && IMAGE_TAGS.has(lower))) || lower.includes(':')) {
       repaired = true
       continue
     }
@@ -451,7 +504,7 @@ function repair(svgChunk: string): ParsedSvg | null {
     const safeRaw = hasDangerousUrl(rawAttrs)
       ? rawAttrs.replace(/\b(?:href|xlink:href)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
       : rawAttrs
-    const attrs = parseAttrs(safeRaw, lower)
+    const attrs = parseAttrs(safeRaw, lower, image)
     const node: SvgNode = { kind: 'element', tag: name, attrs, children: [] }
 
     if (discard > 0) {
@@ -478,6 +531,18 @@ function repair(svgChunk: string): ParsedSvg | null {
     }
 
     current().push(node)
+    // 样式按原文保留为 XML 文本，不能把 CSS 里的 < 当成图元。
+    if (image && lower === 'style' && !selfClosing) {
+      const close = /<\/style\s*>/i.exec(text.slice(i))
+      const end = close ? i + close.index : text.length
+      const raw = text.slice(i, end)
+      const cdata = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/.exec(raw)
+      const css = cdata ? cdata[1]! : decodeXmlText(raw)
+      node.children.push({kind: 'text', text: css})
+      i = close ? end + close[0].length : text.length
+      if (!close) repaired = true
+      continue
+    }
     if (!selfClosing) {
       stack.push({ tag: lower, children: node.children })
     }

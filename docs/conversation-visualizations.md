@@ -16,7 +16,7 @@ Harness 支持在消息流中展示 SVG、HTML、Mermaid、ECharts、Vega、Vega
 {"title":"流程图","kind":"svg","widget_code":"<svg viewBox='0 0 240 80'><text x='16' y='44'>Request → Canvas</text></svg>"}
 ```
 
-SVG 需要完整 XML 结构及根元素的 viewBox 或宽高；支持前置注释、XML 声明及嵌套 SVG，拒绝损坏 XML、脚本、DOCTYPE 与实体声明。前端继续清洗事件属性、危险链接、foreignObject 等内容；同名 gradient、marker 与引用按图形实例隔离。正文中的 SVG 围栏与独占一行的裸 SVG 保留渐进绘制，已经画出的节点随增量更新，不整块重建。
+SVG 需要完整 XML 结构及根元素的 viewBox 或宽高；支持前置注释、XML 声明及嵌套 SVG，拒绝损坏 XML、脚本、DOCTYPE 与实体声明。前端继续清洗事件属性、危险链接、foreignObject 等内容；静态图的同名 gradient、marker 与引用按图形实例隔离。正文中的 SVG 围栏与独占一行的裸 SVG 保留渐进绘制，已经画出的节点随增量更新，不整块重建。围栏闭合后，含样式或动画的完整 SVG 转为独立图片上下文，保留 CSS 关键帧与 SMIL 动画（animate、animateTransform、animateMotion、set）及原始动画时序引用；工具卡片采用同一渲染方式。图片内部样式与宿主隔离，脚本及外部资源不能执行或加载；图形颜色和字体由 SVG 自身定义。对话中的重播按钮重新加载动画图片，下载保留动画；静态图继续沿用增量节点和描边重播。
 
 HTML 支持片段与完整文档，包含内联 CSS、JavaScript、Canvas、SVG 和普通控件。明确标记为 `html` 的围栏闭合后默认显示沙箱预览，也可切换源码；普通 `xml` 围栏只显示源码。完整工具调用通过校验后，`ToolBlock` 从 `display.widget` 显示卡片。模型工具结果只包含简短确认，代码仍保存在调用参数与界面展示数据中，不再复制到结果正文。
 
@@ -91,6 +91,7 @@ HTML 在 `sandbox="allow-scripts"` 的不透明来源 iframe 中执行，不授�
 - `tests/test_widget_tools.py` 核对双语工具说明、完整 HTML、SVG 结构与参数边界。
 - `tests/test_widget_flow.py` 经真实发行桥接、回环供应商流和工具注册入口，核对损坏参数未执行、模型纠正、SVG／HTML 展示事件及完整源码。
 - `svgScope.test.ts` 核对多图 ID 和引用隔离；`streaming.test.ts` 保留分段与渐进内容边界，并核对渲染块（`type="renderer"`）的识别、分段与闭合状态。
+- `svgImage.test.ts` 覆盖完整动画的数值属性、时序引用、CSS／CDATA、XML 实体、命名空间与图片专用输出边界，以及未完成／静态图分流和脚本等内容清洗；`svgImage.integration.test.tsx` 经实际 Markdown 和工具卡片核对图片载体、动画源码、重播资源变化及双语控件，`svgImageLifecycle.test.tsx` 核对同一实例英→中→英、放大、重播、流式结束及遮挡／隐藏后的最新源码恢复。触发旧问题的是 `LiveChart` 与 `WidgetCard` 的内联清洗移除了 style、animate、set 和数值动画属性，而文件图片预览保留动画；这些单测不替代真实浏览器动画播放与布局验收。
 - `rendererRemark.integration.test.tsx` 使用实际 Markdown、清洗器和卡片组件，核对顶格／列表／引用／文件预览的闭合与中断、原始 HTML 保持、普通 HTML／XML／SVG 分流和双语控件；仅沙箱 DOM 边界由替身接收源码。
 - `htmlSandboxRuntime.test.ts` 在受控 VM 中执行实际注入脚本，核对启动／绘制握手、早期错误、消息归属、隐藏恢复、键盘边界及千次布局通知合并。`htmlSandboxFrame.test.tsx` 用受控钩子与 DOM 替身验证宿主超时、迟到就绪、双语提示、源码代次隔离和文档复用；这些单测不替代真实浏览器验收。
 - `widgetDisclosure.test.tsx` 核对工具详情位于预览之前且四周边框完整、默认收起时预览仍可见，以及加载和失败时的展示边界。`visualization-conversation-smoke.mjs` 将真实工具结果交给实际 `Conversation`，覆盖加载、完成、历史重开、两层折叠及语言／主题／宽度切换后的预览与控件状态，并包含标题旁箭头、键盘收展、详情完整边框、与预览不重叠及交互状态保持的布局断言；浏览器专项须显式执行。
