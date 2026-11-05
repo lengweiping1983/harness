@@ -4950,5 +4950,6 @@
   "ui.desktop.menu.updateConnectingMenu": "正在连接更新服务器…",
   "ui.desktop.menu.updateVerifyingMenu": "正在校验更新…",
   "ui.desktop.menu.updatePreparingMenu": "正在准备安装更新…",
-  "ui.desktop.menu.updateTransferMenu": "正在下载更新… {percent}%（{received} / {total}）"
+  "ui.desktop.menu.updateTransferMenu": "正在下载更新… {percent}%（{received} / {total}）",
+  "ui.files.outsideWorkspace": "文件位于当前项目之外，无法在此预览或下载。"
 }

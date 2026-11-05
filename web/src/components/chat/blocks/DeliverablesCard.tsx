@@ -5,7 +5,7 @@ import type { DeliverableFile, DeliverablesBlock as DeliverablesBlockModel } fro
 import { cn } from '@/lib/utils'
 import { getFileRoot } from '@/lib/fileRoot'
 import { fileUrl, isImagePath } from '@/lib/fileLinks'
-import { groupDeliverables, relativizeToRoot, summarizeDeliverables } from '@/lib/deliverables'
+import { groupDeliverables, workspaceRelativePath, summarizeDeliverables } from '@/lib/deliverables'
 import { useAppStore } from '@/store/app'
 import { Badge } from '@/components/ui/primitives'
 
@@ -32,7 +32,11 @@ function DeliverableRow({ file, root }: { file: DeliverableFile; root: string | 
   useLocale()
 
   const reveal = useAppStore((s) => s.revealInFiles)
-  const relative = relativizeToRoot(file.path, root)
+  const relative = workspaceRelativePath(file.path, root)
+  if (relative === null) return <li className="px-1.5 py-1 text-xs text-muted">
+    <p className="break-all">{file.path}</p>
+    <p>{t('ui.files.outsideWorkspace')}</p>
+  </li>
   const href = fileUrl(relative, { root })
   const size = sizeLabel(file.size_bytes)
   const preview = isImagePath(relative) ? href : null

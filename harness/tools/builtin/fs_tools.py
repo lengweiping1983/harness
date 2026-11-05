@@ -535,7 +535,8 @@ def build_fs_tools(cwd: str | None, *, observation_policy: bool = True) -> list[
 
     def write_tool(args: Any, ctx: ToolRunContext) -> Any:
         """写入文件（自动创建父目录）。"""
-        target = resolve_path(ctx.cwd or cwd, args["path"])
+        workspace_root = Path(ctx.cwd or cwd or Path.cwd()).expanduser().resolve()
+        target = resolve_path(str(workspace_root), args["path"])
         session = ctx.services.get('session')
         fs_observation.guard_write(ctx.session_id, target, session=session, enabled=observation_policy, cache=observation_cache)
         prior = fs_observation.lookup(ctx.session_id, target, session=session, enabled=observation_policy, cache=observation_cache)
@@ -547,6 +548,7 @@ def build_fs_tools(cwd: str | None, *, observation_policy: bool = True) -> list[
             create_only=bool(observation_policy and ctx.session_id and not (prior and prior[0] == 'present')))
         return {
             '_fs_observation': fs_observation.observe(ctx.session_id, target, 'present', _text_version(args['content']), session=session, enabled=observation_policy, cache=observation_cache),
+            '_workspace_root': str(workspace_root),
             "path": str(target),
             "created": not existed,
             "bytes": target.stat().st_size,
@@ -556,9 +558,14 @@ def build_fs_tools(cwd: str | None, *, observation_policy: bool = True) -> list[
 
     def write_to_content(args: Any, value: Any) -> list[TextBlock]:
         if not value["changed"]:
-            return [TextBlock(text=tr('python.fs_tools.fb4e54c1ba9b', p0=f"{value['path']}", p1=f"{value['bytes']}"))]
-        key = 'fs.write.summary.created' if value['created'] else 'fs.write.summary.overwritten'
-        return [TextBlock(text=tr(key, path=value['path'], size=value['bytes']))]
+            text = tr('python.fs_tools.fb4e54c1ba9b', p0=f"{value['path']}", p1=f"{value['bytes']}")
+        else:
+            key = 'fs.write.summary.created' if value['created'] else 'fs.write.summary.overwritten'
+            text = tr(key, path=value['path'], size=value['bytes'])
+        root = value['_workspace_root']
+        if not Path(value['path']).is_relative_to(root):
+            text += '\n' + tr('fs.write.outside_workspace', path=value['path'], root=root)
+        return [TextBlock(text=text)]
 
     def edit_tool(args: Any, ctx: ToolRunContext) -> Any:
         """精确编辑文件：old_string 替换，或 insert_line 按行插入。"""

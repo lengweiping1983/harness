@@ -1,4 +1,4 @@
-import {useLocale} from '@/i18n'
+import {t, useLocale} from '@/i18n'
 import {useAppStore} from '@/store/app'
 import {resolveLink} from '@/lib/fileLinks'
 import {FileTypeIcon} from '@/components/ui/FileTypeIcon'
@@ -9,6 +9,12 @@ export function FileChip({ path, label }: { path: string; label?: string }) {
 
   const reveal = useAppStore((s) => s.revealInFiles)
   const resolved = resolveLink(path)
+  if (resolved.kind === 'unsafe') return (
+    <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-line bg-raised px-1.5 py-0.5 text-xs text-muted" title={t('ui.files.outsideWorkspace')}>
+      <FileTypeIcon path={path} />
+      <span className="truncate">{label ?? path}</span>
+    </span>
+  )
   return (
     <a
       href={resolved.href}

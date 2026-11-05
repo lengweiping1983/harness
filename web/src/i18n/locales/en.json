@@ -4950,5 +4950,6 @@
   "ui.desktop.menu.updateConnectingMenu": "Connecting to Update Server…",
   "ui.desktop.menu.updateVerifyingMenu": "Verifying Update…",
   "ui.desktop.menu.updatePreparingMenu": "Preparing Update…",
-  "ui.desktop.menu.updateTransferMenu": "Downloading Update… {percent}% ({received} / {total})"
+  "ui.desktop.menu.updateTransferMenu": "Downloading Update… {percent}% ({received} / {total})",
+  "ui.files.outsideWorkspace": "This file is outside the current project and cannot be previewed or downloaded here."
 }

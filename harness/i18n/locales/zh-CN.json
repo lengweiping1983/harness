@@ -892,7 +892,7 @@
   "python.fs_tools.3aae8cac4c5b": "缺少编辑参数：请提供 old_string（配合 new_string）做精确替换，或提供 insert_line（配合 new_string）在指定行之后插入内容。",
   "python.fs_tools.13194958919d": "匹配 {p0} 的 {p1} 个文件：\n{p2}{p3}",
   "python.fs_tools.58f503cb7fbd": "读取文件，默认显示行号；line_numbers=false 返回可复制的原文，提示文字位于源码块之外。传入目录则列举两层非隐藏条目。最多加载前 512 KiB，大文件明确标记截断；offset/limit 或 view_range 只能读取已加载前缀内的片段。仅接受 path、offset、limit、view_range、line_numbers，不要传 command 或 action。读取文件或列目录示例：{\"path\":\"src\"}。\n读取已有文件前，路径必须来自用户明确提供、实际目录/glob/grep 结果或已读配置中的引用；不能按框架惯例猜 main.js/main.ts、扩展名或目录。用户提供的路径仍可能不存在。寻找入口先核对 package.json、index.html 等实际配置；搜索结果未列出某文件不能当成已存在，也不能把截断结果当成完整清单。准备新增的文件不需要先 read；只有确认要新增时才 write，不能为消除读取错误盲目创建或替换入口。遇到 FS_NOT_FOUND，利用返回的父目录和候选确认实际目标；候选不是自动替代目标，不要原样重试，不要把缺失文件说成已读取。",
-  "python.fs_tools.56485391272f": "覆盖已有文件前，必须先 read 该文件。项目初始化可能已生成入口文件，不要直接当新文件创建。创建新文件或整体替换已读取文件，父目录自动创建。默认文件观察策略下：新文件可直接 write；已有文件必须先 read 该文件，核验内容后才能 write 整体替换；局部修改优先用 edit。脚手架或 shell 创建的文件也要先 read；目录列表、glob 和 shell 输出不建立文件观察。本对话成功 read 或写入建立的观察在版本一致时可复用，无需额外确认参数。FS_EXISTS 时不要原样重试，先 read 再决定 edit 或 write；FS_STALE 表示文件已变化，重新 read 并合并最新改动后再写入。",
+  "python.fs_tools.56485391272f": "新建 SVG、图片、HTML、文档等最终文件时，默认使用本对话工作目录内的相对路径；用户明确指定其它位置时遵循其要求。不要把系统临时目录当作项目交付目录。覆盖已有文件前，必须先 read 该文件。项目初始化可能已生成入口文件，不要直接当新文件创建。创建新文件或整体替换已读取文件，父目录自动创建。默认文件观察策略下：新文件可直接 write；已有文件必须先 read 该文件，核验内容后才能 write 整体替换；局部修改优先用 edit。脚手架或 shell 创建的文件也要先 read；目录列表、glob 和 shell 输出不建立文件观察。本对话成功 read 或写入建立的观察在版本一致时可复用，无需额外确认参数。FS_EXISTS 时不要原样重试，先 read 再决定 edit 或 write；FS_STALE 表示文件已变化，重新 read 并合并最新改动后再写入。",
   "python.fs_tools.ae1a600c4b82": "首选局部编辑入口。调用示例：{\"path\":\"file.ts\",\"old_string\":\"before\",\"new_string\":\"after\"}；全部替换再加 \"replace_all\":true。替换参数使用 old_string/new_string，删除内容时 new_string 传空字符串。一次只改一个小而唯一的逻辑块，不拼接未连续读取的上下文。\n编辑文件，两种互斥用法：(1) 传 old_string（必须唯一出现，可选 replace_all）+ new_string 做精确替换；(2) 传 insert_line（合法范围 [0, 文件行数]）+ new_string 在该行之后插入内容。完整编辑上限为 8 MiB，超过则拒绝并保留原文件。必须先 read 目标块，old_string 逐字复制当前原文，保留换行、缩进且去掉读取输出的行号。优先使用较小的唯一替换块；连续编辑应基于上次成功后的内容。FS_EDIT_NOT_FOUND 后不可原样重试：按返回的候选行号重新 read，核验修改是否已完成，再重建替换参数。 默认观察保护启用时，FS_EDIT_NOT_FOUND 会撤销该文件在本对话的观察；必须重新 read 后才能 edit 或 write，不能改参数绕过。恢复读取使用 line_numbers=false，复制真实原文；候选片段仅用于定位。",
   "python.fs_tools.bffb6fa7d601": "按 glob 模式（如 **/*.py）查找文件路径。",
   "python.fs_tools.12d07b96f522": "用正则表达式搜索文件内容，返回 文件:行号:内容 的列表。默认搜索整个工作目录，可用 path 限定到某个子目录或单个文件。每个文件只搜索前 256 KiB，最多 200 条命中。完整查询最多 30 秒，可取消；截断时会明确报告。 使用 context 返回命中附近的代码，例如 {\"pattern\":\"hideLoader\",\"path\":\"src/ui/HUD.js\",\"context\":6}。只接受当前声明的参数。",
@@ -1200,7 +1200,7 @@
   "python.plan_tools.6311f8f1707d": "计划模式或父对话约束已变化，本次审批未解除任何限制。",
   "python.plan_tools.0e48f19080f1": "批准该计划并退出计划模式",
   "python.plan_tools.968a086a588e": "继续规划，按反馈修改后再次提交",
-  "python.present_tools.2cfa899caa53": "把已生成的最终产物文件声明为交付物，界面会渲染成可点击的下载卡片。只在文件确实已经写好、内容是最终版时调用；一次声明 1-{p0} 个最佳，最多 {p1} 个。",
+  "python.present_tools.2cfa899caa53": "把已生成的最终产物文件声明为交付物，界面会渲染成可点击的下载卡片。只在文件确实已经写好、内容是最终版时调用；一次声明 1-{p0} 个最佳，最多 {p1} 个。 文件必须位于本对话工作目录内；相对路径按该目录解析。项目外路径（包括指向项目外的链接）会被拒绝，不会自动搬运文件。",
   "python.present_tools.d6a82a5a34f1": "提示：一次声明 {p0} 个文件偏多，建议拆成多轮、每次 1-{p1} 个。",
   "python.present_tools.788b4db5f6f7": "已声明 {p0} 个交付物：",
   "python.present_tools.83ad6087f8b2": "files 必须是非空数组",
@@ -8522,5 +8522,9 @@
   "ui.desktop.menu.updateVerifyingMenu": "正在校验更新…",
   "ui.desktop.menu.updatePreparingMenu": "正在准备安装更新…",
   "ui.desktop.menu.updateTransferMenu": "正在下载更新… {percent}%（{received} / {total}）",
-  "subagent.depth_exceeded": "派生深度 {depth} 超过宿主上限 {max_depth}。请等待已有分支收敛，或在当前代理内完成工作，不要继续加深嵌套。"
+  "subagent.depth_exceeded": "派生深度 {depth} 超过宿主上限 {max_depth}。请等待已有分支收敛，或在当前代理内完成工作，不要继续加深嵌套。",
+  "prompt.artifact_output": "- 生成 SVG、图片、HTML、文档等最终文件时，默认使用本对话工作目录内的相对路径；不要把 /tmp、/private/tmp 或系统临时目录中的文件作为项目交付物。临时目录只用于可丢弃的中间数据。若为了生成或验证而写入文件，应直接在项目内保存最终版，验证命令与交付引用使用同一个实际文件，并核对工具回执中的路径。用户明确指定其它保存位置时遵循其要求，如实说明该位置；项目外文件不能通过当前项目的文件面板下载。用户仅要求对话演示或明确要求不写文件时，遵循其输出要求；对话预览本身不代表文件已保存。",
+  "fs.write.outside_workspace": "文件已成功写入项目外：{path}。本对话工作目录为 {root}；当前项目的文件面板不能预览或下载此文件。不要重复执行已成功的写入。若它是最终交付物且用户未指定项目外位置，请将最终版另存到工作目录内的相对路径，再验证并引用项目内文件；不会自动移动原件。",
+  "present.outside_workspace": "不能将项目外文件声明为当前项目的交付物：{path}。请先将最终版保存到本对话工作目录 {root} 内，再使用项目内路径调用 present。原文件未移动或复制；若用户明确指定项目外位置，请在回复中如实说明该位置及当前项目无法提供下载。",
+  "ui.files.outsideWorkspace": "文件位于当前项目之外，无法在此预览或下载。"
 }

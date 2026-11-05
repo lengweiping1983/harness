@@ -3,23 +3,34 @@ import { t } from '@/i18n'
  * 交付物卡片的数据整形（纯函数）。
  *
  * `present` 工具回传的是**绝对路径**（工具内部做过 resolve，保证文件真的
- * 存在），但 `/api/v1/file` 只接受**相对工作区根**的路径，并且 `_safe_join`
- * 会把逃出根的路径 403掉。两者之间必须有一层显式换算 —— 之前少了这一步的
- * 直接后果是：卡片点开全是 403，而且错误信息只有后端日志能看到。
+ * 存在），但 `/api/v1/file` 使用**相对工作区根**的路径。根内路径显式换算，
+ * 根外路径保留绝对身份，由呈现层停用预览与下载，不能剥掉斜杠伪装成项目文件。
  *
  * 单独抽成 .ts 有两个原因：
- *   1. 换算是纯逻辑，.tsx 测不到（测试环境不含 tsx）；
+ *   1. 换算是纯逻辑，供文件链接、变更和交付卡片共用；
  *   2. Windows 盘符 + 混合分隔符 + 大小写折叠是最容易写错又最难肉眼验的部分。
  */
 
 import type { DeliverableFile } from '@/types'
-import { normalizePath } from './workspaces'
+
+/** 工作区可读取的相对路径；绝对路径必须属于声明的根，越界时保持未知。 */
+export function workspaceRelativePath(path: string, root: string | null | undefined): string | null {
+  const posix = path.trim().replace(/\\/g, '/')
+  if (!posix || posix.split('/').some(part => part === '..' || part === '.')) return null
+  if (!/^(?:[a-z]:\/|\/)/i.test(posix)) return posix
+  let base = root?.trim().replace(/\\/g, '/').replace(/\/+$/, '') || ''
+  if (!base && root?.trim() === '/') base = '/'
+  if (!/^(?:[a-z]:\/|\/|[a-z]:$)/i.test(base) || base.split('/').some(part => part === '..' || part === '.')) return null
+  const prefix = base.endsWith('/') ? base : base + '/'
+  const windows = /^[a-z]:/i.test(base) || base.startsWith('//')
+  if (!(windows ? posix.toLowerCase().startsWith(prefix.toLowerCase()) : posix.startsWith(prefix))) return null
+  return posix.slice(prefix.length) || null
+}
 
 /**
  * 把绝对路径换算成相对 ``root`` 的 posix 路径。
  *
- * - ``root`` 为空 / 路径不在 ``root`` 之下：退回文件名（后端会明确报"路径超出
- *   工作区范围"，比给一个看起来能点、点开 403 的链接诚实）；
+ * - 路径不在 ``root`` 之下时保留绝对身份；调用方不能为它生成项目内链接。
  * - 已经在根下：去掉前缀并统一成正斜杠，与 `/api/v1/workspace` 的 ``parents``
  *   面包屑格式一致，面包屑和链接才能互相拼。
  */
@@ -27,17 +38,7 @@ export function relativizeToRoot(absPath: string, root: string | null | undefine
   const raw = (absPath ?? '').trim()
   if (!raw) return ''
   const posix = raw.replace(/\\/g, '/')
-  const nPath = normalizePath(posix)
-  const nRoot = normalizePath(root)
-  if (!nRoot) return posix.replace(/^\/+/, '')
-  if (nPath === nRoot) return ''
-  const prefix = nRoot.endsWith('/') ? nRoot : nRoot + '/'
-  // 不在根下就退回原样的相对形态：宁可让后端明确报"路径超出工作区范围"，
-  // 也不要给一个看起来能点、点开却是 403 的链接。
-  if (!nPath.startsWith(prefix)) return posix.replace(/^\/+/, '')
-  // normalizePath 只折叠大小写、不改长度，所以按前缀长度切原始串
-  // 就能保留原始大小写（"README.md" 不能被切成 "readme.md"）。
-  return posix.slice(prefix.length)
+  return workspaceRelativePath(posix, root) ?? posix
 }
 
 export interface DeliverableGroup {

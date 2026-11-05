@@ -44,7 +44,7 @@ def build_present_tools(bus: EventBus | None = None, *, cwd: str | None = None) 
                 tr('python.present_tools.76849b50f19f', p0=f'{MAX_FILES}', p1=f'{len(raw_files)}')
             )
 
-        root = ctx.cwd or cwd
+        root = str(Path(ctx.cwd or cwd or Path.cwd()).expanduser().resolve())
         entries: list[dict[str, Any]] = []
         missing: list[str] = []
         for item in raw_files:
@@ -58,6 +58,9 @@ def build_present_tools(bus: EventBus | None = None, *, cwd: str | None = None) 
                 resolved = path.resolve()
             except OSError as exc:
                 raise ToolExecutionError(tr('python.present_tools.a176e5be61d8', p0=f'{raw_path}', p1=f'{exc}')) from exc
+            if not resolved.is_relative_to(root):
+                raise ToolExecutionError(tr('present.outside_workspace', path=str(resolved), root=root),
+                                         code='PRESENT_OUTSIDE_WORKSPACE', path=str(resolved), cwd=root)
             if not resolved.is_file():
                 missing.append(raw_path)
                 continue

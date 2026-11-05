@@ -349,6 +349,7 @@ def _build_base_prompt(
         lines = list(env_lines)
         lines[0] = tr('python.registry.d61b366b4f64', p0=f"{variables.get('cwd') or working_dir or os.getcwd()}")
         lines.insert(1, tr('python.registry.d65adac8b2b2'))
+        lines.insert(2, tr('prompt.artifact_output'))
         return "<environment>\n" + "\n".join(lines) + "\n</environment>"
 
     registry.add_section(

@@ -13,7 +13,7 @@
  */
 
 import { getFileRoot } from './fileRoot'
-import { relativizeToRoot } from './deliverables'
+import { relativizeToRoot, workspaceRelativePath } from './deliverables'
 import { validLineRange } from './fileNavigation'
 
 const SAFE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
@@ -100,7 +100,7 @@ export function looksLikePath(target: string): boolean {
   if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return false // 有协议
   if (target.startsWith('#')) return false
   if (target.startsWith('//')) return false
-  if (target.startsWith('/')) return true // 绝对路径仍视为工作区根下
+  if (target.startsWith('/')) return true // 绝对文件路径须继续核对实际工作区归属
   const path = target.split(/[?#]/, 1)[0] ?? ''
   return /[\\/]/.test(path) || /\.[A-Za-z0-9]{1,6}$/.test(path)
 }
@@ -145,6 +145,7 @@ export function resolveLink(rawTarget: string, isImageContext = false, source?: 
     const [absolute = '', fragment] = target.split('#')
     let decoded = absolute
     try { decoded = decodeURIComponent(absolute) } catch { /* 畸形百分号保留为文件名，由服务端确认。 */ }
+    if (workspaceRelativePath(decoded, root) === null) return { href: '#', kind: 'unsafe', external: false }
     const path = relativizeToRoot(decoded, root)
     const hash = fragment ? `#${fragment}` : ''
     return { href: fileUrl(path, { root }) + hash, kind: guessKind(path, isImageContext), workspacePath: path, workspaceRoot: root, lineRange: parseLineFragment(hash), external: false }
@@ -192,6 +193,7 @@ export function resolveLink(rawTarget: string, isImageContext = false, source?: 
   const [pathPart = '', ...restParts] = target.split('#')
   let rawPath = pathPart!.split('?')[0]!
   try { rawPath = decodeURIComponent(rawPath) } catch { /* 保留畸形转义；服务端仍验证路径。 */ }
+  if (rawPath.startsWith('/') && workspaceRelativePath(rawPath, root) === null) return { href: '#', kind: 'unsafe', external: false }
   const path = rawPath.startsWith('/') && root ? relativizeToRoot(rawPath, root)
     : source && !rawPath.startsWith('/') ? documentPath(source.directory, rawPath) : rawPath.replace(/^\/+/, '')
   if (!path) return { href: target, kind: 'anchor', external: false }

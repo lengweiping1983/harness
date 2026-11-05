@@ -303,6 +303,7 @@ python -m venv .run/semantic-eval
 | 模型流与原文 | `harness/llm/transport.py`、`adapter.py`；`test_stream_parsing.py`、`test_backend_prompt_language.py` |
 | 当前格式与写入证据 | `session/`、`core/run_storage.py`；`test_run_storage_validation.py`、`test_turn_end_commit.py`、`test_goal_state_integrity.py` |
 | 文件编辑 | `tools/builtin/fs_tools.py`；`test_file_write_boundaries.py`、`test_edit_recovery.py`、`test_file_policy_isolation.py` |
+| 项目产物位置 | `prompt/registry.py`、`tools/builtin/fs_tools.py`、`present_tools.py`；`test_artifact_output.py` 核对真实模型请求、调用目录、项目外写入反馈及交付拒绝；`artifactPaths.test.tsx` 核对路径身份、变更与交付卡片的双语呈现 |
 | 目录与语言乱序 | `web/src/store/app.ts`；`catalogLanguage.test.ts`、`presentationLanguage.test.tsx` |
 | 补全与输入法 | `useComposerCompletion.ts`、`TriggerMenu.tsx`、`WorkspacePicker.tsx`；`trigger.test.ts`、`composer-completion-smoke.mjs`、`workspace-folder-smoke.mjs` |
 | 面板隐藏与迟到结果 | `ExecutionTracePanel.tsx`、`TeamMemberDetails.tsx`；`member-trace-visibility-smoke.mjs`、`plan-visibility-smoke.mjs` |
