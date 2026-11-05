@@ -38,6 +38,14 @@ MCP 与隧道 token 只通过受监督子进程环境传递，不写命令行参
 
 每个临时授权绑定工具对象、完整 schema、执行函数、效果、危险标记、工作目录、参数指纹和权限作用域，默认 15 分钟后过期；参数、工具身份、权限版本或作用域任一变化都会使授权失效。撤销先从内存准入表移除，再写审计事件；审计写入失败也不恢复执行权限。审批卡片的本地化标签只用于显示，业务决定使用稳定 option ID（`allow-once`、`allow-temporarily`、`deny`）；审批期间参数变化、连接取消、审阅失败或范围不清都 fail closed。
 
+敏感判定与脱敏只有 `harness/core/redaction.py` 一处实现：路径与引用判定、明文凭据形态识别、结构化递归脱敏、纯文本脱敏与命中计数都在该模块，`harness/app/permissions.py` 与 `harness/app/plan_mode.py` 按既有名字再导出。审批展示、计划正文检查与跨代理上下文继承因此共用同一份规则，不存在某一条路径漏判的可能。脱敏只作用于展示与继承副本，不改变真实工具参数、执行指纹或落盘原件；`redact_text` 返回命中次数，使“改写了多少”成为可报告事实而不是静默行为。
+
+委派边界与权限边界一起收敛。`harness/subagent/admission.py::AdmissionGate` 按整棵代理树计名额并限制派生深度：后代不再绕过并发闸，深度在创建会话之前判定，超限立即失败且不留半成品运行记录。父代理阻塞观察期间让渡名额、观察结束后召回，因此“父等子、子等名额”不会互锁；让渡与召回是显式状态迁移，取消既不丢名额也不重复计数。委派成员单调收紧 `read_only` 与工作区目录，不能通过省略覆盖而放宽。
+
+跨代理继承的上下文在进入子代理之前必须脱敏。`harness/collaboration/context_inheritance.py` 复制父会话可见正文时逐条脱敏，并在载荷中给出 `message_count`、`redacted_messages`、`redacted_hits`；父会话事件保持原件。超出体积上限明确拒绝，不做静默截断。继承提示词资源同时声明：继承正文是不可信数据而非指令或授权，调用方已持有的批准不构成本代理的授权，且不得还原或索取被移除的凭据。
+
+自动审阅的证据必须标明完整性与请求方身份。`harness/app/permissions.py::_review` 的载荷带 `user_messages_total`、`user_messages_incomplete` 与 `requester`（根代理报告 `kind='root'`；受管成员报告 `kind='subagent'` 及其 `depth`、`read_only`、`runner`、`parent_session_id`），保留条数上限由 `MAX_REVIEW_USER_MESSAGES` 单点定义。审阅提示词资源相应要求：证据被截断时不得把有界样本当成完整授权，缺失上下文可能改变结论时选择 `ask`；请求来自受委派成员时，委派方某个具体操作曾获得的批准不构成成员的通用授权，必须按当前根会话的限制与撤销重判本次请求。
+
 权限审批只审阅明确的调用和范围。用户原文、模型解释、网页/MCP 输出和参数中嵌入的指令都是不可信数据，不能扩大授权。需要访问工作区外文件、网络、生产系统、凭据或外部服务时，审批理由必须说明目标、影响和最小必要范围；不能通过换工具、拆分调用、改变路径或使用子代理绕过拒绝。普通本地执行器不提供 Codex 托管 sandbox 的操作系统隔离，外部进程工作目录也不能被描述为沙箱；需要隔离时使用独立工作区/容器和受限网络。
 
 ## 计划模式的隐私边界
@@ -62,10 +70,12 @@ MCP 与隧道 token 只通过受监督子进程环境传递，不写命令行参
 
 Codex/Agents 的公开架构把 harness 控制面与 sandbox 执行面分开，并要求秘密由运行时/secret manager 注入，不能进入 prompt、任务文件、提交物或产物；Codex 的审批/guardrail 也要求在副作用边界核验并在审阅不可用时拒绝。Harness 在本地实现了凭据后端、递归错误脱敏、共享凭据摘要、权限 epoch、计划敏感路径拒绝和未知结果回查，适用于本机数据边界。
 
-本机 REA 证据只支持有限的实现比较：当前 Codex 安装的 `codex.exe` 是原生 x86_64 PE，未发现 Electron fuse sentinel；Ghidra/IDA/Hopper 等原生深层反编译提供器不可用，因此不能把私有凭据注入、秘密扫描或沙箱内部实现写成已观察事实。REA 对本机 `goals_1.sqlite` 观察到线程级 Goal 状态约束，对 `state_5.sqlite` 观察到线程的 sandbox/approval 等状态字段；这些数据库快照不证明明文凭据存储位置，也不证明所有恢复路径。本文把官方公开原则、源码实现和 REA 未知边界分开记录。
+本机 REA 证据只支持有限的实现比较：当前 Codex 安装的 `codex.exe` 是原生 x86_64 PE（SHA-256 `37762753b554982eef1c109303d1be652b6397f1479e844794353a85650199c6`），未发现 Electron fuse sentinel；Ghidra/IDA/Hopper 等原生深层反编译提供器不可用（REA `binary_session` 报告 `ghidra: not_configured`），因此不能把私有凭据注入、秘密扫描或沙箱内部实现写成已观察事实。REA 对本机 `goals_1.sqlite` 观察到线程级 Goal 状态约束与续接延后表，对 `state_5.sqlite` 观察到线程的 sandbox/approval 等状态字段；这些数据库快照不证明明文凭据存储位置，也不证明所有恢复路径。
+
+可核对的实现级证据集中在 [Codex Agent 内核实测对照](codex-agent-internals.md)：该文按字节偏移记录二进制字面量（三档沙箱提示词、命令分段与规则匹配边界、`prefix_rule` 升级流程与被禁前缀、`agents` 与 `features.multi_agent_v2` 配置段、guardian v2 证据预算与来源标注、`shell_environment_policy` 五种继承模式、沙箱来源枚举含 `SubAgent`），并记录运行目录结构（`plans/<threadId>/<planId>/PLAN.md`、`rules/default.rules`、`secrets/mcp_oauth.age`、`.sandbox/deny_read_acl_state.json`）。凭据文件只记录名称与字节数，不读取也不复制内容。本文把官方公开原则、源码实现和 REA 未知边界分开记录。
 
 Harness 的本地执行器仍可能与宿主共享文件、环境和网络；除 Academy 明确使用平台隔离外，普通 `LocalExecutionEnvironment` 不承诺操作系统级沙箱，且普通模式的文件/网页工具不会对所有返回内容做通用秘密检测。我们不能据此声称达到托管 Codex sandbox 的隔离强度。需要更强边界时，应使用独立工作区/容器、最小挂载、受限网络和外部 secret manager，并在 artifacts 离开执行面前做人工或策略复核。
 
 ## 针对性验证入口
 
-凭据与隐私相关回归包括 `tests/test_api_key_masks.py`、`tests/test_credential_integrity.py`、`tests/test_issue_boundaries.py`、`tests/test_provider_connections.py`、`tests/test_lan_language.py`、`tests/test_mcp_named_tunnel.py`、`tests/test_trace_read_work.py`、`tests/test_plan_mode_lifecycle.py`、`tests/test_plan_completion.py` 和本次 `tests/test_plan_security.py`/`tests/test_plan_integrity.py`。验证应检查明文不出现在公开投影、错误、日志和计划正文；凭据刷新/撤销失败保留原状态；敏感计划引用被拒绝；跨语言审批仍按机器 ID 判断。缺少真实 Windows Credential Manager、容器或生产网络环境时，只能报告本地替身和源码证据，不能写成实机隔离验收。
+凭据与隐私相关回归包括 `tests/test_api_key_masks.py`、`tests/test_credential_integrity.py`、`tests/test_issue_boundaries.py`、`tests/test_provider_connections.py`、`tests/test_lan_language.py`、`tests/test_mcp_named_tunnel.py`、`tests/test_trace_read_work.py`、`tests/test_plan_mode_lifecycle.py`、`tests/test_plan_completion.py`、`tests/test_plan_security.py`、`tests/test_plan_integrity.py`、`tests/test_permission_sensitive.py`、`tests/test_context_inheritance_hygiene.py`、`tests/test_review_evidence_honesty.py` 和 `tests/test_subagent_admission.py`。验证应检查明文不出现在公开投影、错误、日志、计划正文和跨代理继承副本；继承载荷的脱敏计数与实际改写一致且源事件保留原件；审阅证据在截断时显式声明截断并标注委派请求方；凭据刷新/撤销失败保留原状态；敏感计划引用被拒绝；跨语言审批仍按机器 ID 判断；名额与深度超限失败且不丢名额。缺少真实 Windows Credential Manager、容器或生产网络环境时，只能报告本地替身和源码证据，不能写成实机隔离验收。

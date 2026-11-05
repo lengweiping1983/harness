@@ -8,7 +8,6 @@ import asyncio
 import time
 import uuid
 import math
-import re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
@@ -19,89 +18,19 @@ from ..core.errors import HarnessError, SessionNotFoundError
 from ..core.jsonutil import to_jsonable
 from ..core.cleanup import join_cleanup, raise_cleanup_errors
 from ..core.operation_lock import OperationLock
-from .plan_mode import contains_sensitive_literal, is_sensitive_reference
-
-
-_SENSITIVE_FIELD_RE = re.compile(
-    r"(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token|aws_shared_credentials_file|aws_config_file|aws_profile|boto_config|azure_config_dir|azure_auth_location|cloudsdk_config|npm_config_userconfig|pip_config_file|pip_index_url|pip_extra_index_url|docker_config|git_askpass|git_ssh_command)",
-    re.IGNORECASE,
-)
-_SENSITIVE_QUOTED_ASSIGNMENT_RE = re.compile(
-    r'''(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token)\b["']?\s*[:=]\s*)"(?:\\.|[^"\\])*"'''
-)
-_SENSITIVE_SINGLE_ASSIGNMENT_RE = re.compile(
-    r'''(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token)\b["']?\s*[:=]\s*)'(?:\\.|[^'\\])*' '''.rstrip()
-)
-_SENSITIVE_UNQUOTED_ASSIGNMENT_RE = re.compile(
-    r'''(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token)\b["']?\s*[:=]\s*)(?!["'])([^\s,;}\]]+)'''
-)
-_SENSITIVE_ASSIGNMENT_MARKER_RE = re.compile(
-    r'''(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|private[_-]?key|credential|token)\b["']?\s*[:=]\s*["']?(?!<redacted>|\[redacted\])[^\s,;}\]]+'''
-)
-_SENSITIVE_ENV_QUOTED_ASSIGNMENT_RE = re.compile(
-    r'''(?i)(\b(?:AWS_SHARED_CREDENTIALS_FILE|AWS_CONFIG_FILE|AWS_PROFILE|BOTO_CONFIG|AZURE_CONFIG_DIR|AZURE_AUTH_LOCATION|CLOUDSDK_CONFIG|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|DOCKER_CONFIG|GIT_ASKPASS|GIT_SSH_COMMAND)\b\s*=\s*)"(?:\\.|[^"\\])*"'''
-)
-_SENSITIVE_ENV_SINGLE_ASSIGNMENT_RE = re.compile(
-    r'''(?i)(\b(?:AWS_SHARED_CREDENTIALS_FILE|AWS_CONFIG_FILE|AWS_PROFILE|BOTO_CONFIG|AZURE_CONFIG_DIR|AZURE_AUTH_LOCATION|CLOUDSDK_CONFIG|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|DOCKER_CONFIG|GIT_ASKPASS|GIT_SSH_COMMAND)\b\s*=\s*)'(?:\\.|[^'\\])*' '''.rstrip()
-)
-_SENSITIVE_ENV_UNQUOTED_ASSIGNMENT_RE = re.compile(
-    r'''(?i)(\b(?:AWS_SHARED_CREDENTIALS_FILE|AWS_CONFIG_FILE|AWS_PROFILE|BOTO_CONFIG|AZURE_CONFIG_DIR|AZURE_AUTH_LOCATION|CLOUDSDK_CONFIG|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|DOCKER_CONFIG|GIT_ASKPASS|GIT_SSH_COMMAND)\b\s*=\s*)(?!["'])([^\s,;}\]]+)'''
-)
-_SENSITIVE_ENV_REFERENCE_RE = re.compile(
-    r'''(?i)(?<![A-Z0-9_])(?:AWS_SHARED_CREDENTIALS_FILE|AWS_CONFIG_FILE|AWS_PROFILE|BOTO_CONFIG|AZURE_CONFIG_DIR|AZURE_AUTH_LOCATION|CLOUDSDK_CONFIG|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|DOCKER_CONFIG|GIT_ASKPASS|GIT_SSH_COMMAND)(?![A-Z0-9_])'''
-)
-_AUTH_SCHEME_RE = re.compile(r"(?i)\b(Bearer|Basic)\s+[\"']?[^\s,;}\]]+[\"']?")
-_PRIVATE_KEY_RE = re.compile(
-    r"(?is)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----"
-)
-_SECRET_TOKEN_RE = re.compile(
-    r"(?i)(?<![\w-])(?:sk-[A-Za-z0-9][A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{12,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})(?![\w-])"
-)
-_JWT_RE = re.compile(
-    r"(?<![\w-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}(?![\w-])"
+from ..core.redaction import (
+    contains_sensitive_value as _contains_sensitive_value,
+    redact_path as _redact_path,
+    redact_sensitive as _redact_sensitive,
 )
 
-
-def _redact_sensitive(value: Any) -> Any:
-    """仅为审批/审阅展示脱敏，不改变真实工具参数或执行指纹。"""
-    if isinstance(value, dict):
-        return {key: '[redacted]' if _SENSITIVE_FIELD_RE.search(str(key)) else _redact_sensitive(item)
-                for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_redact_sensitive(item) for item in value]
-    if isinstance(value, str):
-        value = _PRIVATE_KEY_RE.sub('[redacted-private-key]', value)
-        value = _AUTH_SCHEME_RE.sub(lambda match: f'{match.group(1)} [redacted]', value)
-        value = _SECRET_TOKEN_RE.sub('[redacted-token]', value)
-        value = _JWT_RE.sub('[redacted-token]', value)
-        value = _SENSITIVE_ENV_QUOTED_ASSIGNMENT_RE.sub(r'\1"[redacted]"', value)
-        value = _SENSITIVE_ENV_SINGLE_ASSIGNMENT_RE.sub(r"\1'[redacted]'", value)
-        value = _SENSITIVE_ENV_UNQUOTED_ASSIGNMENT_RE.sub(r'\1[redacted]', value)
-        value = _SENSITIVE_QUOTED_ASSIGNMENT_RE.sub(r'\1"[redacted]"', value)
-        value = _SENSITIVE_SINGLE_ASSIGNMENT_RE.sub(r"\1'[redacted]'", value)
-        return _SENSITIVE_UNQUOTED_ASSIGNMENT_RE.sub(r'\1[redacted]', value)
-    return value
+# 敏感判定与脱敏只有 core.redaction 一处实现；这里按本模块既有私有名再导出，
+# 使审批展示、审阅证据与递归参数检查继续共用同一份规则。
+# 路径与明文凭据判定的对外入口在 core.redaction 与 app.plan_mode，不在此重复暴露。
 
 
-def _redact_path(value: Any) -> Any:
-    """为审批/审阅隐藏明显凭据目录，保留普通工作目录的可核对性。"""
-    if not isinstance(value, str):
-        return value
-    return '[redacted-path]' if is_sensitive_reference(value) else value
-
-
-def _contains_sensitive_value(value: Any) -> bool:
-    """递归检查工具参数，防止嵌套参数绕过敏感操作边界。"""
-    if isinstance(value, dict):
-        return any(_SENSITIVE_FIELD_RE.search(str(key)) or _contains_sensitive_value(item)
-                   for key, item in value.items())
-    if isinstance(value, (list, tuple)):
-        return any(_contains_sensitive_value(item) for item in value)
-    if isinstance(value, str):
-        return (is_sensitive_reference(value) or contains_sensitive_literal(value)
-                or bool(_SENSITIVE_ASSIGNMENT_MARKER_RE.search(value))
-                or bool(_SENSITIVE_ENV_REFERENCE_RE.search(value)))
-    return False
+#: 审阅证据里保留的用户消息条数上限；超出部分以计数与截断声明如实报告。
+MAX_REVIEW_USER_MESSAGES = 8
 
 
 class _PolicyChanged(Exception):
@@ -583,13 +512,37 @@ class PermissionPolicy:
             return tr('python.permissions.4cbec050e546')
         return None
 
+    def _review_requester(self, session_id: str) -> dict[str, Any]:
+        """如实标注请求方是根代理还是受管子代理，以及它当前的委派边界。
+
+        审阅者据此判断"父代理已获批准"是否被当成子代理的通用授权；
+        无法归属到任何受管运行时按根代理报告，不猜测身份。
+        """
+        subagents = getattr(self.harness, "subagents", None)
+        state = subagents.state_for_session(session_id) if subagents is not None else None
+        if state is None:
+            return {"kind": "root", "depth": 0}
+        return {"kind": "subagent", "depth": getattr(state, "depth", 0), "agent_id": state.id,
+                "read_only": bool(state.read_only), "runner": state.runner,
+                "parent_session_id": state.parent_session_id}
+
     async def _review(self, tool: Any, args: Any, ctx: Any, scope: str, agent: Any) -> tuple[str, str, str]:
-        """独立、无工具、受预算约束的审阅；失败回退人工而不是放行。"""
+        """独立、无工具、受预算约束的审阅；失败回退人工而不是放行。
+
+        证据被截断时显式声明截断，而不是让审阅者把不完整样本当成完整授权。
+        """
         session = self.harness.sessions.get(scope)
-        intent = [_redact_sensitive(e.data.get("text", "")) for e in session.events_of_type("user/message")
-                  if e.data.get("source", "user") in {"user", "steer"}][-8:]
-        payload = json.dumps({"user_messages": intent, "operation": {"tool": tool.schema.name,
-            "arguments": _redact_sensitive(args), "cwd": _redact_path(str(ctx.cwd)), "effect": tool.effect}}, ensure_ascii=False)
+        recorded = [e for e in session.events_of_type("user/message")
+                    if e.data.get("source", "user") in {"user", "steer"}]
+        kept = recorded[-MAX_REVIEW_USER_MESSAGES:]
+        intent = [_redact_sensitive(e.data.get("text", "")) for e in kept]
+        payload = json.dumps({
+            "user_messages": intent,
+            "user_messages_total": len(recorded),
+            "user_messages_incomplete": len(recorded) > len(kept),
+            "requester": self._review_requester(ctx.session_id),
+            "operation": {"tool": tool.schema.name, "arguments": _redact_sensitive(args),
+                          "cwd": _redact_path(str(ctx.cwd)), "effect": tool.effect}}, ensure_ascii=False)
         if len(payload) > 24000:
             return "ask", tr('python.permissions.517c05d73aee'), 'input_too_large'
         config = (agent.config if agent is not None else LlmCallConfig(model=self.harness.config.model)).merged(max_tokens=1024)

@@ -476,6 +476,8 @@ class Harness:
             bus=self.bus,
             cwd=str(self.config.cwd) if self.config.cwd else None,
             max_concurrent=self.config.max_concurrent_subagents,
+            max_depth=self.config.max_subagent_depth,
+            job_timeout=self.config.subagent_job_timeout,
         )
         self.runs = self.subagents.runs
         self.runs.controller = self.runtime

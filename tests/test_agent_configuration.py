@@ -261,9 +261,10 @@ class AgentConfigurationTests(unittest.IsolatedAsyncioTestCase):
                 parent = self.app._agent_for(session)
                 parent.language = language
                 parent.config = replace(parent.config,model='snapshot-model',max_tokens=321)
-                self.app.subagents._slots = asyncio.Semaphore(1)
-                await self.app.subagents._slots.acquire()
-                # 固定根级名额，明确验证排队期间设置已发生改变。
+                from harness.subagent.admission import AdmissionGate
+                self.app.subagents._gate = AdmissionGate(capacity=1)
+                blocker = await self.app.subagents._gate.acquire('fixture-blocker', 1)
+                # 占满全树名额，明确验证排队期间设置已发生改变。
                 try:
                     with current_language.set(language):
                         member = self.app.subagents.spawn(prompt='Original task {literal}',description='Snapshot',parent_session_id=session.id)
@@ -273,7 +274,7 @@ class AgentConfigurationTests(unittest.IsolatedAsyncioTestCase):
                     parent.config = replace(parent.config,model='later-model',max_tokens=999)
                     self.app.config.language = later
                 finally:
-                    self.app.subagents._slots.release()
+                    self.app.subagents._gate.release(blocker)
                 await self.app.subagents.wait(member.id,timeout=5)
                 self.assertEqual(member.status,'completed',member.error)
                 self.assertEqual(member.language,language)

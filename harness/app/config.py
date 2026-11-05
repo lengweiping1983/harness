@@ -31,6 +31,9 @@ from ..tools.builtin.mcp_client import McpError, McpServerConfig
 
 #: 默认数据目录
 DEFAULT_HOME = Path.home() / ".harness"
+#: 默认派生深度上限；根会话直接派生的成员深度为 1。
+#: 有界默认值让深层递归派生失败可见，而不是无界膨胀后才在资源上崩溃。
+DEFAULT_MAX_SUBAGENT_DEPTH = 8
 
 
 def _default_owned_processes() -> bool:
@@ -168,8 +171,14 @@ class HarnessConfig:
     #: None 关闭每回合执行上限，有限预算仍需显式启用。
     max_steps: int | None = None
     token_budget: int | None = None
-    #: 根级子代理并发上限；None 表示不限制（嵌套派生的子代理不受该闸约束）。
+    #: 整棵代理树的并发上限；None 表示不限制名额。后代同样占名额，
+    #: 阻塞观察期间让渡，因此父代理等待子代理不会与闸门互锁。
     max_concurrent_subagents: int | None = None
+    #: 派生深度上限；根会话直接派生的成员深度为 1。超限在派生时立即失败。
+    max_subagent_depth: int | None = DEFAULT_MAX_SUBAGENT_DEPTH
+    #: 单个受管子代理的墙钟时限（秒）；None 表示不设默认时限，
+    #: 团队等调用方仍可指定更严格的每成员时限。
+    subagent_job_timeout: float | None = None
     permission_policy: str = "full_access"
     enable_setup: bool = False
     enable_browser: bool = False
@@ -221,11 +230,16 @@ class HarnessConfig:
             raise ValueError(tr('context.settings.budget'))
         if type(self.output_reserve) is not int or self.output_reserve < 0:
             self.output_reserve = 16_000
-        for name in ("max_steps", "token_budget", "max_concurrent_subagents"):
+        for name in ("max_steps", "token_budget", "max_concurrent_subagents", "max_subagent_depth"):
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < 1):
                 logging.getLogger(__name__).warning(tr('log.1e037c2b9969'), name)
                 setattr(self, name, None)
+        if self.subagent_job_timeout is not None and (
+                type(self.subagent_job_timeout) not in {int, float}
+                or not math.isfinite(self.subagent_job_timeout) or self.subagent_job_timeout <= 0):
+            logging.getLogger(__name__).warning(tr('log.1e037c2b9969'), "subagent_job_timeout")
+            self.subagent_job_timeout = None
         if self.permission_policy not in {"read_only", "request_approval", "auto_review", "full_access"}:
             raise ValueError(tr('python.config.d0aaa8d658c0'))
         if type(self.network_timeout) not in {int, float} or self.network_timeout <= 0 or (type(self.network_timeout) is float and not math.isfinite(self.network_timeout)):
@@ -257,6 +271,9 @@ class HarnessConfig:
             HARNESS_OWNED_PROCESSES（1 启用所属执行器，0 使用平台基础执行器）
             HARNESS_MCP_SERVERS（JSON 数组或 ``@path`` 配置文件）
             HARNESS_MEMORY_MODEL_CACHE（显式本地模型缓存目录；未设置则关闭语义候选）
+            HARNESS_MAX_CONCURRENT_SUBAGENTS（整棵代理树的并发名额上限）
+            HARNESS_MAX_SUBAGENT_DEPTH（派生深度上限，默认 8）
+            HARNESS_SUBAGENT_JOB_TIMEOUT（单个受管子代理墙钟时限，秒；未设置则不限）
         """
         env = os.environ
         mcp_servers = _load_mcp_servers(env.get("HARNESS_MCP_SERVERS"))
@@ -292,6 +309,8 @@ class HarnessConfig:
             max_steps=_int_or_none(env.get('HARNESS_MAX_STEPS')),
             token_budget=_int_or_none(env.get('HARNESS_TOKEN_BUDGET')),
             max_concurrent_subagents=_int_or_none(env.get('HARNESS_MAX_CONCURRENT_SUBAGENTS')),
+            max_subagent_depth=_int_or_none(env.get('HARNESS_MAX_SUBAGENT_DEPTH', str(DEFAULT_MAX_SUBAGENT_DEPTH))),
+            subagent_job_timeout=_float_or_none(env.get('HARNESS_SUBAGENT_JOB_TIMEOUT')),
             network_timeout=_float_or_none(env.get('HARNESS_NETWORK_TIMEOUT')) or 180.0,
             mcp_servers=mcp_servers,
             permission_policy=env.get("HARNESS_PERMISSION_POLICY", "request_approval"),
@@ -347,6 +366,8 @@ class HarnessConfig:
             "max_steps": self.max_steps,
             "token_budget": self.token_budget,
             "max_concurrent_subagents": self.max_concurrent_subagents,
+            "max_subagent_depth": self.max_subagent_depth,
+            "subagent_job_timeout": self.subagent_job_timeout,
             "enable_browser": self.enable_browser,
             "enable_automations": self.enable_automations,
             "enable_worktrees": self.enable_worktrees,

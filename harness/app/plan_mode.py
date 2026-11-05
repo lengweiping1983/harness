@@ -41,48 +41,8 @@ PLAN_TITLE_RE = re.compile(r"^#[ \t]+\S")
 FIRST_HEADING_RE = re.compile(r"^#[ \t]+(.+)$", re.MULTILINE)
 
 # 计划阶段只需要仓库事实，不应把本机凭据读进模型上下文、计划正文或审阅卡片。
-_SENSITIVE_BASENAMES = {
-    '.env', '.env.local', '.env.production', '.env.development', '.env.test',
-    '.git-credentials', '.netrc', '.npmrc', '.pypirc',
-    'credentials.json', 'credentials.yaml', 'credentials.yml',
-    'oauth-credentials.json', 'connection-secrets.json', 'secrets.json',
-    'secrets.yaml', 'secrets.yml', 'token.json', 'tokens.json',
-    'secret.txt', 'secrets.txt', 'password.txt', 'passwords.txt',
-    'credentials.txt', 'auth.json', 'auth.yaml', 'auth.yml',
-    'id_rsa', 'id_ed25519', 'id_ecdsa', 'private_key', 'privatekey',
-}
-_SENSITIVE_SUFFIXES = ('.pem', '.key', '.p12', '.pfx', '.jks', '.kdbx', '.secret', '.credentials')
-_SAFE_EXAMPLE_MARKERS = ('.example', '.sample', '.template', '.dist')
-_SENSITIVE_LITERAL_RE = re.compile(
-    r"(?:-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|"
-    r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization|cookie|credential|token)\b[\"']?\s*[:=]\s*[\"']?(?!<redacted>|\[redacted\])[^\s,;}\]]{4,}|"
-    r"\b(?:Bearer|Basic)\s+(?!<redacted>|\[redacted\])[A-Za-z0-9._~+/=-]{4,}|"
-    r"(?<![\w-])(?:sk-[A-Za-z0-9_-]{9,}|gh[pousr]_[A-Za-z0-9_]{13,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{11,})(?![\w-])|"
-    r"(?<![\w-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}(?![\w-]))",
-    re.IGNORECASE,
-)
-
-
-def is_sensitive_reference(value: Any) -> bool:
-    """判断文件/搜索引用是否可能暴露本地凭据。"""
-    if not isinstance(value, str) or not value.strip():
-        return False
-    # 同时拆开命令/标题中的空白和常见标点，避免 `cat .env` 或
-    # `--path=.env` 通过只按目录分隔符切分的检查。
-    parts = [part for part in re.split(r'''[\\/\s"'`;,(){}\[\]=:]+''', value.strip().lower()) if part]
-    for part in parts:
-        if any(marker in part for marker in _SAFE_EXAMPLE_MARKERS):
-            continue
-        if part in {'.ssh', '.aws', '.azure'}:
-            return True
-        if part in _SENSITIVE_BASENAMES or part.endswith(_SENSITIVE_SUFFIXES):
-            return True
-    return False
-
-
-def contains_sensitive_literal(value: Any) -> bool:
-    """识别计划正文中的常见明文凭据形态，不保存或展示命中正文。"""
-    return isinstance(value, str) and bool(_SENSITIVE_LITERAL_RE.search(value))
+# 判定规则唯一来源是 core.redaction；此处再导出以保持既有调用方与测试不变。
+from ..core.redaction import contains_sensitive_literal, is_sensitive_reference
 
 
 def plan_policy_section() -> str:

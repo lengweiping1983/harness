@@ -8,7 +8,8 @@
 
 1. **本机 REA 观察**：Codex `goals_1.sqlite` 的 `thread_goals` 表包含 `active`、`paused`、`blocked`、`usage_limited`、`budget_limited`、`complete` 状态；`thread_goal_continuation_deferrals` 单独保存续接延迟。`state_5.sqlite` 包含线程、项目和 `thread_spawn_edges`；`logs_2.sqlite` 的日志按线程和进程索引，并记录 app-server 的 `thread/start`、环境初始化和派工跨度。这些是当前机器上的已安装版本快照，不代表所有 Codex 版本都相同。
 2. **OpenAI 官方行为说明**：[Using Goals in Codex](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex) 将 Goal 定义为线程级、持久、以证据为完成条件的工作契约；自动续接只在轮次结束、线程空闲、没有排队输入或其他未完成工作时检查，并将预算限制与完成区分。[Run long horizon tasks with Codex](https://developers.openai.com/blog/run-long-horizon-tasks-with-codex) 将长程循环概括为计划、修改、运行工具、观察、修复和更新状态的可审查闭环。
-3. **静态 REA 限制**：本机 `codex.exe` 是 PE 原生应用，Electron fuse 扫描没有发现 Electron 哨兵；当前 Ghidra 未配置，CDP 页面端点需要鉴权。因此本文不声称已经反编译出 Codex 原生函数，也不把数据库字段推断成未观察到的内部算法。
+3. **二进制字面量证据**：本机 `codex.exe`（SHA-256 `37762753b554982eef1c109303d1be652b6397f1479e844794353a85650199c6`）的 `.rodata` 保留了实现 `thread_goals` 的 SQL 原文与源路径字面量 `state\src\runtime\goals.rs`。其中三条决定了“不虚报”的机制：更新语句统一带 `AND (? IS NULL OR goal_id = ?)`，`goal_id` 因此是乐观并发键；用量累加与预算翻转在同一条 `UPDATE` 内完成，判断用的是 `tokens_used + ? >= token_budget`，不存在“先读再判再写”的竞态窗口；状态守卫是显式白名单，`status IN ('active','paused','blocked','usage_limited','budget_limited')` 正是“除 `complete` 之外都可恢复”，`complete` 是终态。新建目标时 `ON CONFLICT(thread_id) DO UPDATE` 会把 `tokens_used`、`time_used_seconds` 归零，同一线程换目标不继承旧用量。续接延后是幂等的：`INSERT ... ON CONFLICT DO NOTHING` 加 `SELECT EXISTS(...)`，一个线程最多一条延后记录。续接被跳过时写明确日志（`skipping goal continuation because thread manager is unavailable` / `live thread is unavailable` / `automatic idle work was rejected` / `turn input submission failed`），跳过是显式事件而不是静默不做。预算上限受 `goals.max_goal_token_budget` 约束，超限在配置加载期报错。逐条偏移与复核方式见 [Codex Agent 内核实测对照](codex-agent-internals.md)。
+4. **静态 REA 限制**：本机 `codex.exe` 是 PE 原生应用，Electron fuse 扫描没有发现 Electron 哨兵；当前 Ghidra 未配置，CDP 页面端点需要鉴权。因此本文不声称已经反编译出 Codex 原生函数，也不把数据库字段推断成未观察到的内部算法；SQL 与配置键字面量只证明文本存在，不证明所有调用路径。
 
 ## Goal、提示词和计划的分工
 
@@ -100,6 +101,7 @@ Claude Code 的公开文档也把 session、worktree、后台任务、`/compact`
 - Goal 提示词装配：`harness/prompt/tool_policies.py`、`harness/i18n/locales/en.json`、`harness/i18n/locales/zh-CN.json`
 - 正式存储契约：`docs/storage.md`
 - 架构入口：`docs/architecture.md`
+- Codex 侧实测证据与差距处置：`docs/codex-agent-internals.md`
 
 ## 验证范围和限制
 

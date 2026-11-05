@@ -42,6 +42,7 @@ from ..core.events import EventBus
 from .events import SubagentEventBus
 from ..core.errors import HarnessError, PersistenceError
 from ..core.runs import PENDING, RUNNING, COMPLETED, FAILED, INTERRUPTED, TERMINAL_STATES, AgentRun, turn_outcome, run_error_message, run_error_copy
+from .admission import AdmissionGate
 from ..session.session import create_session
 from ..session.events import SessionHeader
 
@@ -49,12 +50,12 @@ logger = logging.getLogger(__name__)
 
 #: 子代理默认超时（秒）
 DEFAULT_AGENT_TIMEOUT = 600.0
-#: 默认不限制子代理轮数；任务仍受运行预算、取消及超时约束。
+#: 默认不限制子代理轮数；任务仍受运行预算、取消、名额与超时约束。
 DEFAULT_MAX_STEPS = None
 
-#: 当前协程是否已经在一个受管子代理运行中；用于让嵌套派生跳过根级并发闸，
-#: 否则父代理等待子代理时会占着并发名额形成死锁。
-_MANAGED_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar("subagent_managed_depth", default=0)
+#: 当前协程所属受管运行的名额凭证；阻塞观察期间据此让渡名额，
+#: 使父代理等待子代理时不会与全树并发闸互相等待。
+_CURRENT_PERMIT: contextvars.ContextVar[Any] = contextvars.ContextVar("subagent_permit", default=None)
 
 
 def validate_spawn_text(prompt: Any, description: Any) -> tuple[str, str]:
@@ -99,6 +100,8 @@ class SubagentManager:
         run_storage: RunStorage | Path | None = None,
         contexts: Any = None,
         max_concurrent: int | None = None,
+        max_depth: int | None = None,
+        job_timeout: float | None = None,
     ) -> None:
         self.adapter = adapter
         self.tools = tools
@@ -121,10 +124,15 @@ class SubagentManager:
         self.parent_config: Callable[[str], LlmCallConfig | None] | None = None
         self._followup_lock = asyncio.Lock()
         self._closing: dict[str | None, int] = {}
-        #: 根级子代理并发上限；None 表示不限制。只约束根级派生，
-        #: 受管子代理自己再派生的后代不占名额（见 :data:`_MANAGED_DEPTH`）。
+        #: 整棵代理树的并发上限；None 表示不限制名额。后代同样占名额，
+        #: 阻塞观察期间通过让渡避免父子互锁（见 :mod:`.admission`）。
         self.max_concurrent = max_concurrent if isinstance(max_concurrent, int) and max_concurrent > 0 else None
-        self._slots = asyncio.Semaphore(self.max_concurrent) if self.max_concurrent else None
+        #: 派生深度上限；None 表示不限制。深度在派生时判定，超限立即失败。
+        self.max_depth = max_depth if isinstance(max_depth, int) and max_depth > 0 else None
+        #: 单个受管运行的墙钟时限（秒）；None 表示不设默认时限，
+        #: 团队等调用方仍可用 ``_timeout_seconds`` 指定更严格的值。
+        self.job_timeout = job_timeout if isinstance(job_timeout, (int, float)) and job_timeout > 0 else None
+        self._gate = AdmissionGate(capacity=self.max_concurrent, max_depth=self.max_depth)
 
         self._states: dict[str, AgentRun] = {}
         from .archive import SubagentArchive
@@ -298,6 +306,9 @@ class SubagentManager:
         if reasoning_effort is not None and reasoning_effort not in ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'):
             raise ValueError('agent/invalid-reasoning-effort')
         parent = self.require_accepting(parent_session_id)
+        # 深度在创建会话之前判定：超限不留下半成品运行记录或孤立上下文。
+        depth = (getattr(parent, 'depth', 0) or 0) + 1
+        self._gate.check_depth(depth)
         inherited = inherited_context(self.session_for(parent_session_id), fork_turns)
         # 落盘成员恢复后也必须收紧后代权限，不能只依赖内存中的父 Agent。
         read_only = bool(read_only or parent is not None and parent.read_only)
@@ -360,6 +371,7 @@ class SubagentManager:
             runner=runner,
             # 未显式指定时继承父作用域，使整棵子树同属一个可见性边界。
             scope=scope if scope is not None else (parent.scope if parent else None),
+            depth=depth,
             language=language,
         )
         state._inherited_context = inherited
@@ -390,22 +402,18 @@ class SubagentManager:
         """执行任务持有派工时的请求配置，状态与错误沿用父回合语言。"""
         from ..core.language import current_language
         token = current_language.set(state.language or current_language.get())
-        # 只对根级派生限流：已在受管子代理里派生后代时不再占用名额，
-        # 否则父代理等待子代理会与并发闸互相等待。
-        gate = self._slots if _MANAGED_DEPTH.get() == 0 else None
-        acquired = False
-        depth_token = None
+        # 全树限流：后代同样领取名额；阻塞观察期间由 _yield_slot 让渡，
+        # 因此父代理等待子代理不会与本闸门互相等待。
+        permit_token = None
         try:
-            if gate is not None:
-                await gate.acquire()
-                acquired = True
+            permit = await self._gate.acquire(state.id, state.depth)
+            permit_token = _CURRENT_PERMIT.set(permit)
             try:
                 self.require_accepting(state.session_id)
             except HarnessError as exc:
                 if exc.code != 'agent/parent-closing':
                     raise
                 raise asyncio.CancelledError from None
-            depth_token = _MANAGED_DEPTH.set(_MANAGED_DEPTH.get() + 1)
             await self._run_in_language(state, request_config)
         except asyncio.CancelledError:
             raise
@@ -415,10 +423,10 @@ class SubagentManager:
             try:
                 await join_cleanup(self._finalization(state))
             finally:
-                if depth_token is not None:
-                    _MANAGED_DEPTH.reset(depth_token)
-                if acquired:
-                    gate.release()
+                # 领取过程被取消时凭证仍在闸门队列中，按身份释放同样收敛。
+                self._gate.release_run(state.id)
+                if permit_token is not None:
+                    _CURRENT_PERMIT.reset(permit_token)
                 current_language.reset(token)
 
     async def _run_in_language(self, state: AgentRun, request_config: LlmCallConfig | None) -> None:
@@ -476,10 +484,20 @@ class SubagentManager:
         text = state.text
         source = 'subagent'
         timeout = getattr(state, '_timeout_seconds', None)
+        if timeout is None:
+            timeout = self.job_timeout
         deadline = time.monotonic() + timeout if timeout is not None else None
         while True:
             execution = self.external_runner(state, agent) if state.runner else agent.prompt(session, text, source=source)
-            result = await asyncio.wait_for(execution, max(0.001, deadline - time.monotonic())) if deadline is not None else await execution
+            if deadline is None:
+                result = await execution
+            else:
+                try:
+                    result = await asyncio.wait_for(execution, max(0.001, deadline - time.monotonic()))
+                except TimeoutError as exc:
+                    # asyncio 抛出的是无正文超时；换成可核验的时限失败，
+                    # 不把空消息当成成员错误呈现，也不重放已开始的执行。
+                    raise TimeoutError(tr('runtime.validation.e121bb0c13e1')) from exc
             if deadline is not None and time.monotonic() >= deadline and result.reason == 'aborted':
                 raise TimeoutError(tr('runtime.validation.e121bb0c13e1'))
             if result.text or result.reason == 'completed':
@@ -582,9 +600,35 @@ class SubagentManager:
                     errors.append(exc)
         return errors
 
+    @contextlib.asynccontextmanager
+    async def _yield_slot(self):
+        """阻塞观察期间让出名额，使后代能被准入。
+
+        只有当前协程确实持有名额时才让渡；召回被取消时凭证仍留在闸门队列中，
+        由运行收尾按身份释放，因此名额既不丢失也不重复计数。
+        """
+        permit = _CURRENT_PERMIT.get()
+        if not self._gate.lend(permit):
+            yield
+            return
+        try:
+            yield
+        finally:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._gate.recall(permit)
+
     async def wait(self, agent_id: str, timeout: float | None = None) -> AgentRun:
-        """等待子代理进入终态。超时只停止等待，不杀死子代理。"""
+        """等待子代理进入终态。超时只停止等待，不杀死子代理。
+
+        受管代理在此阻塞期间让出并发名额，其后代因此可以被准入；
+        非法超时在让渡之前就被拒绝，不会留下已让出却未召回的名额。
+        """
         wait_for = validate_wait_timeout(DEFAULT_AGENT_TIMEOUT if timeout is None else timeout)
+        async with self._yield_slot():
+            return await self._observe(agent_id, wait_for)
+
+    async def _observe(self, agent_id: str, wait_for: float) -> AgentRun:
+        """实际观察一次运行到终态或超时；名额让渡由调用方负责。"""
         state = self.get(agent_id)
         if state is None:
             raise KeyError(agent_id)
@@ -617,6 +661,15 @@ class SubagentManager:
         """等待一组子代理；超时只返回当前快照，不取消任何成员。"""
         agent_ids = validate_wait_ids(agent_ids)
         wait_for = validate_wait_timeout(DEFAULT_AGENT_TIMEOUT if timeout is None else timeout)
+        async with self._yield_slot():
+            return await self._observe_many(agent_ids, wait_for)
+
+    async def _observe_many(self, agent_ids: list[str], wait_for: float) -> list[AgentRun]:
+        """批量观察；逐个成员仍委派公开 :meth:`wait`，宿主可据此拦截单次观察。
+
+        名额只在本方法入口让渡一次：内层 :meth:`wait` 再次进入
+        :meth:`_yield_slot` 时凭证已处于让渡态，不会重复记账。
+        """
         states = []
         for agent_id in agent_ids:
             state = self.get(agent_id)

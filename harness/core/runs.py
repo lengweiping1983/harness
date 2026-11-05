@@ -105,6 +105,9 @@ class AgentRun:
     workspace_cwd: str | None = None
     runner: str | None = None
     scope: str | None = None
+    #: 派生深度；受管运行最小为 1（根会话直接派生），后代逐层加一。
+    #: 默认值即最小合法深度，使直接构造的运行记录也能通过准入判定。
+    depth: int = 1
 
     @property
     def finished(self) -> bool:
@@ -140,6 +143,7 @@ class AgentRun:
                 'child_session_id': self.session_id or None, 'parent_agent_id': self.parent_run_id,
                 'root_session_id': self.root_session_id, 'context_persisted': self.context_persisted,
                 'read_only': self.read_only, 'workspace_cwd': self.workspace_cwd,
+                'depth': self.depth,
                 **({'runner': self.runner} if self.runner else {}),
                 'created_at': int(self.created_at * 1000), 'duration_ms': int(duration) if duration is not None else None,
                 'result': self.output, 'error': self.error_message, 'tool_calls': self.tool_calls,
