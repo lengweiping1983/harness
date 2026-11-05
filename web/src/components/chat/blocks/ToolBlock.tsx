@@ -13,7 +13,7 @@ import { toolImages, imageOutputSummary } from '@/lib/toolImages'
 import { widgetPayload, widgetPreview } from '@/lib/widgetPayload'
 import { WidgetCard, WidgetLoading } from './WidgetCard'
 import { ImageGallery } from './ImageGallery'
-import { CopyButton } from '@/components/ui/primitives'
+import { Badge, CopyButton } from '@/components/ui/primitives'
 import { JsonView } from '@/components/ui/JsonView'
 import { JsonSource } from '@/components/ui/JsonSource'
 import { Markdown, FileChip } from '@/components/markdown/Markdown'
@@ -64,6 +64,8 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
   const progress = block.progress
   const jobId = backgroundJobId(block.display)
   const progressText = progress ? progress.stdout + (progress.stderr ? `${progress.stdout && !progress.stdout.endsWith('\n') ? '\n' : ''}[stderr]\n${progress.stderr}` : '') : ''
+  const detailStatus = command.label ?? (running ? t("ui.components.chat.blocks.ToolBlock.5026a63b58cd") : notExecuted ? t("ui.components.chat.blocks.ToolBlock.231fe2204265") : deferred ? t("ui.components.chat.blocks.ToolBlock.09b08165d88e") : (block.display as { interrupted?: boolean } | undefined)?.interrupted ? t("ui.components.chat.blocks.ToolBlock.bb48a89c508b") : block.status === 'error' ? t("ui.components.chat.blocks.ToolBlock.28384d7afd2e") : (block.display as { background?: boolean } | undefined)?.background ? t("ui.components.chat.blocks.ToolBlock.9606b203ed7b") : t("ui.components.chat.blocks.ToolBlock.c0b3fbff51cc"))
+  const detailTone = running ? 'brand' : failed && !skipped ? 'danger' : skipped || (block.display as { interrupted?: boolean; background?: boolean } | undefined)?.interrupted || (block.display as { background?: boolean } | undefined)?.background ? 'warn' : 'neutral'
   useLayoutEffect(() => {
     const view = progressView.current
     if (view && !document.hidden && view.getClientRects().length && followOutput.current) view.scrollTop = view.scrollHeight
@@ -103,23 +105,24 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
 
       {block.name === 'browser' && sessionId ? <button type="button" className="ml-5 mb-1 text-xs text-brand hover:underline focus-visible:underline" onClick={() => useAppStore.getState().setInspectorTab('browser')}>{t("ui.components.chat.blocks.ToolBlock.4d689adda874")}</button> : null}
       {images.length ? <ImageGallery images={images} /> : null}
-      {open && running && progressText ? <div className="ml-5 mt-1 border-l border-line pl-4">
-        <pre ref={progressView} aria-label={t("ui.components.chat.blocks.ToolBlock.8f3ea71ba079")} tabIndex={0}
-          onScroll={(event) => { const view = event.currentTarget; followOutput.current = view.scrollHeight - view.scrollTop - view.clientHeight < 24 }}
-          className={cn('overflow-auto whitespace-pre-wrap break-words rounded-md bg-raised px-3 py-2 font-mono text-xs leading-5 text-muted', open ? 'max-h-60' : 'max-h-24')}>{progressText}</pre>
-        {progress && progress.stdoutDropped + progress.stderrDropped > 0 ? <p className="py-1 text-2xs text-faint">{t("ui.components.chat.blocks.ToolBlock.96c9ed2242ad")}</p> : null}
-      </div> : null}
-
       {open ? (
-        <div id={detailId} className={cn('ml-5 space-y-3', isWidget ? 'my-2 rounded-xl border border-line bg-raised/30 p-3' : 'border-l border-line py-3 pl-4')}>
-          <LearnHarnessButton topic="tool" />
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-            <code>{block.name}</code>
-            {typeof block.durationMs === 'number' ? <span>{t('ui.toolBlock.duration', {duration: formatDuration(block.durationMs)})}</span> : null}
-            <span>{command.label ?? (running ? t("ui.components.chat.blocks.ToolBlock.5026a63b58cd") : notExecuted ? t("ui.components.chat.blocks.ToolBlock.231fe2204265") : deferred ? t("ui.components.chat.blocks.ToolBlock.09b08165d88e") : (block.display as { interrupted?: boolean } | undefined)?.interrupted ? t("ui.components.chat.blocks.ToolBlock.bb48a89c508b") : block.status === 'error' ? t("ui.components.chat.blocks.ToolBlock.28384d7afd2e") : (block.display as { background?: boolean } | undefined)?.background ? t("ui.components.chat.blocks.ToolBlock.9606b203ed7b") : t("ui.components.chat.blocks.ToolBlock.c0b3fbff51cc"))}</span>
-            {command.exitCode !== null ? <span>{t('ui.toolBlock.exitCode', {code: command.exitCode})}</span> : null}
-          </div>
+        <div id={detailId} role="group" aria-label={block.name} data-tool-detail="" className="ml-5 mb-2 mt-1 min-w-0 overflow-hidden rounded-xl border border-line bg-surface/50">
+          <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-raised/70 px-3 py-2">
+            <code className="min-w-0 break-all text-sm font-semibold text-ink">{block.name}</code>
+            <Badge tone={detailTone}>{detailStatus}</Badge>
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums text-muted">
+              {typeof block.durationMs === 'number' ? <span>{t('ui.toolBlock.duration', {duration: formatDuration(block.durationMs)})}</span> : null}
+              {command.exitCode !== null ? <span>{t('ui.toolBlock.exitCode', {code: command.exitCode})}</span> : null}
+            </span>
+          </header>
+          <div className="space-y-3 p-3">
           {command.note ? <p className="text-xs leading-relaxed text-warn">{command.note}</p> : null}
+          {running && progressText ? <div>
+            <pre ref={progressView} aria-label={t("ui.components.chat.blocks.ToolBlock.8f3ea71ba079")} tabIndex={0}
+              onScroll={(event) => { const view = event.currentTarget; followOutput.current = view.scrollHeight - view.scrollTop - view.clientHeight < 24 }}
+              className="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-raised/35 p-3 font-mono text-xs leading-5 text-muted">{progressText}</pre>
+            {progress && progress.stdoutDropped + progress.stderrDropped > 0 ? <p className="py-1 text-2xs text-faint">{t("ui.components.chat.blocks.ToolBlock.96c9ed2242ad")}</p> : null}
+          </div> : null}
           {!running && progressText ? <details className="text-xs text-muted"><summary className="cursor-pointer">{t("ui.components.chat.blocks.ToolBlock.c84acf9d0015")}</summary>
             <pre tabIndex={0} className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md bg-raised p-3 font-mono text-xs leading-5">{progressText}</pre>
             {progress && progress.stdoutDropped + progress.stderrDropped > 0 ? <p className="py-1 text-2xs text-faint">{t("ui.components.chat.blocks.ToolBlock.bed49546e98b")}</p> : null}
@@ -137,7 +140,7 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
             {block.input === undefined ? (
               <Empty>{t("ui.components.chat.blocks.ToolBlock.c336c3a5f5ba")}</Empty>
             ) : (
-              <JsonView value={block.input} />
+              <JsonView value={block.input} className="rounded-none border-0 bg-transparent p-0" />
             )}
           </Section>
 
@@ -170,9 +173,9 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
               ) : savedQuestion ? (
                 <div aria-label={t("ui.components.chat.blocks.ToolBlock.d1166c319527")}><QuestionCard block={savedQuestion} sessionId={null} onAnswer={() => {}} /></div>
               ) : outputIsJson ? (
-                <JsonView value={output} />
+                <JsonView value={output} className="rounded-none border-0 bg-transparent p-0" />
               ) : outputJsonText ? (
-                <JsonSource text={outputText} className="max-h-tool-output" />
+                <JsonSource text={outputText} className="max-h-tool-output rounded-none border-0 bg-transparent p-0" />
               ) : outputMarkdown ? (
                 <Markdown dense className="text-compact">
                   {outputText}
@@ -186,6 +189,10 @@ export const ToolBlock = memo(function ToolBlock({ block, defaultOpen, sessionId
           ) : running ? (
             <div className="shimmer-bar h-8 w-full rounded-lg" />
           ) : null}
+          </div>
+          <footer className="flex justify-end border-t border-line bg-raised/30 px-2 py-1">
+            <LearnHarnessButton topic="tool" />
+          </footer>
         </div>
       ) : null}
       {widget || widgetPending ? <div className="mt-2 min-w-0">
@@ -207,14 +214,14 @@ function Section({
   useLocale()
 
   return (
-    <section>
-      <header className="mb-1 flex items-center justify-between gap-2">
-        <h5 className="text-xs font-medium text-muted">{label}</h5>
+    <section className="min-w-0 overflow-hidden rounded-lg border border-line bg-surface/60">
+      <header className="flex min-h-8 items-center justify-between gap-2 border-b border-line bg-raised/50 px-2.5 py-1">
+        <h5 className="text-xs font-semibold text-ink">{label}</h5>
         <div className="opacity-0 transition-opacity group-hover/tool:opacity-100 focus-within:opacity-100">
           {right}
         </div>
       </header>
-      <div className="border-line bg-surface/60 rounded-lg border p-2">{children}</div>
+      <div className="min-w-0 p-2.5">{children}</div>
     </section>
   )
 }

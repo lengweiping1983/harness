@@ -27,16 +27,19 @@ it('keeps the preview visible when details are collapsed and places expanded det
       expect(html).toContain('title="Original preview 原文"')
       expect(html.includes(t('ui.academy.learnTool'))).toBe(open)
       if (open) {
-        const detail = html.indexOf(t('ui.academy.learnTool'))
+        const detail = html.indexOf('data-tool-detail')
+        const learning = html.indexOf(t('ui.academy.learnTool'))
         const input = html.indexOf(t('ui.components.chat.blocks.ToolBlock.2087c777c06f'))
         const preview = html.indexOf('<figure')
         expect(detail).toBeGreaterThan(0)
         expect(input).toBeGreaterThan(detail)
-        expect(preview).toBeGreaterThan(input)
+        expect(learning).toBeGreaterThan(input)
+        expect(preview).toBeGreaterThan(learning)
         expect(html).toContain('Widget delivered')
-        const details = html.match(/<div id="[^"]+" class="([^"]+)">/)?.[1]?.split(' ')
-        expect(details).toEqual(expect.arrayContaining(['border', 'border-line', 'rounded-xl', 'p-3']))
+        const details = html.match(/<div id="[^"]+"[^>]*data-tool-detail="" class="([^"]+)">/)?.[1]?.split(' ')
+        expect(details).toEqual(expect.arrayContaining(['border', 'border-line', 'rounded-xl']))
         expect(details).not.toContain('border-l')
+        expect(html.match(/<footer\b[^>]*>([\s\S]*?)<\/footer>/)?.[1]).toContain(t('ui.academy.learnTool'))
       }
     }
   }

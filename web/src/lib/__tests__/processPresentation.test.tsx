@@ -58,3 +58,24 @@ it('紧凑工具摘要保留原命令、失败状态和独立详情关联', () =
     }
   }
 })
+
+it('展开详情先显示执行信息，原始输入输出位于卡片内，学习入口收尾', () => {
+  for (const locale of ['en', 'zh-CN', 'en'] as const) {
+    setLocale(locale)
+    for (const failed of [false, true]) {
+      const output = 'Original result 原文😀'
+      const html = renderToStaticMarkup(<ToolBlock defaultOpen block={{kind:'tool', id:'detail-hierarchy', callId:'detail-hierarchy', at:1, name:'bash', status:failed?'error':'ok', input:{command:'python3 verify.py'}, durationMs:165, display:{exit_code:failed?2:0}, output}} />)
+      const header = html.match(/<header\b[^>]*>([\s\S]*?)<\/header>/)!
+      const footer = html.match(/<footer\b[^>]*>([\s\S]*?)<\/footer>/)!
+      expect(header[1]).toContain('bash')
+      expect(header[1]).toContain(t('ui.toolBlock.duration', {duration:'165ms'}))
+      expect(header[1]).toContain(t('ui.toolBlock.exitCode', {code:failed?2:0}))
+      expect(header[1]).not.toContain(t('ui.academy.learnTool'))
+      expect(footer[1]).toContain(t('ui.academy.learnTool'))
+      expect(html.indexOf('python3 verify.py', header.index)).toBeGreaterThan(header.index!)
+      expect(html.indexOf(output)).toBeGreaterThan(header.index!)
+      expect(html.indexOf(output)).toBeLessThan(footer.index!)
+      expect(html).toContain('role="group" aria-label="bash" data-tool-detail=""')
+    }
+  }
+})
