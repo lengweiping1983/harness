@@ -134677,7 +134677,7 @@ async function main() {
   const endpointApi = request.provider === "openrouter" ? "openai-completions" : void 0;
   const api = (deepSeek ? "anthropic-messages" : connection.protocol) || original?.api || endpointApi || (knownApis.length === 1 ? knownApis[0] : void 0);
   if (!api) throw Error("The model needs an explicit API protocol");
-  const roleCompat = api === "openai-completions" && ["qwen-token-plan", "qwen-token-plan-cn", "qwen-token-plan-individual"].includes(request.provider) ? { supportsDeveloperRole: false } : {};
+  const roleCompat = api === "openai-completions" && ["custom", "qwen-token-plan", "qwen-token-plan-cn", "qwen-token-plan-individual"].includes(request.provider) ? { supportsDeveloperRole: false } : {};
   const model = {
     ...original,
     harnessIdentity: request.config?.model,

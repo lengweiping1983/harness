@@ -22,6 +22,10 @@
 
 ## 自定义网关模型失败与默认输出预算
 
+对照 2026-11-05 17:00 前基线 `527b0a3`、最初报错时的 `c863d3f` 和本机既有请求归档，确认两版模型传输及随包桥接相同，同一 TokenRhythm 接口的 `egg-alpha` 在下午成功使用 `system`，晚间失败使用 `developer`。晚间省略推理强度的请求也仍是 `developer`，用户提供的 `trace_9e54c006-ea37-488b-ae5b-daa3decbcd90` 对应归档没有 `reasoning_effort`；因此不能只根据界面所选档位判断实际请求。对照相邻成功／失败样本，工具名称与参数 schema 相同，仅 `write` 说明不同，提示词和对话内容仍有变化。这些归档证实此前正常，并提供角色变化的明确证据，但不能单独证明远端 409 的全部原因。
+
+角色变化来自 pi-ai 的 `model.reasoning && compat.supportsDeveloperRole` 分支：自定义模型一旦声明推理能力，运行库默认的 `supportsDeveloperRole: true` 就会将系统指令改为 `developer`，即使本次没有显式选择推理强度。这是能力配置触发的原有适配行为，并非 17:00 后提交引入了一套不同的模型传输。当前桥接为 Custom API 的 Chat Completions 提供 `supportsDeveloperRole: false` 默认值，恢复已成功使用的 `system`；目录、接口及模型的显式配置仍按原顺序覆盖，其他原生提供商不套用该默认值。`test_qwen_snapshot_instruction_role_reaches_actual_request` 已在修复前复现有／无目录、默认／high／max 时的角色误切，并覆盖修复后的实际请求、请求归档、显式覆盖及租约收尾。仅使用隔离回环，未重放用户请求、修改用户配置或进行新的在线调用；远端恢复仍待实际调用确认。
+
 2026-11-05 使用用户授权的 TokenRhythm 接口和同一 Key，仅发送固定的最小问答，不读取用户对话。目录明确报告 `deepseek-v4.1-flash-1017` 的输出能力为 384000、`egg-alpha` 为 128000。前者的 Chat Completions 流式请求成功；后者在 `max_completion_tokens` 为 128000、256 和省略时均返回 HTTP 409／`MODEL_CALL_FAILED`。移除 `store`、`stream_options` 的最简流式及非流式请求、改用 `max_tokens`、Responses 最小请求也返回相同错误。因此已排除 Harness 历史、工具定义和大输出上限是该错误的必要触发条件，但不能凭公开错误推断网关内部路由、账号权限或上游的具体故障。修复后的真实 Harness 分发再次确认 DeepSeek 未发送输出上限仍返回 `OK`，Egg 未发送输出上限仍失败，诊断保留 `provider_trace_id=trace_46efb38d-aaa5-4d9a-9e11-c9b40d50271b`。远端 Egg 的可用性仍需服务商核查，不能记录为修复通过。[平台接入文档](https://tokenrhythm.studio/docs/api-integration) 要求保留 `traceId` 排障；[错误码文档](https://tokenrhythm.studio/docs/errors) 未列出此 409 业务码，没有据此扩大自动重试的依据。
 
 源码链路为 `provider_runtime.provider_stream` → 发行 `bridge.mjs` → pi-ai 请求与重试器 → SDK／fetch。原来的 `normalize_request` 在没有业务预算时直接选择模型输出能力，桥接又把它作为显式 `maxTokens` 传入；因此目录能力变成每次请求的输出上限。`extra_body` 在桥接最后合并，原先还能覆盖已收敛的预算。当前共享规范化与桥接将未指定预算保持为未指定，Chat Completions／Responses 在最终正文省略可选上限；显式预算及三种字段别名统一收敛，必填 Messages 容量保持。[Chat Completions 参数文档](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create) 明确 `max_completion_tokens` 是可选上限，包含可见输出及推理 Token，并非请求实际用量。

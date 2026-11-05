@@ -112,9 +112,10 @@ async function main() {
   const endpointApi = request.provider === 'openrouter' ? 'openai-completions' : undefined;
   const api = (deepSeek ? 'anthropic-messages' : connection.protocol) || original?.api || endpointApi || (knownApis.length === 1 ? knownApis[0] : undefined);
   if (!api) throw Error('The model needs an explicit API protocol');
-  // Qwen 的日期快照和手工模型可能不在固定目录中，仍沿用端点的角色限制。
+  // 自定义接口的推理能力不代表支持 developer；默认保留 system，避免开启推理改变指令角色。
+  // Qwen 的日期快照和手工模型同样沿用端点的角色限制。
   // 仅提供协议默认值；目录、接口和模型的显式声明依次覆盖。
-  const roleCompat = api === 'openai-completions' && ['qwen-token-plan', 'qwen-token-plan-cn', 'qwen-token-plan-individual'].includes(request.provider)
+  const roleCompat = api === 'openai-completions' && ['custom', 'qwen-token-plan', 'qwen-token-plan-cn', 'qwen-token-plan-individual'].includes(request.provider)
     ? {supportsDeveloperRole: false} : {};
   const model = {...original, harnessIdentity: request.config?.model, id: raw.model, name: raw.name || raw.model, provider: request.provider, api,
     baseUrl: (!connection.protocol && connection.base_url === provider?.baseUrl ? original?.baseUrl : connection.base_url) || original?.baseUrl || provider?.baseUrl,

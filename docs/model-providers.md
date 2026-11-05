@@ -24,7 +24,7 @@ OpenCode Zen 的指定端点 `https://opencode.ai/zen/v1` 保留专用请求映�
 
 OpenRouter 在接口未显式选择协议、所选模型也没有协议元数据时，使用统一的 Chat Completions 入口。此规则覆盖手工添加、目录外新模型、空缓存和缺少协议字段的缓存；协议优先级为接口显式选择、所选模型目录声明、OpenRouter 端点默认值。已有模型声明的 Messages 协议及显式选择的 Responses 协议继续生效，运行时不改写已保存配置。其他混合协议提供商仍沿用自己的协议选择规则。
 
-Qwen Token Plan、CN 与 Individual 的 Chat Completions 接口默认使用 `system` 角色传递系统指令，包括目录外的新日期快照和手工模型。兼容参数按端点默认值、模型目录、接口配置、模型配置的顺序逐字段覆盖；可通过 `supportsDeveloperRole` 显式调整，不修改已保存的目录或对话。
+Custom API 的 Chat Completions 接口默认使用 `system` 角色传递系统指令；声明推理能力、选择 `high`／`max` 或使用模型默认，都不会自动将其改为 `developer`。Qwen Token Plan、CN 与 Individual 使用相同的系统角色默认值，包括目录外的新日期快照和手工模型。兼容参数按端点默认值、模型目录、接口配置、模型配置的顺序逐字段覆盖；已明确支持 `developer` 的接口可通过 `supportsDeveloperRole: true` 声明，其他原生提供商继续使用自己的角色规则。不修改已保存的配置或对话。
 
 ## 免登录免费模型
 

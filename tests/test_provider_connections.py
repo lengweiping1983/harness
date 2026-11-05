@@ -244,7 +244,7 @@ class RuntimeBridgeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(result[-1]['value'])
 
     async def test_qwen_snapshot_instruction_role_reaches_actual_request(self):
-        """日期新模型及旧缓存仍使用系统角色，显式兼容配置保留优先级。"""
+        """Qwen 与自定义接口不因推理能力升级指令角色，显式配置保留优先级。"""
         from harness.llm.types import DeveloperMessage, SystemMessage
         requests = []
 
@@ -268,28 +268,36 @@ class RuntimeBridgeTests(unittest.IsolatedAsyncioTestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         cases = [
-            ('qwen-token-plan-cn', '', True, {}, {}, 'system'),
-            ('qwen-token-plan-cn', 'openai-completions', True, {}, {}, 'system'),
-            ('qwen-token-plan-cn', '', False, {}, {}, 'system'),
-            ('qwen-token-plan', '', True, {}, {}, 'system'),
-            ('qwen-token-plan-individual', '', True, {}, {}, 'system'),
-            ('qwen-token-plan-cn', '', True, {'supportsDeveloperRole': True}, {}, 'developer'),
-            ('qwen-token-plan-cn', '', True, {'supportsDeveloperRole': True}, {'supportsDeveloperRole': False}, 'system'),
-            ('custom', 'openai-completions', True, {}, {}, 'developer'),
+            ('qwen-token-plan-cn', '', True, {}, {}, {}, 'system'),
+            ('qwen-token-plan-cn', 'openai-completions', True, {}, {}, {}, 'system'),
+            ('qwen-token-plan-cn', '', False, {}, {}, {}, 'system'),
+            ('qwen-token-plan', '', True, {}, {}, {}, 'system'),
+            ('qwen-token-plan-individual', '', True, {}, {}, {}, 'system'),
+            ('qwen-token-plan-cn', '', True, {}, {'supportsDeveloperRole': True}, {}, 'developer'),
+            ('qwen-token-plan-cn', '', True, {}, {'supportsDeveloperRole': True}, {'supportsDeveloperRole': False}, 'system'),
+            ('custom', 'openai-completions', True, {}, {}, {}, 'system'),
+            ('custom', 'openai-completions', False, {}, {}, {}, 'system'),
+            ('custom', 'openai-completions', True, {'supportsDeveloperRole': True}, {}, {}, 'developer'),
+            ('custom', 'openai-completions', True, {}, {'supportsDeveloperRole': True}, {}, 'developer'),
+            ('custom', 'openai-completions', True, {}, {'supportsDeveloperRole': True}, {'supportsDeveloperRole': False}, 'system'),
+            ('custom', 'openai-completions', True, {}, {'supportsDeveloperRole': False}, {'supportsDeveloperRole': True}, 'developer'),
+            ('openai', 'openai-completions', True, {}, {}, {}, 'developer'),
         ]
+        cases = [(*case, effort) for case in cases for effort in ((None, 'high', 'max') if case[0] == 'custom' else ('high',))]
         try:
-            for provider, protocol, cached, connection_compat, model_compat, role in cases:
-                with self.subTest(provider=provider, protocol=protocol, cached=cached, role=role), tempfile.TemporaryDirectory() as root:
+            for provider, protocol, cached, catalog_compat, connection_compat, model_compat, role, effort in cases:
+                with self.subTest(provider=provider, protocol=protocol, cached=cached, role=role, effort=effort), tempfile.TemporaryDirectory() as root:
                     value = provider_fixture(f'http://127.0.0.1:{server.server_port}/v1', protocol)
                     value['type'] = provider
                     connection = value['connections'][0]
                     connection['keys'] = connection['keys'][:1]
                     connection['compat'] = connection_compat
                     model = connection['models'][0]
-                    model.update(model='deepseek-v4.1-flash-1017', reasoning_efforts={'high': 'high'}, compat=model_compat)
+                    model.update(model='egg-alpha' if provider == 'custom' else 'deepseek-v4.1-flash-1017',
+                                 reasoning_efforts={'high': 'high', 'max': 'max'} if provider == 'custom' else {'high': 'high'}, compat=model_compat)
                     connection['models'] = [model]
                     if cached:
-                        connection['model_catalog'] = [{'id': model['model'], 'api': 'openai-completions', 'reasoning': True}]
+                        connection['model_catalog'] = [{'id': model['model'], 'api': 'openai-completions', 'reasoning': True, 'compat': catalog_compat}]
                     store = ProviderConnections(root)
                     store.save([value], store.revision)
                     adapter = OpenRouterAdapter('unused')
@@ -300,7 +308,7 @@ class RuntimeBridgeTests(unittest.IsolatedAsyncioTestCase):
                             captured.append(json.loads(event['body']))
                     events = [event async for event in adapter.stream(
                         [SystemMessage('系统指令'), DeveloperMessage('开发者指引'), UserMessage('test')],
-                        config=LlmCallConfig(model='harness/supplier/endpoint/model-a', reasoning_effort='high'),
+                        config=LlmCallConfig(model='harness/supplier/endpoint/model-a', reasoning_effort=effort),
                         on_request=capture)]
                     self.assertEqual(''.join(event.text for event in events if event.kind == 'text'), '完成')
                     self.assertEqual(len(captured), 1)
@@ -310,6 +318,12 @@ class RuntimeBridgeTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(body['model'], model['model'])
                     self.assertEqual(body['messages'][0], {'role': role, 'content': '系统指令\n\n开发者指引'})
                     self.assertEqual(body['messages'][-1], {'role': 'user', 'content': 'test'})
+                    if provider == 'custom' and effort is not None:
+                        self.assertEqual(body['reasoning_effort'], effort)
+                    if provider == 'custom' and effort is None:
+                        self.assertNotIn('reasoning_effort', body)
+                        self.assertNotIn('reasoning', body)
+                    self.assertEqual(adapter.provider_connections.leases, {})
         finally:
             await asyncio.to_thread(server.shutdown)
             server.server_close()
