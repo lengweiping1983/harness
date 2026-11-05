@@ -100,6 +100,8 @@ Web 单测入口也执行 `model-runtime/tests` 的桥接转录回归；Python �
 
 `seatbelt`／`bubblewrap` 只表示检测到对应程序，不证明当前宿主允许启动沙箱。`launchBrowser` 被动记录课程 `/run`／`check`／`tutor-turns` 的原始 POST 响应，以及产品实际发起的 `GET /receipts/{request_id}`、项目 `/runs` 和 `/tutor-turns` 响应。丢失的 POST 响应没有正文，须保留随后实际收到的回查原件；导师 HTTP 接口返回 JSON，后台执行证据由问答历史和运行记录读取，不把它当作浏览器可见的 SSE 执行接口。场景失败时，`cleanupFixture` 在关闭浏览器前最多等待 3 秒，并将最近 8 条响应的方法、URL、HTTP 状态及原始正文写入所属场景日志，每条正文最多 65536 个字符，截断与读取失败明确标记。诊断不新增请求、不重放执行、不替换原断言或根据 stderr 自动改变失败分类；没有捕获到直接证据的场景仍须独立定位。`academy-diagnostics-smoke.mjs` 以受控失败响应核对真实浏览器的两个上下文创建入口、POST 丢失后的 GET 回查、导师历史与运行记录、回执原文、原异常身份、无额外读取及零重放与监听清理，不作为真实沙箱拒绝的验收。真实 `academy-editor` 与 `academy-tutor` 场景另核对被动采集到的回查／完成历史与实际持久结果一致，避免诊断数组为空仍误报采集已覆盖。
 
+`academy-editor` 与 `academy-tutor` 将后端 stderr 文本和执行回执采集器分别命名为 `backendDiagnostics`、`executionDiagnostics`。后者在 `try` 块内较晚初始化；若与前者同名，该块内的启动超时和退出回调会捕获尚未初始化的内层变量，探针等提前失败后的真实后端退出便抛出 `ReferenceError`，掩盖原错误并使工作进程崩溃。`academy-startup-failure.test.mjs` 在隔离 Node 进程中通过 VM 模块执行这两个原始场景文件，保留真实子进程、readline 和 `cleanupFixture`，分别验证就绪前退出保留退出码与 stderr，以及浏览器启动失败后回收子进程仍传播同一原异常与基础设施标记；不启动浏览器，不替代真实业务场景。
+
 `academy-curriculum-smoke.mjs` 的课程完成投影使用真实读取后改写夹具响应。结束时须先以 `unrouteAll({behavior: 'wait'})` 撤销拦截并等待在途回调，再关闭浏览器；否则 `route.fetch()` 可能在最后的界面断言完成后仍未收尾，关闭会造成未处理的 `TargetClosedError` 并中断工作进程。诊断 smoke 用屏障固定这一时序，验证关闭发生在路由完成之后，不通过忽略路由异常消除失败。
 
 浏览器 JSON 报告的 `source` 保存本轮 `revision`、排除任意 `research` 目录后的 `changed` 路径和 `fingerprint`，`input` 保持同一指纹。指纹包含 HEAD 及实际文件内容；相同内容从未提交状态变为提交状态后，指纹也会变化。复验须比较实际输入身份及前后不变标记，不能把提交前回执写成提交态通过，或把旧的 `output/verification.json` 当作当前定点复验结果。提交后需要正式提交态证据时，重新执行所需的针对性用例；定点复验不代表完整套件通过。

@@ -13,14 +13,14 @@ import {cleanupFixture, diagnoseFailure} from './fixture-cleanup.mjs'
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const backend = spawn(fixturePython, ['-m', 'tests.academy_web_fixture'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']})
 const lines = createInterface({input: backend.stdout})
-let browser, page, failure, timer, diagnostics = ''
+let browser, page, failure, timer, backendDiagnostics = ''
 const releases = []
-backend.stderr.on('data', data => {diagnostics += data})
+backend.stderr.on('data', data => {backendDiagnostics += data})
 try {
   const ready = await new Promise((resolve, reject) => {
-    timer = setTimeout(() => reject(Error('Editor fixture startup timed out: ' + diagnostics)), 20000)
+    timer = setTimeout(() => reject(Error('Editor fixture startup timed out: ' + backendDiagnostics)), 20000)
     backend.once('error', reject)
-    backend.once('exit', code => reject(Error('Editor fixture exited: ' + code + diagnostics)))
+    backend.once('exit', code => reject(Error('Editor fixture exited: ' + code + backendDiagnostics)))
     lines.on('line', line => {try {const value = JSON.parse(line); if (Number.isInteger(value.port)) resolve(value)} catch {}})
   })
   clearTimeout(timer)
@@ -112,9 +112,9 @@ try {
   await page.waitForFunction(() => !sessionStorage.getItem('harness.academy.pending.v1'))
   let runs = (await (await page.request.get(base + '/api/v1/academy/projects/' + project.id + '/runs')).json()).runs
   assert.equal(runs.length, 1)
-  const diagnostics = academyDiagnostics(browser)
-  await diagnostics.wait()
-  const recovered = diagnostics.snapshot().find(record => record.method === 'GET'
+  const executionDiagnostics = academyDiagnostics(browser)
+  await executionDiagnostics.wait()
+  const recovered = executionDiagnostics.snapshot().find(record => record.method === 'GET'
     && new URL(record.url).pathname === '/api/v1/academy/receipts/' + pending.requestId && record.state === 'received')
   assert.ok(recovered, 'Lost execution responses must retain the actual receipt recovery body')
   assert.deepEqual(JSON.parse(recovered.body).result.run.result, runs[0].result)

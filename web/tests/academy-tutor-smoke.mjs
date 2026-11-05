@@ -13,14 +13,14 @@ import {cleanupFixture, diagnoseFailure} from './fixture-cleanup.mjs'
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const backend = spawn(fixturePython, ['-m', 'tests.academy_web_fixture'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']})
 const lines = createInterface({input: backend.stdout})
-let browser, page, failure, timer, diagnostics = ''
+let browser, page, failure, timer, backendDiagnostics = ''
 const releases = []
-backend.stderr.on('data', data => {diagnostics += data})
+backend.stderr.on('data', data => {backendDiagnostics += data})
 try {
   const ready = await new Promise((resolve, reject) => {
-    timer = setTimeout(() => reject(Error('Tutor fixture startup timed out: ' + diagnostics)), 20000)
+    timer = setTimeout(() => reject(Error('Tutor fixture startup timed out: ' + backendDiagnostics)), 20000)
     backend.once('error', reject)
-    backend.once('exit', code => reject(Error('Tutor fixture exited: ' + code + diagnostics)))
+    backend.once('exit', code => reject(Error('Tutor fixture exited: ' + code + backendDiagnostics)))
     lines.on('line', line => {try {const value = JSON.parse(line); if (Number.isInteger(value.port)) resolve(value)} catch {}})
   })
   clearTimeout(timer)
@@ -83,9 +83,9 @@ try {
   assert.equal(turns[0].status, 'completed')
   assert.equal(turns[0].prompt, question)
   assert.equal(turns[0].allow_execution, true)
-  const diagnostics = academyDiagnostics(browser)
-  await diagnostics.wait()
-  const observed = diagnostics.snapshot().filter(record => record.method === 'GET'
+  const executionDiagnostics = academyDiagnostics(browser)
+  await executionDiagnostics.wait()
+  const observed = executionDiagnostics.snapshot().filter(record => record.method === 'GET'
     && record.url === base + '/api/v1/academy/projects/' + project.id + '/tutor-turns' && record.state === 'received')
     .flatMap(record => JSON.parse(record.body).tutor_turns)
     .find(turn => turn.id === turns[0].id && turn.status === 'completed')
