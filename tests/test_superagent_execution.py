@@ -496,6 +496,31 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reconciled["state"], "running")
         self.assertEqual(self.shared["submit_calls"], [started["assignment_id"]])
 
+    async def test_authoritatively_absent_single_node_submission_blocks_mission_without_crashing(self):
+        origin, accepted, _ = self.accept_event()
+
+        async def reject_before_acceptance(worker, assignment, prompt, input_ids):
+            self.shared["submit_calls"].append(assignment["assignment_id"])
+            raise RuntimeError("native submission was rejected before acceptance")
+
+        self.adapter.submit = reject_before_acceptance
+        result = await self.host.execution.route_trigger(accepted["ticket_id"], origin["trigger_id"])
+
+        self.assertEqual(result["state"], "rejected")
+        assignment = self.host._execution_service._assignment(result["assignment_id"])
+        self.assertEqual(assignment["state"], "rejected")
+        with self.host._store.transaction() as db:
+            job = db.execute("SELECT state FROM jobs WHERE job_id=?", (assignment["job_id"],)).fetchone()
+            mission = db.execute("SELECT state FROM missions WHERE mission_id=?", (assignment["mission_id"],)).fetchone()
+            ticket_input = db.execute(
+                "SELECT state FROM ticket_inputs WHERE ticket_id=? AND trigger_id=?",
+                (accepted["ticket_id"], origin["trigger_id"]),
+            ).fetchone()
+        self.assertEqual(job["state"], "blocked")
+        self.assertEqual(mission["state"], "blocked")
+        self.assertEqual(ticket_input["state"], "waiting")
+        self.assertEqual(self.shared["submit_calls"], [result["assignment_id"]])
+
     async def test_lost_worker_creation_and_submission_receipts_are_reconciled_without_repeating(self):
         origin, accepted, _ = self.accept_event()
         self.shared["fail_workspace_receipt"] = True

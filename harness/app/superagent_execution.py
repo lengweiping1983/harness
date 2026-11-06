@@ -1211,7 +1211,7 @@ class CoordinatorExecutionService:
             audit = {"reconciliation_ref": f"assignment:{assignment['assignment_id']}:submission-absent"}
         self._transition(
             "assignment", assignment["assignment_id"], target, facts=facts,
-            changes={"ended_at": _now(), "error_ref": f"submission-not-started:{assignment['submission_key']}"},
+            changes={"error_ref": f"submission-not-started:{assignment['submission_key']}"},
             audit_payload=audit,
         )
         if self._control.mode(assignment["mission_id"])["mode"] != "cancelled":
@@ -1226,10 +1226,7 @@ class CoordinatorExecutionService:
         if self._dag_scheduler.uses_artifact_workflow(assignment):
             self._dag_scheduler._advance_mission_state(assignment["mission_id"])
             return
-        if self._dag_scheduler.uses_artifact_workflow(current):
-            self._dag_scheduler._advance_mission_state(current["mission_id"])
-            return
-        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (current["mission_id"],))
+        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (assignment["mission_id"],))
         if (mission and mission["state"] in {"running", "unknown"}
                 and self._control.mode(assignment["mission_id"])["mode"] != "cancelled"):
             facts = {"known_failure_or_human_decision": True}

@@ -5,6 +5,7 @@ handoff, recovery, and mission progression that make the policy executable.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 from ..core.errors import HarnessError
@@ -37,6 +38,9 @@ class CoordinatorDagScheduler:
         self._execution = execution
         self._policy = policy
         self._artifacts = None
+        self._capacity_lock = asyncio.Lock()
+        self._reserved_global = 0
+        self._reserved_by_mission = {}
 
     def set_artifacts(self, artifacts):
         if artifacts is None or not callable(getattr(artifacts, "capture", None)) or not callable(
@@ -67,32 +71,41 @@ class CoordinatorDagScheduler:
         e = self._execution
         if type(limit) is not int or not 1 <= limit <= 200:
             raise ValueError("limit must be an integer between 1 and 200")
-        missions = e.active_mission_states(limit=limit + 1)
-        backlog = len(missions) > limit
+        if limit == 200:
+            missions = e.active_mission_states(limit=limit)
+            total = e._read_one(
+                "SELECT COUNT(*) AS total FROM missions WHERE state IN "
+                "('planning','running','integrating','reviewing','cancelling','unknown')",
+                (),
+            )["total"]
+            backlog = total > limit
+        else:
+            missions = e.active_mission_states(limit=limit + 1)
+            backlog = len(missions) > limit
         missions = missions[:limit]
         results, errors = [], []
 
-        # Unknown Missions are reconciliation-only until their original effects
-        # are settled. They are deliberately not passed to the pure dispatch policy.
-        for mission in missions:
-            if mission.get("state") != "unknown":
-                continue
+        # Unknown Missions are reconciled first, but each Mission advances independently.
+        ordered = [
+            mission for mission in missions if mission.get("state") == "unknown"
+        ] + self._policy.order_missions(missions)
+
+        async def process(mission):
             try:
-                results.extend(await self.schedule_mission(mission["mission_id"]))
+                return ("ok", await self.schedule_mission(mission["mission_id"]))
             except Exception as exc:
-                errors.append({
+                return ("error", {
                     "mission_id": mission["mission_id"],
                     "code": getattr(exc, "code", type(exc).__name__),
                 })
 
-        for mission in self._policy.order_missions(missions):
-            try:
-                results.extend(await self.schedule_mission(mission["mission_id"]))
-            except Exception as exc:
-                errors.append({
-                    "mission_id": mission["mission_id"],
-                    "code": getattr(exc, "code", type(exc).__name__),
-                })
+        # A slow Workspace/Session creation in one Mission must not block other Missions.
+        outcomes = await asyncio.gather(*(process(mission) for mission in ordered))
+        for kind, value in outcomes:
+            if kind == "error":
+                errors.append(value)
+            else:
+                results.extend(value)
         return {
             "processed": len(missions),
             "scheduled": sum(1 for item in results if item.get("state") in {"running", "accepted"}),
@@ -165,40 +178,47 @@ class CoordinatorDagScheduler:
             if any(item["state"] == "pending" for item in active_by_job.get(job["job_id"], []))
         ]
         new_jobs = [job for job in ready if not active_by_job.get(job["job_id"])]
-        global_active = self._count_active_assignments()
         mission_active = len(active)
-        slots = self._policy.available_slots(
-            active_assignments=global_active,
-            mission_active_assignments=mission_active,
-            requested=len(new_jobs),
-        )
-        candidates = reserved + new_jobs[:slots]
+        slots = await self._reserve_slots(mission_id, mission_active, len(new_jobs))
+        reserved_new_jobs = new_jobs[:slots]
+        reserved_job_ids = {job["job_id"] for job in reserved_new_jobs}
+        reservations_remaining = slots
+        candidates = reserved + reserved_new_jobs
         results = []
 
-        for candidate in candidates:
-            mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
-            if mission is None or mission["state"] != "running":
-
-                break
-            assignment = self._assignment_for_job(candidate["job_id"])
-            if assignment is None:
-                used = self._count_mission_assignments(mission_id)
-                if used >= budget["max_turns"]:
-                    self._block_job(candidate, "mission-turn-budget-exhausted")
-                    continue
-            try:
-                result = await self._start_job(
-                    mission, candidate, nodes, ticket, trigger, mandate, default_profile, budget,
-                )
-            except HarnessError as exc:
-                if exc.code == "superagent/mission-paused":
-                    results.append({"state": "queued", "mission_id": mission_id, "job_id": candidate["job_id"]})
+        try:
+            for candidate in candidates:
+                mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
+                if mission is None or mission["state"] != "running":
                     break
-                raise
-            if result is not None:
-                results.append(result)
-        self._advance_mission_state(mission_id)
-        return results
+                assignment = self._assignment_for_job(candidate["job_id"])
+                if assignment is None:
+                    used = self._count_mission_assignments(mission_id)
+                    if used >= budget["max_turns"]:
+                        self._block_job(candidate, "mission-turn-budget-exhausted")
+                        continue
+                reserved_candidate = candidate["job_id"] in reserved_job_ids
+                try:
+                    try:
+                        result = await self._start_job(
+                            mission, candidate, nodes, ticket, trigger, mandate, default_profile, budget,
+                        )
+                    except HarnessError as exc:
+                        if exc.code == "superagent/mission-paused":
+                            results.append({"state": "queued", "mission_id": mission_id, "job_id": candidate["job_id"]})
+                            break
+                        raise
+                    if result is not None:
+                        results.append(result)
+                finally:
+                    if reserved_candidate:
+                        await self._release_slots(mission_id, 1)
+                        reservations_remaining -= 1
+            self._advance_mission_state(mission_id)
+            return results
+        finally:
+            if reservations_remaining:
+                await self._release_slots(mission_id, reservations_remaining)
 
     def _load_plan(self, mission):
         e = self._execution
@@ -312,6 +332,33 @@ class CoordinatorDagScheduler:
             f"SELECT COUNT(*) AS total FROM assignments WHERE state IN ({marks})",
             _ACTIVE_ASSIGNMENTS,
         )["total"]
+
+    async def _reserve_slots(self, mission_id, mission_active, requested):
+        async with self._capacity_lock:
+            mission_reserved = self._reserved_by_mission.get(mission_id, 0)
+            slots = self._policy.available_slots(
+                active_assignments=self._count_active_assignments() + self._reserved_global,
+                mission_active_assignments=mission_active + mission_reserved,
+                requested=requested,
+            )
+            if slots:
+                self._reserved_global += slots
+                self._reserved_by_mission[mission_id] = mission_reserved + slots
+            return slots
+
+    async def _release_slots(self, mission_id, count):
+        if type(count) is not int or count < 1:
+            raise ValueError("reservation release count must be a positive integer")
+        async with self._capacity_lock:
+            mission_reserved = self._reserved_by_mission.get(mission_id, 0)
+            if count > self._reserved_global or count > mission_reserved:
+                raise RuntimeError("DAG Scheduler capacity reservation underflow")
+            self._reserved_global -= count
+            mission_reserved -= count
+            if mission_reserved:
+                self._reserved_by_mission[mission_id] = mission_reserved
+            else:
+                self._reserved_by_mission.pop(mission_id, None)
 
     def _count_mission_assignments(self, mission_id):
         return self._execution._read_one(
