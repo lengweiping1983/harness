@@ -1214,3 +1214,147 @@ class UnifiedExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(host._closed)
         self.assertTrue(adapter.closed)
         self.assertTrue(adapter.shared["async_closed"])
+
+
+class TwoRootJoinPlanner:
+    """Deterministic test Planner for two independent roots and one delivered join."""
+
+    def plan(self, *, trigger_id, profile, prompt):
+        def node(node_id, instruction, dependencies=()):
+            return {
+                "node_id": node_id, "role": "work", "profile_id": profile.profile_id,
+                "instruction_ref": f"trigger:{trigger_id}:{node_id}",
+                "instruction": instruction,
+                "instruction_hash": fixtures._hash(instruction),
+                "dependencies": list(dependencies),
+            }
+
+        return {
+            "plan": {"nodes": [
+                node("source-a", "Prepare the first independent workstream."),
+                node("source-b", "Prepare the second independent workstream."),
+                node("join", "Combine the frozen outputs from both workstreams.", [
+                    {"node_id": "source-a", "requires_delivery": True},
+                    {"node_id": "source-b", "requires_delivery": True},
+                ]),
+            ]},
+            "acceptance": {"kind": "work_dag", "schema_version": 1},
+        }
+
+
+class DagSchedulerExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.fixture = fixtures.SuperagentExecutionTests()
+        self.fixture.planner = TwoRootJoinPlanner()
+        await self.fixture.asyncSetUp()
+        self.addAsyncCleanup(self.fixture.asyncTearDown)
+
+    def _rows(self, query, args=()):
+        f = self.fixture
+        with f.host._store.transaction() as db:
+            return [dict(row) for row in db.execute(query, args).fetchall()]
+
+    async def _start_dag(self):
+        f = self.fixture
+        origin, accepted, _ = f.accept_event(
+            text="Implement a change that requires two independent workstreams and a final integration.",
+        )
+        receipt = await f.host.execution.route_trigger(accepted["ticket_id"], origin["trigger_id"])
+        self.assertEqual(receipt["state"], "running")
+        mission = self._rows("SELECT * FROM missions WHERE ticket_id=?", (accepted["ticket_id"],))[0]
+        assignments = self._rows(
+            "SELECT assignment.*,job.node_id FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? ORDER BY job.node_id",
+            (mission["mission_id"],),
+        )
+        self.assertEqual({row["node_id"] for row in assignments}, {"source-a", "source-b"})
+        self.assertEqual(len(assignments), 2)
+        return accepted, mission, assignments
+
+    async def test_dag_uses_shared_scheduler_freezes_base_and_applies_every_required_delivery(self):
+        f = self.fixture
+        accepted, mission, roots = await self._start_dag()
+        frozen_base = mission["base_commit"]
+        self.assertEqual(frozen_base, "a" * 40)
+
+        # A later source HEAD change must not alter the already frozen Mission base.
+        f.shared["base_commit"] = "b" * 40
+        for assignment in roots:
+            f.adapter.finish(assignment["assignment_id"], {"summary": assignment["node_id"]})
+            result = await f.host.execution.reconcile(assignment["assignment_id"])
+            self.assertEqual(result["state"], "succeeded")
+
+        self.assertEqual(
+            {row["node_id"]: row["state"] for row in self._rows(
+                "SELECT node_id,state FROM jobs WHERE mission_id=?", (mission["mission_id"],)
+            )},
+            {"source-a": "done", "source-b": "done", "join": "pending"},
+        )
+        scheduled = await f.host.execution.schedule_dag_missions(limit=20)
+        self.assertGreaterEqual(scheduled["scheduled"], 1)
+
+        join = self._rows(
+            "SELECT assignment.*,job.node_id,worker.base_commit FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "JOIN workers AS worker ON worker.worker_id=assignment.worker_id "
+            "WHERE job.mission_id=? AND job.node_id='join'",
+            (mission["mission_id"],),
+        )
+        self.assertEqual(len(join), 1)
+        self.assertEqual(join[0]["state"], "running")
+        self.assertEqual(join[0]["base_commit"], frozen_base)
+        deliveries = self._rows(
+            "SELECT state FROM deliveries WHERE target_assignment_id=? ORDER BY artifact_id",
+            (join[0]["assignment_id"],),
+        )
+        self.assertEqual([row["state"] for row in deliveries], ["applied", "applied"])
+        self.assertEqual(len(f.shared["artifact_capture_calls"]), 2)
+        self.assertEqual(len(f.shared["artifact_import_calls"]), 1)
+        self.assertEqual(len(f.shared["artifact_import_calls"][0][1]), 2)
+
+        f.adapter.finish(join[0]["assignment_id"], {"summary": "Integrated output"})
+        completed = await f.host.execution.reconcile(join[0]["assignment_id"])
+        self.assertEqual(completed["state"], "succeeded")
+        mission_after = self._rows(
+            "SELECT state FROM missions WHERE mission_id=?", (mission["mission_id"],),
+        )[0]
+        self.assertEqual(mission_after["state"], "integrating")
+        self.assertEqual(self._rows(
+            "SELECT * FROM artifacts WHERE assignment_id IN "
+            "(SELECT assignment_id FROM assignments WHERE job_id IN "
+            "(SELECT job_id FROM jobs WHERE mission_id=?))", (mission["mission_id"],),
+        ).__len__(), 3)
+
+    async def test_artifact_delivery_conflict_blocks_join_without_overwriting_original_artifacts(self):
+        f = self.fixture
+        accepted, mission, roots = await self._start_dag()
+        for assignment in roots:
+            f.adapter.finish(assignment["assignment_id"], {"summary": assignment["node_id"]})
+            await f.host.execution.reconcile(assignment["assignment_id"])
+
+        f.shared["artifact_conflict"] = True
+        await f.host.execution.schedule_dag_missions(limit=20)
+        join_job = self._rows(
+            "SELECT * FROM jobs WHERE mission_id=? AND node_id='join'",
+            (mission["mission_id"],),
+        )[0]
+        self.assertEqual(join_job["state"], "blocked")
+        self.assertEqual(
+            [row["state"] for row in self._rows(
+                "SELECT state FROM deliveries WHERE target_assignment_id IN "
+                "(SELECT assignment_id FROM assignments WHERE job_id=?)", (join_job["job_id"],)
+            )],
+            ["conflict", "conflict"],
+        )
+        self.assertEqual(
+            self._rows("SELECT state FROM missions WHERE mission_id=?", (mission["mission_id"],))[0]["state"],
+            "blocked",
+        )
+        self.assertEqual(self._rows(
+            "SELECT * FROM artifacts WHERE assignment_id IN "
+            "(SELECT assignment_id FROM assignments WHERE job_id IN "
+            "(SELECT job_id FROM jobs WHERE mission_id=?))", (mission["mission_id"],),
+        ).__len__(), 2)
+        self.assertEqual(f.shared["artifact_import_calls"], [])
+

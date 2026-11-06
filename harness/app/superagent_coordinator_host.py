@@ -390,6 +390,9 @@ class _HostExecutionService:
         with self.__host._operation(): return await self.__service.reconcile(assignment_id)
     async def reconcile_ticket(self, ticket_id):
         with self.__host._operation(): return await self.__service.reconcile_ticket(ticket_id)
+    async def schedule_dag_missions(self, *, limit=100):
+        with self.__host._operation():
+            return await self.__service.schedule_dag_missions(limit=limit)
     def pending_routes(self, *, limit=100):
         with self.__host._operation():
             return self.__service.pending_routes(limit=limit)
@@ -503,7 +506,7 @@ class CoordinatorHost:
         secret_resolver: SecretResolver | None = None,
         local_identity_verifier: LocalIdentityVerifier | None = None,
         source_kinds: tuple[SourceKind, ...] = (), executor_adapter: object | None = None,
-        watchdog_limits: dict | None = None,
+        watchdog_limits: dict | None = None, planner: object | None = None,
     ):
         if executor_adapter is not None and getattr(executor_adapter, "instance_id", None) != instance_id:
             raise ValueError("ExecutorAdapter instance_id must match CoordinatorHost")
@@ -547,7 +550,8 @@ class CoordinatorHost:
         if executor_adapter is not None:
             from .superagent_execution import CoordinatorExecutionService
             self._execution_service = CoordinatorExecutionService(
-                store, self._authorization_service, self._source_service, executor_adapter, instance_id=instance_id,
+                store, self._authorization_service, self._source_service, executor_adapter,
+                instance_id=instance_id, planner=planner,
             )
             self._input_delivery_service = CoordinatorAssignmentInputDelivery(
                 store, self._authorization_service, self._source_service, executor_adapter,
@@ -560,6 +564,7 @@ class CoordinatorHost:
             self._artifacts_service = CoordinatorArtifacts(
                 store, executor_adapter, self._execution_service._admit_mission,
             )
+            self._execution_service._dag_scheduler.set_artifacts(self._artifacts_service)
             self._execution = _HostExecutionService(
                 self, self._execution_service, self._input_delivery_service,
                 self._mission_instruction_service,
@@ -574,7 +579,7 @@ class CoordinatorHost:
         secret_resolver: SecretResolver | None = None,
         local_identity_verifier: LocalIdentityVerifier | None = None,
         source_kinds: tuple[SourceKind, ...] = (), executor_adapter: object | None = None,
-        watchdog_limits: dict | None = None,
+        watchdog_limits: dict | None = None, planner: object | None = None,
     ) -> "CoordinatorHost":
         requested = Path(state_dir).expanduser()
         is_junction = getattr(requested, "is_junction", None)
@@ -609,7 +614,7 @@ class CoordinatorHost:
                 root, store, stack, instance_id=instance_id, legacy_state_dir=legacy, evidence_verifier=evidence_verifier,
                 secret_resolver=secret_resolver, local_identity_verifier=local_identity_verifier,
                 source_kinds=source_kinds, executor_adapter=executor_adapter,
-                watchdog_limits=watchdog_limits,
+                watchdog_limits=watchdog_limits, planner=planner,
             )
         except BaseException:
             if executor_adapter is not None:

@@ -14,6 +14,8 @@ from .superagent_coordinator_service import CoordinatorApplicationService
 from .superagent_coordinator_store import CoordinatorStore, _hash, _json, _now, _text
 from .superagent_executor import ExecutionAdapter, WorkerProfile
 from .superagent_coordination import CoordinatorControl, CoordinatorInputDelivery
+from .superagent_scheduler import CoordinatorScheduler
+from .superagent_dag_scheduler import CoordinatorDagScheduler
 
 
 _ACTOR = {"kind": "host", "component": "superagent-v2-execution"}
@@ -22,7 +24,7 @@ _TERMINAL_ASSIGNMENTS = ("succeeded", "failed", "interrupted", "rejected", "canc
 
 
 class SingleNodePlanner:
-    """Phase 4.2 的确定性单节点 Planner；DAG 解锁交由后续统一 Scheduler。"""
+    """默认确定性单节点 Planner；所有 Work Job 均由统一 Scheduler 推进。"""
 
     def plan(self, *, trigger_id: str, profile: WorkerProfile, prompt: str) -> dict:
         trigger_id = _text(trigger_id, "trigger_id")
@@ -45,7 +47,8 @@ class SingleNodePlanner:
 class CoordinatorExecutionService:
     """Explicit V2 execution surface; it never changes the production V1 Router."""
 
-    def __init__(self, store, authorization, sources, executor: ExecutionAdapter, *, instance_id: str):
+    def __init__(self, store, authorization, sources, executor: ExecutionAdapter, *,
+                 instance_id: str, planner=None):
         if executor.instance_id != instance_id:
             raise ValueError("ExecutorAdapter instance_id must match CoordinatorHost")
         self._store = store
@@ -54,9 +57,17 @@ class CoordinatorExecutionService:
         self._executor = executor
         self.instance_id = instance_id
         self._profiles = dict(executor.profiles)
-        self._planner = SingleNodePlanner()
+        self._planner = planner if planner is not None else SingleNodePlanner()
+        if not callable(getattr(self._planner, "plan", None)):
+            raise TypeError("V2 planner must expose plan(trigger_id, profile, prompt)")
         if not self._profiles:
             raise ValueError("V2 execution requires at least one WorkerProfile")
+        max_workers = getattr(executor, "max_workers", 32)
+        policy = CoordinatorScheduler(
+            max_active_assignments=min(4, max(1, max_workers)),
+            max_active_per_mission=2,
+        )
+        self._dag_scheduler = CoordinatorDagScheduler(self, policy)
         self._locks: dict[str, asyncio.Lock] = {}
         self._closed = False
         self._control = CoordinatorControl(store)
@@ -80,6 +91,15 @@ class CoordinatorExecutionService:
                 await result
         else:
             self._executor.close()
+
+    async def schedule_dag_missions(self, *, limit: int = 100) -> dict:
+        """周期性恢复并调度统一账本中的 DAG Mission。"""
+        self._ensure_open()
+        return await self._dag_scheduler.schedule_pending(limit=limit)
+
+    async def schedule_dag_mission(self, mission_id: str) -> list[dict]:
+        self._ensure_open()
+        return await self._dag_scheduler.schedule_mission(mission_id)
 
     def control_mission(self, mission_id, action, *, request_id, actor):
         """可信宿主控制入口；继续前重新核验授权，重复请求只返回原回执。"""
@@ -157,6 +177,7 @@ class CoordinatorExecutionService:
         for row in missions:
             results.append(await self._reconcile_cancelled_mission(row["mission_id"]))
         return {"processed": len(results), "missions": results}
+
 
     async def _reconcile_cancelled_mission(self, mission_id):
         control = self._control.mode(mission_id)
@@ -338,6 +359,7 @@ class CoordinatorExecutionService:
         if profile is None:
             raise PermissionError("No unique host-owned WorkerProfile maps this Trigger source")
         if not set(profile.actions) <= set(scope.get("actions", [])):
+
             raise PermissionError("WorkerProfile actions exceed the Ticket Mandate")
         if not set(profile.tools) <= set(scope.get("tools", [])):
             raise PermissionError("WorkerProfile tools exceed the Ticket Mandate")
@@ -518,6 +540,7 @@ class CoordinatorExecutionService:
     async def _ensure_worker(self, ticket_id: str, profile: WorkerProfile, mandate_valid: bool,
                              *, mission: dict, job: dict, stage: int = 1) -> dict:
         self._admit_mission(mission["mission_id"])
+
         base_commit = mission["base_commit"]
         worker_id, identity_hash = self._worker_identity(ticket_id, profile, base_commit,
             mission_id=mission["mission_id"], job_id=job["job_id"], stage=stage)
@@ -652,15 +675,15 @@ class CoordinatorExecutionService:
                 plan = uow.plans.create(
                     mission_id, expected_mission_revision=mission["aggregate_revision"],
                     plan=frozen_plan["plan"], acceptance=frozen_plan["acceptance"],
-                    created_by_kind="host", created_by_ref="single-node-planner",
+                    created_by_kind="host", created_by_ref="host-planner",
                 )
                 if plan is None:
                     raise HarnessError(tr("superagent.conflict"), code="superagent/revision-conflict")
                 mission = uow.missions.get(mission_id)
             plan = uow.plans.get(mission_id, mission["plan_revision"])
-            if plan is None or len(plan["jobs"]) != 1:
+            if plan is None or not plan["jobs"]:
                 raise HarnessError(tr("superagent.corrupt"), code="superagent/mission-corrupt")
-            return mission, plan["jobs"][0]
+            return mission, plan
 
     def _create_mission_assignment(self, ticket, trigger, mandate, profile, budget, worker,
                                    prompt, input_ids):
@@ -713,7 +736,13 @@ class CoordinatorExecutionService:
             mandate, profile, budget = self._mandate_context(ticket, trigger, input_row, require_work=False)
             existing = self._assignment_for_trigger(ticket_id, trigger_id)
             if existing is not None:
-                return await self.reconcile(existing["assignment_id"])
+                result = await self.reconcile(existing["assignment_id"])
+                scheduled = await self._dag_scheduler.schedule_mission(existing["mission_id"])
+                if scheduled:
+                    result["scheduled_assignments"] = [
+                        item.get("assignment_id") for item in scheduled if item.get("assignment_id")
+                    ]
+                return result
             if input_row["state"] == "delivered" and input_row.get("delivered_to_assignment_id"):
                 await self.reconcile(input_row["delivered_to_assignment_id"])
                 input_row = self._input(ticket_id, trigger_id)
@@ -741,23 +770,25 @@ class CoordinatorExecutionService:
             )["total"]
             if turns_used >= budget["max_turns"]:
                 raise PermissionError("Ticket Mandate execution turn budget is exhausted")
-            prompt, input_ids = self._build_prompt(ticket, trigger, mandate)
-            mission, job = self._create_mission_plan(ticket, trigger, mandate, profile, budget, prompt)
-            worker = await self._ensure_worker(ticket_id, profile, True, mission=mission, job=job)
-            self._admit_mission(mission["mission_id"])
-            mission, job, assignment = self._create_mission_assignment(
-                ticket, trigger, mandate, profile, budget, worker, prompt, input_ids,
-            )
-            self._admit_mission(mission["mission_id"])
-            try:
-                await self._executor.submit(worker, assignment, prompt, input_ids)
-            except Exception:
-                # 原提交键是唯一身份，返回丢失时只回查，不再次提交。
-                result = await self.reconcile(assignment["assignment_id"])
-            else:
-                result = await self.reconcile(assignment["assignment_id"])
-            result.setdefault("mission_id", mission["mission_id"])
-            return result
+            prompt, _ = self._build_prompt(ticket, trigger, mandate)
+            mission, _ = self._create_mission_plan(ticket, trigger, mandate, profile, budget, prompt)
+
+            # Single-node reports and multi-node Work DAGs enter the same durable
+            # Scheduler, Assignment creation, submission, and reconciliation path.
+            scheduled = await self._dag_scheduler.schedule_mission(mission["mission_id"])
+            if scheduled:
+                receipt = dict(scheduled[0])
+                receipt.setdefault("mission_id", mission["mission_id"])
+                receipt["scheduled_assignments"] = [
+                    item.get("assignment_id") for item in scheduled if item.get("assignment_id")
+                ]
+                return receipt
+            current = self._read_one("SELECT state FROM missions WHERE mission_id=?", (mission["mission_id"],))
+            return {
+                "state": current["state"] if current is not None else "queued",
+                "mission_id": mission["mission_id"],
+                "scheduled_assignments": [],
+            }
 
     def _assert_delivery_still_authorized(self, ticket_id: str, assignment_id: str,
                                           trigger: dict, mandate_id: str) -> None:
@@ -868,6 +899,7 @@ class CoordinatorExecutionService:
             "SELECT mission.mission_id,mission.state FROM missions AS mission "
             "LEFT JOIN watchdog_snapshots AS watchdog ON watchdog.mission_id=mission.mission_id "
             "WHERE mission.state IN "
+
             "('planning','running','integrating','reviewing','cancelling','unknown') "
             "ORDER BY COALESCE(watchdog.observed_at,''),mission.updated_at,mission.mission_id LIMIT ?",
             (limit,),
@@ -948,7 +980,10 @@ class CoordinatorExecutionService:
             raise HarnessError("Assignment Worker is not ready", code="superagent/worker-unavailable")
         if assignment["state"] in _TERMINAL_ASSIGNMENTS:
             if assignment["state"] == "succeeded":
-                self._finalize_report_effects(assignment)
+                if self._dag_scheduler.uses_artifact_workflow(assignment):
+                    self._dag_scheduler.finalize_succeeded_assignment(assignment)
+                else:
+                    self._finalize_report_effects(assignment)
             return {"state": assignment["state"], "assignment_id": assignment_id}
         if assignment["state"] == "submitting" or assignment["state"] == "unknown" and not assignment.get("run_id"):
             try:
@@ -1045,6 +1080,7 @@ class CoordinatorExecutionService:
                     }
                 if assignment["state"] in {"accepted", "running", "stopping", "unknown"}:
                     facts = {"original_run_settled": True}
+
                     audit = None
                     if assignment["state"] == "unknown":
                         facts["reconciliation_verified"] = True
@@ -1052,6 +1088,8 @@ class CoordinatorExecutionService:
                     assignment = self._transition("assignment", assignment_id, "capturing", facts=facts, audit_payload=audit)
                 return {"state": assignment["state"], "assignment_id": assignment_id,
                         "unsettled_background": snapshot["unsettled_background"]}
+            if self._dag_scheduler.uses_artifact_workflow(assignment):
+                return await self._dag_scheduler.finish_work_success(assignment, snapshot, evidence_ids)
             return self._finish_success(assignment, snapshot, evidence_ids)
         return {"state": assignment["state"], "assignment_id": assignment_id, "run_id": assignment.get("run_id")}
 
@@ -1175,7 +1213,13 @@ class CoordinatorExecutionService:
             if job["state"] == "unknown":
                 facts["reconciliation_verified"] = True
             self._transition("job", job["job_id"], "blocked", facts=facts, audit_payload=audit)
-        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (assignment["mission_id"],))
+        if self._dag_scheduler.uses_artifact_workflow(assignment):
+            self._dag_scheduler._advance_mission_state(assignment["mission_id"])
+            return
+        if self._dag_scheduler.uses_artifact_workflow(current):
+            self._dag_scheduler._advance_mission_state(current["mission_id"])
+            return
+        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (current["mission_id"],))
         if (mission and mission["state"] in {"running", "unknown"}
                 and self._control.mode(assignment["mission_id"])["mode"] != "cancelled"):
             facts = {"known_failure_or_human_decision": True}
@@ -1217,6 +1261,7 @@ class CoordinatorExecutionService:
         if value["status"] == "handback" and not reason.strip():
             return {"status": "completed", "summary": output[:4096], "reply": ""}
         if value["status"] == "attention" and not question.strip():
+
             return {"status": "completed", "summary": output[:4096], "reply": ""}
         return {"status": value["status"], "summary": summary, "reply": reply,
                 "question": question, "handback_reason": reason,
@@ -1397,6 +1442,7 @@ class CoordinatorExecutionService:
             if mandate_status == "revoked":
                 target = "suppressed"
                 facts = {"mandate_unavailable": True, "mandate_revoked": True}
+
                 outcome = "suppressed"
             else:
                 # Expiry is a known execution block, not a fabricated revocation event.
@@ -1524,12 +1570,18 @@ class CoordinatorExecutionService:
             report = json.loads(assignment["report_json"])
         except (TypeError, ValueError):
             return None
-        if report.get("kind") != "single_worker_report":
+        if report.get("kind") not in {"single_worker_report", "work_artifact_report"}:
             return None
         report_hash = report.get("report_hash")
         payload = {key: value for key, value in report.items() if key != "report_hash"}
         if not isinstance(report_hash, str) or _hash(_json(payload)) != report_hash:
             raise HarnessError("Frozen Worker Report hash does not match its payload", code="superagent/report-corrupt")
+        if report.get("kind") == "work_artifact_report":
+            artifact = self._read_one("SELECT * FROM artifacts WHERE assignment_id=?", (assignment_id,))
+            if (artifact is None or artifact["artifact_id"] != report.get("artifact_id")
+                    or artifact["manifest_hash"] != report.get("manifest_hash")
+                    or report.get("output_hash") != artifact["manifest_hash"]):
+                raise HarnessError("Frozen Work Artifact Report does not match its Artifact", code="superagent/report-corrupt")
         evidence = self._read_all(
             "SELECT * FROM evidence WHERE assignment_id=? ORDER BY created_at,evidence_id",
             (assignment_id,),
@@ -1571,6 +1623,7 @@ class CoordinatorExecutionService:
         return self._transition(
             "attention", attention_id, "answered",
             facts={"human_answer_trigger_verified": True},
+
             changes={"answer_trigger_id": answer_trigger_id, "resolved_at": _now()},
         )
 

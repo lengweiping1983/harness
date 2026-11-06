@@ -37,6 +37,9 @@ class FakeExecutionAdapter:
         self.shared.setdefault("false_stop_receipt", False)
         self.shared.setdefault("fail_inspect", False)
         self.shared.setdefault("async_closed", False)
+        self.shared.setdefault("artifact_conflict", False)
+        self.shared.setdefault("artifact_capture_calls", [])
+        self.shared.setdefault("artifact_import_calls", [])
         self.worker_lookup = None
         self.closed = False
 
@@ -47,7 +50,7 @@ class FakeExecutionAdapter:
         return next((p for p in self.profiles.values() if source_instance_id in p.source_instance_ids), None)
 
     def base_commit(self, profile):
-        return "a" * 40
+        return self.shared.get("base_commit", "a" * 40)
 
     def find_worker(self, worker, profile):
         value = self.shared["resources"].get(worker["worker_id"])
@@ -188,6 +191,59 @@ class FakeExecutionAdapter:
             status="queued", settled=False,
         )
 
+    def snapshot_workspace(self, worker):
+        resource = self.shared["resources"][worker["worker_id"]]
+        tree = resource.setdefault(
+            "tree", _hash(f"{worker['base_commit']}\\0{worker['worker_id']}")[:40],
+        )
+        return {
+            "tree": tree,
+            "workspace": {
+                "delivery": copy.deepcopy(resource.get("delivery")),
+                "delivery_inputs": copy.deepcopy(resource.get("delivery_inputs")),
+            },
+        }
+
+    async def capture_workspace(self, worker):
+        resource = self.shared["resources"][worker["worker_id"]]
+        tree = resource.setdefault(
+            "tree", _hash(f"{worker['base_commit']}\\0{worker['worker_id']}")[:40],
+        )
+        self.shared["artifact_capture_calls"].append(worker["worker_id"])
+        resource["delivery"] = {
+            "tree": tree, "ref": f"refs/superagent/{worker['worker_id']}",
+            "commit": "commit-" + worker["worker_id"],
+        }
+
+    def artifact_manifest(self, worker, receipt):
+        return {
+            "schema_version": 1, "worker_id": worker["worker_id"],
+            "tree": receipt["tree"], "files": [],
+        }
+
+    async def plan_artifact_delivery(self, worker, artifacts):
+        resource = self.shared["resources"][worker["worker_id"]]
+        target_tree = resource.setdefault(
+            "tree", _hash(f"{worker['base_commit']}\\0{worker['worker_id']}")[:40],
+        )
+        sources = [artifact["artifact_id"] for artifact in artifacts]
+        return {
+            "clean": not self.shared["artifact_conflict"],
+            "tree": _hash(_json([target_tree, sources]))[:40],
+            "target_tree": target_tree, "sources": sources,
+        }
+
+    async def apply_artifact_delivery(self, worker, artifacts, plan):
+        resource = self.shared["resources"][worker["worker_id"]]
+        self.shared["artifact_import_calls"].append(
+            (worker["worker_id"], tuple(plan["sources"])),
+        )
+        resource["tree"] = plan["tree"]
+        resource["delivery_inputs"] = {
+            "tree": plan["tree"], "target_tree": plan["target_tree"],
+            "sources": list(plan["sources"]),
+        }
+
     def close(self):
         self.closed = True
 
@@ -212,7 +268,8 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
             "fail_session_receipt": False, "fail_submit_ack": False,
         }
         self.adapter = FakeExecutionAdapter(self.instance_id, self.profile, self.shared)
-        self.host = self._open_host(self.adapter)
+        self.planner = getattr(self, "planner", None)
+        self.host = self._open_host(self.adapter, planner=self.planner)
         self.host.sources.create_instance(
             "local-source", kind="local", config={"namespace": "repo"},
             legacy_source_id="legacy-local",
@@ -237,13 +294,13 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
             "addressed": metadata.get("addressed", "direct"),
         }
 
-    def _open_host(self, adapter):
+    def _open_host(self, adapter, planner=None):
         return CoordinatorHost.open(
             self.root / "v2", instance_id=self.instance_id,
             identity={"project": "harness", "suite": "phase3"},
             legacy_state_dir=self.root / "v1",
             local_identity_verifier=self._local_identity,
-            executor_adapter=adapter,
+            executor_adapter=adapter, planner=planner,
         )
 
     @staticmethod

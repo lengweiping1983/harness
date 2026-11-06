@@ -271,7 +271,7 @@ class SuperagentService:
         source_kinds: tuple = (), secret_resolver=None, local_identity_verifier=None,
         watchdog_limits: dict | None = None, effect_adapters: Mapping | None = None,
         interval: float = 0.5, once_timeout: float = 600,
-        max_threads_per_tick: int = 16,
+        max_threads_per_tick: int = 16, planner: object | None = None,
     ):
         """显式打开统一协调运行模式；不被旧 CLI 或生产默认路由自动选择。"""
         if (
@@ -291,7 +291,7 @@ class SuperagentService:
             secret_resolver=secret_resolver,
             local_identity_verifier=local_identity_verifier,
             source_kinds=tuple(source_kinds), executor_adapter=executor_adapter,
-            watchdog_limits=watchdog_limits,
+            watchdog_limits=watchdog_limits, planner=planner,
         )
         try:
             service = cls()
@@ -488,6 +488,7 @@ class SuperagentService:
         pending_route_count = len(remaining_routes)
         route_backlog = route_backlog or pending_route_count > 100
 
+        dag_scheduling = await host.execution.schedule_dag_missions(limit=100)
         reconciliation = await host.execution.reconcile_active(limit=100)
         active_states = {"submitting", "accepted", "running", "capturing", "stopping"}
         active_assignments = [
@@ -553,6 +554,9 @@ class SuperagentService:
             "control_unknown": control_unknown,
             "control_backlog": control_backlog,
             "reconciliation": reconciliation,
+            "dag_scheduling": dag_scheduling,
+            "dag_scheduler_backlog": dag_scheduling.get("backlog", False),
+            "dag_scheduler_errors": len(dag_scheduling.get("errors", [])),
             "active_assignments": len(active_assignments),
             "unknown_assignments": len(unknown_assignments),
             "pending_triggers": pending_triggers,
@@ -589,6 +593,7 @@ class SuperagentService:
                 status["pending_triggers"] or status["pending_routes"]
                 or status["route_backlog"] or status["active_assignments"]
                 or status["pending_missions"] or status["mission_backlog"]
+                or status["dag_scheduler_backlog"]
                 or status["control_pending"] or status["control_backlog"]
                 or status["reconcile_backlog"]
             )
@@ -597,6 +602,7 @@ class SuperagentService:
                 or status["unknown_missions"] or status["watchdog_attention"]
                 or status["uncertain_effects"] or status["unavailable_assessments"]
                 or status["blocked_assessments"] or status["route_errors"]
+                or status["dag_scheduler_errors"]
             )
             if once and not pending:
                 return 2 if uncertain else 0
