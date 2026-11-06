@@ -86,7 +86,6 @@ class SessionTitles:
             if self.harness.has_model_credentials:
                 reason = 'request-error'
                 request_id = 'title_' + uuid4().hex
-                config = self.harness._session_llm_config(session).merged(max_tokens=256, reasoning_effort=None)
                 try:
                     parameters = inspect.signature(self.harness.adapter.complete).parameters
                 except (TypeError, ValueError):
@@ -101,6 +100,16 @@ class SessionTitles:
                         return await observer(data)
                     options['on_request'] = observe
                 async with asyncio.timeout(self.timeout):
+                    config = self.harness._session_llm_config(session).merged(max_tokens=256, reasoning_effort=None)
+                    resolve = getattr(self.harness.adapter, 'resolve_capabilities', None)
+                    capabilities = await resolve(config.model) if callable(resolve) else {}
+                    if (capabilities.get('supports_thinking') is not False
+                            and not capabilities.get('reasoning_mandatory')
+                            and 'off' in (capabilities.get('supported_efforts') or ())):
+                        # 模型默认不等于关闭推理；命名只对明确支持的模型选择关闭。
+                        config = config.merged(reasoning_effort='off', extra_body={
+                            key: value for key, value in config.extra_body.items()
+                            if key not in {'reasoning', 'reasoning_effort'}})
                     response = await self.harness.adapter.complete(
                         [SystemMessage(tr('session.title.prompt', limit=MAX_TITLE_CHARS)), UserMessage(text[:12000])],
                         config=config, tools=[], **options)

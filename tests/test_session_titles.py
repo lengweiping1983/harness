@@ -2,7 +2,9 @@
 import asyncio
 import json
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -12,6 +14,7 @@ from harness.core.events import EventBus
 from harness.core.language import current_language
 from harness.llm.types import LlmCallConfig
 from harness.llm.adapter import OpenRouterAdapter
+from harness.llm.providers import ProviderConnections
 from harness.session.events import AppendOp
 from harness.session.store import SessionStore
 from harness.web.views import session_listing
@@ -79,6 +82,119 @@ class SessionTitleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(session.header.title, chosen)
             self.assertEqual(session.header.metadata['auto_title'], 'manual')
             self.assertEqual(session.header.metadata, manual_metadata)
+
+    async def test_title_disables_reasoning_only_when_selected_model_supports_off(self):
+        base = LlmCallConfig(model='selected', max_tokens=4096, reasoning_effort='high',
+            extra_body={'reasoning': {'effort': 'high'}, 'reasoning_effort': 'high', 'user': 'fixture'})
+        self.app._session_llm_config = lambda session: base
+        cases = [
+            ({'supports_thinking': True, 'supported_efforts': ['off', 'high']}, 'off'),
+            ({'supported_efforts': ['off', 'low']}, 'off'),
+            ({'supports_thinking': True, 'supported_efforts': ['low', 'high']}, None),
+            ({'supports_thinking': False, 'supported_efforts': ['off']}, None),
+            ({'reasoning_mandatory': True, 'supported_efforts': ['off', 'high']}, None),
+            ({}, None),
+        ]
+        for capabilities, expected in cases:
+            with self.subTest(capabilities=capabilities):
+                resolve = AsyncMock(return_value=capabilities)
+                self.app.adapter.resolve_capabilities = resolve
+                session = self.create()
+                await self.append(session, 'Task')
+                await self.settle()
+                resolve.assert_awaited_once_with('selected')
+                config = self.complete.call_args.kwargs['config']
+                self.assertEqual((config.reasoning_effort, config.max_tokens), (expected, 256))
+                self.assertEqual(config.extra_body, {'user': 'fixture'} if expected == 'off' else base.extra_body)
+                self.assertEqual(session.header.metadata['auto_title'], 'generated')
+        self.assertEqual((base.reasoning_effort, base.max_tokens), ('high', 4096))
+        self.assertEqual(base.extra_body, {'reasoning': {'effort': 'high'}, 'reasoning_effort': 'high', 'user': 'fixture'})
+
+    async def test_capability_lookup_shares_title_deadline_without_sending_or_replaying(self):
+        self.titles.timeout = .01
+        entered, cleaned = asyncio.Event(), asyncio.Event()
+        async def resolve(model):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaned.set()
+        self.app.adapter.resolve_capabilities = resolve
+        session = self.create()
+        with self.assertLogs('harness.app.session_titles', level='WARNING'):
+            await self.append(session, 'Task')
+            await self.settle()
+        self.assertTrue(entered.is_set())
+        self.assertTrue(cleaned.is_set())
+        self.complete.assert_not_awaited()
+        self.assertEqual(session.header.metadata['auto_title_reason'], 'timeout')
+        self.assertEqual(self.store.request_traces.page(session.id)['requests'], [])
+        await self.append(session, 'Next task')
+        self.complete.assert_not_awaited()
+
+    async def test_title_off_reaches_provider_bridge_and_archived_request_without_changing_settings(self):
+        from tests.test_provider_connections import provider_fixture
+        requests = []
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                """隔离请求不输出凭据。"""
+            def do_POST(self):
+                requests.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream')
+                self.end_headers()
+                chunks = [
+                    {'id': 'fixture', 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': 'Generated title'}, 'finish_reason': None}]},
+                    {'id': 'fixture', 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}], 'usage': {'prompt_tokens': 12, 'completion_tokens': 3}},
+                ]
+                for chunk in chunks:
+                    self.wfile.write(('data: ' + json.dumps(chunk) + '\n\n').encode())
+                self.wfile.write(b'data: [DONE]\n\n')
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for thinking_format, field, expected in [('openai', 'reasoning_effort', 'none'), ('openrouter', 'reasoning', {'effort': 'none'})]:
+                with tempfile.TemporaryDirectory() as root, self.subTest(thinking_format=thinking_format):
+                    value = provider_fixture(f'http://127.0.0.1:{server.server_port}/v1')
+                    connection = value['connections'][0]
+                    connection['models'] = connection['models'][:1]
+                    connection['models'][0]['model'] = 'title-reasoner'
+                    connection['compat'] = {'thinkingFormat': thinking_format}
+                    connection['model_catalog'] = [{'id': 'title-reasoner', 'api': 'openai-completions',
+                        'reasoningEfforts': ['off', 'high'], 'contextWindow': 32000, 'maxTokens': 4096,
+                        **({'thinkingLevelMap': {'off': 'none', 'high': 'high'}} if thinking_format == 'openai' else {}),
+                        'compat': {'supportsReasoningEffort': True, 'supportsStore': False}}]
+                    providers = ProviderConnections(root)
+                    providers.save([value], providers.revision)
+                    before = providers.path.read_bytes()
+                    adapter = OpenRouterAdapter('unused')
+                    adapter.provider_connections = providers
+                    self.app.adapter = adapter
+                    base = LlmCallConfig(model='harness/supplier/endpoint/model-a', reasoning_effort='high',
+                        max_tokens=4096, extra_body={'reasoning': {'effort': 'high'}, 'reasoning_effort': 'high'})
+                    self.app._session_llm_config = lambda session: base
+                    session = self.create()
+                    await self.append(session, 'Original task')
+                    await self.settle()
+                    self.assertEqual(session.header.metadata['auto_title'], 'generated')
+                    body = requests[-1]
+                    self.assertEqual(body[field], expected)
+                    self.assertNotIn('reasoning' if field == 'reasoning_effort' else 'reasoning_effort', body)
+                    self.assertEqual(body['model'], 'title-reasoner')
+                    self.assertEqual(body.get('max_completion_tokens', body.get('max_tokens')), 256)
+                    trace = self.store.request_traces.page(session.id)['requests'][0]
+                    archived = json.loads(self.store.request_traces.read(session.id, trace['id'])[1])
+                    self.assertEqual(archived[field], expected)
+                    self.assertEqual(trace['purpose'], 'title')
+                    self.assertEqual(providers.path.read_bytes(), before)
+                    self.assertEqual((base.reasoning_effort, base.max_tokens), ('high', 4096))
+                    self.assertFalse(providers.leases)
+            self.assertEqual(len(requests), 2)
+        finally:
+            await asyncio.to_thread(server.shutdown)
+            server.server_close()
+            thread.join(timeout=5)
 
     async def test_failures_invalid_results_and_no_credentials_keep_stable_fallback(self):
         cases = [(RuntimeError('offline'), 'request-error'), ('', 'empty-output'),

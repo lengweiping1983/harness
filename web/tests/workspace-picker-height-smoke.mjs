@@ -13,7 +13,9 @@ const project={id:'fixture',path:'/fixture',name:'Project 原文',color:'brand',
 api.listWorkspaces=async()=>({ok:true,data:{workspaces:[project],default:project.path}})
 api.listDirectories=async()=>({ok:true,data:{path:project.path,parent:'/',name:'fixture',entries:Array.from({length:100},(_,index)=>({name:'directory-'+index,path:'/fixture/'+index})),truncated:false}})
 const originalFetch=window.fetch
-window.fetch=(path,options)=>String(path).includes('/api/v1/workspace-options')?Promise.resolve(Response.json({cwd:'/fixture',is_git:true,root:'/fixture',branch:'main',head:'abc',refs:['main'],local_branches:['main'],dirty:true})):originalFetch(path,options)
+window.pendingChecks=[]
+window.releaseChecks=()=>window.pendingChecks.splice(0).forEach(resolve=>resolve(Response.json({cwd:'/fixture',is_git:true,root:'/fixture',branch:'main',head:'abc',refs:['main'],local_branches:['main'],dirty:true})))
+window.fetch=(path,options)=>String(path).includes('/api/v1/workspace-options')?new Promise(resolve=>window.pendingChecks.push(resolve)):originalFetch(path,options)
 window.copy=t
 window.locale=setLocale
 window.openPicker=(theme,size)=>{
@@ -32,18 +34,23 @@ await browserScenario(async ({server, browser}) => {
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(server.resolvedUrls.local[0] + '__workspace-picker-height')
     await page.evaluate(({theme, size}) => window.openPicker(theme, size), {theme, size})
-    for (const language of ['en', 'zh-CN', 'en']) {
-      await page.evaluate(language => window.locale(language), language)
-      const label = await page.evaluate(() => window.copy('ui.newConversation.useProject'))
-      const button = page.getByRole('dialog').getByRole('button', {name: label, exact: true})
-      await button.waitFor()
-      await page.waitForFunction(label => Array.from(document.querySelectorAll('button')).some(node => node.textContent === label && !node.disabled), label)
-      assert.equal(await button.evaluate(node => {
-        const bounds = node.getBoundingClientRect()
-        const x = bounds.left + bounds.width / 2, y = bounds.top + bounds.height / 2
-        return bounds.top >= 0 && bounds.bottom <= innerHeight && node.contains(document.elementFromPoint(x, y))
-      }), true, JSON.stringify({width, height, theme, size, language}))
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    await page.waitForFunction(() => window.pendingChecks.length > 0)
+    for (const phase of ['checking', 'ready']) {
+      if (phase === 'ready') await page.evaluate(() => window.releaseChecks())
+      for (const language of ['en', 'zh-CN', 'en']) {
+        await page.evaluate(language => window.locale(language), language)
+        const label = await page.evaluate(() => window.copy('ui.newConversation.useProject'))
+        const button = page.getByRole('dialog').getByRole('button', {name: label, exact: true})
+        await button.waitFor()
+        if (phase === 'ready') await page.waitForFunction(label => Array.from(document.querySelectorAll('button')).some(node => node.textContent === label && !node.disabled), label)
+        assert.equal(await button.isDisabled(), phase === 'checking')
+        assert.equal(await button.evaluate(node => {
+          const bounds = node.getBoundingClientRect()
+          const x = bounds.left + bounds.width / 2, y = bounds.top + bounds.height / 2
+          return bounds.top >= 0 && bounds.bottom <= innerHeight && node.contains(document.elementFromPoint(x, y))
+        }), true, JSON.stringify({width, height, theme, size, language, phase}))
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+      }
     }
     await page.getByRole('dialog').getByRole('button', {name: await page.evaluate(() => window.copy('ui.newConversation.useProject')), exact: true}).click()
     await page.getByRole('dialog').waitFor({state: 'hidden'})

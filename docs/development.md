@@ -322,7 +322,7 @@ python -m venv .run/semantic-eval
 
 ## 防止再次引入已修复问题
 
-工作台与本机管理接口的 QA 逐项判定、源码依据和未验证边界见 [工作台审查记录](workbench-review.md)。`ConversationCheckout.test.tsx` 核对后台暂停提示、返回恢复、等待期间只读刷新及旧请求隔离；`workspace-picker-height-smoke.mjs` 保留 647×676 等视口的确认按钮几何与命中断言，以及明暗主题、英中英和字号边界，属于显式浏览器专项。数值与隧道输入的定向回归位于 `CapabilitiesPanel.test.tsx` 和 `McpServicePanel.test.tsx`，验证非法值不发送写请求、草稿保留、空值语义和同实例英中英；`test_plugin_preview_bounds.py` 验证提前停止枚举、句柄收尾和既有摘要顺序，`WebCorsTests` 验证实际请求与预检同源策略、Fetch Metadata 归一化及原生客户端保留；`web/tests/dev-api-cors.test.mjs` 用隔离 Vite 和 HTTP 后端核对代理预检与响应头不被开发入口提前放行。插件 I/O 错误的缺失目录、权限失败、日志诊断、无路径响应及双语消费由 `test_plugin_validation_language.py` 和 `httpErrorLanguage.test.ts` 的对应错误码用例验证。
+工作台与本机管理接口的 QA 逐项判定、源码依据和未验证边界见 [工作台审查记录](workbench-review.md)。`ConversationCheckout.test.tsx` 核对后台暂停提示、返回恢复、等待期间只读刷新及旧请求隔离；`workspace-picker-height-smoke.mjs` 保留 647×676 等视口在项目检查挂起及完成两阶段的确认按钮几何与命中断言，以及明暗主题、英中英和字号边界，属于显式浏览器专项。数值与隧道输入的定向回归位于 `CapabilitiesPanel.test.tsx` 和 `McpServicePanel.test.tsx`，验证非法值不发送写请求、草稿保留、空值语义和同实例英中英；`test_plugin_preview_bounds.py` 验证提前停止枚举、句柄收尾和既有摘要顺序，`WebCorsTests` 验证实际请求与预检同源策略、Fetch Metadata 归一化及原生客户端保留；`web/tests/dev-api-cors.test.mjs` 用隔离 Vite 和 HTTP 后端核对代理预检与响应头不被开发入口提前放行。插件 I/O 错误的缺失目录、权限失败、日志诊断、无路径响应及双语消费由 `test_plugin_validation_language.py` 和 `httpErrorLanguage.test.ts` 的对应错误码用例验证。
 
 修改前按 [代码生成与防回归](code-generation.md) 核对相关不变量。新增缺陷回归应先固定触发条件，再检查真实入口及实际结果；受控异步屏障优先于固定睡眠。产品语言资源、机器协议、业务写入和观察请求分别处理，不能靠统一捕获、默认值或重试掩盖错误。
 
@@ -490,7 +490,7 @@ Superagent 目标控制回归位于 `tests/test_superagent_control.py` 与 `test
 
 Superagent 长节点回归位于 `tests/test_superagent_checkpoints.py`，通过真实隔离工作树、文件工具、原运行和确定性模型检查阶段交接、最终依赖解锁、重启不重放、捕获确认丢失、后台写入、未知工具、预算和指令上下文。检查点协议为显式配置；完整行为及限制统一见 [Superagent 模式](superagent.md#长工作节点的阶段接续)。这些离线回归不证明真实模型的交接质量或长时吞吐。
 
-对话自动标题由 `tests/test_session_titles.py` 经真实事件总线和持久存储核对首次人工输入、独立模型配置、原文保持、后续消息稳定、手动同值改名保护、并发对话隔离、删除后的迟到回包、关闭收尾及同实例英中英提示词。命名追踪回归通过真实适配器和受控 SSE 传输核对归档、失败原因、原件重开、删除后的迟到传输及自定义适配器签名；纯附件只取文件名，不将附件模型正文发送给命名请求。`test_session_creation_receipt.py` 保留初始请求身份和完成标记断言，并核对无标题创建的自动命名登记；前端 `sessionCreationRecovery.test.ts` 核对创建请求不把用户消息写成显式标题，未知结果仍只回查原创建请求；旧请求确认完成后，更换项目／检出／智能体的同一次发送继续创建当前对话，切换期间不误发。`test_model_readiness.py` 经实际状态路由、提供商凭据存储和标题消费者核对主配置无 Key 时的连接及订阅来源。
+对话自动标题由 `tests/test_session_titles.py` 经真实事件总线和持久存储核对首次人工输入、独立模型配置、原文保持、后续消息稳定、手动同值改名保护、并发对话隔离、删除后的迟到回包、关闭收尾及同实例英中英提示词。命名追踪回归通过真实适配器和受控 SSE 传输核对归档、失败原因、原件重开、删除后的迟到传输及自定义适配器签名；能力边界回归核对只对支持关闭的模型选择 `off`、能力查询计入超时且不重放，实际提供商桥接与本机 HTTP 回归核对关闭参数进入传输和归档、连接与执行配置不变；纯附件只取文件名，不将附件模型正文发送给命名请求。`test_session_creation_receipt.py` 保留初始请求身份和完成标记断言，并核对无标题创建的自动命名登记；前端 `sessionCreationRecovery.test.ts` 核对创建请求不把用户消息写成显式标题，未知结果仍只回查原创建请求；旧请求确认完成后，更换项目／检出／智能体的同一次发送继续创建当前对话，切换期间不误发。`test_model_readiness.py` 经实际状态路由、提供商凭据存储和标题消费者核对主配置无 Key 时的连接及订阅来源。
 
 
 `tests/test_runtime_validation_language.py` 核对运行和工具声明的双语拒绝：目标序列与绝对路径、输出上限、已取消请求、运行缓存身份/删除边界及轮次选择。workflow 元数据错误保留精确字段路径并使用本次语言，合法元数据及用户正文不改写；Node 引擎行为另运行现有 workflow 专项。
