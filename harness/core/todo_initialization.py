@@ -1,4 +1,4 @@
-"""实施阶段的首次建单保障：只接受模型通过正式工具提交的真实清单。"""
+"""普通实施提供建单建议，已批准计划在实施前要求真实清单。"""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,7 @@ from .todo_progress import BOOKKEEPING_TOOLS
 
 
 class TodoInitialization:
-    """批准计划立即要求建单；无计划时由连续写入识别多步骤实施。"""
+    """批准计划立即要求建单；无计划时连续写入只触发有限提醒。"""
 
     MAX_REPAIR_REQUESTS = 2
     WRITE_BATCH_THRESHOLD = 3
@@ -66,7 +66,7 @@ class TodoInitialization:
             self.pending_notice = True
 
     def denial(self, event: Any, definition: Any) -> dict[str, Any] | None:
-        if not self.required or self.has_list(event) or not self.implementation_tool(definition):
+        if self.plan is None or not self.required or self.has_list(event) or not self.implementation_tool(definition):
             return None
         self.pending_notice = True
         return {'code': 'todo/list-required', 'message': tr('todo.initialization.before_work'),
@@ -74,8 +74,8 @@ class TodoInitialization:
                 **({'plan_id': self.plan['id']} if self.plan is not None else {})}
 
     def defer_completion(self, event: Any) -> bool:
-        """漏建清单不能通过直接返回最终文本被当作正常完成。"""
-        if not self.required or self.has_list(event):
+        """只有已批准计划的建单要求会阻止直接收尾。"""
+        if self.plan is None or not self.required or self.has_list(event):
             return False
         self.pending_notice = True
         return True
@@ -84,11 +84,17 @@ class TodoInitialization:
         if not self.required or self.has_list(event) or not self.pending_notice:
             return None
         if self.repair_requests >= self.MAX_REPAIR_REQUESTS:
+            if self.plan is None:
+                self.pending_notice = False
+                return None
             raise HarnessError(tr('todo.initialization.failed'), code='todo/list-required')
         self.repair_requests += 1
         self.pending_notice = False
         scope = {'reason': 'approved_plan' if self.plan is not None else 'repeated_writes',
                  'plan_id': self.plan['id'] if self.plan is not None else None,
                  'write_batches': self.write_batches}
-        return {'kind': 'todo_initialization_required', **scope, 'attempt': self.repair_requests,
-                'text': tr('todo.initialization.instructions') + '\n' + json.dumps(scope, ensure_ascii=False)}
+        approved = self.plan is not None
+        return {'kind': 'todo_initialization_required' if approved else 'todo_initialization_reminder',
+                **scope, 'attempt': self.repair_requests,
+                'text': tr('todo.initialization.instructions' if approved else 'todo.initialization.advisory')
+                + '\n' + json.dumps(scope, ensure_ascii=False)}

@@ -4982,5 +4982,9 @@
   "ui.companion.saveUnconfirmed": "The save result is unconfirmed. No save will be repeated automatically; check the connection status.",
   "ui.companion.tokenHint": "Harness generates this pairing token. Copy it into the browser extension; no input is needed here.",
   "ui.companion.tokenPending": "Generated automatically after MCP starts",
-  "ui.companion.tokenDisabled": "Available after enabling continuation and starting MCP"
+  "ui.companion.tokenDisabled": "Available after enabling continuation and starting MCP",
+  "ui.process.runningCount": "{count} in progress",
+  "ui.process.failedCount": "{count} failed",
+  "ui.process.skippedCount": "{count} skipped",
+  "ui.process.backgroundCount": "{count} in background"
 }

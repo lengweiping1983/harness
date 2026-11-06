@@ -1,12 +1,12 @@
 import { HarnessLogo } from '@/components/ui/HarnessLogo'
 import { noticeText } from '@/lib/noticeText'
-import { ToolActivityIcon } from '@/components/ui/ToolActivityIcon'
+import { observeMessageSelectionCopy } from '@/lib/copyMessageSelection'
 import { messageNavigationEntries, type MessageNavigationEntry } from '@/lib/messageNavigation'
 import { MessageNavigator } from './MessageNavigator'
 import { t, useLocale } from '@/i18n'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ArrowDown, Brain, ChevronRight, ListOrdered, RotateCw, WifiOff } from 'lucide-react'
+import { ArrowDown, ListOrdered, RotateCw, WifiOff } from 'lucide-react'
 import type { Block, QuestionBlock } from '@/types'
 import { api, unwrap } from '@/lib/api'
 import { cn, createDateHeadingFormatter } from '@/lib/utils'
@@ -23,6 +23,7 @@ import { groupToolRuns } from '@/lib/toolRuns'
 import { completionRows, type CompletedConversationRow } from '@/lib/turnCompletion'
 import { TurnCompletionBar } from './blocks/TurnCompletionBar'
 import { TurnElapsed } from './blocks/TurnElapsed'
+import { ProcessGroupSummary, ProcessSummaryButton } from './blocks/ProcessSummary'
 import { ConversationScenarios } from './ConversationScenarios'
 import { readTurnDisclosure, rememberTurnDisclosures } from '@/lib/turnDisclosure'
 import { appendedBlockCount } from '@/lib/conversationArrival'
@@ -105,6 +106,10 @@ export function Conversation({
   const [answerFeedback, setAnswerFeedback] = useState<Record<string, QuestionSubmissionFeedback | undefined>>({})
   const toast = useAppStore((s) => s.toast)
   const sessionId = useAppStore((s) => s.activeSessionId)
+  useEffect(() => {
+    const scope = parentRef.current
+    if (scope) return observeMessageSelectionCopy(scope)
+  }, [sessionId])
   const toolRunChoices = useMemo(() => toolRunState.sessionId === sessionId ? toolRunState.values : {}, [toolRunState, sessionId])
   const latestTurn = Object.keys(turns).reduce((latest, turn) => Math.max(latest, Number(turn)), 0)
   const queuedEmpty = useChatStore((state): 'none' | 'paused' | 'environment' | 'queued' => {
@@ -152,7 +157,7 @@ export function Conversation({
     const loadedIds = new Set(body.map(block => block.id))
     for (const id of toolRunIdentities.current.aliases.keys()) if (!loadedIds.has(id)) toolRunIdentities.current.aliases.delete(id)
     const out: Item[] = []
-    if (history && history.total > 0) out.push({ kind: 'history', id: 'conversation-history' })
+    if (history && (history.has_more || history.loading || history.error || history.resetRequired)) out.push({ kind: 'history', id: 'conversation-history' })
     const formatDay = createDateHeadingFormatter()
     let lastDay = ''
     for (const row of completionRows(groupToolRuns(conversationRows(changeRows.filter(row => row.kind !== 'changes' || changeCardVisible(row, sessionId, changeChoices)), turns, activityChoices), toolRunChoices, toolRunIdentities.current.aliases), turns)) {
@@ -164,7 +169,7 @@ export function Conversation({
       out.push(row)
     }
     return out
-  }, [body, changeRows, changeChoices, history?.total, turns, activityChoices, toolRunChoices, sessionId, locale])
+  }, [body, changeRows, changeChoices, history?.has_more, history?.loading, history?.error, history?.resetRequired, turns, activityChoices, toolRunChoices, sessionId, locale])
 
   const navigationEntries = useMemo(() => messageNavigationEntries(items, history), [items, history])
   const navigationRead = useRef<Promise<void> | null>(null)
@@ -599,13 +604,12 @@ export function Conversation({
                 if (!row) return null
                 if (row.kind === 'history') return <div key={row.id} data-index={item.index} data-row-id={row.id} ref={restoreSettled ? virtualizer.measureElement : undefined}
                   className="flex flex-col items-center gap-2 py-3 text-xs text-muted">
-                  <span>{t('ui.conversation.historyCount', {loaded: history ? history.end - history.start : 0, total: history?.total ?? 0})}</span>
                   {history?.error ? <p role="alert" className="max-w-full text-center text-danger">{noticeText(history.error)}</p> : null}
                   {history?.resetRequired ? <Button size="sm" variant="secondary" icon={<RotateCw aria-hidden className="h-3.5 w-3.5" />} onClick={onRefreshHistory}>{t("ui.components.chat.Conversation.3014a4a1a292")}</Button>
                     : history?.has_more ? <ShowMoreControl className="w-auto" disabled={history.loading} onClick={loadOlder}>
                       {history.loading ? t("ui.components.chat.Conversation.3e8f9af3b2e4") : history.error ? t("ui.components.chat.Conversation.6d7f1def5670") : t("ui.showMore")}</ShowMoreControl>
                     : null}
-                  <span role="status" aria-live="polite" className="sr-only">{history?.loading ? t("ui.components.chat.Conversation.bca2a7dd358e") : history?.error ? '' : t("ui.components.chat.Conversation.64b4a67b6241")}</span>
+                  <span role="status" aria-live="polite" className={history?.loading && !history.has_more && !history.resetRequired ? undefined : 'sr-only'}>{history?.loading ? t("ui.components.chat.Conversation.bca2a7dd358e") : history?.error ? '' : t("ui.components.chat.Conversation.64b4a67b6241")}</span>
                 </div>
                 if (row.kind === 'day') {
                   return (
@@ -624,22 +628,7 @@ export function Conversation({
                 }
                 if (row.kind === 'tool-run') {
                   return <div key={row.id} data-index={item.index} data-row-id={row.id} data-anchor-row="" data-tool-run-turn={row.turn} ref={restoreSettled ? virtualizer.measureElement : undefined}>
-                    <button type="button" aria-expanded={row.open} aria-label={t("ui.components.chat.Conversation.114bc8bcfc39", {p0: (row.summary)})} title={t("ui.components.chat.Conversation.4203e873a132")}
-                      onClick={event => { holdDisclosure(row.id, event.currentTarget); setToolRunState(current => ({ sessionId, values: { ...(current.sessionId === sessionId ? current.values : {}), [row.id]: !row.open } })) }}
-                      className="activity-summary conversation-activity bg-raised/40">
-                      {row.thoughts === row.count && !row.running ? <Brain aria-hidden className="h-4 w-4 shrink-0" /> : <ToolActivityIcon kind={row.activityKind} running={!!row.running} failed={!!row.failed} className={cn('h-4 w-4 shrink-0', row.failed && 'text-danger')} />}
-                      <span className="min-w-0">
-                        <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                          <span className="min-w-0 break-words font-medium">{row.label}</span>
-                          <span className="min-w-0 break-words text-xs text-faint">{row.summary}</span>
-                        </span>
-                        {(row.running || row.failed || row.skipped || row.background) ? <span className="flex flex-wrap gap-x-2 text-2xs">
-                          {row.running ? <span>{t("ui.components.chat.Conversation.dc9591e56d50")}{row.running}</span> : null}{row.failed ? <span className="text-danger">{t("ui.components.chat.Conversation.28384d7afd2e")}{row.failed}</span> : null}
-                          {row.skipped ? <span>{t("ui.components.chat.Conversation.71e95b289aad")}{row.skipped}</span> : null}{row.background ? <span>{t("ui.components.chat.Conversation.baecf258a042")}{row.background}</span> : null}
-                        </span> : null}
-                      </span>
-                      <ChevronRight aria-hidden className={cn('h-3.5 w-3.5 shrink-0 transition-transform duration-200', row.open && 'rotate-90')} />
-                    </button>
+                    <ProcessGroupSummary row={row} onClick={event => { holdDisclosure(row.id, event.currentTarget); setToolRunState(current => ({ sessionId, values: { ...(current.sessionId === sessionId ? current.values : {}), [row.id]: !row.open } })) }} />
                   </div>
                 }
                 if (row.kind === 'completion') return <div key={row.id} data-index={item.index} data-row-id={row.id} data-anchor-row="" ref={restoreSettled ? virtualizer.measureElement : undefined} className="py-1">
@@ -647,14 +636,13 @@ export function Conversation({
                 </div>
                 if (row.kind === 'activity') {
                   return <div key={row.id} data-index={item.index} data-row-id={row.id} data-anchor-row="" ref={restoreSettled ? virtualizer.measureElement : undefined} className="border-b border-line py-2">
-                    <button type="button" disabled={!row.count} aria-expanded={row.count ? row.open : undefined} aria-label={t("ui.components.chat.Conversation.c4ed97b7b12b", {p0: (row.turn)})} title={t("ui.components.chat.Conversation.5f933635623c", {p0: (row.count)})} onClick={event => { holdDisclosure(row.id, event.currentTarget); setActivityOverrides(current => ({ sessionId,
+                    <ProcessSummaryButton disabled={!row.count} expanded={row.count ? row.open : undefined} aria-label={t("ui.components.chat.Conversation.c4ed97b7b12b", {p0: (row.turn)})} title={t("ui.components.chat.Conversation.5f933635623c", {p0: (row.count)})} onClick={event => { holdDisclosure(row.id, event.currentTarget); setActivityOverrides(current => ({ sessionId,
                       values: { ...(current.sessionId === sessionId ? current.values : {}), [row.turn]: !row.open } })) }}
-                      className="flex max-w-full flex-wrap items-center gap-1.5 rounded py-1 text-xs text-muted hover:text-ink disabled:cursor-default disabled:hover:text-muted">
+                    >
                       <TurnElapsed key={JSON.stringify([sessionId, row.turn, row.activity.startSeq])} activity={row.activity} active={running && connection === 'open' && row.turn === latestTurn} />
                       {row.partial ? <span>{t("ui.components.chat.Conversation.1a8dde503030")}</span> : null}
-                      {row.count ? <ChevronRight aria-hidden className={cn('h-3.5 w-3.5 shrink-0 transition-transform', row.open && 'rotate-90')} /> : null}
                       <span className="sr-only">{t("ui.components.chat.Conversation.5f933635623c", {p0: row.count})}</span>
-                    </button>
+                    </ProcessSummaryButton>
                   </div>
                 }
                 return (

@@ -25,4 +25,11 @@ describe('会话名称中的输入模式命令', () => {
     expect(sessionTitle(summary('/plan'))).toBe(sessionTitle(null))
     expect(sessionTitle(summary('/goal'))).toBe(sessionTitle(null))
   })
+
+  it('完整保留50个Unicode字符的标题，顶部和侧栏共用原文', () => {
+    const title = '开发'.repeat(24) + '😀游'
+    expect(Array.from(title)).toHaveLength(50)
+    expect(sessionTitle(summary('Old summary', title))).toBe(title)
+    expect(sessionTitle(summary('Different summary', title))).toBe(title)
+  })
 })

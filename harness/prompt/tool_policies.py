@@ -31,6 +31,7 @@ def build_tool_policies(names: set) -> list:
         ('glob', 1400, 'policy.glob'),
         ('grep', 1500, 'policy.grep_read' if 'read' in names else 'policy.grep'),
         ('lsp', 2200, 'policy.lsp'),
+        ('load_workspace_dependencies', 1050, 'policy.workspace_dependencies'),
         ('show_widget', 1800, 'policy.visualization'),
     ):
         if tool in names:

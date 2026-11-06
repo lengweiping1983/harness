@@ -1,6 +1,6 @@
 import type { ResourceText } from '@/types'
 import { noticeText } from '@/lib/noticeText'
-import { failureText } from '@/lib/resourceError'
+import { failureText, ResourceError } from '@/lib/resourceError'
 import { listVisibleCount } from '../../lib/listPagination'
 import { useEffect, useRef, useState } from 'react'
 import { Bot, ChevronRight, Wrench } from 'lucide-react'
@@ -16,8 +16,8 @@ import { RequestNumberBadge } from './RequestNumberBadge'
 import { TraceStatusBadge } from './TraceStatusBadge'
 import { JsonSource } from '@/components/ui/JsonSource'
 
-type Level = { session?: string; label: string; rows: TraceEntry[]; after: string | null; more: boolean; missing: boolean; scroll: number; shown: Record<string, number>; collapsed: Record<string, boolean> }
-const level = (session?: string, label = ''): Level => ({ session, label, rows: [], after: null, more: false, missing: false, scroll: 0, shown: {}, collapsed: {} })
+type Level = { session?: string; label: string; rows: TraceEntry[]; missing: boolean; scroll: number; shown: Record<string, number>; collapsed: Record<string, boolean> }
+const level = (session?: string, label = ''): Level => ({ session, label, rows: [], missing: false, scroll: 0, shown: {}, collapsed: {} })
 
 export function ExecutionTracePanel({ sessionId, initialTraceId, agentSessionId, active = true }: { sessionId: string | null; initialTraceId?: string; agentSessionId?: string; active?: boolean }) {
   useLocale()
@@ -28,11 +28,7 @@ export function ExecutionTracePanel({ sessionId, initialTraceId, agentSessionId,
   const [refresh, setRefresh] = useState(0)
   const visible = usePageVisible()
   const current = levels[levels.length - 1]
-  const levelsRef = useRef(levels)
-  levelsRef.current = levels
   const container = useRef<HTMLElement>(null)
-  const request = useRef<AbortController>()
-  const busy = useRef(false)
   const scroller = () => container.current?.closest('.overflow-y-auto') ?? container.current?.parentElement
   const saveScroll = () => { if (!selected) current.scroll = scroller()?.scrollTop ?? 0 }
   useEffect(() => {
@@ -42,55 +38,47 @@ export function ExecutionTracePanel({ sessionId, initialTraceId, agentSessionId,
   useEffect(() => {
     if (!sessionId || !active || !visible || selected) return
     let disposed = false
+    let busy = false
     const abort = new AbortController()
-    request.current = abort
     async function load() {
-      if (busy.current) return
-      busy.current = true
+      if (busy) return
+      busy = true
       setLoading(true)
       try {
-        const count = Math.max(1, Math.ceil((levelsRef.current.at(-1)?.rows.length ?? 0) / 50))
-        let rows: TraceEntry[] = [], after: string | undefined, more = false, missing = false
-        for (let index = 0; index < count; index++) {
+        const rows: TraceEntry[] = []
+        let after: string | undefined, more = false, missing = false
+        const cursors = new Set<string>(), ids = new Set<string>()
+        // 先读完轻量列表再按本地小时分组，组内“显示更多”只控制呈现数量。
+        do {
           const result = await api.executionTrace(sessionId!, current.session, after, abort.signal)
           if (disposed) return
-          if (!result.ok) { setError(result.copy ?? result.message); setLoading(false); return }
-          rows = [...rows, ...result.data.entries]
-          after = result.data.next_after ?? undefined
-          more = result.data.has_more
-          missing = result.data.context_missing
-          if (!more) break
-        }
+          if (!result.ok) { setError(result.copy ?? result.message); return }
+          const page = result.data
+          if (page.session_id !== (current.session ?? sessionId)
+            || page.entries.some(row => ids.has(row.id))
+            || new Set(page.entries.map(row => row.id)).size !== page.entries.length
+            || page.has_more && (!page.entries.length || typeof page.next_after !== 'string' || !page.next_after || cursors.has(page.next_after))) {
+            throw new ResourceError({key: 'ui.http.invalidResponse'})
+          }
+          for (const row of page.entries) ids.add(row.id)
+          rows.push(...page.entries)
+          after = page.next_after ?? undefined
+          more = page.has_more
+          missing ||= page.context_missing
+          if (after) cursors.add(after)
+        } while (more)
         if (disposed) return
         setError('')
-        setLevels(previous => previous.map((entry, index) => index === previous.length - 1 ? { ...entry, rows, after: after ?? null, more, missing } : entry))
-        setLoading(false)
-      } finally { if (!disposed) busy.current = false }
+        setLevels(previous => previous.map((entry, index) => index === previous.length - 1 ? { ...entry, rows, missing } : entry))
+      } catch (failure) {
+        if (!disposed) setError(failureText(failure))
+      } finally { if (!disposed) { busy = false; setLoading(false) } }
     }
     void load()
     const timer = window.setInterval(() => { if (!abort.signal.aborted) void load() }, 3000)
-    return () => { disposed = true; abort.abort(); busy.current = false; window.clearInterval(timer) }
+    return () => { disposed = true; abort.abort(); window.clearInterval(timer) }
   }, [sessionId, current.session, active, visible, selected, refresh])
   useEffect(() => { const target = scroller(); if (target) target.scrollTop = current.scroll }, [current.session, selected])
-  async function more() {
-    if (!sessionId || busy.current || !current.after) return
-    busy.current = true
-    setLoading(true)
-    const scope = current.session
-    const abort = request.current
-    try {
-      const result = await api.executionTrace(sessionId, scope, current.after, abort?.signal)
-      if (abort?.signal.aborted || levelsRef.current.at(-1)?.session !== scope) return
-      if (!result.ok) { setError(result.copy ?? result.message); return }
-      setLevels(previous => previous.map((entry, index) => index === previous.length - 1 ? { ...entry,
-        rows: [...new Map([...entry.rows, ...result.data.entries].map(row => [row.id, row])).values()],
-        after: result.data.next_after, more: result.data.has_more } : entry))
-    } catch (failure) {
-      if (!abort?.signal.aborted && request.current === abort) setError(failureText(failure))
-    } finally {
-      if (request.current === abort) { busy.current = false; setLoading(false) }
-    }
-  }
   const grouped = new Map<string, { label: string; rows: TraceEntry[] }>()
   for (const row of current.rows) {
     const start = new Date(row.time)
@@ -105,10 +93,9 @@ export function ExecutionTracePanel({ sessionId, initialTraceId, agentSessionId,
   const groups = [...grouped.entries()]
   const requestNumbers = new Map<string, number>()
   for (const row of current.rows) if (row.kind === 'request') requestNumbers.set(row.id, requestNumbers.size + 1)
-  function reveal(key: string, fetch: boolean) {
+  function reveal(key: string) {
     setLevels(previous => previous.map((entry, index) => index === previous.length - 1
       ? { ...entry, shown: { ...entry.shown, [key]: (entry.shown[key] ?? 10) + 10 } } : entry))
-    if (fetch) void more()
   }
   if (!sessionId) return <p className="text-xs text-muted">{t('ui.trace.selectSession')}</p>
   return <section ref={container} aria-label={t('ui.trace.title')} className="refresh-action-container space-y-3 min-w-0">
@@ -120,7 +107,7 @@ export function ExecutionTracePanel({ sessionId, initialTraceId, agentSessionId,
       {error ? <p role="alert" className="text-xs text-danger">{noticeText(error)}</p> : null}
       {current.missing ? <p className="text-xs text-muted">{t('ui.trace.missing')}</p> : null}
       {!current.rows.length ? <p role="status" className="text-xs text-muted">{t(loading ? 'ui.trace.loading' : 'ui.trace.empty')}</p> : null}
-      {groups.map(([key, group], index) => <details key={key} open={!current.collapsed[key]} onToggle={event => {
+      {groups.map(([key, group]) => <details key={key} open={!current.collapsed[key]} onToggle={event => {
         const collapsed = !event.currentTarget.open
         setLevels(previous => previous.map((entry, position) => position === previous.length - 1 && entry.session === current.session && entry.collapsed[key] !== collapsed
           ? { ...entry, collapsed: { ...entry.collapsed, [key]: collapsed } } : entry))
@@ -145,9 +132,9 @@ export function ExecutionTracePanel({ sessionId, initialTraceId, agentSessionId,
           </> : null}
           {row.agent ? row.agent.child_session_id ? <button type="button" className="text-brand break-all" onClick={() => { saveScroll(); setLevels(previous => [...previous, level(row.agent!.child_session_id!, row.agent!.description || row.agent!.agent_id)]) }}>{t('ui.trace.enterAgent')} · {row.agent.description || row.agent.agent_id} · {REQUEST_STATUS[row.agent.status] ?? t('ui.trace.status.' + row.agent.status)}</button> : <p className="text-muted">{t('ui.trace.missing')}</p> : null}
         </li>)}
+        {group.rows.length > listVisibleCount(group.rows.length, current.shown[key] ?? 10)
+          ? <li className="py-2"><ShowMoreControl disabled={loading} onClick={() => reveal(key)} /></li> : null}
         </ol>
-        {group.rows.length > listVisibleCount(group.rows.length, current.shown[key] ?? 10) || index === groups.length - 1 && current.more
-          ? <ShowMoreControl disabled={loading} onClick={() => reveal(key, group.rows.length <= listVisibleCount(group.rows.length, current.shown[key] ?? 10))} /> : null}
       </details>)}
     </>}
   </section>

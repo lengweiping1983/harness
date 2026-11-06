@@ -42,7 +42,7 @@ class SessionTitleTests(unittest.IsolatedAsyncioTestCase):
         session = self.create(model='custom-model')
         text = '/plan 请用单文件原生 HTML/CSS/JS 实现 Trello 看板，支持跨列拖拽、排序和卡片编辑。' * 4
         await self.append(session, text)
-        self.assertLessEqual(len(session.header.title), 60)
+        self.assertLessEqual(len(session.header.title), 50)
         self.assertFalse(session.header.title.startswith('/plan'))
         await self.settle()
         self.assertEqual(session.header.title, '实现 Trello 拖拽看板')
@@ -77,7 +77,7 @@ class SessionTitleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(session.header.metadata['auto_title'], 'manual')
 
     async def test_failures_invalid_results_and_no_credentials_keep_stable_fallback(self):
-        for response in (RuntimeError('offline'), '', 'a\nb', 'x' * 37):
+        for response in (RuntimeError('offline'), '', 'a\nb', 'x' * 51):
             session = self.create()
             self.complete.side_effect = response if isinstance(response, Exception) else None
             self.complete.return_value = SimpleNamespace(text=response, has_tool_use=False)
@@ -86,7 +86,7 @@ class SessionTitleTests(unittest.IsolatedAsyncioTestCase):
             await self.settle()
             await self.append(session, '后续请求')
             self.assertEqual(session.header.title, fallback)
-            self.assertLessEqual(len(fallback), 60)
+            self.assertLessEqual(len(fallback), 50)
             self.assertEqual(session.header.metadata['auto_title'], 'fallback')
         self.app.has_model_credentials = False
         self.complete.reset_mock()
@@ -127,6 +127,28 @@ class SessionTitleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([language for language, _ in prompts], ['en', 'zh-CN', 'en'])
         self.assertEqual(prompts[0][1], prompts[2][1])
         self.assertNotEqual(prompts[0][1], prompts[1][1])
+
+    async def test_titles_accept_fifty_unicode_codepoints_and_share_the_prompt_limit(self):
+        for language in ('en', 'zh-CN', 'en'):
+            self.app.config.language = language
+            for length in (37, 49, 50):
+                candidate = '标题' * ((length - 1) // 2) + '题' * ((length - 1) % 2) + '😀'
+                self.assertEqual(len(candidate), length)
+                self.complete.return_value = SimpleNamespace(text=candidate, has_tool_use=False)
+                session = self.create()
+                await self.append(session, '/goal ' + '用户原始需求' * 20)
+                self.assertEqual(len(session.header.title), 50)
+                await self.settle()
+                self.assertEqual(session.header.title, candidate)
+                self.assertEqual(session.header.metadata['auto_title'], 'generated')
+                self.assertIn('50', self.complete.call_args.args[0][0].text)
+                self.assertNotIn('{limit}', self.complete.call_args.args[0][0].text)
+                from tests.web_fixture import FIXTURE_TITLE, is_title_request
+                self.assertGreater(len(FIXTURE_TITLE), 50)
+                self.assertTrue(is_title_request([{'role': 'system', 'content': self.complete.call_args.args[0][0].text}]))
+                reopened = SessionStore(Path(self.directory.name)).get(session.id)
+                self.assertEqual(reopened.header.title, candidate)
+                self.assertEqual(next(row for row in session_listing(self.app) if row['id'] == session.id)['title'], candidate)
 
     async def test_timeout_and_repeated_close_wait_for_request_cleanup(self):
         entered, cleaning, release = asyncio.Event(), asyncio.Event(), asyncio.Event()

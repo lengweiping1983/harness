@@ -51,6 +51,7 @@ from .errors import HarnessError, LlmError, LlmContextLengthError, LlmResponseEr
 from .response_cost import ResponseCost
 from .turn import AgentStatus, TurnResult
 from .todo_progress import TodoProgressReminder, is_business_result
+from .browser_verification import BrowserVerificationReminder
 from .todo_initialization import TodoInitialization
 from .jsonutil import to_jsonable
 from ..llm.types import (
@@ -211,6 +212,7 @@ class AgentLoop:
         #: 宿主指定的成员文件写入根目录，不接收模型参数。
         self.workspace_write_root: str | None = None
         self._todo_progress: TodoProgressReminder | None = None
+        self._browser_verification: BrowserVerificationReminder | None = None
         self._todo_initialization: TodoInitialization | None = None
         self.stream_checkpoints = True
         self._checkpoint_clock = time.monotonic
@@ -350,6 +352,7 @@ class AgentLoop:
             # 已提交轮次后，运行辅助状态初始化同样属于本轮错误与取消收尾边界。
             self._todo_progress = TodoProgressReminder()
             self._todo_progress.sync(session.latest('todo/write'))
+            self._browser_verification = BrowserVerificationReminder()
             self._todo_initialization = TodoInitialization(start_event.seq)
             # 1) 记录用户输入
             from ..skills.context import user_spans
@@ -388,6 +391,7 @@ class AgentLoop:
 
             # 4) 工具循环
             todo_completion_feedback = None
+            browser_completion_feedback = None
             while self.max_steps is None or step < self.max_steps:
                 if self._cancel_requested:
                     reason = "aborted"
@@ -438,6 +442,10 @@ class AgentLoop:
                     await self._run_pre_step_hooks(session, turn, step)
                 self._check_cancelled()
                 await session.agent_messages.apply(turn, run_id=self.run_id)
+                if self._todo_progress_enabled(session):
+                    self._todo_progress.begin_request(session)
+                else:
+                    self._todo_progress.clear_request()
                 self._check_cancelled()
                 await self._ensure_system_prompt(session)
 
@@ -450,6 +458,10 @@ class AgentLoop:
                 if output_continuation:
                     runtime_messages = (DeveloperMessage(text=tr('agent.output_continuation'),
                                                          source='output-continuation'),)
+                if browser_completion_feedback:
+                    runtime_messages = (*runtime_messages, DeveloperMessage(
+                        text=browser_completion_feedback, source='browser-final-review'))
+                    browser_completion_feedback = None
                 initialization = self._todo_initialization_for(session)
                 if initialization is not None:
                     notice = initialization.take_notice(session.latest('todo/write'))
@@ -457,7 +469,11 @@ class AgentLoop:
                         await session.append('note', {**notice, 'turn': turn, 'step': step}, ignorable=True)
                         runtime_messages = (*runtime_messages, DeveloperMessage(text=notice['text'], source='todo-initialization'))
                 if self._todo_progress_enabled(session):
-                    notice = self._todo_progress.take_notice(session.latest('todo/write'), session_id=session.id)
+                    snapshot = self._todo_progress.snapshot_context(self._todo_progress.request_event,
+                        session_id=session.id, start_seq=start_event.seq)
+                    if snapshot is not None:
+                        runtime_messages = (*runtime_messages, DeveloperMessage(text=snapshot, source='todo-snapshot'))
+                    notice = self._todo_progress.take_notice(self._todo_progress.request_event, session_id=session.id)
                     if notice is not None:
                         await session.append('note', {**notice, 'turn': turn, 'step': step}, ignorable=True)
                         runtime_messages = (*runtime_messages, DeveloperMessage(text=notice['text'], source='todo-progress-reminder'))
@@ -583,6 +599,12 @@ class AgentLoop:
                     initialization = self._todo_initialization_for(session)
                     if initialization is not None and initialization.defer_completion(todo_event):
                         continue
+                    notice = self._browser_verification.take_notice()
+                    if notice is not None:
+                        await session.append('note', {**notice, 'turn': turn, 'step': step}, ignorable=True)
+                        browser_completion_feedback = notice['text']
+                        continue
+                    todo_event = self._todo_progress.selected_event(session)
                     if self._todo_progress_enabled(session) and todo_event is not None and (
                         todo_event.seq > start_event.seq or self._todo_progress.work_steps > 0
                     ):
@@ -744,6 +766,9 @@ class AgentLoop:
                     schema.name == 'update_goal' and not self.recovery_read_only
                     and getattr(self, 'team_goal', None) is not None
                     and getattr(self, 'team_goal_writer', False)]
+        reminder = getattr(self, '_todo_progress', None)
+        if reminder is not None:
+            schemas = reminder.project_schemas(schemas)
         return schemas
 
     def _active_tool_schemas(self) -> list[Any]:
@@ -1552,6 +1577,10 @@ class AgentLoop:
                 },
                 surface_op=AppendOp(),
             )
+            if self._browser_verification is not None:
+                self._browser_verification.observe(call, outcome, source_seq=result_event.seq)
+            if self._todo_progress is not None:
+                self._todo_progress.observe_result(call, outcome, session)
             if self.bus is not None and call.name == 'skill' and not outcome.is_error and isinstance(outcome.display, Mapping) and outcome.display.get('skill'):
                 await self.bus.emit('skill/loaded', session.id, {'session_id': session.id,
                     'name': outcome.display['skill'], 'path': outcome.display.get('path'),
@@ -1662,7 +1691,7 @@ class AgentLoop:
 
         # 每个完整提交的调用批次只计数一次，不在结果之间计数。
         if self._todo_progress_enabled(session):
-            self._todo_progress.observe_batch(session.latest('todo/write'), successful_work=successful_work)
+            self._todo_progress.observe_batch(self._todo_progress.selected_event(session), successful_work=successful_work)
         initialization = self._todo_initialization_for(session)
         if initialization is not None:
             initialization.observe_batch(session.latest('todo/write'), successful_write=successful_write,

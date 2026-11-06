@@ -9,7 +9,7 @@
 * 传入 ``run_in_background=true`` 时立即返回 ``job_id``，命令在后台继续跑，
   不受本工具超时限制；用 ``job_output`` 收集输出、``job_kill`` 终止。
 * 后台分支需要注入 :class:`~harness.tools.builtin.job_tools.JobRegistry`；
-  未注入时该参数会被忽略并退回前台执行。
+  未注入时不声明后台参数，直接调用的后台请求也明确拒绝。
 """
 
 from __future__ import annotations
@@ -205,14 +205,17 @@ def build_shell_tools(
     if registry is not None:
         parameter_keys[('properties', 'run_in_background', 'description')] = 'python.shell_tools.faa885dee6b4'
 
+    description_key = ('python.shell_tools.7ae8b8577b31' if registry is not None
+                       else 'python.shell_tools.foreground_description')
+
     return [
         ToolDefinition(
             schema={
                 "parameter_keys": parameter_keys,
-                "description_key": 'python.shell_tools.7ae8b8577b31',
+                "description_key": description_key,
                 "name": "bash",
                 "description": (
-                    tr('python.shell_tools.7ae8b8577b31')
+                    tr(description_key)
                 ),
                 "parameters": {
                     "type": "object",

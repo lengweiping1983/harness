@@ -102,28 +102,30 @@ class ToolDiscovery:
         query, limit, offset = args.get('query', ''), args.get('limit', 5), args.get('offset', 0)
         if not isinstance(query, str) or len(query) > 1000 or type(limit) is not int or not 1 <= limit <= 10 or type(offset) is not int or offset < 0:
             raise ToolError(tr('tool.discovery.invalid'), code='tool-discovery/invalid')
-        tokens = re.findall(r'[\w]+', query.casefold())
-        exact = next((schema.name for schema in schemas if schema.name.casefold() == query.strip().casefold()
-                      and registry.get(schema.name).defer_loading), None)
+        normalized_query = query.casefold()
+        tokens = re.findall(r'[\w]+', normalized_query)
+        exact = next((schema.name for schema in schemas if schema.name.casefold() == query.strip().casefold()), None)
+        named_matches = {schema.name for schema in schemas if re.search(
+            r'(?<![\w-])' + re.escape(schema.name.casefold()) + r'(?![\w-])', normalized_query)}
         ranked = []
         for schema in schemas:
             definition = registry.get(schema.name)
-            if not definition.defer_loading:
-                continue
             if exact is not None and schema.name != exact:
+                continue
+            if named_matches and schema.name not in named_matches:
                 continue
             name = schema.name.casefold()
             namespace = (definition.discovery_namespace or '').casefold()
             description = schema.description.casefold()
             scores = [10 * (word in name) + 5 * (word in namespace) + (word in description) for word in tokens]
-            if tokens and not all(scores):
+            named = schema.name in named_matches
+            if tokens and not named and not all(scores):
                 continue
-            ranked.append((sum(scores), schema.name, schema, definition))
+            ranked.append((sum(scores) + (100 if named else 0), schema.name, schema, definition))
         ranked.sort(key=lambda row: (-row[0], row[1]))
         selected = ranked[offset:offset + limit]
-        names = [row[1] for row in selected]
         self.sync()
-        new = [name for name in names if name not in self.loaded]
+        new = [name for _, name, _, definition in selected if definition.defer_loading and name not in self.loaded]
         if new:
             await self.session.append('note', {'kind': 'tool-discovery/activated', 'tools': new}, ignorable=True)
             self.loaded.update(new)

@@ -190,3 +190,10 @@ class TodoEvidenceRecoveryTests(unittest.IsolatedAsyncioTestCase):
         results = session.events_of_type('tool/result')
         self.assertEqual([event.data['name'] for event in results], ['read', 'todo_write', 'todo_read', 'todo_write'])
         self.assertFalse(results[-1].data['results'][0]['is_error'])
+        notices = [event for event in session.events_of_type('note')
+                   if event.data.get('kind') == 'todo_initialization_required']
+        self.assertEqual(len(notices), 2)
+        self.assertTrue(all(event.data['reason'] == 'approved_plan' and event.data['plan_id'] == plan
+                            for event in notices))
+        self.assertFalse(any(event.data.get('kind') == 'todo_initialization_reminder'
+                             for event in session.events_of_type('note')))
