@@ -738,6 +738,11 @@ class CoordinatorExecutionService:
             if existing is not None:
                 result = await self.reconcile(existing["assignment_id"])
                 scheduled = await self._dag_scheduler.schedule_mission(existing["mission_id"])
+                if any(item.get("state") == "queued" for item in scheduled):
+                    raise HarnessError(
+                        "Mission is paused; execution remains queued",
+                        code="superagent/mission-paused",
+                    )
                 if scheduled:
                     result["scheduled_assignments"] = [
                         item.get("assignment_id") for item in scheduled if item.get("assignment_id")
@@ -776,6 +781,11 @@ class CoordinatorExecutionService:
             # Single-node reports and multi-node Work DAGs enter the same durable
             # Scheduler, Assignment creation, submission, and reconciliation path.
             scheduled = await self._dag_scheduler.schedule_mission(mission["mission_id"])
+            if any(item.get("state") == "queued" for item in scheduled):
+                raise HarnessError(
+                    "Mission is paused; execution remains queued",
+                    code="superagent/mission-paused",
+                )
             if scheduled:
                 receipt = dict(scheduled[0])
                 receipt.setdefault("mission_id", mission["mission_id"])
