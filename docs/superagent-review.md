@@ -28,7 +28,7 @@
 
 ## Phase 4 协调模型与文件适配审查
 
-本节相对于整合改造前 `5f1c3b7` 核对当前增量，仅覆盖统一模型和显式内部适配入口，未核验或宣称统一 Scheduler、生产 CLI、目标停止 Runtime、独立复核及生产 Sender 已交付。当前旧生产链仍保留。
+本节相对于整合改造前 `5f1c3b7` 核对当前增量，覆盖统一模型、显式内部适配入口及 Phase 4.2 唯一服务生命周期；未核验或宣称统一 Scheduler、生产 CLI、独立复核及生产 Sender 已交付。当前旧生产链仍保留。
 
 | 触发条件 | 源码措施 | 对应回归 |
 |---|---|---|
@@ -49,7 +49,22 @@
 | 跨 Host 并发提交同一 MissionInstruction | SQLite 唯一身份认领配合原回执查询，竞争实例不重复调用原生 steer；严格拒绝 bool / float 冒充整数及非字符串回执字段 | `test_concurrent_mission_instruction_claim_across_hosts_never_submits_twice`、`test_mission_instruction_native_status_rejects_noncanonical_types` |
 | 直接 SQL 试图回退投递、指令、控制或 Watchdog 状态 | Schema v16 将 Revision、状态边、终态回执、取消后不可恢复和进度指纹单调性固化到数据库层 | `test_mission_instruction_control_and_watchdog_state_guards_are_monotonic`、`test_input_has_independent_assignment_receipts_and_cannot_cross_tickets` |
 
-文件适配回归使用真实临时 Git 工作树和确定性模型传输驱动的原生 Run，不代表模型判断质量、生产账号、长期负载或跨平台实机验收。2026-11-06，`test_superagent_coordinator_store`、`test_superagent_unified_artifacts`、`test_superagent_unified_execution`、`test_superagent_execution` 与 `test_superagent_unified_model` 共 112 项回归全部通过，相关新增守卫的直接 SQL 越界、跨 Host 并发和畸形回执用例均在其中。后续缺口以领域模型的当前实现边界为准。
+文件适配回归使用真实临时 Git 工作树和确定性模型传输驱动的原生 Run，不代表模型判断质量、生产账号、长期负载或跨平台实机验收。2026-11-06，`test_superagent_coordinator_store`、`test_superagent_unified_artifacts`、`test_superagent_unified_execution`、`test_superagent_execution` 与 `test_superagent_unified_model` 共 112 项回归全部通过，相关新增守卫的直接 SQL 越界、跨 Host 并发和畸形回执用例均在其中。后续缺口以领域模型的当前实现边界为准。 同日，`test_superagent_coordinator_host`、`test_superagent_phase2` 和 `test_superagent_service` 共 85 项回归全部通过，验证 CoordinatorHost 默认不再依赖 legacy_state_dir / Shadow，同时显式 Shadow 与 V1 / V2 状态目录隔离仍保持。
+
+### Phase 4.2：唯一服务生命周期与持久控制
+
+| 触发条件 | 源码措施 | 对应回归 |
+|---|---|---|
+| 统一服务在暂停、资源边界或重启后遗失已接受输入 | `SuperagentService.tick` 从持久 TicketInput 重读待路由输入，沿原 Ticket / Trigger 幂等入口恢复；暂停不创建第二个 Workspace、Session 或 Run | `test_single_superagent_service_runs_assessor_planner_executor_recovery_and_close` |
+| 已结算的历史 Cancel 长期占用控制恢复批次，或前 100 个未知目标永久挤占后续任务 | `reconcile_controls` 只选仍处于活动状态的 cancelled Mission；终态 Mission 不再反复扫描；控制、Assignment 与 Mission 批次按持久 Watchdog 观察时间轮转，且服务显式暴露积压 | `test_cancel_stops_original_run_and_settles_persisted_mission`、`test_reconciliation_rotates_over_backlog_using_persisted_watchdog_cursor` |
+| Mandate 撤销后仍允许 Resume，或 Cancel 停止错误运行 | Resume 在原控制边界重验 Mandate；Cancel 绑定 Assignment / 原 Run / 所属后台作业，未知停止仅回查 | `test_unified_service_revoke_blocks_resume_and_cancel_settles_original_run`、`test_unknown_cancel_stop_is_not_replayed_and_can_be_reconciled`、`test_unknown_stop_after_nonconfirming_receipt_never_replays_after_inspection_error`、`test_cancel_stops_a_capturing_assignment_after_run_settlement` |
+| 缺少 Provider Adapter 被误当作外部操作未发生，或每轮恢复无限追加事件 | 统一服务始终装配 EffectRecovery；缺失适配器只留下 unknown / unavailable，完全相同的最近观测幂等 | `test_missing_adapter_leaves_unknown_without_lookup`、`test_stale_lookup_result_cannot_overwrite_concurrent_reconciliation` |
+| serve 中途失败被关闭错误覆盖，或 Host / Executor 未释放 | 保留首次运行错误；关闭等待 Tick、Host 操作和 Executor 收尾，重复关闭等待同一任务 | `test_unified_service_serve_failure_is_preserved_after_resource_close`、`test_aclose_waits_for_active_operations_and_releases_the_instance_lease` |
+| Watchdog 误将停滞解释为授权或自动终止 | Watchdog 持久化单调进度与关注状态，关注模式不自动阻断；服务将 stalled / blocked 计入不确定状态 | `test_coordinator_watchdog_persists_monotonic_escalation_and_progress`、`test_coordinator_watchdog_attention_policy_never_auto_blocks` |
+
+本阶段回归仍使用隔离账本、确定性 Assessor 和 Fake Executor；验证服务装配、控制、幂等回查与资源所有权，不宣称在线模型质量、生产 Provider 发送能力或 Phase 4.3 DAG Scheduler 已完成。
+
+**提交门禁状态（2026-11-06）：** 定向 `.venv` 回归已通过。`harness_verify` 曾在执行命令前被当前 MCP 进程内存中的旧执行器 8 MiB 指纹上限拒绝；仓库源码已有独立 128 MiB 单文件／512 MiB 总量指纹上限，且已将对应 `files.py` / `runtime.py` 同步到本机安装目录。当前 MCP 进程仍需完全重启以重新加载模块；未忽略或跳过任何工作树文件，官方验证证据与提交仍待重启后完成。
 
 ## 已核对问题与防回归依据
 
@@ -99,7 +114,7 @@
 | 暂停在异步合并预检期间到达，随后仍导入文件 | `_control_allows` 在资源准备及写入边界采用原目标控制，继续后复用原资源 | `test_pause_during_import_preflight_blocks_late_write_and_resume_uses_original_resources` |
 | 控制队列前部都是未知目标，或时钟回拨改变动作顺序 | 持久插入顺序、有限轮转及每目标先后校验 | `test_unknown_targets_do_not_starve_later_valid_control_or_reorder_one_target`、`test_wall_clock_rollback_does_not_reorder_control_intent` |
 | 停止慢后台进程阻塞其他目标，或停止失败被自动重试 | 每个所属作业拥有单次停止任务，状态保留未知，关闭继续传播原失败 | `test_slow_background_cancellation_does_not_block_another_goal`、`test_failed_background_stop_stays_unknown_and_is_not_replayed_by_control` |
-| 原提交或重启后的后台进程未确认，被取消回执误称停止成功 | 控制模式与实际收尾分开；确切后台回执可核对，不可用保持未知，不向旧 PID 投递 | `test_cancel_does_not_resolve_or_replay_an_unknown_submission`、`test_restart_uses_exact_background_receipt_and_never_signals_an_old_process_id` |
+| 原提交或重启后的后台进程未确认，被取消回执误称停止成功 | 控制模式与实际收尾分开；确切后台回执可核对，不可用保持未知，不向旧 PID 投递 | `test_cancel_does_not_resolve_or_replay_an_unknown_submission`、`test_restart_uses_exac
 | 最近十六项目标全部暂停，隐藏的活动目标没有计入待执行 | 全部活动清单与展示统计来自同一目标读事务，再按原控制模式计数 | `test_pending_counts_include_active_goals_hidden_by_the_recent_list`、`test_full_active_inventory_and_d
 | 损坏控制 JSON、模式或修订被当作合法历史或默认运行 | 严格解析、模式关联原已应用回执、修订核对真实已结算命令数，失败保留原件 | `test_corrupt_command_is_rejected_on_read_duplicate_and_reconcile_without_repair`、`test_mode_and_meta_corruption_are_not_treated_as_default_running` |
 | 并发操作者重复控制、控制回执缺失或原动作被拒绝 | 稳定请求原子认领；独立只读回执入口，单批 CLI 按本条原回执核对退出码 | `test_concurrent_operators_share_one_stable_control_receipt`、`test_missing_receipt_is_read_only_and_known_receipts_keep_original_status`、`test_once_control_exit_code_comes_from_the_original_receipt` |

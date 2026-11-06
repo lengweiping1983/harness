@@ -585,12 +585,15 @@ Phase 0–3 是已经形成的领域和基础能力背景，不再作为待执�
 
 #### Phase 4.2：唯一服务生命周期与持久控制
 
-- 改造唯一 SuperagentService，组合 CoordinatorHost、来源、原生 Assessor / Planner、Executor、Effect 和恢复循环；CoordinatorHost 不再强制依赖 legacy_state_dir 或装配生产 Shadow。
-- 提供统一 tick / serve / aclose，明确后台任务、原生资源和实例锁的所有者；停止准入后等待已接受操作收尾，重复关闭等待同一收尾任务。
-- 持久控制覆盖资源创建、提交、文件导入与捕获、最终完成和候选发布。Pause 阻止新派工及后续写入；Resume 重新核验授权；Cancel 只停止确切原 Run 和所属后台作业。
-- 控制已受理、真实停止和未知副作用分别记录。只读状态和回执查询不补建资源、不推进运行、不触发恢复写入。
+- 改造唯一 SuperagentService，组合 CoordinatorHost、来源、原生 Assessor / Planner、Executor、Effect 和恢复循环；CoordinatorHost 不再强制依赖 legacy_state_dir 或装配生产 Shadow。2026-11-06 已完成 Host 解耦第一步：legacy_state_dir 改为可选，默认不构造 ShadowComparisonService；仅显式传入旧账本目录时保留只读 Shadow 审计。旧版 V1 状态目录冲突检查仍保留，防止同一目录双账本。
+- 唯一 `SuperagentService.open_coordinator` 组合 CoordinatorHost、SourceRegistry、原生 Assessor / Planner、Executor、EffectRecovery 与持久控制；默认不构造 V1 Shadow。统一 `tick` 先恢复控制、轮转评估 Thread，再从账本重读 waiting TicketInput 路由，回查活动 Assignment、Mission 和 Watchdog，最后执行有界 Effect Recovery。
+- `pending_routes`、`active_mission_states` 均为有界只读清单。暂停或重启后未完成的 TicketInput 保留原 Ticket / Trigger 身份，恢复时复用 `route_trigger` 幂等路径；控制、路由、Assignment、Mission 和 Effect 的批次背压进入 `serve` 状态。控制、Assignment 与 Mission 恢复按持久 `WatchdogSnapshot.observed_at` 轮转，优先处理从未观察或最久未观察的项目，避免未知旧任务永久占满前 100 条。
+- Effect Recovery 始终由统一服务装配。未配置 Provider Adapter 时明确记录 `lookup_unavailable` 并保留 `unknown`，不把缺少适配器当作未发生，也不重放外部副作用；重复相同观测不重复追加审计事件。
+- 提供统一 `tick / serve / aclose`。服务拥有 Tick 与关闭任务，Host 拥有账本、Executor 和实例锁；关闭停止新准入、等待已接受 Tick 和 Host 操作收尾，重复关闭共享同一关闭任务，原始运行错误不会被清理错误覆盖。
+- 持久控制覆盖资源创建、提交、文件导入与捕获、最终完成和 Outbox Candidate。Pause 阻止新派工及后续写入；Resume 重新核验 Mandate；Cancel 只停止确切原 Run 和其所属后台作业。已受理、实际停止、待停止与未知副作用分别记录。
+- 只读状态、MissionControl 回执和 Effect 查询不补建资源、不推进运行、不触发恢复写入；取消完成后不再反复扫描终态 Mission，避免历史取消挤占后续控制恢复批次。
 
-**出口：** 单节点经统一服务闭环运行；暂停、撤权、取消、重启和关闭有实际回执及资源收尾依据。测试不能以调用旧服务或维持旧默认路由替代此出口。
+**出口状态（2026-11-06）：** Phase 4.2 功能实现与定向回归已完成；暂停／恢复、授权撤销、取消、TicketInput 恢复、进程重启、未知结果不重放和关闭收尾均有确定性回归及实际回执依据。最终 Harness 验证证据仍待运行中的 MCP 服务重载已同步的指纹运行时后生成；在此之前不将提交门禁标记为通过。此出口不代表 Phase 4.3 Scheduler、Phase 4.4 独立 Review 或生产默认路由已切换。
 
 #### Phase 4.3：统一 DAG 调度与真实交付
 

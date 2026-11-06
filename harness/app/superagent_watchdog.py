@@ -6,12 +6,17 @@ import json
 import math
 import sqlite3
 import time
+from datetime import datetime
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from ..core.sqlite import prepare_database
 from .superagent_inbox import _error, _text
+from .superagent_coordinator_store import (
+    CoordinatorStore, _hash as _coordinator_hash, _json as _coordinator_json,
+    _now as _coordinator_now, _time as _coordinator_time,
+)
 
 
 SCHEMA = '''
@@ -238,4 +243,226 @@ class MissionWatchdog:
         return None
 
 
-__all__ = ['MissionWatchdog', 'validate_watchdog', 'watchdog_limits']
+
+class CoordinatorWatchdog:
+    """在协调账本中持久化 Mission 活性快照；不直接重放或终止外部操作。"""
+
+    _ACTIVITY_LIMIT = 65_536
+
+    def __init__(self, store: CoordinatorStore, *, limits: dict[str, Any] | None = None):
+        self._store = store
+        self.limits = watchdog_limits(limits)
+
+    @staticmethod
+    def _seconds(value: str) -> float:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+        return parsed.timestamp()
+
+    @staticmethod
+    def _decode(row, limits: dict[str, Any]) -> dict[str, Any]:
+        try:
+            state = row["state"]
+            fingerprint = row["fingerprint"]
+            revision = row["aggregate_revision"]
+            observed = _coordinator_time(row["observed_at"], "observed_at")
+            progress = _coordinator_time(row["last_progress_at"], "last_progress_at")
+            if (
+                state not in {"healthy", "stalled", "blocked"}
+                or not isinstance(fingerprint, str) or len(fingerprint) != 64
+                or any(char not in "0123456789abcdef" for char in fingerprint)
+                or type(revision) is not int or revision < 1
+                or observed != row["observed_at"] or progress != row["last_progress_at"]
+                or progress > observed
+            ):
+                raise ValueError
+            stagnant_seconds = max(
+                0.0, CoordinatorWatchdog._seconds(observed) - CoordinatorWatchdog._seconds(progress),
+            )
+            return {
+                "mission_id": row["mission_id"], "fingerprint": fingerprint,
+                "state": state, "last_progress_at": progress, "observed_at": observed,
+                "aggregate_revision": revision, "stagnant_seconds": stagnant_seconds,
+                "stagnant_ticks": int(stagnant_seconds // limits["stale_after"]),
+            }
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise _error("corrupt") from exc
+
+    @staticmethod
+    def _activity(value: object) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if type(value) is not dict or any(not isinstance(key, str) for key in value):
+            raise _error("invalid", field="watchdog.activity")
+        try:
+            encoded = _coordinator_json(value).encode("utf-8")
+        except Exception as exc:
+            raise _error("invalid", field="watchdog.activity") from exc
+        if len(encoded) > CoordinatorWatchdog._ACTIVITY_LIMIT:
+            raise _error("invalid", field="watchdog.activity")
+        return json.loads(encoded)
+
+    @staticmethod
+    def _fingerprint(mission, jobs, assignments, activity: dict[str, Any]) -> str:
+        payload = {
+            "mission": {
+                "mission_id": mission["mission_id"],
+                "aggregate_revision": mission["aggregate_revision"],
+                "state": mission["state"],
+                "plan_revision": mission["plan_revision"],
+                "round_no": mission["round_no"],
+                "outcome": mission["outcome"],
+            },
+            "jobs": [
+                {
+                    "job_id": row["job_id"], "aggregate_revision": row["aggregate_revision"],
+                    "state": row["state"], "role": row["role"], "result_hash": row["result_hash"],
+                }
+                for row in jobs
+            ],
+            "assignments": [
+                {
+                    "assignment_id": row["assignment_id"],
+                    "aggregate_revision": row["aggregate_revision"],
+                    "state": row["state"], "attempt_no": row["attempt_no"],
+                    "run_id": row["run_id"], "started_at": row["started_at"],
+                    "ended_at": row["ended_at"],
+                }
+                for row in assignments
+            ],
+            "activity": activity,
+        }
+        return _coordinator_hash(_coordinator_json(payload))
+
+    def observe(
+        self, mission_id: str, *, activity: dict[str, Any] | None = None,
+        now: str | None = None,
+    ) -> dict[str, Any]:
+        """记录一个账本快照；时间、Revision 和状态升级均保持单调。"""
+        mission_id = _text(mission_id, "mission_id")
+        observed_at = _coordinator_time(
+            _coordinator_now() if now is None else now, "watchdog.now",
+        )
+        activity_value = self._activity(activity)
+        with self._store.transaction(write=True) as db:
+            mission = db.execute(
+                "SELECT mission_id,aggregate_revision,state,plan_revision,round_no,outcome "
+                "FROM missions WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+            if mission is None:
+                raise LookupError("Mission not found")
+            jobs = db.execute(
+                "SELECT job_id,aggregate_revision,state,role,result_hash "
+                "FROM jobs WHERE mission_id=? ORDER BY job_id",
+                (mission_id,),
+            ).fetchall()
+            assignments = db.execute(
+                "SELECT assignment.assignment_id,assignment.aggregate_revision,assignment.state,"
+                "assignment.attempt_no,assignment.run_id,assignment.started_at,assignment.ended_at "
+                "FROM assignments AS assignment JOIN jobs AS job ON job.job_id=assignment.job_id "
+                "WHERE job.mission_id=? ORDER BY assignment.assignment_id",
+                (mission_id,),
+            ).fetchall()
+            fingerprint = self._fingerprint(mission, jobs, assignments, activity_value)
+            previous = db.execute(
+                "SELECT * FROM watchdog_snapshots WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+            if previous is None:
+                db.execute(
+                    "INSERT INTO watchdog_snapshots(mission_id,fingerprint,state,last_progress_at,observed_at,aggregate_revision) "
+                    "VALUES(?,?,'healthy',?,?,1)",
+                    (mission_id, fingerprint, observed_at, observed_at),
+                )
+            else:
+                current = self._decode(previous, self.limits)
+                observed_at = max(observed_at, current["observed_at"])
+                if fingerprint == current["fingerprint"] and observed_at == current["observed_at"]:
+                    return current
+                progressed = fingerprint != current["fingerprint"]
+                if progressed:
+                    state = "healthy"
+                    last_progress_at = observed_at
+                else:
+                    last_progress_at = current["last_progress_at"]
+                    stagnant_seconds = max(
+                        0.0, self._seconds(observed_at) - self._seconds(last_progress_at),
+                    )
+                    stagnant_ticks = int(stagnant_seconds // self.limits["stale_after"])
+                    state = current["state"]
+                    if current["state"] != "blocked" and stagnant_ticks >= 1:
+                        state = (
+                            "blocked"
+                            if self.limits["action"] == "block"
+                            and stagnant_ticks >= self.limits["max_stale_ticks"]
+                            else "stalled"
+                        )
+                changed = db.execute(
+                    "UPDATE watchdog_snapshots SET fingerprint=?,state=?,last_progress_at=?,observed_at=?,"
+                    "aggregate_revision=aggregate_revision+1 "
+                    "WHERE mission_id=? AND aggregate_revision=?",
+                    (
+                        fingerprint, state, last_progress_at, observed_at,
+                        mission_id, current["aggregate_revision"],
+                    ),
+                )
+                if changed.rowcount != 1:
+                    raise RuntimeError("WatchdogSnapshot revision changed during a serialized update")
+            row = db.execute(
+                "SELECT * FROM watchdog_snapshots WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+        return self._decode(row, self.limits)
+
+    def get(self, mission_id: str) -> dict[str, Any] | None:
+        mission_id = _text(mission_id, "mission_id")
+        with self._store.transaction() as db:
+            row = db.execute(
+                "SELECT * FROM watchdog_snapshots WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+        return None if row is None else self._decode(row, self.limits)
+
+    def status(self, *, limit: int = 32, mission_ids: list[str] | None = None) -> dict[str, Any]:
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise _error("invalid", field="watchdog.limit")
+        if mission_ids is not None and (
+            not isinstance(mission_ids, list) or len(mission_ids) > 500
+        ):
+            raise _error("invalid", field="watchdog.mission_ids")
+        ids = None if mission_ids is None else list(dict.fromkeys(
+            _text(value, "mission_id") for value in mission_ids
+        ))
+        if ids == []:
+            return {
+                "enabled": True, "limits": dict(self.limits),
+                "states": {"healthy": 0, "stalled": 0, "blocked": 0},
+                "items": [], "total": 0, "shown": 0, "has_more": False,
+            }
+        where = "" if ids is None else " WHERE mission_id IN (" + ",".join("?" for _ in ids) + ")"
+        arguments = () if ids is None else tuple(ids)
+        with self._store.transaction() as db:
+            rows = db.execute(
+                "SELECT * FROM watchdog_snapshots" + where
+                + " ORDER BY CASE state WHEN 'blocked' THEN 0 WHEN 'stalled' THEN 1 ELSE 2 END,"
+                "observed_at DESC,mission_id LIMIT ?",
+                (*arguments, limit),
+            ).fetchall()
+            counts = dict(db.execute(
+                "SELECT state,count(*) FROM watchdog_snapshots" + where + " GROUP BY state",
+                arguments,
+            ).fetchall())
+        items = [self._decode(row, self.limits) for row in rows]
+        total = sum(counts.values())
+        return {
+            "enabled": True, "limits": dict(self.limits),
+            "states": {state: counts.get(state, 0) for state in ("healthy", "stalled", "blocked")},
+            "items": items, "total": total, "shown": len(items), "has_more": total > len(items),
+        }
+
+    def close(self) -> None:
+        """连接按调用关闭；WatchdogSnapshot 历史保留在协调账本中。"""
+        return None
+
+
+__all__ = ['MissionWatchdog', 'CoordinatorWatchdog', 'validate_watchdog', 'watchdog_limits']

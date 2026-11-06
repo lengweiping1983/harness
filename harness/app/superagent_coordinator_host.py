@@ -1,13 +1,15 @@
 """下一代 Superagent 的宿主组合边界；不启动旧 Router 或 Harness Worker。"""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Lock
+from threading import Condition
 from typing import Protocol
 
+from ..core.cleanup import raise_cleanup_errors
 from ..core.errors import HarnessError
 from ..i18n import tr
 from ..session.write_lock import event_write_lock
@@ -15,11 +17,13 @@ from .superagent_coordinator_service import CoordinatorApplicationService
 from .superagent_coordinator_store import CoordinatorStore
 from .superagent_effect_recovery import EffectLookupAdapter, EffectRecoveryService
 from .superagent_outbox import OutboxEffectService
+from .superagent_artifacts import CoordinatorArtifacts
 from .superagent_authorization import CoordinatorAuthorizationEngine
 from .superagent_shadow import ShadowComparisonService
 from .superagent_source_registry import LocalIdentityVerifier, SecretResolver, SourceKind, SourceRegistry
 from .superagent_input_delivery import CoordinatorAssignmentInputDelivery
 from .superagent_mission_instruction import CoordinatorMissionInstruction
+from .superagent_watchdog import CoordinatorWatchdog
 
 
 _LEGACY_STATE_FILES = (
@@ -300,6 +304,10 @@ class _HostAuthorizationEngine:
         with self.__host._operation():
             return self.__service.assess_next(*args, **kwargs)
 
+    async def assess_next_async(self, *args, **kwargs):
+        with self.__host._operation():
+            return await self.__service.assess_next_async(*args, **kwargs)
+
     def requeue_unavailable(self, *args, **kwargs):
         with self.__host._operation():
             return self.__service.requeue_unavailable(*args, **kwargs)
@@ -382,6 +390,21 @@ class _HostExecutionService:
         with self.__host._operation(): return await self.__service.reconcile(assignment_id)
     async def reconcile_ticket(self, ticket_id):
         with self.__host._operation(): return await self.__service.reconcile_ticket(ticket_id)
+    def pending_routes(self, *, limit=100):
+        with self.__host._operation():
+            return self.__service.pending_routes(limit=limit)
+    async def reconcile_active(self, *, limit=100):
+        with self.__host._operation():
+            return await self.__service.reconcile_active(limit=limit)
+    def active_mission_states(self, *, limit=100):
+        with self.__host._operation():
+            return self.__service.active_mission_states(limit=limit)
+    def active_missions(self, *, limit=100):
+        with self.__host._operation():
+            return self.__service.active_missions(limit=limit)
+    def watchdog_activity(self, mission_id):
+        with self.__host._operation():
+            return self.__service.watchdog_activity(mission_id)
     async def deliver_input_to_assignment(self, input_id, assignment_id):
         with self.__host._operation():
             return await self.__input_delivery.deliver(input_id, assignment_id)
@@ -418,21 +441,69 @@ class _HostExecutionService:
         with self.__host._operation(): return self.__service.control_receipt(request_id)
     def mission_control(self, mission_id):
         with self.__host._operation(): return self.__service.mission_control(mission_id)
+    def control_status(self, mission_id):
+        with self.__host._operation(): return self.__service.control_status(mission_id)
+    async def reconcile_controls(self, *, limit=100):
+        with self.__host._operation():
+            return await self.__service.reconcile_controls(limit=limit)
+
+
+class _HostArtifactsService:
+    __slots__ = ("__host", "__service")
+
+    def __init__(self, host, service):
+        self.__host, self.__service = host, service
+
+    def get(self, assignment_id):
+        with self.__host._operation():
+            return self.__service.get(assignment_id)
+
+    async def capture(self, assignment, worker):
+        with self.__host._operation():
+            return await self.__service.capture(assignment, worker)
+
+    async def deliver(self, assignment, worker, artifacts):
+        with self.__host._operation():
+            return await self.__service.deliver(assignment, worker, artifacts)
+
+
+
+class _HostWatchdogService:
+    """每次观察和读取都持有协调宿主活动租约。"""
+
+    __slots__ = ("__host", "__service")
+
+    def __init__(self, host, service):
+        self.__host = host
+        self.__service = service
+
+    def observe(self, mission_id, *, activity=None, now=None):
+        with self.__host._operation():
+            return self.__service.observe(mission_id, activity=activity, now=now)
+
+    def get(self, mission_id):
+        with self.__host._operation():
+            return self.__service.get(mission_id)
+
+    def status(self, *, limit=32, mission_ids=None):
+        with self.__host._operation():
+            return self.__service.status(limit=limit, mission_ids=mission_ids)
 
 
 class CoordinatorHost:
     """下一代 Superagent 的宿主组合边界。
 
-    组合 Source Registry、Authorization Engine 和只读 Shadow 审计；
-    不创建旧版 Harness、Router、Worker，不注册 CLI / HTTP 默认路由，也不执行新 Ticket。
+    组合 Source Registry、Authorization Engine 与可选的显式 Shadow 审计；
+    默认不依赖旧账本、不创建旧版 Harness / Router / Worker，也不注册生产路由。
     """
 
     def __init__(
         self, state_dir: Path, store: CoordinatorStore, stack: ExitStack,
-        *, instance_id: str, legacy_state_dir: Path, evidence_verifier: HostEvidenceVerifier | None = None,
+        *, instance_id: str, legacy_state_dir: Path | None = None, evidence_verifier: HostEvidenceVerifier | None = None,
         secret_resolver: SecretResolver | None = None,
         local_identity_verifier: LocalIdentityVerifier | None = None,
         source_kinds: tuple[SourceKind, ...] = (), executor_adapter: object | None = None,
+        watchdog_limits: dict | None = None,
     ):
         if executor_adapter is not None and getattr(executor_adapter, "instance_id", None) != instance_id:
             raise ValueError("ExecutorAdapter instance_id must match CoordinatorHost")
@@ -441,10 +512,14 @@ class CoordinatorHost:
         self._store = store
         self._stack = stack
         self._evidence_verifier = evidence_verifier
-        self._lifecycle_lock = Lock()
+        self._lifecycle_lock = Condition()
         self._active_operations = 0
+        self._closing = False
         self._closed = False
+        self._close_task = None
         self._outbox = _HostOutboxService(self, OutboxEffectService(store))
+        self._watchdog_service = CoordinatorWatchdog(store, limits=watchdog_limits)
+        self._watchdog = _HostWatchdogService(self, self._watchdog_service)
         self._authorization_service = CoordinatorAuthorizationEngine(store)
         self._source_service = SourceRegistry(
             store, ingest=self._authorization_service.receive_normalized,
@@ -453,14 +528,22 @@ class CoordinatorHost:
             initial_kinds=source_kinds,
             secret_resolver=secret_resolver, local_identity_verifier=local_identity_verifier,
         )
-        self._shadow_service = ShadowComparisonService(store, legacy_state_dir)
+        self._shadow_service = (
+            ShadowComparisonService(store, legacy_state_dir)
+            if legacy_state_dir is not None else None
+        )
         self._sources = _HostSourceRegistry(self, self._source_service)
         self._authorization = _HostAuthorizationEngine(self, self._authorization_service)
-        self._shadow = _HostShadowComparison(self, self._shadow_service)
+        self._shadow = (
+            _HostShadowComparison(self, self._shadow_service)
+            if self._shadow_service is not None else None
+        )
         self._execution_service = None
         self._input_delivery_service = None
         self._mission_instruction_service = None
+        self._artifacts_service = None
         self._execution = None
+        self._artifacts = None
         if executor_adapter is not None:
             from .superagent_execution import CoordinatorExecutionService
             self._execution_service = CoordinatorExecutionService(
@@ -474,19 +557,24 @@ class CoordinatorHost:
                 store, self._authorization_service, self._source_service, executor_adapter,
                 admit_mission=self._execution_service._admit_mission,
             )
+            self._artifacts_service = CoordinatorArtifacts(
+                store, executor_adapter, self._execution_service._admit_mission,
+            )
             self._execution = _HostExecutionService(
                 self, self._execution_service, self._input_delivery_service,
                 self._mission_instruction_service,
             )
+            self._artifacts = _HostArtifactsService(self, self._artifacts_service)
 
     @classmethod
     def open(
         cls, state_dir: str | Path, *, instance_id: str, identity: object,
-        legacy_state_dir: str | Path,
+        legacy_state_dir: str | Path | None = None,
         evidence_verifier: HostEvidenceVerifier | None = None,
         secret_resolver: SecretResolver | None = None,
         local_identity_verifier: LocalIdentityVerifier | None = None,
         source_kinds: tuple[SourceKind, ...] = (), executor_adapter: object | None = None,
+        watchdog_limits: dict | None = None,
     ) -> "CoordinatorHost":
         requested = Path(state_dir).expanduser()
         is_junction = getattr(requested, "is_junction", None)
@@ -495,8 +583,8 @@ class CoordinatorHost:
         root = requested.resolve()
         if root.exists() and not root.is_dir():
             raise ValueError("Coordinator state_dir must be a directory")
-        legacy = Path(legacy_state_dir).expanduser().resolve()
-        if _paths_overlap(root, legacy):
+        legacy = Path(legacy_state_dir).expanduser().resolve() if legacy_state_dir is not None else None
+        if legacy is not None and _paths_overlap(root, legacy):
             raise _state_dir_conflict()
         # 先于创建锁文件拒绝已存在的 v1 目录，保证失败探测不改变旧账本目录。
         if _legacy_state_present(root):
@@ -521,6 +609,7 @@ class CoordinatorHost:
                 root, store, stack, instance_id=instance_id, legacy_state_dir=legacy, evidence_verifier=evidence_verifier,
                 secret_resolver=secret_resolver, local_identity_verifier=local_identity_verifier,
                 source_kinds=source_kinds, executor_adapter=executor_adapter,
+                watchdog_limits=watchdog_limits,
             )
         except BaseException:
             if executor_adapter is not None:
@@ -552,6 +641,8 @@ class CoordinatorHost:
     @property
     def shadow(self) -> _HostShadowComparison:
         self._ensure_open()
+        if self._shadow is None:
+            raise HarnessError(tr("superagent.conflict"), code="superagent/shadow-unavailable")
         return self._shadow
 
     @property
@@ -560,6 +651,18 @@ class CoordinatorHost:
         if self._execution is None:
             raise HarnessError(tr("superagent.conflict"), code="superagent/executor-unavailable")
         return self._execution
+
+    @property
+    def artifacts(self) -> _HostArtifactsService:
+        self._ensure_open()
+        if self._artifacts is None:
+            raise HarnessError(tr("superagent.conflict"), code="superagent/artifact-unavailable")
+        return self._artifacts
+
+    @property
+    def watchdog(self) -> _HostWatchdogService:
+        self._ensure_open()
+        return self._watchdog
 
     @contextmanager
     def unit_of_work(self, *, actor: object, correlation_id: str | None = None):
@@ -643,23 +746,83 @@ class CoordinatorHost:
         finally:
             with self._lifecycle_lock:
                 self._active_operations -= 1
+                if self._active_operations == 0:
+                    self._lifecycle_lock.notify_all()
 
     def _ensure_open(self) -> None:
-        if self._closed:
+        if self._closed or self._closing:
             raise HarnessError(tr("superagent.conflict"), code="superagent/closed")
+
+    def _wait_for_idle(self) -> None:
+        with self._lifecycle_lock:
+            while self._active_operations:
+                self._lifecycle_lock.wait()
 
     def close(self) -> None:
         with self._lifecycle_lock:
             if self._closed:
                 return
-            if self._active_operations:
+            if self._closing or self._active_operations:
                 raise HarnessError(
                     tr("superagent.runtime-busy"), code="superagent/runtime-busy",
                 )
-            if self._execution_service is not None:
+            self._closing = True
+        errors = []
+        if self._execution_service is not None:
+            try:
                 self._execution_service.close()
-            self._closed = True
+            except BaseException as exc:
+                errors.append(exc)
+        try:
             self._stack.close()
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            with self._lifecycle_lock:
+                self._closed = True
+                self._closing = False
+                self._lifecycle_lock.notify_all()
+        raise_cleanup_errors(errors)
+
+    async def aclose(self) -> None:
+        loop = asyncio.get_running_loop()
+        with self._lifecycle_lock:
+            task = self._close_task
+            if task is None:
+                if self._closed:
+                    return
+                if self._closing:
+                    raise HarnessError(
+                        tr("superagent.runtime-busy"), code="superagent/runtime-busy",
+                    )
+                self._closing = True
+                task = loop.create_task(self._aclose_impl(), name="superagent-host-close")
+                self._close_task = task
+            elif task.get_loop() is not loop:
+                raise HarnessError(
+                    tr("superagent.runtime-busy"), code="superagent/runtime-busy",
+                )
+        await asyncio.shield(task)
+
+    async def _aclose_impl(self) -> None:
+        errors = []
+        try:
+            await asyncio.to_thread(self._wait_for_idle)
+            if self._execution_service is not None:
+                try:
+                    await self._execution_service.aclose()
+                except BaseException as exc:
+                    errors.append(exc)
+            try:
+                self._stack.close()
+            except BaseException as exc:
+                errors.append(exc)
+        finally:
+            with self._lifecycle_lock:
+                self._closed = True
+                self._closing = False
+                self._lifecycle_lock.notify_all()
+        raise_cleanup_errors(errors)
 
     def __enter__(self) -> "CoordinatorHost":
         self._ensure_open()
@@ -667,4 +830,12 @@ class CoordinatorHost:
 
     def __exit__(self, exc_type, exc, traceback) -> bool:
         self.close()
+        return False
+
+    async def __aenter__(self) -> "CoordinatorHost":
+        self._ensure_open()
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> bool:
+        await self.aclose()
         return False

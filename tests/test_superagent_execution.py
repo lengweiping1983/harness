@@ -7,6 +7,7 @@ import json
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,6 +32,11 @@ class FakeExecutionAdapter:
         self.shared.setdefault("instruction_calls", [])
         self.shared.setdefault("instruction_receipts", {})
         self.shared.setdefault("fail_instruction_ack", False)
+        self.shared.setdefault("stop_calls", [])
+        self.shared.setdefault("fail_stop", False)
+        self.shared.setdefault("false_stop_receipt", False)
+        self.shared.setdefault("fail_inspect", False)
+        self.shared.setdefault("async_closed", False)
         self.worker_lookup = None
         self.closed = False
 
@@ -96,6 +102,9 @@ class FakeExecutionAdapter:
         return copy.deepcopy(snapshot) if snapshot is not None else {"found": False, "authoritative": True}
 
     def inspect(self, worker, assignment):
+        if self.shared["fail_inspect"]:
+            self.shared["fail_inspect"] = False
+            raise RuntimeError("native inspection failed")
         return self.reconcile(worker, assignment)
 
     async def deliver_input(self, worker, assignment, prompt, delivery_key, before_accept):
@@ -151,6 +160,12 @@ class FakeExecutionAdapter:
         return copy.deepcopy(self.shared["instruction_receipts"].get(operation_key))
 
     async def stop(self, worker, assignment):
+        self.shared["stop_calls"].append(assignment["assignment_id"])
+        if self.shared["fail_stop"]:
+            raise RuntimeError("native stop acknowledgement lost")
+        if self.shared["false_stop_receipt"]:
+            self.shared["false_stop_receipt"] = False
+            return {"stopped": False}
         snapshot = self.shared["runs"][assignment["assignment_id"]]
         self.shared["runs"][assignment["assignment_id"]] = self._snapshot(
             snapshot["run_id"], worker["session_id"], snapshot["input_ids"],
@@ -175,6 +190,10 @@ class FakeExecutionAdapter:
 
     def close(self):
         self.closed = True
+
+    async def aclose(self):
+        self.closed = True
+        self.shared["async_closed"] = True
 
 
 class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
@@ -203,6 +222,11 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         if getattr(self, "host", None) is not None and not getattr(self.host, "_closed", True):
             self.host.close()
         self.temp.cleanup()
+
+    async def test_host_aclose_awaits_executor_adapter_cleanup(self):
+        await self.host.aclose()
+        self.assertTrue(self.shared["async_closed"])
+        self.assertTrue(self.adapter.closed)
 
     @staticmethod
     def _local_identity(event):
@@ -540,7 +564,8 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
             runtime=runtime, worktrees=object(), sessions=SimpleNamespace(root=self.root),
             config=SimpleNamespace(enable_agents=False, enable_skills=False, enable_goal=False,
                 enable_plan_mode=False, enable_subagent=False, enable_ralph=False),
-            agent_mount=None, _close_task=None, _agents={},
+            agent_mount=None, _close_task=None, _agents={}, jobs=SimpleNamespace(),
+            get_session=lambda _session_id: SimpleNamespace(events=[]),
         )
         adapter = object.__new__(HarnessExecutorAdapter)
         adapter.closed = False
@@ -549,6 +574,107 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["stopped"])
         self.assertEqual(runtime.removed, [record.id])
         self.assertEqual(record.status, "interrupted")
+
+    async def test_native_stop_kills_only_background_jobs_from_the_original_run(self):
+        record = SimpleNamespace(
+            id="run-background", session_id="worker-session",
+            status="completed", started_at=1, finished_at=2,
+        )
+
+        class Runtime:
+            closed = False
+
+            def get(self, run_id):
+                self.requested = run_id
+                return record
+
+        class Jobs:
+            def __init__(self):
+                self.calls = []
+
+            async def kill(self, job_id, owner, *, reason=None):
+                self.calls.append((job_id, owner, reason))
+                return "killed", SimpleNamespace(job_id=job_id)
+
+        jobs = Jobs()
+        harness = SimpleNamespace(
+            runtime=Runtime(), worktrees=object(), sessions=SimpleNamespace(root=object()),
+            config=SimpleNamespace(enable_agents=False, enable_skills=False, enable_goal=False,
+                enable_plan_mode=False, enable_subagent=False, enable_ralph=False),
+            agent_mount=None, _agents={}, _close_task=None,
+            get_session=lambda _session_id: SimpleNamespace(events=[]),
+            jobs=jobs,
+        )
+        adapter = object.__new__(HarnessExecutorAdapter)
+        adapter.closed = False
+        adapter.harness = harness
+        invocation = object()
+        with (
+            patch("harness.app.superagent_executor.turn_events", return_value=[object()]),
+            patch("harness.app.superagent_executor.tool_invocations", return_value=[invocation]),
+            patch("harness.app.superagent_executor.background_invocation", return_value=True),
+            patch(
+                "harness.app.superagent_executor.background_status",
+                side_effect=[
+                    {"confirmed": True, "settled": False, "job_id": "owned-background"},
+                    {"confirmed": True, "settled": True, "job_id": "owned-background"},
+                ],
+            ),
+        ):
+            receipt = await adapter.stop(
+                {"session_id": "worker-session"},
+                {"assignment_id": "assignment-1", "run_id": "run-background"},
+            )
+        self.assertTrue(receipt["stopped"])
+        self.assertEqual(receipt["backgrounds_stopped"], 1)
+        self.assertEqual(jobs.calls[0][0:2], ("owned-background", "worker-session"))
+
+    async def test_native_stop_refuses_unconfirmed_background_ownership(self):
+        record = SimpleNamespace(
+            id="run-background-unknown", session_id="worker-session",
+            status="completed", started_at=1, finished_at=2,
+        )
+
+        class Runtime:
+            closed = False
+
+            def get(self, run_id):
+                return record
+
+        class Jobs:
+            calls = []
+
+            async def kill(self, job_id, owner, *, reason=None):
+                self.calls.append((job_id, owner))
+                return "killed", SimpleNamespace(job_id=job_id)
+
+        jobs = Jobs()
+        harness = SimpleNamespace(
+            runtime=Runtime(), worktrees=object(), sessions=SimpleNamespace(root=object()),
+            config=SimpleNamespace(enable_agents=False, enable_skills=False, enable_goal=False,
+                enable_plan_mode=False, enable_subagent=False, enable_ralph=False),
+            agent_mount=None, _agents={}, _close_task=None,
+            get_session=lambda _session_id: SimpleNamespace(events=[]),
+            jobs=jobs,
+        )
+        adapter = object.__new__(HarnessExecutorAdapter)
+        adapter.closed = False
+        adapter.harness = harness
+        with (
+            patch("harness.app.superagent_executor.turn_events", return_value=[object()]),
+            patch("harness.app.superagent_executor.tool_invocations", return_value=[object()]),
+            patch("harness.app.superagent_executor.background_invocation", return_value=True),
+            patch(
+                "harness.app.superagent_executor.background_status",
+                return_value={"confirmed": False, "settled": False},
+            ),
+        ):
+            with self.assertRaises(HarnessError):
+                await adapter.stop(
+                    {"session_id": "worker-session"},
+                    {"assignment_id": "assignment-2", "run_id": "run-background-unknown"},
+                )
+        self.assertEqual(jobs.calls, [])
 
 
 if __name__ == "__main__":

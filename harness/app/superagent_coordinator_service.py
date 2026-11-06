@@ -27,7 +27,7 @@ _TRANSITIONS = {
         "cancelling": {"cancelled", "unknown"},
         "unknown": {
             "planning", "running", "integrating", "reviewing", "completed",
-            "blocked", "rejected", "suppressed", "cancelled",
+            "blocked", "rejected", "suppressed", "cancelling", "cancelled",
         },
     },
     "job": {
@@ -47,11 +47,11 @@ _TRANSITIONS = {
     },
     "attention": {"open": {"answered", "dismissed"}, "answered": set(), "dismissed": set()},
     "assignment": {
-        "pending": {"submitting"},
+        "pending": {"submitting", "cancelled"},
         "submitting": {"accepted", "rejected", "unknown"},
         "accepted": {"running", "capturing", "stopping", "failed", "interrupted", "unknown"},
         "running": {"capturing", "stopping", "failed", "interrupted", "unknown"},
-        "capturing": {"succeeded", "failed", "unknown"},
+        "capturing": {"stopping", "succeeded", "failed", "unknown"},
         "stopping": {"cancelled", "succeeded", "failed", "interrupted", "unknown"},
         "unknown": {
             "accepted", "running", "capturing", "rejected", "succeeded",
@@ -75,6 +75,7 @@ _REQUIRED_FACTS = {
     ),
     ("mission", "reviewing", "integrating"): ("repair_authorized", "repair_budget_available", "mandate_valid", "control_allows"),
     ("mission", "cancelling", "cancelled"): ("owned_operations_settled",),
+    ("mission", "unknown", "cancelling"): ("cancel_accepted",),
     ("mission", "unknown", "*"): ("reconciliation_verified",),
     ("mission", "unknown", "planning"): (
         "reconciliation_verified", "original_operation_not_started", "mandate_valid", "control_allows", "next_step_safe",
@@ -114,8 +115,10 @@ _REQUIRED_FACTS = {
     ("assignment", "accepted", "failed"): ("original_run_failure_confirmed",),
     ("assignment", "accepted", "interrupted"): ("original_run_interruption_confirmed",),
     ("assignment", "running", "capturing"): ("original_run_settled",),
-    ("assignment", "accepted", "stopping"): ("stop_requested", "mandate_valid", "control_allows"),
-    ("assignment", "running", "stopping"): ("stop_requested", "mandate_valid", "control_allows"),
+    ("assignment", "pending", "cancelled"): ("no_external_side_effect_started",),
+    ("assignment", "accepted", "stopping"): ("stop_requested", "control_allows"),
+    ("assignment", "running", "stopping"): ("stop_requested", "control_allows"),
+    ("assignment", "capturing", "stopping"): ("stop_requested", "control_allows", "original_run_settled"),
     ("assignment", "stopping", "capturing"): ("original_run_settled",),
     ("assignment", "stopping", "failed"): ("original_run_failure_confirmed",),
     ("assignment", "stopping", "interrupted"): ("original_run_interruption_confirmed",),
@@ -597,6 +600,9 @@ class CoordinatorApplicationService:
         if source == "unknown" and target in {"capturing", "succeeded", "failed", "interrupted", "cancelled"}:
             if current.get("run_id") is None:
                 raise PermissionError("reconciling an original Run requires its persisted identity")
+        if source == "pending" and target == "cancelled":
+            if current.get("run_id") is not None or facts.get("no_external_side_effect_started") is not True:
+                raise PermissionError("a pending Assignment can be cancelled only before any Run was accepted")
         if target == "succeeded":
             single_report = job["role"] == "work" and self._single_node_report_job(job)
             role_fact = ("report_frozen" if single_report else {

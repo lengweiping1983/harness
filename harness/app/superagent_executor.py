@@ -748,24 +748,91 @@ class HarnessExecutorAdapter:
     async def stop(self, worker: dict, assignment: dict) -> dict:
         self._open()
         session_id = worker["session_id"]
-        record = self.harness.runtime.get(assignment["run_id"])
-        if record.session_id != session_id:
+        run_id = assignment["run_id"]
+        if assignment.get("session_id") not in {None, session_id}:
+            raise PermissionError("Assignment Session does not match its Worker")
+        record = self.harness.runtime.get(run_id)
+        if record.id != run_id or record.session_id != session_id:
             raise PermissionError("Assignment Run belongs to a different Worker Session")
+
+        run_settled = record.finished_at is not None
         if record.status == "queued" and record.started_at is None:
             self.harness.runtime.remove(record.id)
-            return {"stopped": True, "status": "queued-removed"}
-        if record.status in {"completed", "failed", "interrupted"} or record.finished_at is not None:
-            return {"stopped": False, "status": record.status}
-        agent = self.harness._agents.get(session_id)
-        active = self.harness.runtime.active.get(session_id)
-        current = getattr(self.harness.runtime, "_executions", {}).get(active)
-        if active is None or current is not record or agent is None or getattr(agent, "run_id", None) != record.id:
-            return {"stopped": False, "status": record.status}
-        turn = self.harness.get_session(session_id).open_turn
-        if turn is None:
-            return {"stopped": False, "status": "not-active"}
-        stopped = await self.harness.cancel(session_id, expected_turn=turn)
-        return {"stopped": bool(stopped), "status": "stopping" if stopped else "not-active"}
+            run_settled = record.finished_at is not None
+        elif not run_settled:
+            agent = self.harness._agents.get(session_id)
+            active = self.harness.runtime.active.get(session_id)
+            current = getattr(self.harness.runtime, "_executions", {}).get(active)
+            if active is None or current is not record or agent is None or getattr(agent, "run_id", None) != record.id:
+                return {"stopped": False, "status": record.status, "run_settled": False}
+            turn = self.harness.get_session(session_id).open_turn
+            if turn is None:
+                return {"stopped": False, "status": "not-active", "run_settled": False}
+            stopped = await self.harness.cancel(session_id, expected_turn=turn)
+            run_settled = record.finished_at is not None
+            if not run_settled:
+                return {
+                    "stopped": bool(stopped),
+                    "status": "stopping" if stopped else "not-active",
+                    "run_settled": False,
+                }
+
+        if not run_settled:
+            return {"stopped": False, "status": record.status, "run_settled": False}
+
+        # 只有原始 Run 已结束后，才检查并停止它自己创建的后台作业。
+        # 不按 Worker Session 扫描，避免误杀同一 Session 的其他 Run。
+        session = self.harness.get_session(session_id)
+        try:
+            events = turn_events(session.events, run_id=record.id)
+            invocations = tool_invocations(events)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HarnessError(
+                "Original Run background evidence cannot be parsed",
+                code="superagent/background-evidence-unknown",
+            ) from exc
+
+        backgrounds_stopped = 0
+        for invocation in invocations:
+            if not background_invocation(invocation):
+                continue
+            status = background_status(self.harness.jobs, session_id, invocation, archived=True)
+            if not status.get("confirmed"):
+                raise HarnessError(
+                    "Original Run background job ownership cannot be confirmed",
+                    code="superagent/background-unknown",
+                )
+            if status.get("settled"):
+                continue
+            job_id = status.get("job_id")
+            if not isinstance(job_id, str) or not job_id:
+                raise HarnessError(
+                    "Original Run background job identity is missing",
+                    code="superagent/background-unknown",
+                )
+            outcome, _view = await self.harness.jobs.kill(
+                job_id, session_id,
+                reason=f"Superagent cancellation for assignment {assignment.get('assignment_id', '')}",
+            )
+            if outcome == "cleanup-failed":
+                raise HarnessError(
+                    "Original Run background job cleanup failed",
+                    code="superagent/background-cleanup-failed",
+                )
+            settled = background_status(self.harness.jobs, session_id, invocation, archived=True)
+            if not settled.get("confirmed") or not settled.get("settled"):
+                raise HarnessError(
+                    "Original Run background job stop outcome cannot be confirmed",
+                    code="superagent/background-stop-unknown",
+                )
+            backgrounds_stopped += 1
+
+        return {
+            "stopped": True,
+            "status": record.status,
+            "run_settled": True,
+            "backgrounds_stopped": backgrounds_stopped,
+        }
 
     def close(self) -> None:
         self.closed = True

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 from typing import Any
 
@@ -10,7 +11,7 @@ from harness.i18n import tr
 
 from ..core.errors import HarnessError
 from .superagent_coordinator_service import CoordinatorApplicationService
-from .superagent_coordinator_store import CoordinatorStore, _hash, _json, _now
+from .superagent_coordinator_store import CoordinatorStore, _hash, _json, _now, _text
 from .superagent_executor import ExecutionAdapter, WorkerProfile
 from .superagent_coordination import CoordinatorControl, CoordinatorInputDelivery
 
@@ -18,6 +19,27 @@ from .superagent_coordination import CoordinatorControl, CoordinatorInputDeliver
 _ACTOR = {"kind": "host", "component": "superagent-v2-execution"}
 _ACTIVE_ASSIGNMENTS = ("pending", "submitting", "accepted", "running", "capturing", "stopping", "unknown")
 _TERMINAL_ASSIGNMENTS = ("succeeded", "failed", "interrupted", "rejected", "cancelled", "blocked")
+
+
+class SingleNodePlanner:
+    """Phase 4.2 的确定性单节点 Planner；DAG 解锁交由后续统一 Scheduler。"""
+
+    def plan(self, *, trigger_id: str, profile: WorkerProfile, prompt: str) -> dict:
+        trigger_id = _text(trigger_id, "trigger_id")
+        if not isinstance(profile, WorkerProfile):
+            raise TypeError("SingleNodePlanner requires a host-owned WorkerProfile")
+        if not isinstance(prompt, str) or not prompt:
+            raise ValueError("single-node prompt must be non-empty")
+        return {
+            "plan": {
+                "nodes": [{
+                    "node_id": "work", "role": "work", "profile_id": profile.profile_id,
+                    "instruction_ref": f"trigger:{trigger_id}",
+                    "instruction_hash": _hash(prompt), "dependencies": [],
+                }],
+            },
+            "acceptance": {"kind": "single_worker_report", "schema_version": 1},
+        }
 
 
 class CoordinatorExecutionService:
@@ -32,6 +54,7 @@ class CoordinatorExecutionService:
         self._executor = executor
         self.instance_id = instance_id
         self._profiles = dict(executor.profiles)
+        self._planner = SingleNodePlanner()
         if not self._profiles:
             raise ValueError("V2 execution requires at least one WorkerProfile")
         self._locks: dict[str, asyncio.Lock] = {}
@@ -45,6 +68,18 @@ class CoordinatorExecutionService:
             return
         self._closed = True
         self._executor.close()
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        closer = getattr(self._executor, "aclose", None)
+        if callable(closer):
+            result = closer()
+            if inspect.isawaitable(result):
+                await result
+        else:
+            self._executor.close()
 
     def control_mission(self, mission_id, action, *, request_id, actor):
         """可信宿主控制入口；继续前重新核验授权，重复请求只返回原回执。"""
@@ -65,6 +100,157 @@ class CoordinatorExecutionService:
     def mission_control(self, mission_id):
         self._ensure_open()
         return self._control.mode(mission_id)
+
+    def control_status(self, mission_id):
+        """只读控制状态；不触发原生回查、恢复写入或资源创建。"""
+        self._ensure_open()
+        control = self._control.mode(mission_id)
+        mission = self._read_one("SELECT state FROM missions WHERE mission_id=?", (mission_id,))
+        if mission is None:
+            raise LookupError("Mission not found")
+        active = self._read_all(
+            "SELECT assignment.assignment_id,assignment.state,assignment.error_ref "
+            "FROM assignments AS assignment JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? AND assignment.state IN "
+            "('pending','submitting','accepted','running','capturing','stopping','unknown') "
+            "ORDER BY assignment.assignment_id",
+            (mission_id,),
+        )
+        jobs = self._read_all("SELECT job_id,state FROM jobs WHERE mission_id=? ORDER BY job_id", (mission_id,))
+        unknown_assignments = [
+            item for item in active
+            if item["state"] == "unknown" or str(item.get("error_ref") or "").startswith("stop-unknown:")
+        ]
+        unsettled_jobs = [item for item in jobs if item["state"] not in {"done", "blocked", "cancelled"}]
+        stop_state = None
+        if control["mode"] == "cancelled":
+            if mission["state"] == "cancelled":
+                stop_state = "settled"
+            elif unknown_assignments or any(item["state"] == "unknown" for item in unsettled_jobs):
+                stop_state = "unknown"
+            else:
+                stop_state = "pending"
+        return {
+            **control,
+            "mission_state": mission["state"],
+            "stop_state": stop_state,
+            "active_assignments": len(active),
+            "unknown_assignments": len(unknown_assignments),
+            "unsettled_jobs": len(unsettled_jobs),
+        }
+
+    async def reconcile_controls(self, *, limit=100):
+        """恢复已持久化的 Cancel 意图；未知停止结果只回查，不重放副作用。"""
+        self._ensure_open()
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("limit must be an integer between 1 and 200")
+        missions = self._read_all(
+            "SELECT control.mission_id FROM mission_controls AS control "
+            "JOIN missions AS mission ON mission.mission_id=control.mission_id "
+            "LEFT JOIN watchdog_snapshots AS watchdog ON watchdog.mission_id=mission.mission_id "
+            "WHERE control.mode='cancelled' AND mission.state IN "
+            "('planning','running','integrating','reviewing','cancelling','unknown') "
+            "ORDER BY COALESCE(watchdog.observed_at,''),mission.updated_at,control.mission_id LIMIT ?",
+            (limit,),
+        )
+        results = []
+        for row in missions:
+            results.append(await self._reconcile_cancelled_mission(row["mission_id"]))
+        return {"processed": len(results), "missions": results}
+
+    async def _reconcile_cancelled_mission(self, mission_id):
+        control = self._control.mode(mission_id)
+        if control["mode"] != "cancelled":
+            return self.control_status(mission_id)
+        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
+        if mission is None:
+            raise LookupError("Mission not found")
+        if mission["state"] == "cancelled":
+            return self.control_status(mission_id)
+        if mission["state"] in {"completed", "blocked", "rejected", "suppressed"}:
+            return self.control_status(mission_id)
+        if mission["state"] != "cancelling":
+            self._transition(
+                "mission", mission_id, "cancelling",
+                facts={"cancel_accepted": True},
+                changes={"outcome": "cancellation_pending"},
+            )
+
+        assignments = self._read_all(
+            "SELECT assignment.assignment_id,assignment.state,assignment.error_ref,assignment.run_id "
+            "FROM assignments AS assignment JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? AND assignment.state IN "
+            "('pending','submitting','accepted','running','capturing','stopping','unknown') "
+            "ORDER BY assignment.assignment_id",
+            (mission_id,),
+        )
+        for item in assignments:
+            assignment = self._assignment(item["assignment_id"])
+            if assignment is None:
+                continue
+            state = assignment["state"]
+            if state == "pending" and not assignment.get("run_id"):
+                self._transition(
+                    "assignment", assignment["assignment_id"], "cancelled",
+                    facts={"no_external_side_effect_started": True},
+                    changes={"ended_at": _now(), "error_ref": "mission-cancelled-before-submit"},
+                )
+                continue
+            if state in {"submitting", "unknown"}:
+                await self.reconcile(assignment["assignment_id"])
+                assignment = self._assignment(item["assignment_id"])
+                if assignment is None:
+                    continue
+                state = assignment["state"]
+                if state in {"accepted", "running", "capturing"}:
+                    await self.stop(assignment["assignment_id"], reason="mission cancelled")
+                elif state == "stopping":
+                    await self.reconcile(assignment["assignment_id"])
+                    assignment = self._assignment(item["assignment_id"])
+                    if assignment and assignment["state"] == "capturing":
+                        await self.stop(assignment["assignment_id"], reason="mission cancelled")
+                continue
+            if state == "stopping":
+                await self.reconcile(assignment["assignment_id"])
+                assignment = self._assignment(item["assignment_id"])
+                if assignment and assignment["state"] == "capturing":
+                    await self.stop(assignment["assignment_id"], reason="mission cancelled")
+                continue
+            if state in {"accepted", "running", "capturing"}:
+                await self.stop(assignment["assignment_id"], reason="mission cancelled")
+
+        jobs = self._read_all("SELECT * FROM jobs WHERE mission_id=? ORDER BY job_id", (mission_id,))
+        for job in jobs:
+            if job["state"] not in {"pending", "ready", "checkpointed"}:
+                continue
+            active_assignment = self._read_one(
+                "SELECT 1 AS active FROM assignments WHERE job_id=? AND state IN "
+                "('pending','submitting','accepted','running','capturing','stopping','unknown') LIMIT 1",
+                (job["job_id"],),
+            )
+            if active_assignment is None:
+                self._transition(
+                    "job", job["job_id"], "cancelled",
+                    facts={"no_external_side_effect_started": True},
+                )
+
+        active = self._read_one(
+            "SELECT COUNT(*) AS count FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? AND assignment.state IN "
+            "('pending','submitting','accepted','running','capturing','stopping','unknown')",
+            (mission_id,),
+        )
+        jobs = self._read_all("SELECT state FROM jobs WHERE mission_id=?", (mission_id,))
+        if active["count"] == 0 and all(job["state"] in {"done", "blocked", "cancelled"} for job in jobs):
+            current = self._read_one("SELECT state FROM missions WHERE mission_id=?", (mission_id,))
+            if current and current["state"] == "cancelling":
+                self._transition(
+                    "mission", mission_id, "cancelled",
+                    facts={"owned_operations_settled": True},
+                    changes={"outcome": "cancelled"},
+                )
+        return self.control_status(mission_id)
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -460,11 +646,14 @@ class CoordinatorExecutionService:
                     "source_revision_at_start": trigger.get("source_revision"),
                     "repo": profile.repo, "base_commit": base_commit, "budgets_json": budget,
                 })
-                plan = uow.plans.create(mission_id, expected_mission_revision=mission["aggregate_revision"],
-                    plan={"nodes": [{"node_id": "work", "role": "work", "profile_id": profile.profile_id,
-                        "instruction_ref": f"trigger:{trigger_id}", "instruction_hash": _hash(prompt), "dependencies": []}]},
-                    acceptance={"kind": "single_worker_report", "schema_version": 1},
-                    created_by_kind="host", created_by_ref="single-mission-router")
+                frozen_plan = self._planner.plan(
+                    trigger_id=trigger_id, profile=profile, prompt=prompt,
+                )
+                plan = uow.plans.create(
+                    mission_id, expected_mission_revision=mission["aggregate_revision"],
+                    plan=frozen_plan["plan"], acceptance=frozen_plan["acceptance"],
+                    created_by_kind="host", created_by_ref="single-node-planner",
+                )
                 if plan is None:
                     raise HarnessError(tr("superagent.conflict"), code="superagent/revision-conflict")
                 mission = uow.missions.get(mission_id)
@@ -636,6 +825,115 @@ class CoordinatorExecutionService:
             results.append(await self.reconcile(row["assignment_id"]))
         return results
 
+    def pending_routes(self, *, limit: int = 100) -> list[dict]:
+        """列出已授权且仍等待执行的 TicketInput；不创建资源或改变输入状态。"""
+        self._ensure_open()
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("limit must be an integer between 1 and 200")
+        return self._read_all(
+            "SELECT input.ticket_id,input.trigger_id FROM ticket_inputs AS input "
+            "JOIN tickets AS ticket ON ticket.ticket_id=input.ticket_id "
+            "WHERE ticket.state='open' AND input.context_only=0 AND input.state='waiting' "
+            "ORDER BY input.created_at,input.input_id LIMIT ?",
+            (limit,),
+        )
+
+    async def reconcile_active(self, *, limit: int = 100) -> dict:
+        """回查当前实例的活动 Assignment；不创建新资源或重放提交。"""
+        self._ensure_open()
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("limit must be an integer between 1 and 200")
+        rows = self._read_all(
+            "SELECT assignment.assignment_id FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "JOIN missions AS mission ON mission.mission_id=job.mission_id "
+            "LEFT JOIN watchdog_snapshots AS watchdog ON watchdog.mission_id=mission.mission_id "
+            "WHERE assignment.state IN "
+            "('submitting','accepted','running','capturing','stopping','unknown') "
+            "ORDER BY COALESCE(watchdog.observed_at,''),COALESCE(assignment.started_at,''),"
+            "assignment.assignment_id LIMIT ?",
+            (limit,),
+        )
+        results = []
+        for row in rows:
+            results.append(await self.reconcile(row["assignment_id"]))
+        return {"processed": len(results), "assignments": results}
+
+    def active_mission_states(self, *, limit: int = 100) -> list[dict]:
+        """列出需要监督的 Mission 状态；读取不创建或修复快照。"""
+        self._ensure_open()
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("limit must be an integer between 1 and 200")
+        rows = self._read_all(
+            "SELECT mission.mission_id,mission.state FROM missions AS mission "
+            "LEFT JOIN watchdog_snapshots AS watchdog ON watchdog.mission_id=mission.mission_id "
+            "WHERE mission.state IN "
+            "('planning','running','integrating','reviewing','cancelling','unknown') "
+            "ORDER BY COALESCE(watchdog.observed_at,''),mission.updated_at,mission.mission_id LIMIT ?",
+            (limit,),
+        )
+        return [{"mission_id": row["mission_id"], "state": row["state"]} for row in rows]
+
+    def active_missions(self, *, limit: int = 100) -> list[str]:
+        """列出需要监督的 Mission 身份。"""
+        return [
+            item["mission_id"] for item in self.active_mission_states(limit=limit)
+        ]
+
+    def watchdog_activity(self, mission_id: str) -> dict:
+        """只读检查原生 Run 活动；只返回状态摘要，不把正文写入监督指纹。"""
+        self._ensure_open()
+        mission_id = _text(mission_id, "mission_id")
+        rows = self._read_all(
+            "SELECT assignment.assignment_id FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? AND assignment.state IN "
+            "('submitting','accepted','running','capturing','stopping','unknown') "
+            "ORDER BY assignment.assignment_id",
+            (mission_id,),
+        )
+        activity = []
+        for row in rows:
+            assignment = self._assignment(row["assignment_id"])
+            if assignment is None:
+                continue
+            worker = self._worker_row(assignment["worker_id"])
+            if worker is None:
+                activity.append({
+                    "assignment_id": assignment["assignment_id"],
+                    "inspection": "worker_unavailable",
+                })
+                continue
+            try:
+                snapshot = self._executor.inspect(worker, assignment)
+            except Exception as exc:
+                activity.append({
+                    "assignment_id": assignment["assignment_id"],
+                    "inspection": "unknown", "error_type": type(exc).__name__,
+                })
+                continue
+            if not isinstance(snapshot, dict):
+                activity.append({
+                    "assignment_id": assignment["assignment_id"],
+                    "inspection": "invalid",
+                })
+                continue
+            reference = snapshot.get("run_reference")
+            if not isinstance(reference, dict):
+                reference = {}
+            activity.append({
+                "assignment_id": assignment["assignment_id"],
+                "run_id": snapshot.get("run_id"),
+                "status": snapshot.get("status"),
+                "settled": snapshot.get("settled"),
+                "turn": snapshot.get("turn", reference.get("turn")),
+                "last_activity": reference.get("last_activity"),
+                "unconfirmed_tools": snapshot.get("unconfirmed_tools", 0),
+                "unsettled_background": snapshot.get("unsettled_background", 0),
+                "inspection": "confirmed" if snapshot.get("found", True) else "not_found",
+            })
+        return {"assignments": activity}
+
     async def reconcile(self, assignment_id: str) -> dict:
         self._ensure_open()
         async with self._lock(f"assignment:{assignment_id}"):
@@ -697,6 +995,12 @@ class CoordinatorExecutionService:
             self._mark_unknown(assignment, "Worker Run exceeded its time budget but native cancellation was not confirmed")
             return {"state": "unknown", "assignment_id": assignment_id, "budget_failure": True}
         status = snapshot.get("status")
+        stop_outcome_unknown = str(assignment.get("error_ref") or "").startswith("stop-unknown:")
+        if stop_outcome_unknown and status in {"queued", "pending", "running"}:
+            return {
+                "state": "unknown", "assignment_id": assignment_id,
+                "native_state": status, "stop_outcome": "unknown",
+            }
         if status in {"queued", "pending"}:
             if assignment["state"] == "unknown":
                 assignment = self._transition("assignment", assignment_id, "accepted",
@@ -732,6 +1036,13 @@ class CoordinatorExecutionService:
                 self._mark_unknown(assignment, "one or more Tool results are not durably confirmed")
                 return {"state": "unknown", "assignment_id": assignment_id}
             if snapshot.get("unsettled_background", 0):
+                if stop_outcome_unknown:
+                    return {
+                        "state": "unknown", "assignment_id": assignment_id,
+                        "native_state": "completed",
+                        "unsettled_background": snapshot["unsettled_background"],
+                        "stop_outcome": "unknown",
+                    }
                 if assignment["state"] in {"accepted", "running", "stopping", "unknown"}:
                     facts = {"original_run_settled": True}
                     audit = None
@@ -823,20 +1134,25 @@ class CoordinatorExecutionService:
                 evidence_ids.append(identity)
         return evidence_ids
 
-    def _mark_unknown(self, assignment: dict, reason: str) -> None:
+    def _mark_unknown(self, assignment: dict, reason: str, *, error_ref: str | None = None) -> None:
         if assignment["state"] != "unknown":
+            # stopping 表示原生 Stop 已先持久化；观察失败不能丢失其未知副作用身份。
+            if error_ref is None and assignment["state"] == "stopping":
+                error_ref = f"stop-unknown:{assignment['assignment_id']}"
             self._transition(
                 "assignment", assignment["assignment_id"], "unknown",
                 facts={"operation_outcome_uncertain": True},
-                changes={"error_ref": f"harness-run:{assignment.get('run_id') or assignment['submission_key']}"},
+                changes={"error_ref": error_ref or f"harness-run:{assignment.get('run_id') or assignment['submission_key']}"},
                 audit_payload={"reconciliation_ref": f"assignment:{assignment['assignment_id']}:unknown", "reason": reason},
             )
         job = self._read_one("SELECT * FROM jobs WHERE job_id=?", (assignment["job_id"],))
         if job and job["state"] in {"ready", "running"}:
             self._transition("job", job["job_id"], "unknown", facts={"operation_outcome_uncertain": True})
-        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (assignment["mission_id"],))
-        if mission and mission["state"] == "running":
-            self._transition("mission", mission["mission_id"], "unknown", facts={"operation_outcome_uncertain": True})
+        mission_id = job.get("mission_id") if job else None
+        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,)) if mission_id else None
+        if (mission and mission["state"] == "running"
+                and self._control.mode(mission_id)["mode"] != "cancelled"):
+            self._transition("mission", mission_id, "unknown", facts={"operation_outcome_uncertain": True})
 
     def _reject_unstarted(self, assignment: dict, reason: str) -> None:
         target = "rejected"
@@ -850,7 +1166,8 @@ class CoordinatorExecutionService:
             changes={"ended_at": _now(), "error_ref": f"submission-not-started:{assignment['submission_key']}"},
             audit_payload=audit,
         )
-        self._requeue_inputs(assignment["assignment_id"])
+        if self._control.mode(assignment["mission_id"])["mode"] != "cancelled":
+            self._requeue_inputs(assignment["assignment_id"])
         job = self._read_one("SELECT * FROM jobs WHERE job_id=?", (assignment["job_id"],))
         if job and job["state"] in {"ready", "unknown"}:
             facts = {"known_failure_or_human_decision": True}
@@ -859,7 +1176,8 @@ class CoordinatorExecutionService:
                 facts["reconciliation_verified"] = True
             self._transition("job", job["job_id"], "blocked", facts=facts, audit_payload=audit)
         mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (assignment["mission_id"],))
-        if mission and mission["state"] in {"running", "unknown"}:
+        if (mission and mission["state"] in {"running", "unknown"}
+                and self._control.mode(assignment["mission_id"])["mode"] != "cancelled"):
             facts = {"known_failure_or_human_decision": True}
             audit = {"reconciliation_ref": f"mission:{mission['mission_id']}:submission-absent"} if mission["state"] == "unknown" else None
             if mission["state"] == "unknown":
@@ -1022,6 +1340,10 @@ class CoordinatorExecutionService:
         ticket = ticket or self._authorization.ticket(assignment["ticket_id"])
         if trigger is None or ticket is None:
             raise HarnessError("Frozen Worker Report references a missing source aggregate", code="superagent/report-corrupt")
+        if not self._control.allows(assignment["mission_id"]):
+            # 暂停/取消期间只冻结原生结果与 Job 事实，不创建 Attention、Handback 或发布候选。
+            self._complete_job_mission(assignment, report)
+            return
         if report.get("disposition") == "attention" and report.get("attention_id"):
             expected = self._attention_id(assignment, trigger["trigger_id"], report.get("question", ""))
             if expected != report["attention_id"]:
@@ -1061,6 +1383,8 @@ class CoordinatorExecutionService:
                              changes={"result_hash": report_hash}, audit_payload=audit)
         mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (assignment["mission_id"],))
         if mission is None or mission["state"] in {"completed", "blocked", "cancelled", "suppressed"}:
+            return
+        if mission["state"] == "cancelling" or not self._control.allows(assignment["mission_id"]):
             return
         ticket = self._authorization.ticket(assignment["ticket_id"])
         mandate = (ticket or {}).get("mandate") or {}
@@ -1142,7 +1466,8 @@ class CoordinatorExecutionService:
                 audit = {"reconciliation_ref": f"job:{job['job_id']}:{status}"}
             self._transition("job", job["job_id"], "blocked", facts=facts, audit_payload=audit)
         mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (current["mission_id"],))
-        if mission and mission["state"] in {"running", "unknown"}:
+        if (mission and mission["state"] in {"running", "unknown"}
+                and self._control.mode(assignment["mission_id"])["mode"] != "cancelled"):
             facts = {"known_failure_or_human_decision": True}
             audit = None
             if mission["state"] == "unknown":
@@ -1279,34 +1604,79 @@ class CoordinatorExecutionService:
             assignment = self._assignment(assignment_id)
             if assignment is None:
                 raise LookupError("Assignment not found")
-            if assignment["state"] not in {"accepted", "running", "stopping"}:
-                return {"state": assignment["state"], "stopped": False}
+
+            if assignment["state"] in {"submitting", "unknown"}:
+                if str(assignment.get("error_ref") or "").startswith("stop-unknown:"):
+                    return await self._reconcile_locked(assignment_id)
+                await self._reconcile_locked(assignment_id)
+                assignment = self._assignment(assignment_id)
+                if assignment is None:
+                    raise LookupError("Assignment not found")
+                if assignment["state"] in _TERMINAL_ASSIGNMENTS or assignment["state"] == "unknown":
+                    return {"state": assignment["state"], "stopped": False}
+
             if assignment["state"] == "stopping":
-                return await self._reconcile_locked(assignment_id)
+                result = await self._reconcile_locked(assignment_id)
+                assignment = self._assignment(assignment_id)
+                if assignment is None:
+                    raise LookupError("Assignment not found")
+                if assignment["state"] != "capturing":
+                    return result
+
+            if assignment["state"] not in {"accepted", "running", "capturing"}:
+                return {"state": assignment["state"], "stopped": False}
+
+            control = self._control.mode(assignment["mission_id"])
             ticket = self._authorization.ticket(assignment["ticket_id"])
             if ticket is None:
                 raise PermissionError("Ticket not found")
             mandate = ticket.get("mandate") or {}
-            check = self._authorization.revalidate_mandate(mandate.get("mandate_id"), actor=_ACTOR)
-            if check.get("status") not in {"valid", "affected"}:
+            mandate_status = self._authorization.revalidate_mandate(
+                mandate.get("mandate_id"), actor=_ACTOR,
+            ).get("status", "unknown")
+            mandate_valid = mandate_status in {"valid", "affected"}
+            # Cancel 是已持久化的宿主安全控制；即使 Mandate 已撤销，也必须允许停止原 Run。
+            if control["mode"] != "cancelled" and not mandate_valid:
                 raise PermissionError("Current Mandate does not authorize stopping this Assignment")
             worker = self._worker_row(assignment["worker_id"])
             if worker is None:
                 raise HarnessError("Assignment Worker is missing", code="superagent/worker-unavailable")
-            if assignment["state"] != "stopping":
-                assignment = self._transition(
-                    "assignment", assignment_id, "stopping",
-                    facts={"stop_requested": True, "mandate_valid": True, "control_allows": True},
-                    changes={"error_ref": f"stop-request:{hashlib.sha256(reason.encode()).hexdigest()}"},
-                )
+
+            stop_facts = {
+                "stop_requested": True,
+                "mandate_valid": mandate_valid,
+                "control_allows": True,
+            }
+            if assignment["state"] == "capturing":
+                stop_facts["original_run_settled"] = True
+            assignment = self._transition(
+                "assignment", assignment_id, "stopping",
+                facts=stop_facts,
+                changes={"error_ref": f"stop-request:{hashlib.sha256(reason.encode()).hexdigest()}"},
+            )
             try:
                 receipt = await self._executor.stop(worker, assignment)
             except Exception:
-                self._mark_unknown(assignment, "native stop outcome cannot be confirmed")
+                self._mark_unknown(
+                    assignment, "native stop outcome cannot be confirmed",
+                    error_ref=f"stop-unknown:{assignment_id}",
+                )
                 return {"state": "unknown", "stopped": False}
             if not isinstance(receipt, dict) or type(receipt.get("stopped")) is not bool:
-                self._mark_unknown(assignment, "native stop receipt is invalid")
+                self._mark_unknown(
+                    assignment, "native stop receipt is invalid",
+                    error_ref=f"stop-unknown:{assignment_id}",
+                )
                 return {"state": "unknown", "stopped": False}
             if not receipt["stopped"]:
-                return {"state": "stopping", "stopped": False, "receipt": receipt}
+                result = await self._reconcile_locked(assignment_id)
+                current = self._assignment(assignment_id)
+                if current and (current["state"] in _TERMINAL_ASSIGNMENTS or current["state"] == "capturing"):
+                    return result
+                if current is not None:
+                    self._mark_unknown(
+                        current, "native stop could not be confirmed",
+                        error_ref=f"stop-unknown:{assignment_id}",
+                    )
+                return {"state": "unknown", "stopped": False, "receipt": receipt}
             return await self._reconcile_locked(assignment_id)

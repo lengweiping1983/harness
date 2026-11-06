@@ -54,7 +54,6 @@ class CoordinatorHostTests(unittest.TestCase):
         self.root = Path(temporary.name)
 
     def open_host(self, path=None, **kwargs):
-        kwargs.setdefault("legacy_state_dir", self.root / "legacy-v1")
         return CoordinatorHost.open(
             path or self.root / "v2-state",
             instance_id="v2-instance", identity={"profile": "coordinator"},
@@ -80,6 +79,14 @@ class CoordinatorHostTests(unittest.TestCase):
         reopened = self.open_host()
         self.addCleanup(reopened.close)
         self.assertEqual(reopened.database_path, host.database_path)
+
+    def test_host_does_not_require_legacy_state_or_assemble_shadow_by_default(self):
+        host = self.open_host()
+        self.addCleanup(host.close)
+        self.assertFalse((self.root / "legacy-v1").exists())
+        with self.assertRaises(HarnessError) as caught:
+            _ = host.shadow
+        self.assertEqual(caught.exception.code, "superagent/shadow-unavailable")
 
     def test_host_rejects_a_legacy_v1_state_directory_without_modifying_it(self):
         legacy = self.root / "legacy-v1"
@@ -438,3 +445,123 @@ class CoordinatorHostTests(unittest.TestCase):
             with host.unit_of_work(actor={"kind": "human"}):
                 pass
         self.assertEqual(caught.exception.code, "superagent/closed")
+
+    def test_aclose_waits_for_active_operations_and_releases_the_instance_lease(self):
+        host = self.open_host()
+        entered = Event()
+        release = Event()
+
+        def hold_operation():
+            with host._operation():
+                entered.set()
+                release.wait(3)
+
+        worker = Thread(target=hold_operation)
+        worker.start()
+        self.assertTrue(entered.wait(1))
+
+        async def close_host():
+            task = asyncio.create_task(host.aclose())
+            await asyncio.sleep(0)
+            self.assertTrue(host._closing)
+            self.assertFalse(task.done())
+            with self.assertRaises(HarnessError) as closed:
+                _ = host.outbox
+            self.assertEqual(closed.exception.code, "superagent/closed")
+            with self.assertRaises(HarnessError) as busy:
+                self.open_host()
+            self.assertEqual(busy.exception.code, "superagent/runtime-busy")
+            release.set()
+            await task
+            await host.aclose()
+
+        try:
+            asyncio.run(close_host())
+        finally:
+            release.set()
+            worker.join(2)
+        self.assertFalse(worker.is_alive())
+        reopened = self.open_host()
+        self.addCleanup(reopened.close)
+
+    def test_coordinator_watchdog_persists_monotonic_escalation_and_progress(self):
+        host = self.open_host(watchdog_limits={
+            "stale_after": 1.0, "max_stale_ticks": 2, "action": "block",
+        })
+        self.addCleanup(host.close)
+        with host.unit_of_work(actor={"kind": "test"}) as uow:
+            ticket = uow.tickets.create({
+                "ticket_id": "ticket-watchdog", "mandate_id": "mandate-watchdog",
+                "origin_trigger_id": "trigger-watchdog", "title": "Watchdog test",
+            })
+            mission = uow.missions.create({
+                "mission_id": "mission-watchdog", "ticket_id": ticket["ticket_id"],
+                "sequence": 1, "repo": "D:/repo", "base_commit": "a" * 40,
+            })
+
+        first = host.watchdog.observe(
+            mission["mission_id"], activity={"run_status": "running", "event_seq": 1},
+            now="2026-11-06T00:00:00Z",
+        )
+        self.assertEqual((first["state"], first["aggregate_revision"]), ("healthy", 1))
+        stalled = host.watchdog.observe(
+            mission["mission_id"], activity={"run_status": "running", "event_seq": 1},
+            now="2026-11-06T00:00:01Z",
+        )
+        self.assertEqual((stalled["state"], stalled["stagnant_ticks"]), ("stalled", 1))
+        blocked = host.watchdog.observe(
+            mission["mission_id"], activity={"run_status": "running", "event_seq": 1},
+            now="2026-11-06T00:00:02Z",
+        )
+        self.assertEqual((blocked["state"], blocked["stagnant_ticks"]), ("blocked", 2))
+
+        # 时钟回拨不降低 observed_at，也不制造新的 Revision。
+        repeated = host.watchdog.observe(
+            mission["mission_id"], activity={"run_status": "running", "event_seq": 1},
+            now="2026-11-05T23:59:00Z",
+        )
+        self.assertEqual(repeated, blocked)
+        before = host.watchdog.get(mission["mission_id"])
+        status = host.watchdog.status()
+        after = host.watchdog.get(mission["mission_id"])
+        self.assertEqual(before, after)
+        self.assertEqual(status["states"]["blocked"], 1)
+
+        progressed = host.watchdog.observe(
+            mission["mission_id"], activity={"run_status": "completed", "event_seq": 2},
+            now="2026-11-06T00:00:03Z",
+        )
+        self.assertEqual(progressed["state"], "healthy")
+        self.assertEqual(progressed["aggregate_revision"], 4)
+        self.assertEqual(progressed["last_progress_at"], "2026-11-06T00:00:03.000Z")
+        self.assertFalse((host.state_dir / "watchdog.sqlite3").exists())
+
+        with host._store.transaction() as db:
+            row = db.execute(
+                "SELECT state,aggregate_revision FROM watchdog_snapshots WHERE mission_id=?",
+                (mission["mission_id"],),
+            ).fetchone()
+        self.assertEqual((row["state"], row["aggregate_revision"]), ("healthy", 4))
+
+    def test_coordinator_watchdog_attention_policy_never_auto_blocks(self):
+        host = self.open_host()
+        self.addCleanup(host.close)
+        with host.unit_of_work(actor={"kind": "test"}) as uow:
+            ticket = uow.tickets.create({
+                "ticket_id": "ticket-watchdog-attention", "mandate_id": "mandate-watchdog-attention",
+                "origin_trigger_id": "trigger-watchdog-attention", "title": "Watchdog attention",
+            })
+            mission = uow.missions.create({
+                "mission_id": "mission-watchdog-attention", "ticket_id": ticket["ticket_id"],
+                "sequence": 1, "repo": "D:/repo", "base_commit": "b" * 40,
+            })
+        host.watchdog.observe(
+            mission["mission_id"], activity={"run_status": "running"},
+            now="2026-11-06T00:00:00Z",
+        )
+        stale = host.watchdog.observe(
+            mission["mission_id"], activity={"run_status": "running"},
+            now="2026-11-06T02:00:00Z",
+        )
+        self.assertEqual(stale["state"], "stalled")
+        self.assertGreaterEqual(stale["stagnant_ticks"], 3)

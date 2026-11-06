@@ -7,7 +7,7 @@ import inspect
 import json
 from typing import Awaitable, Literal, Mapping, Protocol
 
-from .superagent_coordinator_store import CoordinatorStore
+from .superagent_coordinator_store import CoordinatorStore, _json
 from .superagent_outbox import OutboxEffectService
 
 
@@ -71,9 +71,20 @@ class EffectRecoveryService:
             ).fetchone()
             if current is None:
                 return False
+            event_payload = {"generation": generation, **payload}
+            previous = db.execute(
+                "SELECT event_type,payload_json FROM audit_events WHERE event_id=?",
+                (current["last_event_id"],),
+            ).fetchone()
+            if (
+                previous is not None
+                and previous["event_type"] == event_type
+                and previous["payload_json"] == _json(event_payload)
+            ):
+                return True
             CoordinatorStore._append_effect_event(
                 db, current, event_type=event_type,
-                payload={"generation": generation, **payload},
+                payload=event_payload,
                 actor={"kind": "system", "component": "durable-effect-recovery"},
             )
             return True

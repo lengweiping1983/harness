@@ -8,7 +8,8 @@ import os
 import sqlite3
 import time
 from contextlib import ExitStack, contextmanager
-from dataclasses import fields
+from collections.abc import Mapping
+from dataclasses import asdict, fields
 from pathlib import Path
 from itertools import islice
 
@@ -263,6 +264,76 @@ class SuperagentService:
                 errors.append(cleanup)
             raise_cleanup_errors(errors)
 
+    @classmethod
+    async def open_coordinator(
+        cls, state_dir: Path, *, instance_id: str, identity: object,
+        executor_adapter: object, assessor: object | None = None,
+        source_kinds: tuple = (), secret_resolver=None, local_identity_verifier=None,
+        watchdog_limits: dict | None = None, effect_adapters: Mapping | None = None,
+        interval: float = 0.5, once_timeout: float = 600,
+        max_threads_per_tick: int = 16,
+    ):
+        """显式打开统一协调运行模式；不被旧 CLI 或生产默认路由自动选择。"""
+        if (
+            isinstance(interval, bool) or not isinstance(interval, (int, float))
+            or not 0.01 <= interval <= 60
+            or isinstance(once_timeout, bool) or not isinstance(once_timeout, (int, float))
+            or not 1 <= once_timeout <= 86400
+            or type(max_threads_per_tick) is not int or not 1 <= max_threads_per_tick <= 100
+            or not isinstance(source_kinds, (tuple, list))
+            or effect_adapters is not None and not isinstance(effect_adapters, Mapping)
+        ):
+            raise ValueError("unified SuperagentService runtime options are invalid")
+        from .superagent_coordinator_host import CoordinatorHost
+
+        host = CoordinatorHost.open(
+            state_dir, instance_id=instance_id, identity=identity,
+            secret_resolver=secret_resolver,
+            local_identity_verifier=local_identity_verifier,
+            source_kinds=tuple(source_kinds), executor_adapter=executor_adapter,
+            watchdog_limits=watchdog_limits,
+        )
+        try:
+            service = cls()
+            service._coordinator_mode = True
+            service._coordinator_host = host
+            service._coordinator_assessor = assessor
+            service._coordinator_effect_recovery = host.effect_recovery_service(
+                {} if effect_adapters is None else effect_adapters,
+            )
+            service._coordinator_thread_cursor = 0
+            service._coordinator_max_threads_per_tick = max_threads_per_tick
+            service._coordinator_last_status = None
+            service.spec = {"interval": float(interval), "once_timeout": float(once_timeout)}
+            service.root = host.state_dir
+            service.hosts = []
+            service.channels = []
+            service.router = service.dispatcher = service.factory = None
+            service.guidance_files = service.results = service.inbox = None
+            service.closed = False
+            service._close_task = None
+            service._tick_task = None
+            service._serve_error = None
+            service.owner = asyncio.get_running_loop()
+            return service
+        except BaseException:
+            await host.aclose()
+            raise
+
+    @property
+    def coordinator(self):
+        if not getattr(self, "_coordinator_mode", False):
+            raise HarnessError(tr("superagent.conflict"), code="superagent/coordinator-unavailable")
+        if self.closed:
+            raise _error("closed")
+        return self._coordinator_host
+
+    @property
+    def coordinator_status(self):
+        if not getattr(self, "_coordinator_mode", False):
+            raise HarnessError(tr("superagent.conflict"), code="superagent/coordinator-unavailable")
+        return self._coordinator_last_status
+
     @contextmanager
     def _db(self, *, initialize=False, write=False):
         db = sqlite3.connect(self.path, timeout=10)
@@ -351,6 +422,8 @@ class SuperagentService:
         self.file_errors = [self._file_errors[name] for name in sorted(self._file_errors)]
 
     async def tick(self):
+        if getattr(self, "_coordinator_mode", False):
+            return await self._tick_coordinator_entry()
         if self.closed:
             raise _error('closed')
         if self.owner is not asyncio.get_running_loop():
@@ -359,6 +432,213 @@ class SuperagentService:
         if self._tick_task is None or self._tick_task.done():
             self._tick_task = asyncio.create_task(self._tick())
         return await join_cleanup(self._tick_task)
+
+    async def _tick_coordinator_entry(self):
+        if self.closed:
+            raise _error("closed")
+        if self.owner is not asyncio.get_running_loop():
+            future = asyncio.run_coroutine_threadsafe(self._tick_coordinator_entry(), self.owner)
+            return await join_cleanup(asyncio.wrap_future(future))
+        if self._tick_task is None or self._tick_task.done():
+            self._tick_task = asyncio.create_task(self._tick_coordinator())
+        return await join_cleanup(self._tick_task)
+
+    async def _tick_coordinator(self):
+        host = self._coordinator_host
+        controls = await host.execution.reconcile_controls(limit=100)
+        threads = host.sources.list_threads(limit=1000)
+        selected = []
+        if threads:
+            start = self._coordinator_thread_cursor % len(threads)
+            selected = (threads[start:] + threads[:start])[:self._coordinator_max_threads_per_tick]
+            self._coordinator_thread_cursor = (start + len(selected)) % len(threads)
+
+        assessments = []
+        routes = []
+        route_errors = []
+        for thread in selected:
+            result = await host.authorization.assess_next_async(
+                thread["thread_id"], self._coordinator_assessor,
+                actor={"kind": "host"}, assessor_actor={"kind": "assessor"},
+            )
+            assessments.append(result)
+
+        # 已接受的 TicketInput 在暂停、撤权或进程重启后仍保留 waiting；
+        # 每轮从账本重读并复用 route_trigger 的原身份幂等路径。
+        route_candidates = host.execution.pending_routes(limit=101)
+        route_backlog = len(route_candidates) > 100
+        for item in route_candidates[:100]:
+            try:
+                receipt = await host.execution.route_trigger(
+                    item["ticket_id"], item["trigger_id"],
+                )
+            except (HarnessError, PermissionError, LookupError) as exc:
+                route_errors.append({
+                    "ticket_id": item["ticket_id"],
+                    "trigger_id": item["trigger_id"],
+                    "code": getattr(exc, "code", type(exc).__name__),
+                })
+            else:
+                routes.append({
+                    "ticket_id": item["ticket_id"],
+                    "trigger_id": item["trigger_id"],
+                    "receipt": receipt,
+                })
+        remaining_routes = host.execution.pending_routes(limit=101)
+        pending_route_count = len(remaining_routes)
+        route_backlog = route_backlog or pending_route_count > 100
+
+        reconciliation = await host.execution.reconcile_active(limit=100)
+        active_states = {"submitting", "accepted", "running", "capturing", "stopping"}
+        active_assignments = [
+            item for item in reconciliation["assignments"]
+            if item.get("state") in active_states
+        ]
+        unknown_assignments = [
+            item for item in reconciliation["assignments"]
+            if item.get("state") in {"unknown", "unavailable"}
+        ]
+
+        mission_states = host.execution.active_mission_states(limit=101)
+        mission_backlog = len(mission_states) > 100
+        mission_states = mission_states[:100]
+        active_missions = [item["mission_id"] for item in mission_states]
+        pending_missions = sum(1 for item in mission_states if item["state"] != "unknown")
+        unknown_missions = sum(1 for item in mission_states if item["state"] == "unknown")
+        watchdog_observations = []
+        for mission_id in active_missions:
+            activity = host.execution.watchdog_activity(mission_id)
+            watchdog_observations.append(host.watchdog.observe(mission_id, activity=activity))
+        watchdog_status = host.watchdog.status(limit=100, mission_ids=active_missions)
+        watchdog_attention = (
+            watchdog_status["states"]["stalled"] + watchdog_status["states"]["blocked"]
+        )
+
+        pending_triggers = 0
+        for thread in threads:
+            triggers = host.sources.list_triggers(thread_id=thread["thread_id"], limit=1000)
+            pending_triggers += sum(
+                1 for trigger in triggers
+                if (trigger.get("disposition") or {}).get("state") == "evaluation.queued"
+            )
+
+        control_pending = sum(
+            1 for item in controls["missions"] if item.get("stop_state") == "pending"
+        )
+        control_unknown = sum(
+            1 for item in controls["missions"] if item.get("stop_state") == "unknown"
+        )
+        control_backlog = controls["processed"] >= 100
+        unavailable_assessments = sum(
+            1 for item in assessments if item.get("state") == "unavailable"
+        )
+        blocked_assessments = sum(
+            1 for item in assessments if item.get("state") == "blocked"
+        )
+        effect_report = None
+        if self._coordinator_effect_recovery is not None:
+            effect_report = asdict(await self._coordinator_effect_recovery.recover_async(limit=100))
+        uncertain_effects = 0 if effect_report is None else (
+            effect_report["left_unknown"] + effect_report["unavailable"] + effect_report["errors"]
+        )
+        status = {
+            "runtime_state": "running",
+            "threads_considered": len(selected),
+            "evaluations": len(assessments),
+            "accepted": sum(1 for item in assessments if item.get("kind") in {"accept", "reopen"}),
+            "routes": routes,
+            "route_errors": route_errors,
+            "controls": controls,
+            "control_pending": control_pending,
+            "control_unknown": control_unknown,
+            "control_backlog": control_backlog,
+            "reconciliation": reconciliation,
+            "active_assignments": len(active_assignments),
+            "unknown_assignments": len(unknown_assignments),
+            "pending_triggers": pending_triggers,
+            "pending_routes": pending_route_count,
+            "route_backlog": route_backlog,
+            "reconcile_backlog": reconciliation["processed"] >= 100,
+            "active_missions": len(active_missions),
+            "mission_backlog": mission_backlog,
+            "pending_missions": pending_missions,
+            "unknown_missions": unknown_missions,
+            "watchdog": watchdog_status,
+            "watchdog_attention": watchdog_attention,
+            "watchdog_observations": len(watchdog_observations),
+            "effect_recovery_enabled": self._coordinator_effect_recovery is not None,
+            "effect_recovery": effect_report,
+            "uncertain_effects": uncertain_effects,
+            "unavailable_assessments": unavailable_assessments,
+            "blocked_assessments": blocked_assessments,
+        }
+        self._coordinator_last_status = status
+        return status
+
+    async def _serve_coordinator(self, stop: asyncio.Event, *, once: bool = False):
+        started = time.monotonic()
+        while not stop.is_set() and not self.closed:
+            try:
+                status = await self.tick()
+            except Exception as exc:
+                self._serve_error = exc
+                raise
+            if once and status["route_errors"]:
+                return 2
+            pending = bool(
+                status["pending_triggers"] or status["pending_routes"]
+                or status["route_backlog"] or status["active_assignments"]
+                or status["pending_missions"] or status["mission_backlog"]
+                or status["control_pending"] or status["control_backlog"]
+                or status["reconcile_backlog"]
+            )
+            uncertain = bool(
+                status["control_unknown"] or status["unknown_assignments"]
+                or status["unknown_missions"] or status["watchdog_attention"]
+                or status["uncertain_effects"] or status["unavailable_assessments"]
+                or status["blocked_assessments"] or status["route_errors"]
+            )
+            if once and not pending:
+                return 2 if uncertain else 0
+            if once and time.monotonic() - started >= self.spec["once_timeout"]:
+                self._serve_error = _error("once-timeout")
+                raise self._serve_error
+            try:
+                await asyncio.wait_for(stop.wait(), self.spec["interval"])
+            except TimeoutError:
+                pass
+        return 0
+
+    async def _aclose_coordinator(self):
+        if self.owner is not asyncio.get_running_loop():
+            future = asyncio.run_coroutine_threadsafe(self._aclose_coordinator(), self.owner)
+            await join_cleanup(asyncio.wrap_future(future))
+            return
+        if self._close_task is None:
+            self.closed = True
+            self._close_task = asyncio.create_task(self._close_coordinator())
+        await join_cleanup(self._close_task)
+
+    async def _close_coordinator(self):
+        errors = []
+        if self._tick_task is not None:
+            try:
+                await self._tick_task
+            except BaseException as exc:
+                errors.append(exc)
+        try:
+            await self._coordinator_host.aclose()
+        except BaseException as exc:
+            errors.append(exc)
+        previous = self._coordinator_last_status or {}
+        self._coordinator_last_status = {
+            **previous,
+            "runtime_state": "failed" if errors or self._serve_error is not None else "stopped",
+            **({"last_error_code": getattr(errors[0] if errors else self._serve_error,
+                                            "code", "runtime/failure")}
+               if errors or self._serve_error is not None else {}),
+        }
+        raise_cleanup_errors(errors)
 
     async def _tick(self):
         for _, channel in self.channels:
@@ -388,6 +668,8 @@ class SuperagentService:
         return status
 
     async def serve(self, stop: asyncio.Event, *, once=False):
+        if getattr(self, "_coordinator_mode", False):
+            return await self._serve_coordinator(stop, once=once)
         started = time.monotonic()
         scans = 0
         if once and self.guidance_files is not None:
@@ -434,6 +716,9 @@ class SuperagentService:
         return 0
 
     async def aclose(self):
+        if getattr(self, "_coordinator_mode", False):
+            await self._aclose_coordinator()
+            return
         if self.owner is not asyncio.get_running_loop():
             future = asyncio.run_coroutine_threadsafe(self.aclose(), self.owner)
             await join_cleanup(asyncio.wrap_future(future))

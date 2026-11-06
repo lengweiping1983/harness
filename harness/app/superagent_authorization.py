@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import inspect
 import json
 import re
 from typing import Any, Mapping
@@ -1535,6 +1536,41 @@ class CoordinatorAuthorizationEngine:
         try:
             method = getattr(assessor, "assess", None)
             proposal = method(candidate) if callable(method) else assessor(candidate) if callable(assessor) else None
+            if proposal is None:
+                raise TypeError("Assessor must return a DecisionProposal")
+        except Exception:
+            return self.complete_evaluation(
+                evaluation_id, {"kind": "unavailable", "reason": "assessor_failed"},
+                actor=audit_actor, now=now,
+            )
+        try:
+            return self.complete_evaluation(evaluation_id, proposal, actor=audit_actor, now=now)
+        except (ValueError, TypeError, PermissionError, LookupError):
+            return self.complete_evaluation(
+                evaluation_id, {"kind": "unavailable", "reason": "assessor_invalid_proposal"},
+                actor=audit_actor, now=now,
+            )
+
+    async def assess_next_async(
+        self, thread_id: str, assessor: object | None, *, actor: object,
+        assessor_actor: object | None = None, now: str | None = None,
+    ) -> dict[str, Any]:
+        """冻结候选后等待原生异步 Assessor；异常和无效提案只形成 unavailable。"""
+        candidate = self.begin_evaluation(thread_id, actor=actor, now=now)
+        if candidate.get("state") != "running":
+            return candidate
+        evaluation_id = candidate["evaluation_id"]
+        audit_actor = {"kind": "assessor"} if assessor_actor is None else assessor_actor
+        if assessor is None:
+            return self.complete_evaluation(
+                evaluation_id, {"kind": "unavailable", "reason": "assessor_unavailable"},
+                actor=audit_actor, now=now,
+            )
+        try:
+            method = getattr(assessor, "assess", None)
+            proposal = method(candidate) if callable(method) else assessor(candidate) if callable(assessor) else None
+            if inspect.isawaitable(proposal):
+                proposal = await proposal
             if proposal is None:
                 raise TypeError("Assessor must return a DecisionProposal")
         except Exception:

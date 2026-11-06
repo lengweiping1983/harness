@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 
 from harness.app.superagent_executor import HarnessExecutorAdapter
+from harness.app.superagent_service import SuperagentService
 from harness.core.errors import HarnessError
 from harness.core.language import current_language
 from tests import test_superagent_execution as fixtures
@@ -755,3 +756,461 @@ class UnifiedExecutionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HarnessError) as malformed:
             adapter.reconcile_instruction(worker, assignment, key, 1, expected_text)
         self.assertEqual(malformed.exception.code, "superagent/instruction-receipt-invalid")
+
+    async def test_cancel_stops_original_run_and_settles_persisted_mission(self):
+        f = self.fixture
+        origin, accepted, _ = f.accept_event()
+        started = await f.host.execution.route_trigger(accepted["ticket_id"], origin["trigger_id"])
+        mission_id = started["mission_id"]
+        receipt = f.host.execution.control_mission(
+            mission_id, "cancel", request_id="cancel-mission-1", actor={"kind": "human"},
+        )
+        self.assertEqual(receipt["state"], "applied")
+        self.assertEqual(f.host.execution.control_status(mission_id)["stop_state"], "pending")
+
+        reconciled = await f.host.execution.reconcile_controls()
+        self.assertEqual(reconciled["processed"], 1)
+        assignment = f.host._execution_service._assignment(started["assignment_id"])
+        self.assertEqual(assignment["state"], "interrupted")
+        self.assertEqual(f.mission_state(mission_id), "cancelled")
+        self.assertEqual(f.host.execution.control_status(mission_id)["stop_state"], "settled")
+
+        settled = await f.host.execution.reconcile_controls()
+        self.assertEqual(settled["processed"], 0)
+        self.assertEqual(f.shared["stop_calls"], [started["assignment_id"]])
+
+    async def test_unknown_cancel_stop_is_not_replayed_and_can_be_reconciled(self):
+        f = self.fixture
+        origin, accepted, _ = f.accept_event()
+        started = await f.host.execution.route_trigger(accepted["ticket_id"], origin["trigger_id"])
+        mission_id = started["mission_id"]
+        f.shared["fail_stop"] = True
+        f.host.execution.control_mission(
+            mission_id, "cancel", request_id="cancel-mission-unknown", actor={"kind": "human"},
+        )
+
+        await f.host.execution.reconcile_controls()
+        assignment = f.host._execution_service._assignment(started["assignment_id"])
+        self.assertEqual(assignment["state"], "unknown")
+        self.assertTrue(assignment["error_ref"].startswith("stop-unknown:"))
+        self.assertEqual(f.host.execution.control_status(mission_id)["stop_state"], "unknown")
+
+        await f.host.execution.reconcile_controls()
+        self.assertEqual(f.shared["stop_calls"], [started["assignment_id"]])
+
+        snapshot = f.shared["runs"][started["assignment_id"]]
+        f.shared["runs"][started["assignment_id"]] = f.adapter._snapshot(
+            snapshot["run_id"], snapshot["run_reference"]["session_id"], snapshot["input_ids"],
+            status="interrupted", settled=True, output_text=snapshot["output_text"],
+        )
+        await f.host.execution.reconcile_controls()
+        self.assertEqual(f.mission_state(mission_id), "cancelled")
+        self.assertEqual(f.host.execution.control_status(mission_id)["stop_state"], "settled")
+        self.assertEqual(f.shared["stop_calls"], [started["assignment_id"]])
+
+    async def test_unknown_stop_after_nonconfirming_receipt_never_replays_after_inspection_error(self):
+        f = self.fixture
+        origin, accepted, _ = f.accept_event()
+        started = await f.host.execution.route_trigger(accepted["ticket_id"], origin["trigger_id"])
+        mission_id = started["mission_id"]
+        assignment_id = started["assignment_id"]
+        f.shared["false_stop_receipt"] = True
+        f.shared["fail_inspect"] = True
+        f.host.execution.control_mission(
+            mission_id, "cancel", request_id="cancel-mission-false-receipt",
+            actor={"kind": "human"},
+        )
+
+        await f.host.execution.reconcile_controls()
+        assignment = f.host._execution_service._assignment(assignment_id)
+        self.assertEqual(assignment["state"], "unknown")
+        self.assertEqual(assignment["error_ref"], f"stop-unknown:{assignment_id}")
+        self.assertEqual(f.host.execution.control_status(mission_id)["stop_state"], "unknown")
+
+        await f.host.execution.reconcile_controls()
+        self.assertEqual(f.shared["stop_calls"], [assignment_id])
+        self.assertEqual(f.mission_state(mission_id), "cancelling")
+
+        snapshot = f.shared["runs"][assignment_id]
+        f.shared["runs"][assignment_id] = f.adapter._snapshot(
+            snapshot["run_id"], snapshot["run_reference"]["session_id"], snapshot["input_ids"],
+            status="interrupted", settled=True, output_text=snapshot["output_text"],
+        )
+        await f.host.execution.reconcile_controls()
+        self.assertEqual(f.mission_state(mission_id), "cancelled")
+        self.assertEqual(f.shared["stop_calls"], [assignment_id])
+
+    async def test_cancel_stops_a_capturing_assignment_after_run_settlement(self):
+        f = self.fixture
+        origin, accepted, _ = f.accept_event()
+        started = await f.host.execution.route_trigger(accepted["ticket_id"], origin["trigger_id"])
+        snapshot = f.shared["runs"][started["assignment_id"]]
+        completed = f.adapter._snapshot(
+            snapshot["run_id"], snapshot["run_reference"]["session_id"], snapshot["input_ids"],
+            status="completed", settled=True, output_text=snapshot["output_text"],
+        )
+        completed["unsettled_background"] = 1
+        f.shared["runs"][started["assignment_id"]] = completed
+
+        result = await f.host.execution.reconcile(started["assignment_id"])
+        self.assertEqual(result["state"], "capturing")
+        f.host.execution.control_mission(
+            started["mission_id"], "cancel", request_id="cancel-capturing", actor={"kind": "human"},
+        )
+        await f.host.execution.reconcile_controls()
+
+        assignment = f.host._execution_service._assignment(started["assignment_id"])
+        self.assertEqual(assignment["state"], "interrupted")
+        self.assertEqual(f.mission_state(started["mission_id"]), "cancelled")
+        self.assertEqual(f.shared["stop_calls"], [started["assignment_id"]])
+
+    async def test_pause_defers_attention_creation_until_resume(self):
+        f = self.fixture
+        origin, accepted, _ = f.accept_event()
+        started = await f.host.execution.route_trigger(accepted["ticket_id"], origin["trigger_id"])
+        f.host.execution.control_mission(
+            started["mission_id"], "pause", request_id="pause-attention", actor={"kind": "human"},
+        )
+        f.adapter.finish(started["assignment_id"], {
+            "status": "attention", "summary": "Human decision required",
+            "question": "Which deployment target should be used?",
+        })
+
+        await f.host.execution.reconcile(started["assignment_id"])
+        self.assertEqual(f.host.execution.list_attentions(accepted["ticket_id"], state="open"), [])
+        self.assertEqual(f.mission_state(started["mission_id"]), "running")
+
+        f.host.execution.control_mission(
+            started["mission_id"], "resume", request_id="resume-attention", actor={"kind": "human"},
+        )
+        await f.host.execution.reconcile(started["assignment_id"])
+        attentions = f.host.execution.list_attentions(accepted["ticket_id"], state="open")
+        self.assertEqual(len(attentions), 1)
+        self.assertEqual(f.mission_state(started["mission_id"]), "blocked")
+
+    async def test_host_exposes_artifact_service_under_the_same_lifecycle_lease(self):
+        self.assertIsNone(self.fixture.host.artifacts.get("missing-assignment"))
+
+    async def test_single_superagent_service_runs_assessor_planner_executor_recovery_and_close(self):
+        f = self.fixture
+        instance_id = "phase4-unified-service"
+        state_dir = f.root / "service-v2"
+        identity = {"project": "harness", "suite": "phase4.2"}
+        adapter = fixtures.FakeExecutionAdapter(instance_id, f.profile)
+
+        async def assessor(candidate):
+            await asyncio.sleep(0)
+            return f._proposal(candidate["triggers"][0]["body"]["text"])
+
+        service = await SuperagentService.open_coordinator(
+            state_dir, instance_id=instance_id, identity=identity,
+            executor_adapter=adapter,
+            local_identity_verifier=f._local_identity, assessor=assessor,
+            watchdog_limits={"stale_after": 30.0, "max_stale_ticks": 2, "action": "attention"},
+            interval=0.01, once_timeout=10,
+        )
+        self.addAsyncCleanup(service.aclose)
+        host = service.coordinator
+        host.sources.create_instance(
+            "local-source", kind="local", config={"namespace": "repo"},
+            legacy_source_id="legacy-local",
+        )
+        thread_key = "unified-service-thread"
+        thread_id = f._thread_id(thread_key)
+        scope = {
+            "source_instance_ids": ["local-source"], "thread_ids": [thread_id],
+            "actions": ["read", "reply"], "tools": [],
+            "budget": {"max_turns": 3, "max_seconds": 60},
+        }
+        host.authorization.publish_policy({
+            "mode": "auto", "timeout_seconds": 120,
+            "rules": [{
+                "id": "implementation", "name": "Implementation", "enabled": True,
+                "instruction": "Only accept a settled implementation request.",
+            }],
+            "sources": {"local-source": {
+                "allowed": [{"id": "human:1"}], "scope": scope,
+            }},
+        }, actor={"kind": "human", "id": "policy-admin"})
+        host.sources.receive_local("local-source", {
+            "event_id": "service-event-1", "thread_id": thread_key,
+            "text": "Fix the existing typo.",
+            "occurred_at": "2026-11-06T12:00:00Z",
+            "metadata": {"actor_id": "human:1", "actor_kind": "human", "addressed": "direct"},
+        })
+
+        create_workspace = adapter.create_workspace
+        paused = {}
+
+        async def create_workspace_then_pause(worker, profile):
+            receipt = await create_workspace(worker, profile)
+            paused["mission_id"] = worker["mission_id"]
+            pause = host.execution.control_mission(
+                paused["mission_id"], "pause",
+                request_id="service-pause-after-workspace", actor={"kind": "human"},
+            )
+            self.assertEqual(pause["state"], "applied")
+            return receipt
+
+        adapter.create_workspace = create_workspace_then_pause
+        first = await service.tick()
+        self.assertEqual(first["accepted"], 1)
+        self.assertEqual(first["routes"], [])
+        self.assertEqual(first["route_errors"][0]["code"], "superagent/mission-paused")
+        self.assertEqual(first["pending_routes"], 1)
+        self.assertEqual(first["active_assignments"], 0)
+        self.assertEqual(first["pending_missions"], 1)
+        self.assertTrue(first["effect_recovery_enabled"])
+        self.assertIsInstance(first["effect_recovery"], dict)
+
+        mission_id = paused["mission_id"]
+        ticket_id = first["route_errors"][0]["ticket_id"]
+        self.assertEqual(host.execution.mission_control(mission_id)["mode"], "paused")
+        self.assertEqual(host.watchdog.get(mission_id)["state"], "healthy")
+        self.assertEqual(host.authorization.ticket(ticket_id)["state"], "open")
+
+        resumed = host.execution.control_mission(
+            mission_id, "resume", request_id="service-resume-after-pause",
+            actor={"kind": "human"},
+        )
+        self.assertEqual(resumed["state"], "applied")
+        adapter.create_workspace = create_workspace
+
+        second = await service.tick()
+        self.assertEqual(len(second["routes"]), 1)
+        route = second["routes"][0]["receipt"]
+        self.assertEqual(route["state"], "running")
+        self.assertEqual(second["pending_routes"], 0)
+        self.assertEqual(second["active_assignments"], 1)
+        self.assertEqual(second["pending_missions"], 1)
+        self.assertEqual(adapter.shared["workspace_calls"], 1)
+        self.assertEqual(adapter.shared["session_calls"], 1)
+        self.assertEqual(adapter.shared["submit_calls"], [route["assignment_id"]])
+        assignment_id = route["assignment_id"]
+        self.assertEqual(host.execution.mission_control(mission_id)["mode"], "running")
+
+        # 关闭释放旧 Host 和 Executor；重启后只回查同一 Assignment，不再次提交。
+        await service.aclose()
+        self.assertTrue(adapter.closed)
+        self.assertTrue(host._closed)
+        restarted_adapter = fixtures.FakeExecutionAdapter(instance_id, f.profile, adapter.shared)
+        restarted = await SuperagentService.open_coordinator(
+            state_dir, instance_id=instance_id, identity=identity,
+            executor_adapter=restarted_adapter,
+            local_identity_verifier=f._local_identity, assessor=assessor,
+            watchdog_limits={"stale_after": 30.0, "max_stale_ticks": 2, "action": "attention"},
+            interval=0.01, once_timeout=10,
+        )
+        self.addAsyncCleanup(restarted.aclose)
+        restarted_host = restarted.coordinator
+        recovered = await restarted.tick()
+        self.assertEqual(recovered["active_assignments"], 1)
+        self.assertEqual(recovered["pending_routes"], 0)
+        self.assertEqual(restarted_adapter.shared["submit_calls"], [assignment_id])
+        self.assertEqual(restarted_host.execution.mission_control(mission_id)["mode"], "running")
+        self.assertEqual(restarted_host.authorization.ticket(ticket_id)["state"], "open")
+        self.assertEqual(restarted_host.watchdog.get(mission_id)["state"], "healthy")
+
+        restarted_adapter.finish(assignment_id, {
+            "status": "completed", "summary": "Unified service run completed", "reply": "Done",
+        })
+        third = await restarted.tick()
+        self.assertEqual(third["active_assignments"], 0)
+        self.assertEqual(third["pending_missions"], 0)
+        self.assertTrue(third["effect_recovery_enabled"])
+        self.assertIsInstance(third["effect_recovery"], dict)
+        with restarted_host._store.transaction() as db:
+            mission = db.execute(
+                "SELECT state FROM missions WHERE mission_id=?", (mission_id,),
+            ).fetchone()
+        self.assertEqual(mission["state"], "completed")
+
+        self.assertEqual(await restarted.serve(asyncio.Event(), once=True), 0)
+        await restarted.aclose()
+        await restarted.aclose()
+        self.assertTrue(restarted_adapter.closed)
+        self.assertTrue(restarted_adapter.shared["async_closed"])
+        self.assertTrue(restarted_host._closed)
+        self.assertEqual(restarted.coordinator_status["runtime_state"], "stopped")
+        with self.assertRaises(HarnessError) as closed:
+            await restarted.tick()
+        self.assertEqual(closed.exception.code, "superagent/closed")
+
+    async def test_unified_service_revoke_blocks_resume_and_cancel_settles_original_run(self):
+        f = self.fixture
+        instance_id = "phase4-unified-service-revoke"
+        adapter = fixtures.FakeExecutionAdapter(instance_id, f.profile)
+        service = await SuperagentService.open_coordinator(
+            f.root / "service-v2-revoke", instance_id=instance_id,
+            identity={"project": "harness", "suite": "phase4.2.revoke"},
+            executor_adapter=adapter, local_identity_verifier=f._local_identity,
+            assessor=lambda candidate: f._proposal(candidate["triggers"][0]["body"]["text"]),
+            interval=0.01, once_timeout=10,
+        )
+        self.addAsyncCleanup(service.aclose)
+        host = service.coordinator
+        host.sources.create_instance(
+            "local-source", kind="local", config={"namespace": "repo"},
+            legacy_source_id="legacy-local",
+        )
+        thread_key = "unified-service-revoke-thread"
+        thread_id = f._thread_id(thread_key)
+        scope = {
+            "source_instance_ids": ["local-source"], "thread_ids": [thread_id],
+            "actions": ["read", "reply"], "tools": [],
+            "budget": {"max_turns": 3, "max_seconds": 60},
+        }
+        policy = {
+            "mode": "auto", "timeout_seconds": 120,
+            "rules": [{
+                "id": "implementation", "name": "Implementation", "enabled": True,
+                "instruction": "Only accept a settled implementation request.",
+            }],
+            "sources": {"local-source": {
+                "allowed": [{"id": "human:1"}], "scope": scope,
+            }},
+        }
+        host.authorization.publish_policy(policy, actor={"kind": "human", "id": "policy-admin"})
+        host.sources.receive_local("local-source", {
+            "event_id": "service-revoke-event", "thread_id": thread_key,
+            "text": "Fix the existing typo.",
+            "occurred_at": "2026-11-06T12:00:00Z",
+            "metadata": {"actor_id": "human:1", "actor_kind": "human", "addressed": "direct"},
+        })
+        first = await service.tick()
+        self.assertEqual(first["accepted"], 1)
+        self.assertEqual(len(first["routes"]), 1)
+        route = first["routes"][0]["receipt"]
+        mission_id = route["mission_id"]
+        assignment_id = route["assignment_id"]
+
+        paused = host.execution.control_mission(
+            mission_id, "pause", request_id="revoke-test-pause", actor={"kind": "human"},
+        )
+        self.assertEqual(paused["state"], "applied")
+        revoked_policy = {
+            **policy,
+            "sources": {"local-source": {
+                "allowed": [{"id": "human:2"}], "scope": scope,
+            }},
+        }
+        host.authorization.publish_policy(
+            revoked_policy, actor={"kind": "human", "id": "policy-admin"},
+        )
+        with self.assertRaises(HarnessError) as denied:
+            host.execution.control_mission(
+                mission_id, "resume", request_id="revoke-test-resume",
+                actor={"kind": "human"},
+            )
+        self.assertEqual(denied.exception.code, "superagent/mandate-unavailable")
+        self.assertEqual(host.execution.mission_control(mission_id)["mode"], "paused")
+
+        cancelled = host.execution.control_mission(
+            mission_id, "cancel", request_id="revoke-test-cancel",
+            actor={"kind": "human"},
+        )
+        self.assertEqual(cancelled["state"], "applied")
+        stopped = await service.tick()
+        self.assertEqual(stopped["controls"]["processed"], 1)
+        self.assertEqual(host.execution.control_status(mission_id)["stop_state"], "settled")
+        self.assertEqual(adapter.shared["stop_calls"], [assignment_id])
+        with host._store.transaction() as db:
+            mission = db.execute(
+                "SELECT state FROM missions WHERE mission_id=?", (mission_id,),
+            ).fetchone()
+            assignment = db.execute(
+                "SELECT state FROM assignments WHERE assignment_id=?", (assignment_id,),
+            ).fetchone()
+        self.assertEqual(mission["state"], "cancelled")
+        self.assertEqual(assignment["state"], "interrupted")
+
+        settled = await service.tick()
+        self.assertEqual(settled["controls"]["processed"], 0)
+        self.assertEqual(adapter.shared["stop_calls"], [assignment_id])
+        await service.aclose()
+        self.assertTrue(host._closed)
+        self.assertTrue(adapter.closed)
+
+    async def test_reconciliation_rotates_over_backlog_using_persisted_watchdog_cursor(self):
+        f = self.fixture
+        origin_a, accepted_a, _ = f.accept_event()
+        started_a = await f.host.execution.route_trigger(accepted_a["ticket_id"], origin_a["trigger_id"])
+        origin_b, accepted_b, _ = f.accept_event(
+            event_id="origin-b", thread_key="work-thread-b",
+        )
+        started_b = await f.host.execution.route_trigger(accepted_b["ticket_id"], origin_b["trigger_id"])
+
+        first = await f.host.execution.reconcile_active(limit=1)
+        self.assertEqual(first["processed"], 1)
+        first_assignment_id = first["assignments"][0]["assignment_id"]
+        first_assignment = f.host._execution_service._assignment(first_assignment_id)
+        first_mission_id = first_assignment["mission_id"]
+        f.host.watchdog.observe(first_mission_id, activity={"status": "running"}, now="2026-11-06T12:00:00Z")
+
+        second = await f.host.execution.reconcile_active(limit=1)
+        self.assertEqual(second["processed"], 1)
+        second_assignment_id = second["assignments"][0]["assignment_id"]
+        self.assertNotEqual(second_assignment_id, first_assignment_id)
+        second_assignment = f.host._execution_service._assignment(second_assignment_id)
+        second_mission_id = second_assignment["mission_id"]
+        self.assertEqual(
+            f.host.execution.active_mission_states(limit=2)[0]["mission_id"],
+            second_mission_id,
+        )
+
+        for mission_id, suffix in (
+            (started_a["mission_id"], "a"), (started_b["mission_id"], "b"),
+        ):
+            f.host.execution.control_mission(
+                mission_id, "cancel", request_id=f"fair-cancel-{suffix}",
+                actor={"kind": "human"},
+            )
+        f.shared["fail_stop"] = True
+        first_control = await f.host.execution.reconcile_controls(limit=1)
+        self.assertEqual(first_control["processed"], 1)
+        first_control_mission = first_control["missions"][0]["mission_id"]
+        self.assertEqual(first_control_mission, second_mission_id)
+        f.host.watchdog.observe(
+            second_mission_id, activity={"status": "running"}, now="2026-11-06T12:00:01Z",
+        )
+        second_control = await f.host.execution.reconcile_controls(limit=1)
+        self.assertEqual(second_control["processed"], 1)
+        self.assertEqual(second_control["missions"][0]["mission_id"], first_mission_id)
+
+    async def test_unified_service_serve_failure_is_preserved_after_resource_close(self):
+        f = self.fixture
+        instance_id = "phase4-unified-service-failure"
+        adapter = fixtures.FakeExecutionAdapter(instance_id, f.profile)
+        service = await SuperagentService.open_coordinator(
+            f.root / "service-v2-failure", instance_id=instance_id,
+            identity={"project": "harness", "suite": "phase4.2.failure"},
+            executor_adapter=adapter, local_identity_verifier=f._local_identity,
+            interval=0.01, once_timeout=5,
+        )
+        host = service.coordinator
+
+        def fail_reconciliation(*, limit=100):
+            raise HarnessError(
+                "Injected coordinator reconciliation failure",
+                code="superagent/runtime-test-failure",
+            )
+
+        host._execution_service.reconcile_controls = fail_reconciliation
+        try:
+            with self.assertRaises(HarnessError) as caught:
+                await service.serve(asyncio.Event(), once=True)
+            self.assertEqual(caught.exception.code, "superagent/runtime-test-failure")
+        finally:
+            try:
+                await service.aclose()
+            except BaseException:
+                pass
+
+        self.assertEqual(service.coordinator_status["runtime_state"], "failed")
+        self.assertEqual(
+            service.coordinator_status["last_error_code"],
+            "superagent/runtime-test-failure",
+        )
+        self.assertTrue(host._closed)
+        self.assertTrue(adapter.closed)
+        self.assertTrue(adapter.shared["async_closed"])

@@ -180,6 +180,27 @@ class EffectRecoveryServiceTests(unittest.TestCase):
                 db.execute("SELECT state FROM effects WHERE effect_id=?", (effect_id,)).fetchone()[0],
                 "unknown",
             )
+            first_event_id = event["event_id"]
+            first_event_count = db.execute(
+                "SELECT COUNT(*) FROM audit_events WHERE aggregate_type='effect' AND aggregate_id=?",
+                (effect_id,),
+            ).fetchone()[0]
+
+        repeated = EffectRecoveryService(self.store, {}).recover()
+        self.assertEqual((repeated.unavailable, repeated.left_unknown), (1, 1))
+        with self.store.transaction() as db:
+            latest = db.execute(
+                "SELECT event_id,event_type FROM audit_events WHERE aggregate_type='effect' "
+                "AND aggregate_id=? ORDER BY seq DESC LIMIT 1",
+                (effect_id,),
+            ).fetchone()
+            event_count = db.execute(
+                "SELECT COUNT(*) FROM audit_events WHERE aggregate_type='effect' AND aggregate_id=?",
+                (effect_id,),
+            ).fetchone()[0]
+        self.assertEqual(latest["event_id"], first_event_id)
+        self.assertEqual(latest["event_type"], "effect.lookup_unavailable")
+        self.assertEqual(event_count, first_event_count)
 
     def test_stale_lookup_result_cannot_overwrite_concurrent_reconciliation(self):
         effect_id, generation = self._unknown_effect("concurrent-reconcile")
