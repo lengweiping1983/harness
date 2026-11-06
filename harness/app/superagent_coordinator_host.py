@@ -107,13 +107,15 @@ class _HostDependencyRepository:
 class _CoordinatorHostUnitOfWork:
     """受限的宿主工作单元视图，不暴露 SQLite 连接或内部应用服务。"""
 
-    __slots__ = ("tickets", "missions", "jobs", "assignments", "outbox", "plans", "dependencies")
+    __slots__ = ("tickets", "missions", "jobs", "assignments", "workers", "attentions", "outbox", "plans", "dependencies")
 
     def __init__(self, uow):
         self.tickets = _HostAggregateRepository(uow.tickets)
         self.missions = _HostAggregateRepository(uow.missions)
         self.jobs = _HostAggregateRepository(uow.jobs)
         self.assignments = _HostAggregateRepository(uow.assignments)
+        self.workers = _HostAggregateRepository(uow.workers)
+        self.attentions = _HostAggregateRepository(uow.attentions)
         self.outbox = _HostAggregateRepository(uow.outbox)
         self.plans = _HostPlanRepository(uow.plans)
         self.dependencies = _HostDependencyRepository(uow.dependencies)
@@ -367,6 +369,29 @@ class _HostShadowComparison:
             return self.__service.compare(**kwargs)
 
 
+class _HostExecutionService:
+    __slots__ = ("__host", "__service")
+    def __init__(self, host, service): self.__host, self.__service = host, service
+    async def route_trigger(self, ticket_id, trigger_id):
+        with self.__host._operation(): return await self.__service.route_trigger(ticket_id, trigger_id)
+    async def reconcile(self, assignment_id):
+        with self.__host._operation(): return await self.__service.reconcile(assignment_id)
+    async def reconcile_ticket(self, ticket_id):
+        with self.__host._operation(): return await self.__service.reconcile_ticket(ticket_id)
+    async def stop(self, assignment_id, *, reason):
+        with self.__host._operation(): return await self.__service.stop(assignment_id, reason=reason)
+    def report(self, assignment_id):
+        with self.__host._operation(): return self.__service.report(assignment_id)
+    def list_workers(self, ticket_id):
+        with self.__host._operation(): return self.__service.list_workers(ticket_id)
+    def list_attentions(self, ticket_id, *, state=None):
+        with self.__host._operation(): return self.__service.list_attentions(ticket_id, state=state)
+    def resolve_attention(self, attention_id, answer_trigger_id):
+        with self.__host._operation(): return self.__service.resolve_attention(attention_id, answer_trigger_id)
+    def outbox_body(self, message_id):
+        with self.__host._operation(): return self.__service.outbox_body(message_id)
+
+
 class CoordinatorHost:
     """下一代 Superagent 的宿主组合边界。
 
@@ -376,11 +401,13 @@ class CoordinatorHost:
 
     def __init__(
         self, state_dir: Path, store: CoordinatorStore, stack: ExitStack,
-        *, legacy_state_dir: Path, evidence_verifier: HostEvidenceVerifier | None = None,
+        *, instance_id: str, legacy_state_dir: Path, evidence_verifier: HostEvidenceVerifier | None = None,
         secret_resolver: SecretResolver | None = None,
         local_identity_verifier: LocalIdentityVerifier | None = None,
-        source_kinds: tuple[SourceKind, ...] = (),
+        source_kinds: tuple[SourceKind, ...] = (), executor_adapter: object | None = None,
     ):
+        if executor_adapter is not None and getattr(executor_adapter, "instance_id", None) != instance_id:
+            raise ValueError("ExecutorAdapter instance_id must match CoordinatorHost")
         self.state_dir = state_dir
         self._legacy_state_dir = legacy_state_dir
         self._store = store
@@ -402,6 +429,14 @@ class CoordinatorHost:
         self._sources = _HostSourceRegistry(self, self._source_service)
         self._authorization = _HostAuthorizationEngine(self, self._authorization_service)
         self._shadow = _HostShadowComparison(self, self._shadow_service)
+        self._execution_service = None
+        self._execution = None
+        if executor_adapter is not None:
+            from .superagent_execution import CoordinatorExecutionService
+            self._execution_service = CoordinatorExecutionService(
+                store, self._authorization_service, self._source_service, executor_adapter, instance_id=instance_id,
+            )
+            self._execution = _HostExecutionService(self, self._execution_service)
 
     @classmethod
     def open(
@@ -410,7 +445,7 @@ class CoordinatorHost:
         evidence_verifier: HostEvidenceVerifier | None = None,
         secret_resolver: SecretResolver | None = None,
         local_identity_verifier: LocalIdentityVerifier | None = None,
-        source_kinds: tuple[SourceKind, ...] = (),
+        source_kinds: tuple[SourceKind, ...] = (), executor_adapter: object | None = None,
     ) -> "CoordinatorHost":
         requested = Path(state_dir).expanduser()
         is_junction = getattr(requested, "is_junction", None)
@@ -442,11 +477,15 @@ class CoordinatorHost:
                 root / "superagent.sqlite3", instance_id=instance_id, identity=identity,
             )
             return cls(
-                root, store, stack, legacy_state_dir=legacy, evidence_verifier=evidence_verifier,
+                root, store, stack, instance_id=instance_id, legacy_state_dir=legacy, evidence_verifier=evidence_verifier,
                 secret_resolver=secret_resolver, local_identity_verifier=local_identity_verifier,
-                source_kinds=source_kinds,
+                source_kinds=source_kinds, executor_adapter=executor_adapter,
             )
         except BaseException:
+            if executor_adapter is not None:
+                close = getattr(executor_adapter, "close", None)
+                if callable(close):
+                    close()
             stack.close()
             raise
 
@@ -473,6 +512,13 @@ class CoordinatorHost:
     def shadow(self) -> _HostShadowComparison:
         self._ensure_open()
         return self._shadow
+
+    @property
+    def execution(self):
+        self._ensure_open()
+        if self._execution is None:
+            raise HarnessError(tr("superagent.conflict"), code="superagent/executor-unavailable")
+        return self._execution
 
     @contextmanager
     def unit_of_work(self, *, actor: object, correlation_id: str | None = None):
@@ -569,6 +615,8 @@ class CoordinatorHost:
                 raise HarnessError(
                     tr("superagent.runtime-busy"), code="superagent/runtime-busy",
                 )
+            if self._execution_service is not None:
+                self._execution_service.close()
             self._closed = True
             self._stack.close()
 

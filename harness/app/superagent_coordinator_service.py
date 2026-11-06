@@ -1,10 +1,11 @@
 """下一代 Superagent 的宿主应用服务与状态转移守卫。"""
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
-from .superagent_coordinator_store import CoordinatorUnitOfWork
+from .superagent_coordinator_store import CoordinatorUnitOfWork, _hash, _json
 
 
 _REPOSITORIES = {
@@ -12,13 +13,15 @@ _REPOSITORIES = {
     "mission": "missions",
     "job": "jobs",
     "assignment": "assignments",
+    "worker": "workers",
+    "attention": "attentions",
 }
 
 _TRANSITIONS = {
     "ticket": {"open": {"ended"}, "ended": {"open"}},
     "mission": {
         "planning": {"running", "rejected", "blocked", "suppressed", "unknown", "cancelling"},
-        "running": {"integrating", "blocked", "suppressed", "unknown", "cancelling"},
+        "running": {"completed", "integrating", "blocked", "suppressed", "unknown", "cancelling"},
         "integrating": {"reviewing", "blocked", "unknown", "cancelling"},
         "reviewing": {"completed", "integrating", "blocked", "unknown", "cancelling"},
         "cancelling": {"cancelled", "unknown"},
@@ -29,18 +32,27 @@ _TRANSITIONS = {
     },
     "job": {
         "pending": {"ready", "blocked", "unknown", "cancelled"},
-        "ready": {"running", "blocked", "unknown", "cancelled"},
+        "ready": {"running", "done", "blocked", "unknown", "cancelled"},
         "running": {"checkpointed", "done", "blocked", "unknown"},
         "checkpointed": {"running", "blocked", "unknown", "cancelled"},
         "unknown": {"running", "done", "blocked", "cancelled"},
     },
+    "worker": {
+        "planned": {"workspace_creating", "stopped"},
+        "workspace_creating": {"workspace_ready", "unknown"},
+        "workspace_ready": {"session_creating", "unknown", "stopped"},
+        "session_creating": {"ready", "unknown"},
+        "ready": {"unknown", "stopped"},
+        "unknown": {"workspace_ready", "ready", "stopped"},
+    },
+    "attention": {"open": {"answered", "dismissed"}, "answered": set(), "dismissed": set()},
     "assignment": {
         "pending": {"submitting"},
         "submitting": {"accepted", "rejected", "unknown"},
-        "accepted": {"running", "capturing", "failed", "interrupted", "unknown"},
+        "accepted": {"running", "capturing", "stopping", "failed", "interrupted", "unknown"},
         "running": {"capturing", "stopping", "failed", "interrupted", "unknown"},
         "capturing": {"succeeded", "failed", "unknown"},
-        "stopping": {"cancelled", "succeeded", "unknown"},
+        "stopping": {"cancelled", "succeeded", "failed", "interrupted", "unknown"},
         "unknown": {
             "accepted", "running", "capturing", "rejected", "succeeded",
             "failed", "interrupted", "cancelled",
@@ -52,6 +64,7 @@ _REQUIRED_FACTS = {
     ("ticket", "ended", "open"): ("human_followup", "mandate_valid"),
     ("mission", "planning", "running"): ("plan_valid", "base_commit_frozen", "mandate_valid", "control_allows"),
     ("mission", "planning", "rejected"): ("explicit_plan_rejection",),
+    ("mission", "running", "completed"): ("single_node_report_frozen", "all_work_jobs_done", "mandate_valid", "control_allows"),
     ("mission", "running", "integrating"): ("all_work_jobs_done", "required_deliveries_applied", "mandate_valid", "control_allows"),
     ("mission", "integrating", "reviewing"): (
         "integration_artifact_frozen", "all_work_jobs_done", "required_deliveries_applied",
@@ -74,39 +87,46 @@ _REQUIRED_FACTS = {
         "reconciliation_verified", "original_integration_settled",
         "integration_artifact_frozen", "all_work_jobs_done", "required_deliveries_applied",
     ),
-    ("mission", "unknown", "completed"): (
-        "reconciliation_verified", "acceptance_verified", "original_integration_settled",
-        "integration_artifact_frozen", "all_work_jobs_done", "required_deliveries_applied",
-    ),
+    # Role-specific completion facts are enforced after inspecting the frozen PlanRevision.
+    ("mission", "unknown", "completed"): ("reconciliation_verified",),
     ("mission", "unknown", "blocked"): ("reconciliation_verified", "known_failure_or_human_decision"),
     ("mission", "unknown", "rejected"): ("reconciliation_verified", "explicit_plan_rejection"),
-    ("mission", "unknown", "suppressed"): ("reconciliation_verified", "mandate_revoked"),
+    ("mission", "running", "suppressed"): ("mandate_unavailable",),
+    ("mission", "unknown", "suppressed"): ("reconciliation_verified", "mandate_unavailable"),
     ("mission", "unknown", "cancelled"): ("reconciliation_verified", "owned_operations_settled"),
     ("job", "pending", "ready"): ("dependencies_satisfied", "mandate_valid", "control_allows"),
     ("job", "ready", "running"): ("assignment_accepted", "control_allows"),
+    ("job", "ready", "done"): ("role_result_validated", "report_frozen"),
     ("job", "running", "checkpointed"): ("checkpoint_and_capture_frozen",),
     ("job", "running", "done"): ("role_result_validated",),
     ("job", "checkpointed", "running"): ("new_assignment_created", "checkpoint_and_capture_imported", "control_allows"),
     ("job", "unknown", "*"): ("reconciliation_verified",),
     ("job", "unknown", "running"): ("reconciliation_verified", "exact_original_assignment_active", "control_allows"),
-    ("job", "unknown", "done"): ("reconciliation_verified", "role_result_validated"),
+    ("job", "unknown", "done"): ("reconciliation_verified", "role_result_validated", "report_frozen"),
     ("job", "unknown", "blocked"): ("reconciliation_verified", "known_failure_or_human_decision"),
     ("job", "unknown", "cancelled"): ("reconciliation_verified",),
     ("assignment", "pending", "submitting"): ("stable_submission_persisted", "mandate_valid", "control_allows"),
     ("assignment", "submitting", "accepted"): ("harness_acceptance_confirmed",),
+    ("assignment", "submitting", "unknown"): ("operation_outcome_uncertain",),
     ("assignment", "submitting", "rejected"): ("explicit_preexecution_rejection",),
     ("assignment", "accepted", "running"): ("exact_original_run_active", "control_allows"),
     ("assignment", "accepted", "capturing"): ("original_run_settled",),
     ("assignment", "accepted", "failed"): ("original_run_failure_confirmed",),
     ("assignment", "accepted", "interrupted"): ("original_run_interruption_confirmed",),
     ("assignment", "running", "capturing"): ("original_run_settled",),
-    ("assignment", "running", "stopping"): ("cancel_accepted",),
+    ("assignment", "accepted", "stopping"): ("stop_requested", "mandate_valid", "control_allows"),
+    ("assignment", "running", "stopping"): ("stop_requested", "mandate_valid", "control_allows"),
+    ("assignment", "stopping", "capturing"): ("original_run_settled",),
+    ("assignment", "stopping", "failed"): ("original_run_failure_confirmed",),
+    ("assignment", "stopping", "interrupted"): ("original_run_interruption_confirmed",),
+    ("assignment", "stopping", "unknown"): ("operation_outcome_uncertain",),
     ("assignment", "running", "failed"): ("original_run_failure_confirmed",),
     ("assignment", "running", "interrupted"): ("original_run_interruption_confirmed",),
     ("assignment", "capturing", "succeeded"): ("output_frozen_and_validated",),
     ("assignment", "capturing", "failed"): ("capture_or_validation_failure_confirmed",),
+    ("assignment", "capturing", "unknown"): ("operation_outcome_uncertain",),
     ("assignment", "stopping", "cancelled"): ("owned_operations_settled",),
-    ("assignment", "stopping", "succeeded"): ("original_run_completed",),
+    ("assignment", "stopping", "succeeded"): ("original_run_completed", "output_frozen_and_validated"),
     ("assignment", "unknown", "*"): ("reconciliation_verified",),
     ("assignment", "unknown", "accepted"): ("reconciliation_verified", "harness_acceptance_confirmed"),
     ("assignment", "unknown", "running"): ("reconciliation_verified", "exact_original_run_active"),
@@ -120,6 +140,20 @@ _REQUIRED_FACTS = {
     ("assignment", "unknown", "cancelled"): (
         "reconciliation_verified", "original_run_cancelled", "owned_operations_settled",
     ),
+    ("worker", "planned", "workspace_creating"): ("worker_profile_valid", "mandate_valid", "control_allows"),
+    ("worker", "workspace_creating", "workspace_ready"): ("workspace_identity_verified",),
+    ("worker", "workspace_creating", "unknown"): ("operation_outcome_uncertain",),
+    ("worker", "workspace_ready", "unknown"): ("operation_outcome_uncertain",),
+    ("worker", "workspace_ready", "session_creating"): ("workspace_identity_verified", "mandate_valid", "control_allows"),
+    ("worker", "session_creating", "ready"): ("session_identity_verified", "tools_restricted"),
+    ("worker", "session_creating", "unknown"): ("operation_outcome_uncertain",),
+    ("worker", "ready", "unknown"): ("operation_outcome_uncertain",),
+    ("worker", "unknown", "workspace_ready"): ("reconciliation_verified", "workspace_identity_verified"),
+    ("worker", "unknown", "ready"): ("reconciliation_verified", "session_identity_verified", "tools_restricted"),
+    ("worker", "ready", "stopped"): ("no_owned_run_active",),
+    ("worker", "unknown", "stopped"): ("reconciliation_verified", "no_owned_run_active"),
+    ("attention", "open", "answered"): ("human_answer_trigger_verified",),
+    ("attention", "open", "dismissed"): ("human_dismissal_verified",),
 }
 
 
@@ -178,6 +212,51 @@ class CoordinatorApplicationService:
             (mission_id,),
         ).fetchone()[0]
         return count > 0
+
+    def _single_node_report_plan(self, mission_id: str, mission: dict):
+        revision = mission.get("plan_revision")
+        if type(revision) is not int or revision < 1:
+            return None
+        plan = self._uow.plans.get(mission_id, revision)
+        if plan is None or plan["acceptance_json"].get("kind") != "single_worker_report":
+            return None
+        nodes = plan["plan_json"].get("nodes", [])
+        if (len(nodes) != 1 or nodes[0].get("role") != "work"
+                or nodes[0].get("dependencies") or len(plan["jobs"]) != 1
+                or plan["dependencies"]):
+            return None
+        return plan
+
+    def _single_node_report_job(self, job: dict) -> bool:
+        mission = self._uow.missions.get(job["mission_id"])
+        return bool(job["role"] == "work" and mission is not None
+                    and self._single_node_report_plan(job["mission_id"], mission))
+
+    def _validate_frozen_report(self, assignment_id: str, assignment: dict, report: object) -> dict:
+        if not isinstance(report, dict) or report.get("kind") != "single_worker_report":
+            raise PermissionError("single Worker completion requires a frozen structured Report")
+        run_id = assignment.get("run_id")
+        output_ref = f"harness-run:{assignment.get('session_id')}:{run_id}"
+        if not run_id or report.get("run_id") != run_id or report.get("output_ref") != output_ref:
+            raise PermissionError("Report must bind the exact persisted Harness Run")
+        self._require_digest(report.get("output_hash"), "report.output_hash")
+        report_hash = self._require_digest(report.get("report_hash"), "report.report_hash")
+        unsigned = {key: value for key, value in report.items() if key != "report_hash"}
+        if _hash(_json(unsigned)) != report_hash:
+            raise PermissionError("Report hash does not match its immutable contents")
+        evidence_ids = report.get("evidence_ids")
+        if (not isinstance(evidence_ids, list) or not evidence_ids
+                or any(not isinstance(item, str) or not item or len(item) > 128 for item in evidence_ids)
+                or len(evidence_ids) != len(set(evidence_ids))):
+            raise PermissionError("Report requires unique persisted execution evidence references")
+        placeholders = ",".join("?" for _ in evidence_ids)
+        rows = self._uow.db.execute(
+            f"SELECT evidence_id,evidence_type FROM evidence WHERE assignment_id=? AND evidence_id IN ({placeholders})",
+            (assignment_id, *evidence_ids),
+        ).fetchall()
+        if {row["evidence_id"] for row in rows} != set(evidence_ids) or not any(row["evidence_type"] == "run" for row in rows):
+            raise PermissionError("Report evidence references must resolve to this Assignment's persisted Run evidence")
+        return report
 
     @staticmethod
     def _require_evidence_text(value: object, name: str) -> str:
@@ -304,6 +383,21 @@ class CoordinatorApplicationService:
             self._require_evidence_text(evidence.get("cancel_receipt_ref"), "cancel_receipt_ref")
             self._require_evidence_text(evidence.get("ownership_evidence_ref"), "ownership_evidence_ref")
 
+    def _validate_single_node_report_reconciliation(self, mission_id: str, current: dict, evidence: object) -> None:
+        if not isinstance(evidence, dict) or evidence.get("mission_id") != mission_id:
+            raise ValueError("single-node Mission reconciliation requires structured Report evidence")
+        if evidence.get("plan_revision") != current["plan_revision"]:
+            raise PermissionError("Report reconciliation must bind the current PlanRevision")
+        self._require_evidence_text(evidence.get("reconciliation_ref"), "reconciliation_ref")
+        assignment_id = self._require_evidence_text(evidence.get("assignment_id"), "assignment_id")
+        row = self._uow.db.execute("SELECT assignment.* FROM assignments AS assignment JOIN jobs AS job ON job.job_id=assignment.job_id WHERE assignment.assignment_id=? AND job.mission_id=? AND job.plan_revision=? AND job.role='work'", (assignment_id, mission_id, current["plan_revision"])).fetchone()
+        if row is None or row["state"] != "succeeded":
+            raise PermissionError("reconciliation must identify the original succeeded Assignment")
+        assignment = dict(row); report = json.loads(assignment["report_json"])
+        self._validate_frozen_report(assignment_id, assignment, report)
+        if evidence.get("run_id") != assignment["run_id"] or evidence.get("report_ref") != f"report:{assignment_id}:{report['report_hash']}" or evidence.get("report_hash") != report["report_hash"]:
+            raise PermissionError("reconciliation Report reference does not match the original Assignment")
+
     def _validate_ticket(self, current: dict, source: str, target: str,
                          facts: dict[str, bool], changes: dict[str, Any]) -> None:
         if source == "open" and target == "ended":
@@ -385,8 +479,23 @@ class CoordinatorApplicationService:
         if target == "completed":
             if not self._mission_jobs_done(identity, current["plan_revision"]):
                 raise PermissionError("Mission completion requires every Work Job and Assignment to be settled")
-            if facts.get("integration_artifact_frozen") is not True or facts.get("required_deliveries_applied") is not True:
-                raise PermissionError("Mission completion requires a frozen integration artifact and applied required Deliveries")
+            if self._single_node_report_plan(identity, current):
+                if not all(facts.get(name) is True for name in (
+                    "single_node_report_frozen", "all_work_jobs_done", "original_run_settled",
+                    "mandate_valid", "control_allows",
+                )):
+                    raise PermissionError("single-node Mission completion requires a frozen Report, settled Run and current authorization")
+                rows = self._uow.db.execute("SELECT assignment.* FROM assignments AS assignment JOIN jobs AS job ON job.job_id=assignment.job_id WHERE job.mission_id=? AND job.plan_revision=? AND job.role='work' AND assignment.state='succeeded'", (identity, current["plan_revision"])).fetchall()
+                if len(rows) != 1:
+                    raise PermissionError("single-node Mission requires exactly one succeeded Worker Report")
+                row = dict(rows[0]); self._validate_frozen_report(row["assignment_id"], row, json.loads(row["report_json"]))
+                if json.loads(row["report_json"]).get("disposition") == "attention":
+                    raise PermissionError("a Mission awaiting human Attention cannot be completed")
+            elif not all(facts.get(name) is True for name in (
+                "all_work_jobs_done", "original_integration_settled", "integration_artifact_frozen",
+                "required_deliveries_applied", "acceptance_verified", "mandate_valid", "control_allows",
+            )):
+                raise PermissionError("integrated Mission completion requires settled Work and Integrator operations, applied Deliveries, accepted output and current authorization")
 
     def _validate_job(self, identity: str, current: dict, source: str, target: str,
                       facts: dict[str, bool], changes: dict[str, Any]) -> None:
@@ -444,14 +553,20 @@ class CoordinatorApplicationService:
                 raise PermissionError("terminal Job transition requires every Assignment to be settled")
         if target == "done":
             self._require_digest(changes.get("result_hash"), "result_hash")
-            role_fact = {
-                "plan": "plan_revision_frozen",
-                "work": "artifact_frozen",
-                "integrate": "artifact_frozen",
-                "review": "review_verdict_and_evidence_frozen",
-            }[current["role"]]
+            single_report = current["role"] == "work" and self._single_node_report_job(current)
+            role_fact = ("report_frozen" if single_report else {
+                "plan": "plan_revision_frozen", "work": "artifact_frozen",
+                "integrate": "artifact_frozen", "review": "review_verdict_and_evidence_frozen",
+            }[current["role"]])
             if facts.get(role_fact) is not True:
                 raise PermissionError(f"done requires role-specific frozen output: {role_fact}")
+            if single_report:
+                row = self._uow.db.execute("SELECT assignment.* FROM assignments AS assignment WHERE assignment.job_id=? AND assignment.state='succeeded'", (identity,)).fetchone()
+                if row is None:
+                    raise PermissionError("single-node Job completion requires its succeeded Worker Assignment")
+                report = self._validate_frozen_report(row["assignment_id"], dict(row), json.loads(row["report_json"]))
+                if changes.get("result_hash") != report["report_hash"]:
+                    raise PermissionError("single-node Job result_hash must equal its frozen Report hash")
         if target == "blocked" and facts.get("known_failure_or_human_decision") is not True:
             raise PermissionError("blocked requires a known failure or human decision")
         if target == "cancelled":
@@ -483,14 +598,16 @@ class CoordinatorApplicationService:
             if current.get("run_id") is None:
                 raise PermissionError("reconciling an original Run requires its persisted identity")
         if target == "succeeded":
-            role_fact = {
-                "plan": "plan_revision_frozen",
-                "work": "artifact_frozen",
-                "integrate": "artifact_frozen",
-                "review": "review_verdict_and_evidence_frozen",
-            }[job["role"]]
+            single_report = job["role"] == "work" and self._single_node_report_job(job)
+            role_fact = ("report_frozen" if single_report else {
+                "plan": "plan_revision_frozen", "work": "artifact_frozen",
+                "integrate": "artifact_frozen", "review": "review_verdict_and_evidence_frozen",
+            }[job["role"]])
             if facts.get(role_fact) is not True:
                 raise PermissionError(f"succeeded requires role-specific frozen output: {role_fact}")
+            if single_report:
+                assignment = {**current, **changes}
+                self._validate_frozen_report(identity, assignment, assignment.get("report_json"))
         if target == "failed":
             required_failure_fact = (
                 "capture_or_validation_failure_confirmed"
@@ -502,6 +619,40 @@ class CoordinatorApplicationService:
             raise PermissionError("interrupted requires confirmation of the original Run interruption")
         if source == "unknown" and target == "running" and current.get("run_id") is None:
             raise PermissionError("unknown can resume running only with the original Run identity")
+
+    def _validate_worker(self, identity: str, current: dict, source: str, target: str, facts: dict[str, bool], changes: dict[str, Any]) -> None:
+        if current.get("workspace_id") is not None and changes.get("workspace_id", current["workspace_id"]) != current["workspace_id"]:
+            raise PermissionError("Worker workspace identity is immutable once bound")
+        if current.get("session_id") is not None and changes.get("session_id", current["session_id"]) != current["session_id"]:
+            raise PermissionError("Worker session identity is immutable once bound")
+        if target == "workspace_ready":
+            self._require_evidence_text(changes.get("workspace_id") or current.get("workspace_id"), "workspace_id")
+        if target == "session_creating" and not current.get("workspace_id"):
+            raise PermissionError("Worker session creation requires a verified workspace")
+        if target == "ready":
+            self._require_evidence_text(changes.get("session_id") or current.get("session_id"), "session_id")
+            self._require_evidence_text(changes.get("workspace_id") or current.get("workspace_id"), "workspace_id")
+        if target == "stopped":
+            active = self._uow.db.execute("SELECT COUNT(*) FROM assignments WHERE worker_id=? AND state IN ('pending','submitting','accepted','running','capturing','stopping','unknown')", (identity,)).fetchone()[0]
+            if active or facts.get("no_owned_run_active") is not True:
+                raise PermissionError("Worker can stop only after all owned Assignments are settled")
+
+    def _validate_attention(self, identity: str, current: dict, source: str, target: str, facts: dict[str, bool], changes: dict[str, Any]) -> None:
+        if source != "open":
+            raise PermissionError("only open Attention can be resolved")
+        if target == "dismissed":
+            if changes.get("answer_trigger_id") is not None or not changes.get("resolved_at"):
+                raise ValueError("dismissed Attention must have a resolution time and no answer Trigger")
+            return
+        answer_id = self._require_evidence_text(changes.get("answer_trigger_id"), "answer_trigger_id")
+        if not changes.get("resolved_at"):
+            raise ValueError("answered Attention requires a resolution time")
+        row = self._uow.db.execute("SELECT input.context_only,input.state,trigger.actor_json FROM ticket_inputs AS input JOIN triggers AS trigger ON trigger.trigger_id=input.trigger_id WHERE input.ticket_id=? AND input.trigger_id=?", (current["ticket_id"], answer_id)).fetchone()
+        if row is None or row["context_only"] or row["state"] == "handed_back":
+            raise PermissionError("Attention answer must be a work input belonging to the same Ticket")
+        actor = json.loads(row["actor_json"])
+        if actor.get("kind", actor.get("actor_kind")) != "human":
+            raise PermissionError("Attention can be answered only by a human Trigger")
 
     def transition(
         self,
@@ -552,11 +703,17 @@ class CoordinatorApplicationService:
             self._validate_job(identity, current, source_state, target_state, facts, payload)
         elif aggregate_type == "assignment":
             self._validate_assignment(identity, current, source_state, target_state, facts, payload)
+        elif aggregate_type == "worker":
+            self._validate_worker(identity, current, source_state, target_state, facts, payload)
+        elif aggregate_type == "attention":
+            self._validate_attention(identity, current, source_state, target_state, facts, payload)
         if source_state == "unknown":
             if not isinstance(audit_payload, dict):
                 raise ValueError("unknown reconciliation requires a structured audit payload")
             self._require_evidence_text(audit_payload.get("reconciliation_ref"), "reconciliation_ref")
-            if aggregate_type == "mission" and target_state in {"reviewing", "completed"}:
+            if aggregate_type == "mission" and target_state == "completed" and self._single_node_report_plan(identity, current):
+                self._validate_single_node_report_reconciliation(identity, current, audit_payload)
+            elif aggregate_type == "mission" and target_state in {"reviewing", "completed"}:
                 self._validate_mission_integration_evidence(identity, current, audit_payload)
             elif aggregate_type == "job" and target_state == "cancelled":
                 self._validate_job_cancel_evidence(identity, audit_payload)

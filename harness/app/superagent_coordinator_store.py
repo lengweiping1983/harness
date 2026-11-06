@@ -13,6 +13,9 @@ from uuid import uuid4
 from ..core.errors import HarnessError
 from harness.i18n import tr
 
+from .superagent_coordinator_migration_12 import MIGRATION_12
+from .superagent_coordinator_migration_13 import MIGRATION_13
+
 _APPLICATION_ID = int.from_bytes(b"SUPA", "big")
 _MAX_EFFECT_BATCH = 100
 
@@ -798,7 +801,8 @@ MIGRATIONS = (
     (1, _MIGRATION_1), (2, _MIGRATION_2), (3, _MIGRATION_3),
     (4, _MIGRATION_4), (5, _MIGRATION_5), (6, _MIGRATION_6),
     (7, _MIGRATION_7), (8, _MIGRATION_8), (9, _MIGRATION_9),
-    (10, _MIGRATION_10), (11, _MIGRATION_11),
+    (10, _MIGRATION_10), (11, _MIGRATION_11), (12, MIGRATION_12),
+    (13, MIGRATION_13),
 )
 
 class CoordinatorStore:
@@ -819,7 +823,7 @@ class CoordinatorStore:
             if row is None:
                 populated = any(db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
                                 for table in ("aggregate_revisions", "audit_events", "effects",
-                                              "tickets", "missions", "jobs", "assignments", "outbox_messages", "source_instances",
+                                              "tickets", "missions", "jobs", "assignments", "outbox_messages", "workers", "evidence", "attentions", "source_instances",
                                               "threads", "triggers", "policy_versions", "evaluations", "decisions", "mandates"))
                 if populated:
                     raise HarnessError(tr("storage.schema.invalid"), code="superagent/instance-missing")
@@ -1318,6 +1322,22 @@ _REPOSITORY_SPECS = {
                      "state": "pending", "result_hash": None},
         "json": (), "times": (),
     },
+    "workers": {
+        "table": "workers", "identity": "worker_id", "aggregate_type": "worker",
+        "required": ("worker_id", "ticket_id", "profile_id", "repo", "base_commit", "runtime_instance_id", "identity_hash"),
+        "create": ("worker_id", "ticket_id", "profile_id", "repo", "base_commit", "runtime_instance_id", "workspace_id", "session_id", "state", "identity_hash", "created_at", "last_seen_at"),
+        "update": ("state", "workspace_id", "session_id", "last_seen_at"),
+        "defaults": {"workspace_id": None, "session_id": None, "state": "planned", "last_seen_at": None},
+        "json": (), "times": ("created_at", "last_seen_at"),
+    },
+    "attentions": {
+        "table": "attentions", "identity": "attention_id", "aggregate_type": "attention",
+        "required": ("attention_id", "ticket_id", "mission_id", "trigger_id", "assignment_id", "question_ref", "question_text", "options_json"),
+        "create": ("attention_id", "ticket_id", "mission_id", "trigger_id", "assignment_id", "question_ref", "question_text", "options_json", "state", "answer_trigger_id", "created_at", "resolved_at"),
+        "update": ("state", "answer_trigger_id", "resolved_at"),
+        "defaults": {"state": "open", "answer_trigger_id": None, "resolved_at": None},
+        "json": ("options_json",), "times": ("created_at", "resolved_at"),
+    },
     "outbox": {
         "table": "outbox_messages", "identity": "message_id", "aggregate_type": "outbox_message",
         "required": ("message_id", "ticket_id", "channel_id", "kind", "body_ref", "body_hash", "idempotency_key"),
@@ -1669,7 +1689,7 @@ class AggregateRepository:
         if not CoordinatorStore.compare_and_swap(self._uow.db, self._spec["aggregate_type"], identity, 0):
             raise HarnessError(tr("storage.schema.invalid"), code="superagent/revision-conflict")
         now = _now()
-        if self._spec["table"] in {"tickets", "missions", "outbox_messages"}:
+        if self._spec["table"] in {"tickets", "missions", "outbox_messages", "workers", "attentions"}:
             record["created_at"] = now
             record["updated_at"] = now
         for field in self._spec["json"]:
@@ -1702,7 +1722,7 @@ class AggregateRepository:
                event_type: str, audit_payload: object | None = None,
                effect: dict | None = None) -> dict | None:
         if isinstance(changes, dict) and "state" in changes and self._spec["table"] in {
-            "tickets", "missions", "jobs", "assignments",
+            "tickets", "missions", "jobs", "assignments", "workers", "attentions",
         }:
             raise PermissionError("aggregate state changes must pass through CoordinatorApplicationService")
         return self._write(
@@ -1713,7 +1733,7 @@ class AggregateRepository:
     def _transition(self, identity: str, *, expected_revision: int, changes: dict,
                     event_type: str, audit_payload: object | None = None,
                     effect: dict | None = None) -> dict | None:
-        if self._spec["table"] not in {"tickets", "missions", "jobs", "assignments"}:
+        if self._spec["table"] not in {"tickets", "missions", "jobs", "assignments", "workers", "attentions"}:
             raise ValueError("only coordinator aggregates have application state transitions")
         if not isinstance(changes, dict) or "state" not in changes:
             raise ValueError("application transition must include a target state")
@@ -1807,6 +1827,8 @@ class CoordinatorUnitOfWork:
         self.missions: AggregateRepository | None = None
         self.jobs: AggregateRepository | None = None
         self.assignments: AggregateRepository | None = None
+        self.workers: AggregateRepository | None = None
+        self.attentions: AggregateRepository | None = None
         self.outbox: AggregateRepository | None = None
         self.plans: PlanRevisionRepository | None = None
         self.dependencies: JobDependencyRepository | None = None
@@ -1821,6 +1843,8 @@ class CoordinatorUnitOfWork:
 
         self.jobs = AggregateRepository(self, _REPOSITORY_SPECS["jobs"])
         self.assignments = AggregateRepository(self, _REPOSITORY_SPECS["assignments"])
+        self.workers = AggregateRepository(self, _REPOSITORY_SPECS["workers"])
+        self.attentions = AggregateRepository(self, _REPOSITORY_SPECS["attentions"])
         self.outbox = AggregateRepository(self, _REPOSITORY_SPECS["outbox"])
         self.plans = PlanRevisionRepository(self)
         self.dependencies = JobDependencyRepository(self)

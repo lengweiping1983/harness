@@ -418,9 +418,9 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 | Results drafts | Report / Outbox Candidate | Draft 不等于 Sent |
 | Harness 原生存储 | Evidence Provider | 不复制 Run / Tool Event 历史 |
 
-## 9. Phase 1 / Phase 2 当前实现边界
+## 9. Phase 1 / Phase 2 / Phase 3 当前实现边界
 
-本文件定义完整目标领域模型。Phase 1 的独立持久化基础设施、状态机基础与宿主隔离已按既定范围完成；Phase 2 的 Source Registry、Authorization Engine 和只读 Shadow 已通过显式 CoordinatorHost API 提供。Phase 3 及后续执行、交付和生产接入能力仍未实现。
+本文件定义完整目标领域模型。Phase 1 的独立持久化基础设施、状态机基础与宿主隔离已完成；Phase 2 的 Source Registry、Authorization Engine 和只读 Shadow 已通过显式 CoordinatorHost API 提供；Phase 3 的单 Worker 执行闭环也已通过显式 CoordinatorHost API 实现并完成专项回归。所有新能力仍保持显式 opt-in，不切换 v1 生产默认路由。
 
 已落地的持久化基础：
 
@@ -442,24 +442,36 @@ Phase 2 已实现的来源与授权能力：
 - 授权宿主 API 提供 PolicyRevision、Evaluation、Decision、Mandate 的有界只读历史查询；Evaluation 详情包含冻结 Policy 与逐 Trigger Gate 快照，Mandate 详情包含追加式状态事件。
 - `ShadowComparisonService` 只读对照 v1 Inbox / Router 与 v2 来源事实和决策；决策比较按每个 Trigger 的 Gate 结果映射，Gate 拒绝项按 ignore 对照，并报告新旧两侧未匹配项及有界样本是否截断，不写任一账本、不执行 Ticket。
 
+Phase 3 已实现的单 Worker 执行闭环：
+
+- `CoordinatorExecutionService.route_trigger` 仅在调用方显式执行时，将已接受 Trigger 映射为一个 Mission、不可变单节点 PlanRevision、Work Job 和 Assignment；Assignment 使用稳定 submission key，避免重复提交。
+- `HarnessExecutorAdapter` 为 Worker 创建并核验专属 Worktree / Session，绑定不可变 Worker Profile、工具白名单与来源能力；Session metadata 与持久 Worker 账本双向核验，不能仅凭 Session 元数据取得 Worker 身份。
+- Run 提交结果不确定时只按原 submission key 回查，不盲目重提；重启后按原 Run ID 恢复。`HarnessEvidenceProvider` 从 Harness 原生 Run / Tool / Background Job 事件日志只读提取证据，不复制或伪造 Runtime 历史。
+- Mandate 的 max_turns / max_seconds 约束进入 Assignment；时间预算 Watchdog 只尝试取消精确匹配的原生 Run，取消无法确认时将 Assignment 标为 unknown，禁止把不确定结果当作成功。排队但尚未启动的原生 Run 可按原 Run ID 移除。
+- TicketInput 可按幂等 delivery key 送入当前 Assignment；交付前重新核验 Ticket、Mandate 和 Assignment。context-only 输入不启动执行；Handback 必须指向实际交付给该 Assignment 的非源始 TicketInput，无法验证时转为 Attention。
+- Worker Report 先冻结并校验内容哈希，再幂等完成 Mission、Attention、Handback 和 Outbox Candidate；进程中断后可从冻结 Report 恢复后续效果。Outbox Candidate 创建时再次检查 Ticket 状态、Mandate 和 reply Scope，不把 Candidate 误报为已发送。
+- Schema v13 为 Worker 与 Attention 聚合补齐 `updated_at`，并将旧行回填为 `created_at`；迁移覆盖 v1–v12 的升级路径。`tests/test_superagent_execution.py` 覆盖原 Run 恢复、报告效果幂等、后续输入 Handback、Mandate 撤销、预算 Watchdog、排队 Run 停止和并发去重。
+
 后续阶段仍未实现或尚未验收：
 
-- DAG 目前只验证结构、同版本依赖和环；尚未实现 Job ready 解锁所需的 Artifact Delivery applied 与目标树核验。
+- DAG 目前只验证结构、同版本依赖和环；多 Worker Job 的 Artifact Delivery applied、目标树核验、集成与 Review 完整生命周期仍待实现。
 - EffectRecoveryService 提供同步与异步只读回查入口；OutboxProviderLookupAdapter 通过宿主注入的 Channel 与正文解析器分发到 GitHubIssueCommentLookupAdapter / FeishuThreadReplyLookupAdapter。两种适配器仅查询 Provider 资源 GET，只有在完整有界扫描中找到唯一、原幂等键标记和发送主体均匹配的远端对象才返回 applied；未找到、重复匹配或分页不完整均保持 indeterminate，不把缺失结果解释为安全重试。GitHub / 飞书列表接口不提供权威的“未执行”回执，因此这两种适配器不会返回 not_applied / permanent_rejection；retry_wait 仍必须由支持原操作状态查询的 Provider 明确证明。
-- Phase 2 的 SourceInstance、Trigger、Thread、Channel、PolicyRevision、Gate、Evaluation、Decision、Mandate、Ticket Subscription / TicketInput 已由 SourceRegistry 和 CoordinatorAuthorizationEngine 持久化；这些能力当前仅通过显式 CoordinatorHost API 使用，尚未接入生产默认路由。Attention 与 Ticket 后续协作流程仍待实现。
-- Mission / Job / Assignment / Artifact / Delivery 的完整业务 Application Service 与执行状态机仍待实现；当前通用聚合转移和 PlanRevisionRepository 只覆盖宿主核验后的基础事务、不可变计划与 DAG 约束，不等同于可运行的 Executor / Worker 流程。
-- GitHub / Feishu 只读回查适配器及模拟 Provider REST 沙箱已实现；尚无 Phase 1 Outbox Sender、生产 Channel 注册表 / 正文 Artifact Resolver 接线或周期性恢复 Worker。Feishu 发送 UUID 与 GitHub / Feishu 正文标记已定义为 Sender 应复用的稳定身份。
-- Phase 2 CoordinatorHost 尚未接入现有 Router、MissionStore、Dispatcher、Worker 或 Harness Runtime 的默认运行链；不会自动创建生产账本、迁移旧数据库、双写或切换 CLI / HTTP 路由。
+- Phase 3 只提供单 Worker Report / Attention / Handback / Outbox Candidate 闭环；尚无 V2 Outbox Sender、生产 Channel 注册表 / 正文 Artifact Resolver 接线或周期性恢复 Worker。Outbox Candidate 不等于已发送。
+- CoordinatorHost 的 Source / Authorization / Execution API 均须显式启用；尚未接入现有 Router、MissionStore、Dispatcher、Worker 或 Harness Runtime 的生产默认运行链，不会自动创建生产账本、迁移旧数据库、双写或切换 CLI / HTTP 路由。
+- V2 CoordinatorHost 尚未接入独立 MissionControl Runtime；当前 `control_allows` 在未配置 V2 控制适配器时沿用旧系统“无控制器则允许”的默认行为。生产接入前必须实现持久化的 V2 Mission 暂停 / 取消 / 审批控制，并将其实际决策接入状态转移，不能继续把默认允许当作控制能力已交付。
 - 推断自动接受仅在具体 Source 策略显式启用 `auto` 且 Gate、规则、意图与 Scope 全部通过时可用；它不会因此切换生产默认路由。远程 Worker 与 OS Sandbox 尚未启用。
 
-因此，Phase 1 按其持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 已提供显式来源接入、来源事实核验、授权闭环、审计读取和只读 Shadow 对照。当前仍保持 v1 生产默认路由，未交付 Phase 3 Executor / Worker、生产 Channel 外发、Artifact Delivery 完整生命周期或新架构默认入口。
+因此，Phase 1 按持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 的来源事实、授权闭环和只读 Shadow 已交付；Phase 3 的单 Worker 执行、原 Run 恢复、冻结 Report 与后续效果恢复已在显式 CoordinatorHost API 中实现。多 Worker DAG / Artifact Delivery、V2 MissionControl、生产 Channel 外发和新架构默认入口仍未交付；v1 生产默认路由保持不变。
 
 ## 10. 源码依据
 
 ### Harness
 
-- harness/app/superagent_coordinator_store.py：v2 独立协调账本、Schema 迁移、Revision、AuditEvent、Durable Effect 与 UOW。
-- harness/app/superagent_coordinator_host.py：v2 宿主组合、活动操作租约、来源 / 授权 / Shadow API 与 v1 隔离。
+- harness/app/superagent_coordinator_store.py：v2 独立协调账本、Schema v1–v13 迁移、Revision、AuditEvent、Durable Effect 与 UOW。
+- harness/app/superagent_coordinator_migration_13.py：Worker / Attention `updated_at` 字段及历史行回填。
+- harness/app/superagent_coordinator_host.py：v2 宿主组合、活动操作租约、来源 / 授权 / Shadow / Execution API 与 v1 隔离。
+- harness/app/superagent_execution.py：单 Worker Mission / Job / Assignment 编排、TicketInput、Run reconciliation、冻结 Report、Attention / Handback 与 Outbox Candidate。
+- harness/app/superagent_executor.py：Harness 原生 Worktree / Session 适配、受限工具、Run / Tool / Background 只读证据和精确 Run 预算 Watchdog。
 - harness/app/superagent_source_registry.py：SourceKind、SourceInstance、GitHub / Feishu / Local 规范化、Trigger Intake、Thread / Channel 和 Cursor。
 - harness/app/superagent_authorization.py：PolicyRevision、Gate、Evaluation、Decision、Mandate、Ticket、Subscription、TicketInput 与审计查询。
 - harness/app/superagent_shadow.py：v1 Inbox / Router 与 v2 来源事实及决策的只读对照。

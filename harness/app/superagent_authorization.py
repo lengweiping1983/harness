@@ -1700,7 +1700,7 @@ class CoordinatorAuthorizationEngine:
                 raise PermissionError("a human-stopped Ticket no longer owns follow-ups")
             now = _now()
             db.execute(
-                "UPDATE ticket_inputs SET state='handed_back',handback_reason=? WHERE input_id=?",
+                "UPDATE ticket_inputs SET state='handed_back',handback_reason=?,input_revision=input_revision+1 WHERE input_id=?",
                 (reason, input_row["input_id"]),
             )
             owner_rows = db.execute(
@@ -2083,7 +2083,8 @@ class CoordinatorAuthorizationEngine:
                 (ticket_id,),
             ).fetchall()
             inputs = db.execute(
-                "SELECT trigger_id,context_only,state,handback_reason FROM ticket_inputs WHERE ticket_id=? ORDER BY created_at",
+                "SELECT input_id,trigger_id,context_only,state,handback_reason,created_at,delivered_at,read_at,"
+            "delivered_to_assignment_id,delivery_key,input_revision FROM ticket_inputs WHERE ticket_id=? ORDER BY created_at",
                 (ticket_id,),
             ).fetchall()
         return {

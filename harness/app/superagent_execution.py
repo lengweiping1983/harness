@@ -1,0 +1,1260 @@
+"""V2 Ticket-to-single-Mission execution, evidence, Report and human Attention lifecycle."""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+from typing import Any
+
+from harness.i18n import tr
+
+from ..core.errors import HarnessError
+from .superagent_coordinator_service import CoordinatorApplicationService
+from .superagent_coordinator_store import CoordinatorStore, _hash, _json, _now
+from .superagent_executor import ExecutionAdapter, WorkerProfile
+
+
+_ACTOR = {"kind": "host", "component": "superagent-v2-execution"}
+_ACTIVE_ASSIGNMENTS = ("pending", "submitting", "accepted", "running", "capturing", "stopping", "unknown")
+_TERMINAL_ASSIGNMENTS = ("succeeded", "failed", "interrupted", "rejected", "cancelled", "blocked")
+
+
+class CoordinatorExecutionService:
+    """Explicit V2 execution surface; it never changes the production V1 Router."""
+
+    def __init__(self, store, authorization, sources, executor: ExecutionAdapter, *, instance_id: str):
+        if executor.instance_id != instance_id:
+            raise ValueError("ExecutorAdapter instance_id must match CoordinatorHost")
+        self._store = store
+        self._authorization = authorization
+        self._sources = sources
+        self._executor = executor
+        self.instance_id = instance_id
+        self._profiles = dict(executor.profiles)
+        if not self._profiles:
+            raise ValueError("V2 execution requires at least one WorkerProfile")
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._closed = False
+        executor.set_worker_lookup(self._worker_row)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._executor.close()
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise HarnessError("V2 execution service is closed", code="superagent/executor-closed")
+
+    def _lock(self, identity: str) -> asyncio.Lock:
+        return self._locks.setdefault(identity, asyncio.Lock())
+
+    def _read_one(self, sql: str, params: tuple = ()) -> dict | None:
+        with self._store.transaction() as db:
+            row = db.execute(sql, params).fetchone()
+            return dict(row) if row is not None else None
+
+    def _read_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        with self._store.transaction() as db:
+            return [dict(row) for row in db.execute(sql, params).fetchall()]
+
+    def _worker_row(self, worker_id: str) -> dict | None:
+        if not isinstance(worker_id, str) or not worker_id:
+            return None
+        return self._read_one("SELECT * FROM workers WHERE worker_id=?", (worker_id,))
+
+    def _assignment(self, assignment_id: str) -> dict | None:
+        return self._read_one(
+            "SELECT assignment.*,job.mission_id,job.role,job.state AS job_state,"
+            "job.result_hash,mission.ticket_id,mission.state AS mission_state,"
+            "mission.plan_revision,mission.repo,mission.base_commit,mission.goal_ref,mission.budgets_json "
+            "FROM assignments AS assignment JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "JOIN missions AS mission ON mission.mission_id=job.mission_id "
+            "WHERE assignment.assignment_id=?", (assignment_id,),
+        )
+
+    def _input(self, ticket_id: str, trigger_id: str) -> dict | None:
+        return self._read_one(
+            "SELECT * FROM ticket_inputs WHERE ticket_id=? AND trigger_id=?",
+            (ticket_id, trigger_id),
+        )
+
+    def _transition(self, aggregate_type: str, identity: str, target: str, *,
+                    facts: dict[str, bool], changes: dict | None = None,
+                    audit_payload: object | None = None, correlation_id: str | None = None) -> dict:
+        self._ensure_open()
+        repo_name = {
+            "ticket": "tickets", "mission": "missions", "job": "jobs",
+            "assignment": "assignments", "worker": "workers", "attention": "attentions",
+        }[aggregate_type]
+        with self._store.unit_of_work(actor=_ACTOR, correlation_id=correlation_id or f"{aggregate_type}:{identity}") as uow:
+            repo = getattr(uow, repo_name)
+            current = repo.get(identity)
+            if current is None:
+                raise LookupError(f"{aggregate_type} {identity} not found")
+            if current["state"] == target:
+                return current
+            return CoordinatorApplicationService(uow).transition(
+                aggregate_type, identity,
+                expected_revision=current["aggregate_revision"],
+                target_state=target,
+                facts={"authorized": True, **facts},
+                changes=changes or {},
+                audit_payload=audit_payload,
+            )
+
+    def _mandate_context(self, ticket: dict, trigger: dict, input_row: dict,
+                         *, require_work: bool = True) -> tuple[dict, WorkerProfile, dict]:
+        mandate = ticket.get("mandate")
+        if not isinstance(mandate, dict) or not mandate.get("mandate_id"):
+            raise PermissionError("Ticket has no active Mandate")
+        check = self._authorization.revalidate_mandate(mandate["mandate_id"], actor=_ACTOR)
+        if check.get("status") not in {"valid", "affected"}:
+            raise PermissionError("Ticket Mandate is no longer valid")
+        scope = mandate.get("scope") or {}
+        source_id = trigger.get("source_instance_id")
+        thread_id = trigger.get("primary_thread_id")
+        if source_id not in scope.get("source_instance_ids", []):
+            raise PermissionError("Trigger source is outside the Ticket Mandate")
+        if thread_id not in scope.get("thread_ids", []):
+            raise PermissionError("Trigger Thread is outside the Ticket Mandate")
+        if require_work and input_row.get("context_only"):
+            raise PermissionError("Context-only Ticket Input cannot start a Mission")
+        if hasattr(self._executor, "profile_for_source"):
+            profile = self._executor.profile_for_source(source_id)
+        else:
+            matches = [item for item in self._profiles.values() if source_id in item.source_instance_ids]
+            profile = matches[0] if len(matches) == 1 else None
+        if profile is None:
+            raise PermissionError("No unique host-owned WorkerProfile maps this Trigger source")
+        if not set(profile.actions) <= set(scope.get("actions", [])):
+            raise PermissionError("WorkerProfile actions exceed the Ticket Mandate")
+        if not set(profile.tools) <= set(scope.get("tools", [])):
+            raise PermissionError("WorkerProfile tools exceed the Ticket Mandate")
+        budget = scope.get("budget") or {}
+        max_turns = budget.get("max_turns", profile.max_turns)
+        max_seconds = budget.get("max_seconds", profile.max_seconds)
+        if type(max_turns) is not int or type(max_seconds) is not int:
+            raise PermissionError("Ticket Mandate execution budget is invalid")
+        effective = {
+            "max_turns": min(profile.max_turns, max_turns),
+            "max_seconds": min(profile.max_seconds, max_seconds),
+        }
+        if effective["max_turns"] < 1 or effective["max_seconds"] < 1:
+            raise PermissionError("Ticket Mandate has no remaining execution budget")
+        if ticket.get("state") not in {"open", "ended"}:
+            raise PermissionError("Ticket is not eligible for execution")
+        if ticket.get("state") == "ended":
+            self._reopen_for_human_followup(ticket, trigger, input_row, mandate)
+        return mandate, profile, effective
+
+    def _reopen_for_human_followup(self, ticket: dict, trigger: dict, input_row: dict, mandate: dict) -> None:
+        actor = trigger.get("actor") or {}
+        if input_row.get("context_only") or actor.get("kind", actor.get("actor_kind")) != "human":
+            raise PermissionError("Only a human work follow-up can resume a non-human-ended Ticket")
+        current = self._read_one("SELECT * FROM tickets WHERE ticket_id=?", (ticket["ticket_id"],))
+        if current is None or current["state"] != "ended" or current.get("ended_by") == "human":
+            raise PermissionError("Human-ended Ticket cannot be reopened")
+        self._transition(
+            "ticket", ticket["ticket_id"], "open",
+            facts={"human_followup": True, "mandate_valid": True},
+            changes={"ended_by": None, "ended_at": None, "outcome": None},
+            correlation_id=f"ticket:{ticket['ticket_id']}:human-followup",
+        )
+
+    def _trigger_payload(self, trigger: dict) -> dict:
+        return {
+            "trigger_id": trigger["trigger_id"],
+            "source_instance_id": trigger["source_instance_id"],
+            "thread_id": trigger.get("primary_thread_id"),
+            "actor": trigger.get("actor"),
+            "body": trigger.get("body"),
+            "metadata": trigger.get("metadata"),
+            "body_ref": trigger.get("body_ref"),
+            "body_hash": trigger.get("body_hash"),
+        }
+
+    def _build_prompt(self, ticket: dict, trigger: dict, mandate: dict) -> tuple[str, list[str]]:
+        inputs = self._read_all(
+            "SELECT input_id,trigger_id,context_only,state,created_at FROM ticket_inputs "
+            "WHERE ticket_id=? ORDER BY created_at,input_id", (ticket["ticket_id"],),
+        )
+        selected = [
+            row for row in inputs
+            if row["state"] != "handed_back"
+            and (row["state"] == "read" or row["context_only"] or row["trigger_id"] == trigger["trigger_id"])
+        ]
+        context = []
+        input_ids = []
+        total = 0
+        for row in selected:
+            item_trigger = trigger if row["trigger_id"] == trigger["trigger_id"] else self._sources.get_trigger(row["trigger_id"])
+            if item_trigger is None:
+                raise HarnessError("Ticket context references a missing Trigger", code="superagent/context-corrupt")
+            context.append({
+                "input_id": row["input_id"], "context_only": bool(row["context_only"]),
+                "state": row["state"], "trigger": self._trigger_payload(item_trigger),
+            })
+            encoded = _json(context[-1])
+            total += len(encoded.encode("utf-8"))
+            if total > 512 * 1024:
+                raise HarnessError("Ticket context exceeds the bounded Worker prompt size", code="superagent/context-too-large")
+            if row["state"] == "waiting" and (row["context_only"] or row["trigger_id"] == trigger["trigger_id"]):
+                input_ids.append(row["input_id"])
+        event = {
+            "kind": "ticket_work", "ticket_id": ticket["ticket_id"],
+            "origin_trigger_id": ticket["origin_trigger_id"],
+            "current_trigger_id": trigger["trigger_id"],
+            "current": self._trigger_payload(trigger),
+            "ticket_context": context,
+            "mandate": {
+                "policy_version": mandate.get("policy_version"),
+                "source_instance_ids": mandate["scope"].get("source_instance_ids", []),
+                "thread_ids": mandate["scope"].get("thread_ids", []),
+                "actions": mandate["scope"].get("actions", []),
+                "tools": mandate["scope"].get("tools", []),
+            },
+        }
+        prompt = tr("superagent.worker_input", event=_json(event))
+        prompt += "\n\n" + tr("superagent.worker_report_contract")
+        return prompt, input_ids
+
+    def _mark_input_db(self, db, input_id: str, target: str, *,
+                       assignment_id: str | None = None, delivery_key: str | None = None) -> dict:
+        row = db.execute("SELECT * FROM ticket_inputs WHERE input_id=?", (input_id,)).fetchone()
+        if row is None:
+            raise LookupError("Ticket Input not found")
+        current = dict(row)
+        if current["state"] == target:
+            if target != "delivered" or (current.get("delivered_to_assignment_id") == assignment_id
+                                         and current.get("delivery_key") == delivery_key):
+                return current
+        if target == "delivered":
+            if current["state"] != "waiting" or not assignment_id or not delivery_key:
+                raise PermissionError("Only waiting Ticket Inputs can be delivered")
+            delivered_at, read_at = _now(), None
+            owner, key = assignment_id, delivery_key
+        elif target == "read":
+            if current["state"] != "delivered" or not current.get("delivered_to_assignment_id"):
+                raise PermissionError("Ticket Input can be read only after confirmed delivery")
+            delivered_at, read_at = current.get("delivered_at"), _now()
+            owner, key = current.get("delivered_to_assignment_id"), current.get("delivery_key")
+        elif target == "waiting":
+            if current["state"] != "delivered":
+                return current
+            delivered_at, read_at, owner, key = None, None, None, None
+        else:
+            raise ValueError("unsupported Ticket Input transition")
+        changed = db.execute(
+            "UPDATE ticket_inputs SET state=?,delivered_to_assignment_id=?,delivery_key=?,"
+            "delivered_at=?,read_at=?,input_revision=input_revision+1 "
+            "WHERE input_id=? AND input_revision=?",
+            (target, owner, key, delivered_at, read_at, input_id, current["input_revision"]),
+        ).rowcount
+        if changed != 1:
+            raise HarnessError("Ticket Input changed concurrently", code="superagent/revision-conflict")
+        CoordinatorStore.append_audit(
+            db, aggregate_type="ticket_input", aggregate_id=input_id,
+            event_type=f"ticket_input.{target}",
+            payload={"ticket_id": current["ticket_id"], "trigger_id": current["trigger_id"],
+                     "assignment_id": owner, "delivery_key": key, "input_revision": current["input_revision"] + 1},
+            actor=_ACTOR, correlation_id=f"ticket:{current['ticket_id']}",
+        )
+        return dict(db.execute("SELECT * FROM ticket_inputs WHERE input_id=?", (input_id,)).fetchone())
+
+    def _mark_input(self, input_id: str, target: str, *, assignment_id: str | None = None,
+                    delivery_key: str | None = None) -> dict:
+        with self._store.transaction(write=True) as db:
+            return self._mark_input_db(db, input_id, target, assignment_id=assignment_id, delivery_key=delivery_key)
+
+    def _worker_identity(self, ticket_id: str, profile: WorkerProfile, base_commit: str) -> tuple[str, str]:
+        worker_id = "worker_" + hashlib.sha256(f"{self.instance_id}\0{ticket_id}\0{profile.profile_id}".encode()).hexdigest()[:32]
+        identity_hash = _hash(_json({
+            "instance_id": self.instance_id, "ticket_id": ticket_id,
+            "profile_id": profile.profile_id, "profile_fingerprint": profile.fingerprint,
+            "repo": profile.repo, "base_commit": base_commit,
+        }))
+        return worker_id, identity_hash
+
+    async def _ensure_worker(self, ticket_id: str, profile: WorkerProfile, mandate_valid: bool) -> dict:
+        provisional_id = "worker_" + hashlib.sha256(f"{self.instance_id}\0{ticket_id}\0{profile.profile_id}".encode()).hexdigest()[:32]
+        existing = self._worker_row(provisional_id)
+        base_commit = existing["base_commit"] if existing else self._executor.base_commit(profile)
+        worker_id, identity_hash = self._worker_identity(ticket_id, profile, base_commit)
+        if existing is None:
+            with self._store.unit_of_work(actor=_ACTOR, correlation_id=f"ticket:{ticket_id}") as uow:
+                count = uow.db.execute("SELECT COUNT(*) FROM workers WHERE runtime_instance_id=?", (self.instance_id,)).fetchone()[0]
+                if count >= getattr(self._executor, "max_workers", 32):
+                    raise HarnessError("Worker capacity is exhausted", code="superagent/worker-capacity")
+                try:
+                    existing = uow.workers.create({
+                        "worker_id": worker_id, "ticket_id": ticket_id, "profile_id": profile.profile_id,
+                        "repo": profile.repo, "base_commit": base_commit, "runtime_instance_id": self.instance_id,
+                        "identity_hash": identity_hash,
+                    })
+                except Exception:
+                    existing = uow.workers.get(worker_id)
+                    if existing is None:
+                        raise
+        if existing["identity_hash"] != identity_hash or existing["repo"] != profile.repo:
+            raise PermissionError("Persisted Worker identity does not match the current host-owned Profile")
+        lock = self._lock(worker_id)
+        async with lock:
+            return await self._ensure_worker_locked(existing, profile, mandate_valid)
+
+    async def _ensure_worker_locked(self, worker: dict, profile: WorkerProfile, mandate_valid: bool) -> dict:
+        state = worker["state"]
+        if state == "planned":
+            worker = self._transition("worker", worker["worker_id"], "workspace_creating", facts={"worker_profile_valid": True, "mandate_valid": mandate_valid, "control_allows": True})
+            try:
+                await self._executor.create_workspace(worker, profile)
+            except Exception:
+                found = self._executor.find_worker(worker, profile)
+                if found is None:
+                    self._worker_unknown(worker, "workspace")
+                    raise
+            found = self._executor.find_worker(worker, profile)
+            if found is None or not found.get("workspace_id"):
+                self._worker_unknown(worker, "workspace")
+                raise HarnessError("Worker Worktree cannot be verified", code="superagent/worker-unknown")
+            worker = self._transition("worker", worker["worker_id"], "workspace_ready", facts={"workspace_identity_verified": True}, changes={"workspace_id": found["workspace_id"]})
+            state = "workspace_ready"
+        elif state == "workspace_creating":
+            found = self._executor.find_worker(worker, profile)
+            if found is None or not found.get("workspace_id"):
+                self._worker_unknown(worker, "workspace")
+                raise HarnessError("Worker Worktree creation outcome is unknown", code="superagent/worker-unknown")
+            worker = self._transition("worker", worker["worker_id"], "workspace_ready", facts={"workspace_identity_verified": True}, changes={"workspace_id": found["workspace_id"]})
+            state = "workspace_ready"
+        elif state == "unknown":
+            found = self._executor.find_worker(worker, profile)
+            if found is None or not found.get("workspace_id"):
+                raise HarnessError("Unknown Worker resources cannot be reconciled", code="superagent/worker-unknown")
+            if found.get("session_id"):
+                worker = self._transition("worker", worker["worker_id"], "ready", facts={"reconciliation_verified": True, "session_identity_verified": True, "tools_restricted": True}, changes={"workspace_id": found["workspace_id"], "session_id": found["session_id"]}, audit_payload={"reconciliation_ref": f"worker:{worker['worker_id']}:session"})
+                state = "ready"
+            else:
+                worker = self._transition("worker", worker["worker_id"], "workspace_ready", facts={"reconciliation_verified": True, "workspace_identity_verified": True}, changes={"workspace_id": found["workspace_id"]}, audit_payload={"reconciliation_ref": f"worker:{worker['worker_id']}:workspace"})
+                state = "workspace_ready"
+        if state == "workspace_ready":
+            worker = self._transition("worker", worker["worker_id"], "session_creating", facts={"workspace_identity_verified": True, "mandate_valid": mandate_valid, "control_allows": True})
+            try:
+                await self._executor.create_session(worker, profile)
+            except Exception:
+                found = self._executor.find_worker(worker, profile)
+                if found is None or not found.get("session_id"):
+                    self._worker_unknown(worker, "session")
+                    raise
+            found = self._executor.find_worker(worker, profile)
+            if found is None or not found.get("session_id"):
+                self._worker_unknown(worker, "session")
+                raise HarnessError("Worker Session cannot be verified", code="superagent/worker-unknown")
+            worker = self._transition("worker", worker["worker_id"], "ready", facts={"session_identity_verified": True, "tools_restricted": True}, changes={"session_id": found["session_id"]})
+            state = "ready"
+        elif state == "session_creating":
+            found = self._executor.find_worker(worker, profile)
+            if found is None or not found.get("session_id"):
+                self._worker_unknown(worker, "session")
+                raise HarnessError("Worker Session creation outcome is unknown", code="superagent/worker-unknown")
+            worker = self._transition("worker", worker["worker_id"], "ready", facts={"session_identity_verified": True, "tools_restricted": True}, changes={"session_id": found["session_id"]})
+            state = "ready"
+        if state != "ready":
+            raise HarnessError(f"Worker is not ready (state={state})", code="superagent/worker-unavailable")
+        found = self._executor.find_worker(worker, profile)
+        if found is None or found.get("session_id") != worker["session_id"]:
+            self._worker_unknown(worker, "ready-check")
+            raise HarnessError("Ready Worker resources do not match", code="superagent/worker-unknown")
+        return worker
+
+    def _worker_unknown(self, worker: dict, phase: str) -> None:
+        self._transition("worker", worker["worker_id"], "unknown", facts={"operation_outcome_uncertain": True}, audit_payload={"reconciliation_ref": f"worker:{worker['worker_id']}:{phase}"})
+
+    def _assignment_for_trigger(self, ticket_id: str, trigger_id: str) -> dict | None:
+        return self._read_one(
+            "SELECT assignment.*,job.mission_id,job.role,job.state AS job_state,"
+            "mission.ticket_id,mission.state AS mission_state,mission.plan_revision "
+            "FROM missions AS mission JOIN jobs AS job ON job.mission_id=mission.mission_id "
+            "JOIN assignments AS assignment ON assignment.job_id=job.job_id "
+            "WHERE mission.ticket_id=? AND mission.goal_ref=? ORDER BY assignment.attempt_no LIMIT 1",
+            (ticket_id, trigger_id),
+        )
+
+    def _active_assignment(self, ticket_id: str) -> dict | None:
+        placeholders = ",".join("?" for _ in _ACTIVE_ASSIGNMENTS)
+        return self._read_one(
+            "SELECT assignment.*,job.mission_id,job.role,job.state AS job_state,"
+            "mission.ticket_id,mission.state AS mission_state,mission.plan_revision "
+            "FROM missions AS mission JOIN jobs AS job ON job.mission_id=mission.mission_id "
+            "JOIN assignments AS assignment ON assignment.job_id=job.job_id "
+            f"WHERE mission.ticket_id=? AND mission.state IN ('planning','running','integrating','reviewing','cancelling','unknown') "
+            f"AND assignment.state IN ({placeholders}) ORDER BY mission.sequence DESC,assignment.attempt_no DESC LIMIT 1",
+            (ticket_id, *_ACTIVE_ASSIGNMENTS),
+        )
+
+    def _create_mission_assignment(self, ticket: dict, trigger: dict, mandate: dict,
+                                   profile: WorkerProfile, budget: dict, worker: dict,
+                                   prompt: str, input_ids: list[str]) -> tuple[dict, dict, dict]:
+        ticket_id, trigger_id = ticket["ticket_id"], trigger["trigger_id"]
+        mission_id = "mission_" + hashlib.sha256(f"{ticket_id}\0{trigger_id}".encode()).hexdigest()[:32]
+        assignment_id = "assignment_" + hashlib.sha256(f"{mission_id}\0work\0{1}".encode()).hexdigest()[:32]
+        submission_key = f"superagent-v2:{assignment_id}"
+        with self._store.unit_of_work(actor=_ACTOR, correlation_id=f"ticket:{ticket_id}") as uow:
+            existing = uow.missions.get(mission_id)
+            if existing is not None:
+                job = uow.db.execute("SELECT * FROM jobs WHERE mission_id=? AND plan_revision=? AND role='work'", (mission_id, existing["plan_revision"])).fetchone()
+                assignment = uow.assignments.get(assignment_id)
+                if job is None or assignment is None:
+                    raise HarnessError("Existing single-node Mission is missing its durable Assignment", code="superagent/mission-corrupt")
+                return existing, dict(job), {**assignment, "max_seconds": budget["max_seconds"]}
+            sequence = uow.db.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM missions WHERE ticket_id=?", (ticket_id,)).fetchone()[0]
+            mission = uow.missions.create({
+                "mission_id": mission_id, "ticket_id": ticket_id, "sequence": sequence,
+                "goal_ref": trigger_id, "policy_version_at_start": mandate.get("policy_version"),
+                "source_revision_at_start": trigger.get("source_revision"),
+                "repo": profile.repo, "base_commit": worker["base_commit"],
+                "budgets_json": budget,
+            })
+            plan = uow.plans.create(
+                mission_id, expected_mission_revision=mission["aggregate_revision"],
+                plan={"nodes": [{
+                    "node_id": "work", "role": "work", "profile_id": profile.profile_id,
+                    "instruction_ref": f"trigger:{trigger_id}",
+                    "instruction_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                    "dependencies": [],
+                }]},
+                acceptance={"kind": "single_worker_report", "schema_version": 1},
+                created_by_kind="host", created_by_ref="single-mission-router",
+            )
+            if plan is None:
+                raise HarnessError("Mission changed while creating its immutable plan", code="superagent/revision-conflict")
+            mission = uow.missions.get(mission_id)
+            if mission is None:
+                raise HarnessError("Mission disappeared after plan creation", code="superagent/mission-corrupt")
+            app = CoordinatorApplicationService(uow)
+            mission = app.transition(
+                "mission", mission_id, expected_revision=mission["aggregate_revision"],
+                target_state="running",
+                facts={"authorized": True, "plan_valid": True, "base_commit_frozen": True,
+                       "mandate_valid": True, "control_allows": True},
+            )
+            job = plan["jobs"][0]
+            job = app.transition(
+                "job", job["job_id"], expected_revision=job["aggregate_revision"],
+                target_state="ready",
+                facts={"authorized": True, "dependencies_satisfied": True,
+                       "mandate_valid": True, "control_allows": True},
+            )
+            assignment = uow.assignments.create({
+                "assignment_id": assignment_id, "job_id": job["job_id"], "attempt_no": 1,
+                "worker_id": worker["worker_id"], "session_id": worker["session_id"],
+                "workspace_id": worker["workspace_id"], "submission_key": submission_key,
+                "report_json": {"pending_prompt": prompt, "pending_input_ids": input_ids},
+            })
+            assignment = app.transition(
+                "assignment", assignment_id, expected_revision=assignment["aggregate_revision"],
+                target_state="submitting",
+                facts={"authorized": True, "stable_submission_persisted": True,
+                       "mandate_valid": True, "control_allows": True},
+            )
+            for input_id in input_ids:
+                self._mark_input_db(
+                    uow.db, input_id, "delivered", assignment_id=assignment_id,
+                    delivery_key=f"superagent-v2:input:{input_id}:{assignment_id}",
+                )
+            return mission, job, {**assignment, "max_seconds": budget["max_seconds"]}
+
+    async def route_trigger(self, ticket_id: str, trigger_id: str) -> dict:
+        self._ensure_open()
+        async with self._lock(f"ticket:{ticket_id}"):
+            ticket = self._authorization.ticket(ticket_id)
+            if ticket is None:
+                raise LookupError("Ticket not found")
+            trigger = self._sources.get_trigger(trigger_id)
+            if trigger is None:
+                raise LookupError("Trigger not found")
+            input_row = self._input(ticket_id, trigger_id)
+            if input_row is None:
+                raise PermissionError("Trigger is not an authorized Ticket Input")
+            if input_row["state"] == "handed_back":
+                return {"state": "handed_back", "duplicate": True, "trigger_id": trigger_id}
+            mandate, profile, budget = self._mandate_context(ticket, trigger, input_row, require_work=False)
+            existing = self._assignment_for_trigger(ticket_id, trigger_id)
+            if existing is not None:
+                return await self.reconcile(existing["assignment_id"])
+            if input_row["state"] == "delivered" and input_row.get("delivered_to_assignment_id"):
+                await self.reconcile(input_row["delivered_to_assignment_id"])
+                input_row = self._input(ticket_id, trigger_id)
+                if input_row["state"] in {"read", "handed_back", "delivered"}:
+                    return {"state": input_row["state"], "ticket_id": ticket_id, "trigger_id": trigger_id,
+                            "assignment_id": input_row.get("delivered_to_assignment_id")}
+            if input_row["state"] == "read":
+                return {"state": "read", "ticket_id": ticket_id, "trigger_id": trigger_id}
+            active = self._active_assignment(ticket_id)
+            if active is not None:
+                worker = self._worker_row(active["worker_id"])
+                if worker is None or worker["profile_id"] != profile.profile_id:
+                    raise PermissionError("Active Ticket Worker does not match the source's host-owned Profile")
+                if active["state"] in {"accepted", "running"} and input_row["state"] == "waiting":
+                    return await self._deliver_input(ticket, trigger, input_row, mandate, active, worker)
+                return {"state": active["state"], "ticket_id": ticket_id,
+                        "assignment_id": active["assignment_id"], "input_state": input_row["state"]}
+            if input_row["context_only"]:
+                return {"state": "queued_context", "ticket_id": ticket_id, "trigger_id": trigger_id}
+            turns_used = self._read_one(
+                "SELECT COUNT(*) AS total FROM assignments AS assignment "
+                "JOIN jobs AS job ON job.job_id=assignment.job_id "
+                "JOIN missions AS mission ON mission.mission_id=job.mission_id "
+                "WHERE mission.ticket_id=? AND assignment.state<>'rejected'", (ticket_id,),
+            )["total"]
+            if turns_used >= budget["max_turns"]:
+                raise PermissionError("Ticket Mandate execution turn budget is exhausted")
+            worker = await self._ensure_worker(ticket_id, profile, True)
+            prompt, input_ids = self._build_prompt(ticket, trigger, mandate)
+            mission, job, assignment = self._create_mission_assignment(
+                ticket, trigger, mandate, profile, budget, worker, prompt, input_ids,
+            )
+            try:
+                await self._executor.submit(worker, assignment, prompt, input_ids)
+            except Exception:
+                # The durable submission key is authoritative; never issue a second submit here.
+                result = await self.reconcile(assignment["assignment_id"])
+            else:
+                result = await self.reconcile(assignment["assignment_id"])
+            result.setdefault("mission_id", mission["mission_id"])
+            return result
+
+    def _assert_delivery_still_authorized(self, ticket_id: str, assignment_id: str,
+                                          trigger: dict, mandate_id: str) -> None:
+        ticket = self._authorization.ticket(ticket_id)
+        if ticket is None or ticket["state"] != "open":
+            raise PermissionError("Ticket stopped while delivering follow-up input")
+        mandate = self._authorization.revalidate_mandate(mandate_id, actor=_ACTOR)
+        if mandate.get("status") not in {"valid", "affected"}:
+            raise PermissionError("Mandate was revoked while delivering follow-up input")
+        active = self._active_assignment(ticket_id)
+        if active is None or active["assignment_id"] != assignment_id or active["state"] not in {"accepted", "running"}:
+            raise PermissionError("Assignment is no longer eligible for follow-up delivery")
+
+    async def _deliver_input(self, ticket: dict, trigger: dict, input_row: dict,
+                             mandate: dict, assignment: dict, worker: dict) -> dict:
+        input_id = input_row["input_id"]
+        delivery_key = f"superagent-v2:input:{input_id}:{assignment['assignment_id']}"
+        self._mark_input(input_id, "delivered", assignment_id=assignment["assignment_id"], delivery_key=delivery_key)
+        event = {
+            "kind": "ticket_follow_up", "ticket_id": ticket["ticket_id"],
+            "assignment_id": assignment["assignment_id"], "input_id": input_id,
+            "context_only": bool(input_row["context_only"]), "trigger": self._trigger_payload(trigger),
+        }
+        prompt = tr("superagent.worker_input", event=_json(event)) + "\n\n" + tr("superagent.worker_report_contract")
+        try:
+            receipt = await self._executor.deliver_input(
+                worker, assignment, prompt, delivery_key,
+                lambda: self._assert_delivery_still_authorized(
+                    ticket["ticket_id"], assignment["assignment_id"], trigger, mandate["mandate_id"],
+                ),
+            )
+        except HarnessError as exc:
+            if exc.code in {"run/stale-turn", "session/turn-stale", "runtime/stale-turn"}:
+                self._mark_input(input_id, "waiting")
+                return {"state": "queued", "ticket_id": ticket["ticket_id"], "trigger_id": trigger["trigger_id"]}
+            raise
+        if (not isinstance(receipt, dict) or type(receipt.get("accepted")) is not bool
+                or type(receipt.get("deferred", False)) is not bool
+                or receipt.get("accepted") and receipt.get("deferred")):
+            raise HarnessError("Follow-up delivery receipt is invalid or uncertain", code="superagent/input-delivery-unknown")
+        if receipt.get("deferred"):
+            self._mark_input(input_id, "waiting")
+            return {"state": "queued", "ticket_id": ticket["ticket_id"], "trigger_id": trigger["trigger_id"]}
+        if not receipt["accepted"]:
+            raise HarnessError("Follow-up input was not accepted by the original Run", code="superagent/input-delivery-unknown")
+        return {"state": "delivered", "ticket_id": ticket["ticket_id"],
+                "assignment_id": assignment["assignment_id"], "trigger_id": trigger["trigger_id"],
+                "delivery_key": delivery_key}
+
+    async def reconcile_ticket(self, ticket_id: str) -> list[dict]:
+        self._ensure_open()
+        rows = self._read_all(
+            "SELECT assignment.assignment_id FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "JOIN missions AS mission ON mission.mission_id=job.mission_id "
+            "WHERE mission.ticket_id=? AND assignment.state IN ('submitting','accepted','running','capturing','stopping','unknown') "
+            "ORDER BY mission.sequence,assignment.attempt_no,assignment.assignment_id", (ticket_id,),
+        )
+        results = []
+        for row in rows:
+            results.append(await self.reconcile(row["assignment_id"]))
+        return results
+
+    async def reconcile(self, assignment_id: str) -> dict:
+        self._ensure_open()
+        async with self._lock(f"assignment:{assignment_id}"):
+            return await self._reconcile_locked(assignment_id)
+
+    async def _reconcile_locked(self, assignment_id: str) -> dict:
+        assignment = self._assignment(assignment_id)
+        if assignment is None:
+            raise LookupError("Assignment not found")
+        worker = self._worker_row(assignment["worker_id"])
+        if worker is None or worker["state"] != "ready":
+            raise HarnessError("Assignment Worker is not ready", code="superagent/worker-unavailable")
+        if assignment["state"] in _TERMINAL_ASSIGNMENTS:
+            if assignment["state"] == "succeeded":
+                self._finalize_report_effects(assignment)
+            return {"state": assignment["state"], "assignment_id": assignment_id}
+        if assignment["state"] == "submitting" or assignment["state"] == "unknown" and not assignment.get("run_id"):
+            try:
+                snapshot = self._executor.reconcile(worker, assignment)
+            except Exception:
+                self._mark_unknown(assignment, "original submission reconciliation failed")
+                return {"state": "unknown", "assignment_id": assignment_id}
+            if not snapshot.get("found"):
+                if snapshot.get("authoritative"):
+                    self._reject_unstarted(assignment, "original submission key is absent from native Run storage")
+                    return {"state": "rejected", "assignment_id": assignment_id}
+                self._mark_unknown(assignment, "submission outcome cannot be reconciled")
+                return {"state": "unknown", "assignment_id": assignment_id}
+            run_id = snapshot.get("run_id")
+            if not isinstance(run_id, str) or not run_id:
+                self._mark_unknown(assignment, "original submission returned no Run identity")
+                return {"state": "unknown", "assignment_id": assignment_id}
+            if assignment.get("run_id") and assignment["run_id"] != run_id:
+                raise HarnessError("Submission key resolved to a different original Run", code="superagent/run-conflict")
+            if assignment["state"] == "submitting":
+                assignment = self._transition("assignment", assignment_id, "accepted",
+                    facts={"harness_acceptance_confirmed": True}, changes={"run_id": run_id})
+            elif assignment["state"] == "unknown":
+                assignment = self._transition("assignment", assignment_id, "accepted",
+                    facts={"reconciliation_verified": True, "harness_acceptance_confirmed": True},
+                    changes={"run_id": run_id},
+                    audit_payload={"reconciliation_ref": f"assignment:{assignment_id}:original-run", "run_id": run_id})
+            assignment = self._assignment(assignment_id)
+        else:
+            try:
+                snapshot = self._executor.inspect(worker, assignment)
+            except Exception:
+                self._mark_unknown(assignment, "original Run inspection failed")
+                return {"state": "unknown", "assignment_id": assignment_id}
+        if not isinstance(snapshot, dict):
+            self._mark_unknown(assignment, "native Run snapshot is invalid")
+            return {"state": "unknown", "assignment_id": assignment_id}
+        if not snapshot.get("found", True) or snapshot.get("run_id") != assignment.get("run_id"):
+            self._mark_unknown(assignment, "original Run identity could not be verified")
+            return {"state": "unknown", "assignment_id": assignment_id}
+        self._reconcile_inputs(assignment, worker, snapshot)
+        evidence_ids = self._persist_evidence(assignment, snapshot)
+        if snapshot.get("budget_failure"):
+            self._mark_unknown(assignment, "Worker Run exceeded its time budget but native cancellation was not confirmed")
+            return {"state": "unknown", "assignment_id": assignment_id, "budget_failure": True}
+        status = snapshot.get("status")
+        if status in {"queued", "pending"}:
+            if assignment["state"] == "unknown":
+                assignment = self._transition("assignment", assignment_id, "accepted",
+                    facts={"reconciliation_verified": True, "harness_acceptance_confirmed": True})
+            return {"state": assignment["state"], "assignment_id": assignment_id, "run_id": assignment["run_id"]}
+        if status == "running":
+            if assignment["state"] in {"accepted", "unknown"}:
+                # CoordinatorHost currently has no V2 MissionControl adapter; absent a control
+                # runtime, preserve the legacy default-admit behavior. A wired control runtime
+                # must replace this with its persisted per-Mission admission decision.
+                facts = {"exact_original_run_active": True, "control_allows": True}
+                audit = None
+                if assignment["state"] == "unknown":
+                    facts["reconciliation_verified"] = True
+                    audit = {"reconciliation_ref": f"assignment:{assignment_id}:original-run-active",
+                             "run_id": assignment.get("run_id")}
+                assignment = self._transition("assignment", assignment_id, "running", facts=facts,
+                    changes={"started_at": assignment.get("started_at") or _now()}, audit_payload=audit)
+            job = self._read_one("SELECT * FROM jobs WHERE job_id=?", (assignment["job_id"],))
+            if job and job["state"] == "ready":
+                self._transition("job", job["job_id"], "running", facts={"assignment_accepted": True, "control_allows": True})
+            elif job and job["state"] == "unknown":
+                self._transition(
+                    "job", job["job_id"], "running",
+                    facts={"reconciliation_verified": True, "exact_original_assignment_active": True, "control_allows": True},
+                    audit_payload={"reconciliation_ref": f"job:{job['job_id']}:original-assignment-active",
+                                   "assignment_id": assignment_id, "run_id": assignment.get("run_id")},
+                )
+            return {"state": assignment["state"], "assignment_id": assignment_id, "run_id": assignment["run_id"]}
+        if status in {"failed", "interrupted"} and snapshot.get("settled"):
+            self._finish_failure(assignment, snapshot, evidence_ids)
+            return {"state": "failed" if status == "failed" else "interrupted", "assignment_id": assignment_id}
+        if status == "completed" and snapshot.get("settled"):
+            if snapshot.get("unconfirmed_tools", 0):
+                self._mark_unknown(assignment, "one or more Tool results are not durably confirmed")
+                return {"state": "unknown", "assignment_id": assignment_id}
+            if snapshot.get("unsettled_background", 0):
+                if assignment["state"] in {"accepted", "running", "stopping", "unknown"}:
+                    facts = {"original_run_settled": True}
+                    audit = None
+                    if assignment["state"] == "unknown":
+                        facts["reconciliation_verified"] = True
+                        audit = {"reconciliation_ref": f"assignment:{assignment_id}:capturing", "run_id": assignment.get("run_id")}
+                    assignment = self._transition("assignment", assignment_id, "capturing", facts=facts, audit_payload=audit)
+                return {"state": assignment["state"], "assignment_id": assignment_id,
+                        "unsettled_background": snapshot["unsettled_background"]}
+            return self._finish_success(assignment, snapshot, evidence_ids)
+        return {"state": assignment["state"], "assignment_id": assignment_id, "run_id": assignment.get("run_id")}
+
+    def _reconcile_inputs(self, assignment: dict, worker: dict, snapshot: dict) -> None:
+        rows = self._read_all(
+            "SELECT * FROM ticket_inputs WHERE delivered_to_assignment_id=? AND state='delivered'",
+            (assignment["assignment_id"],),
+        )
+        prompt_ids = set(snapshot.get("input_ids", []))
+        for row in rows:
+            if row["input_id"] in prompt_ids and snapshot.get("started"):
+                self._mark_input(row["input_id"], "read")
+                continue
+            key = row.get("delivery_key")
+            if not key:
+                continue
+            receipt = self._executor.reconcile_input(worker, assignment, key)
+            if not isinstance(receipt, dict):
+                continue
+            state = receipt.get("status")
+            if state in {"applied", "read"}:
+                self._mark_input(row["input_id"], "read")
+            elif state in {"unapplied", "not-applied"}:
+                self._mark_input(row["input_id"], "waiting")
+
+    def _persist_evidence(self, assignment: dict, snapshot: dict) -> list[str]:
+        records = [{
+            "evidence_type": "run", "reference": snapshot["run_reference"],
+            "reference_hash": snapshot["run_reference_hash"], "payload_hash": snapshot["run_payload_hash"],
+            "turn_id": str(snapshot["run_reference"].get("turn")) if snapshot["run_reference"].get("turn") is not None else None,
+            "tool_call_id": None, "result_seq": None,
+        }]
+        for item in snapshot.get("tools", []):
+            records.append({
+                "evidence_type": "tool", "reference": item["reference"],
+                "reference_hash": item["reference_hash"], "payload_hash": item["payload_hash"],
+                "turn_id": str(item["reference"].get("turn")), "tool_call_id": item["reference"].get("call_id"),
+                "result_seq": item.get("result_seq"),
+            })
+        for item in snapshot.get("backgrounds", []):
+            records.append({
+                "evidence_type": "background", "reference": item["reference"],
+                "reference_hash": item["reference_hash"], "payload_hash": item["payload_hash"],
+                "turn_id": None, "tool_call_id": item["reference"].get("call_id"), "result_seq": None,
+            })
+        evidence_ids = []
+        with self._store.transaction(write=True) as db:
+            for item in records:
+                identity = "ev_" + hashlib.sha256(
+                    f"{assignment['assignment_id']}\0{item['evidence_type']}\0{item['reference_hash']}".encode()
+                ).hexdigest()[:32]
+                values = {
+                    "evidence_id": identity, "assignment_id": assignment["assignment_id"],
+                    "harness_instance_id": self.instance_id, "session_id": assignment["session_id"],
+                    "run_id": assignment["run_id"], "evidence_type": item["evidence_type"],
+                    "turn_id": item["turn_id"], "tool_call_id": item["tool_call_id"],
+                    "result_seq": item["result_seq"], "reference_hash": item["reference_hash"],
+                    "payload_hash": item["payload_hash"], "reference_json": _json(item["reference"]),
+                    "created_at": _now(),
+                }
+                old = db.execute("SELECT * FROM evidence WHERE evidence_id=?", (identity,)).fetchone()
+                if old is None:
+                    columns = tuple(values)
+                    db.execute(
+                        f"INSERT INTO evidence({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+                        tuple(values[name] for name in columns),
+                    )
+                    CoordinatorStore.append_audit(
+                        db, aggregate_type="evidence", aggregate_id=identity,
+                        event_type="execution_evidence.recorded",
+                        payload={"assignment_id": assignment["assignment_id"], "evidence_type": item["evidence_type"],
+                                 "reference_hash": item["reference_hash"], "payload_hash": item["payload_hash"]},
+                        actor=_ACTOR, correlation_id=f"assignment:{assignment['assignment_id']}",
+                    )
+                else:
+                    for key in ("assignment_id", "harness_instance_id", "session_id", "run_id", "evidence_type",
+                                "turn_id", "tool_call_id", "result_seq", "reference_hash", "payload_hash", "reference_json"):
+                        if old[key] != values[key]:
+                            raise HarnessError("Immutable execution evidence identity conflict", code="superagent/evidence-conflict")
+                evidence_ids.append(identity)
+        return evidence_ids
+
+    def _mark_unknown(self, assignment: dict, reason: str) -> None:
+        if assignment["state"] != "unknown":
+            self._transition(
+                "assignment", assignment["assignment_id"], "unknown",
+                facts={"operation_outcome_uncertain": True},
+                changes={"error_ref": f"harness-run:{assignment.get('run_id') or assignment['submission_key']}"},
+                audit_payload={"reconciliation_ref": f"assignment:{assignment['assignment_id']}:unknown", "reason": reason},
+            )
+        job = self._read_one("SELECT * FROM jobs WHERE job_id=?", (assignment["job_id"],))
+        if job and job["state"] in {"ready", "running"}:
+            self._transition("job", job["job_id"], "unknown", facts={"operation_outcome_uncertain": True})
+        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (assignment["mission_id"],))
+        if mission and mission["state"] == "running":
+            self._transition("mission", mission["mission_id"], "unknown", facts={"operation_outcome_uncertain": True})
+
+    def _reject_unstarted(self, assignment: dict, reason: str) -> None:
+        target = "rejected"
+        facts = {"original_submission_not_started": True, "explicit_preexecution_rejection": True}
+        audit = None
+        if assignment["state"] == "unknown":
+            facts["reconciliation_verified"] = True
+            audit = {"reconciliation_ref": f"assignment:{assignment['assignment_id']}:submission-absent"}
+        self._transition(
+            "assignment", assignment["assignment_id"], target, facts=facts,
+            changes={"ended_at": _now(), "error_ref": f"submission-not-started:{assignment['submission_key']}"},
+            audit_payload=audit,
+        )
+        self._requeue_inputs(assignment["assignment_id"])
+        job = self._read_one("SELECT * FROM jobs WHERE job_id=?", (assignment["job_id"],))
+        if job and job["state"] in {"ready", "unknown"}:
+            facts = {"known_failure_or_human_decision": True}
+            audit = {"reconciliation_ref": f"job:{job['job_id']}:submission-absent"} if job["state"] == "unknown" else None
+            if job["state"] == "unknown":
+                facts["reconciliation_verified"] = True
+            self._transition("job", job["job_id"], "blocked", facts=facts, audit_payload=audit)
+        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (assignment["mission_id"],))
+        if mission and mission["state"] in {"running", "unknown"}:
+            facts = {"known_failure_or_human_decision": True}
+            audit = {"reconciliation_ref": f"mission:{mission['mission_id']}:submission-absent"} if mission["state"] == "unknown" else None
+            if mission["state"] == "unknown":
+                facts["reconciliation_verified"] = True
+            self._transition("mission", mission["mission_id"], "blocked", facts=facts, audit_payload=audit)
+
+    def _requeue_inputs(self, assignment_id: str) -> None:
+        rows = self._read_all("SELECT input_id FROM ticket_inputs WHERE delivered_to_assignment_id=? AND state='delivered'", (assignment_id,))
+        for row in rows:
+            self._mark_input(row["input_id"], "waiting")
+
+    def _parse_worker_report(self, output: str) -> dict:
+        try:
+            value = json.loads(output)
+        except (TypeError, ValueError):
+            value = None
+        if not isinstance(value, dict) or value.get("status") not in {"completed", "handback", "attention"}:
+            return {"status": "completed", "summary": output[:4096], "reply": ""}
+        summary = value.get("summary", "")
+        reply = value.get("reply", "")
+        question = value.get("question", "")
+        reason = value.get("handback_reason", "")
+        handback_trigger_id = value.get("handback_trigger_id", "")
+        options = value.get("options", [])
+        if not isinstance(summary, str) or len(summary) > 4096:
+            raise HarnessError("Worker Report summary is invalid", code="superagent/report-invalid")
+        if not isinstance(reply, str) or len(reply) > 8192:
+            raise HarnessError("Worker Report reply is invalid", code="superagent/report-invalid")
+        if not isinstance(question, str) or len(question) > 8192:
+            raise HarnessError("Worker Report question is invalid", code="superagent/report-invalid")
+        if not isinstance(reason, str) or len(reason) > 4096:
+            raise HarnessError("Worker Report handback reason is invalid", code="superagent/report-invalid")
+        if not isinstance(handback_trigger_id, str) or len(handback_trigger_id) > 128:
+            raise HarnessError("Worker Report handback Trigger identity is invalid", code="superagent/report-invalid")
+        if not isinstance(options, list) or len(options) > 16 or any(not isinstance(item, str) or len(item) > 512 for item in options):
+            raise HarnessError("Worker Report options are invalid", code="superagent/report-invalid")
+        if value["status"] == "handback" and not reason.strip():
+            return {"status": "completed", "summary": output[:4096], "reply": ""}
+        if value["status"] == "attention" and not question.strip():
+            return {"status": "completed", "summary": output[:4096], "reply": ""}
+        return {"status": value["status"], "summary": summary, "reply": reply,
+                "question": question, "handback_reason": reason,
+                "handback_trigger_id": handback_trigger_id, "options": options}
+
+    def _attention_id(self, assignment: dict, trigger_id: str, question: str) -> str:
+        question_hash = hashlib.sha256(question.encode("utf-8")).hexdigest()
+        return "attention_" + hashlib.sha256(
+            f"{assignment['ticket_id']}\0{trigger_id}\0{assignment['assignment_id']}\0{question_hash}".encode()
+        ).hexdigest()[:32]
+
+    def _create_attention(self, assignment: dict, trigger_id: str, question: str, options: list[str]) -> str:
+        question_hash = hashlib.sha256(question.encode("utf-8")).hexdigest()
+        attention_id = self._attention_id(assignment, trigger_id, question)
+        with self._store.unit_of_work(actor=_ACTOR, correlation_id=f"ticket:{assignment['ticket_id']}") as uow:
+            existing = uow.attentions.get(attention_id)
+            if existing is not None:
+                if existing["question_text"] != question or existing["options_json"] != options:
+                    raise HarnessError("Attention identity conflicts with its frozen question", code="superagent/attention-conflict")
+                return attention_id
+            uow.attentions.create({
+                "attention_id": attention_id, "ticket_id": assignment["ticket_id"],
+                "mission_id": assignment["mission_id"], "trigger_id": trigger_id,
+                "assignment_id": assignment["assignment_id"],
+                "question_ref": f"inline:{question_hash}", "question_text": question,
+                "options_json": options,
+            }, audit_payload={"question_hash": question_hash, "assignment_id": assignment["assignment_id"]})
+        return attention_id
+
+    def _finish_success(self, assignment: dict, snapshot: dict, evidence_ids: list[str]) -> dict:
+        ticket = self._authorization.ticket(assignment["ticket_id"])
+        if ticket is None:
+            raise HarnessError("Completed Worker Run references a missing Ticket", code="superagent/ticket-corrupt")
+        trigger = self._sources.get_trigger(assignment.get("goal_ref"))
+        if trigger is None:
+            raise HarnessError("Completed Worker Run references a missing Trigger", code="superagent/trigger-corrupt")
+        parsed = self._parse_worker_report(snapshot.get("output_text", ""))
+        disposition = parsed["status"]
+        question = parsed.get("question", "")
+        options = parsed.get("options", [])
+        handback_trigger_id = parsed.get("handback_trigger_id", "")
+        if disposition == "handback":
+            handback_trigger_id = handback_trigger_id or trigger["trigger_id"]
+            input_row = self._input(assignment["ticket_id"], handback_trigger_id)
+            if (handback_trigger_id == ticket.get("origin_trigger_id") or input_row is None
+                    or input_row["context_only"] or input_row.get("delivered_to_assignment_id") != assignment["assignment_id"]
+                    or input_row["state"] == "handed_back") :
+                disposition = "attention"
+                question = parsed.get("handback_reason") or "This request is outside the authorized scope. A human decision is required."
+                options = []
+        attention_id = self._attention_id(assignment, trigger["trigger_id"], question) if disposition == "attention" else None
+        mandate = ticket.get("mandate") or {}
+        mandate_status = "missing"
+        if mandate.get("mandate_id"):
+            mandate_status = self._authorization.revalidate_mandate(mandate["mandate_id"], actor=_ACTOR).get("status", "unknown")
+        mandate_valid = mandate_status in {"valid", "affected"}
+        output_ref = f"harness-run:{assignment['session_id']}:{assignment['run_id']}"
+        report = {
+            "kind": "single_worker_report", "schema_version": 1,
+            "ticket_id": assignment["ticket_id"], "mission_id": assignment["mission_id"],
+            "job_id": assignment["job_id"], "assignment_id": assignment["assignment_id"],
+            "trigger_id": trigger["trigger_id"], "run_id": assignment["run_id"],
+            "output_ref": output_ref, "output_hash": snapshot["output_hash"],
+            "disposition": disposition, "summary": parsed["summary"],
+            "reply": parsed.get("reply", ""), "handback_reason": parsed.get("handback_reason", ""),
+            "handback_trigger_id": handback_trigger_id,
+            "question": question, "options": options, "attention_id": attention_id,
+            "mandate_status": mandate_status, "mandate_valid": mandate_valid,
+            "evidence_ids": evidence_ids, "created_at": _now(),
+        }
+        report["report_hash"] = _hash(_json(report))
+        current = self._assignment(assignment["assignment_id"])
+        if current["state"] in {"accepted", "running"}:
+            current = self._transition("assignment", current["assignment_id"], "capturing",
+                                       facts={"original_run_settled": True})
+        if current["state"] == "unknown":
+            current = self._transition(
+                "assignment", current["assignment_id"], "succeeded",
+                facts={"reconciliation_verified": True, "original_run_completed": True,
+                       "output_frozen_and_validated": True, "report_frozen": True},
+                changes={"report_json": report, "ended_at": _now()},
+                audit_payload={"reconciliation_ref": f"assignment:{current['assignment_id']}:report",
+                               "run_evidence_ref": evidence_ids[0], "output_ref": output_ref,
+                               "output_hash": snapshot["output_hash"]},
+            )
+        elif current["state"] == "capturing":
+            current = self._transition("assignment", current["assignment_id"], "succeeded",
+                facts={"output_frozen_and_validated": True, "report_frozen": True},
+                changes={"report_json": report, "ended_at": _now()})
+        elif current["state"] == "stopping":
+            current = self._transition("assignment", current["assignment_id"], "succeeded",
+                facts={"original_run_completed": True, "output_frozen_and_validated": True, "report_frozen": True},
+                changes={"report_json": report, "ended_at": _now()})
+        else:
+            raise HarnessError("Assignment is not eligible to freeze a Worker Report", code="superagent/assignment-state-conflict")
+        current = self._assignment(current["assignment_id"])
+        if current is None:
+            raise HarnessError("Frozen Assignment disappeared before finalization", code="superagent/assignment-corrupt")
+        self._finalize_report_effects(current, report, trigger=trigger, ticket=ticket)
+        return {"state": "succeeded", "assignment_id": current["assignment_id"],
+                "mission_id": current["mission_id"], "report_hash": report["report_hash"],
+                "disposition": disposition, "attention_id": attention_id}
+
+    def _finalize_report_effects(self, assignment: dict, report: dict | None = None, *,
+                                 trigger: dict | None = None, ticket: dict | None = None) -> None:
+        assignment = self._assignment(assignment["assignment_id"])
+        if assignment is None or assignment["state"] != "succeeded":
+            return
+        if report is None:
+            try:
+                report = json.loads(assignment["report_json"])
+            except (TypeError, ValueError) as exc:
+                raise HarnessError("Frozen Worker Report is corrupt", code="superagent/report-corrupt") from exc
+        if report.get("kind") != "single_worker_report":
+            return
+        report_hash = report.get("report_hash")
+        payload = {key: value for key, value in report.items() if key != "report_hash"}
+        if not isinstance(report_hash, str) or _hash(_json(payload)) != report_hash:
+            raise HarnessError("Frozen Worker Report hash does not match its payload", code="superagent/report-corrupt")
+        trigger = trigger or self._sources.get_trigger(report.get("trigger_id"))
+        ticket = ticket or self._authorization.ticket(assignment["ticket_id"])
+        if trigger is None or ticket is None:
+            raise HarnessError("Frozen Worker Report references a missing source aggregate", code="superagent/report-corrupt")
+        if report.get("disposition") == "attention" and report.get("attention_id"):
+            expected = self._attention_id(assignment, trigger["trigger_id"], report.get("question", ""))
+            if expected != report["attention_id"]:
+                raise HarnessError("Frozen Attention identity does not match its question", code="superagent/attention-conflict")
+            self._create_attention(assignment, trigger["trigger_id"], report.get("question", ""), report.get("options", []))
+        elif report.get("disposition") == "handback":
+            target_trigger_id = report.get("handback_trigger_id")
+            input_row = self._input(assignment["ticket_id"], target_trigger_id) if target_trigger_id else None
+            if (input_row is not None and not input_row["context_only"]
+                    and input_row.get("delivered_to_assignment_id") == assignment["assignment_id"]
+                    and target_trigger_id != ticket.get("origin_trigger_id")
+                    and input_row["state"] != "handed_back"
+                    and not (ticket.get("state") == "ended" and ticket.get("ended_by") == "human")):
+                self._authorization.handback(assignment["ticket_id"], target_trigger_id,
+                                             report.get("handback_reason", "Worker handed back this request"), actor=_ACTOR)
+        self._complete_job_mission(assignment, report)
+        if report.get("mandate_valid") is True:
+            self._create_outbox_candidates(assignment, report, trigger, ticket)
+
+    def _complete_job_mission(self, assignment: dict, report: dict | None = None,
+                              snapshot: dict | None = None) -> None:
+        assignment = self._assignment(assignment["assignment_id"])
+        if assignment is None or assignment["state"] != "succeeded":
+            return
+        report = report or json.loads(assignment["report_json"])
+        report_hash = report["report_hash"]
+        job = self._read_one("SELECT * FROM jobs WHERE job_id=?", (assignment["job_id"],))
+        if job and job["state"] != "done":
+            if job["state"] not in {"ready", "running", "unknown"}:
+                raise HarnessError("Succeeded Assignment has a non-completable Job state", code="superagent/job-state-conflict")
+            facts = {"role_result_validated": True, "report_frozen": True}
+            audit = None
+            if job["state"] == "unknown":
+                facts["reconciliation_verified"] = True
+                audit = {"reconciliation_ref": f"job:{job['job_id']}:frozen-report", "report_hash": report_hash}
+            self._transition("job", job["job_id"], "done", facts=facts,
+                             changes={"result_hash": report_hash}, audit_payload=audit)
+        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (assignment["mission_id"],))
+        if mission is None or mission["state"] in {"completed", "blocked", "cancelled", "suppressed"}:
+            return
+        ticket = self._authorization.ticket(assignment["ticket_id"])
+        mandate = (ticket or {}).get("mandate") or {}
+        mandate_status = "missing"
+        if mandate.get("mandate_id"):
+            mandate_status = self._authorization.revalidate_mandate(mandate["mandate_id"], actor=_ACTOR).get("status", "unknown")
+        mandate_valid = report.get("mandate_valid") is True and mandate_status in {"valid", "affected"}
+        if not mandate_valid:
+            audit = None
+            if mandate_status == "revoked":
+                target = "suppressed"
+                facts = {"mandate_unavailable": True, "mandate_revoked": True}
+                outcome = "suppressed"
+            else:
+                # Expiry is a known execution block, not a fabricated revocation event.
+                target = "blocked"
+                facts = {"known_failure_or_human_decision": True}
+                outcome = "mandate_expired" if mandate_status == "expired" else "mandate_unavailable"
+            if mission["state"] == "unknown":
+                facts["reconciliation_verified"] = True
+                audit = {"reconciliation_ref": f"mission:{mission['mission_id']}:mandate-unavailable",
+                         "report_hash": report_hash, "mandate_status": mandate_status}
+            self._transition("mission", mission["mission_id"], target, facts=facts,
+                changes={"outcome": outcome}, audit_payload=audit)
+            return
+        if report.get("disposition") == "attention":
+            facts = {"known_failure_or_human_decision": True}
+            audit = None
+            if mission["state"] == "unknown":
+                facts["reconciliation_verified"] = True
+                audit = {"reconciliation_ref": f"mission:{mission['mission_id']}:attention", "report_hash": report_hash}
+            self._transition("mission", mission["mission_id"], "blocked", facts=facts,
+                changes={"outcome": "attention"},
+                audit_payload=audit)
+            return
+        facts = {"single_node_report_frozen": True, "all_work_jobs_done": True,
+                 "original_run_settled": True, "mandate_valid": True, "control_allows": True}
+        audit = None
+        if mission["state"] == "unknown":
+            facts["reconciliation_verified"] = True
+            audit = {"reconciliation_ref": f"mission:{mission['mission_id']}:single-report",
+                     "mission_id": mission["mission_id"], "plan_revision": mission["plan_revision"],
+                     "assignment_id": assignment["assignment_id"], "run_id": assignment["run_id"],
+                     "report_ref": f"report:{assignment['assignment_id']}:{report_hash}",
+                     "report_hash": report_hash}
+        self._transition("mission", mission["mission_id"], "completed", facts=facts,
+            changes={"outcome": report.get("disposition", "completed")}, audit_payload=audit)
+
+    def _finish_failure(self, assignment: dict, snapshot: dict, evidence_ids: list[str]) -> None:
+        status = snapshot["status"]
+        target = "failed" if status == "failed" else "interrupted"
+        current = self._assignment(assignment["assignment_id"])
+        if current["state"] == "unknown":
+            facts = {"reconciliation_verified": True,
+                     "original_run_failure_confirmed": status == "failed",
+                     "original_run_interruption_confirmed": status == "interrupted"}
+            audit = {"reconciliation_ref": f"assignment:{current['assignment_id']}:{status}",
+                     "run_evidence_ref": evidence_ids[0]}
+        else:
+            facts = {"original_run_failure_confirmed": status == "failed",
+                     "original_run_interruption_confirmed": status == "interrupted"}
+            audit = None
+        self._transition(
+            "assignment", current["assignment_id"], target, facts=facts,
+            changes={"ended_at": _now(), "error_ref": f"harness-run:{current['run_id']}:{status}",
+                     "report_json": {"kind": "run_failure", "run_id": current["run_id"],
+                                     "status": status, "evidence_ids": evidence_ids}},
+            audit_payload=audit,
+        )
+        current = self._assignment(current["assignment_id"])
+        job = self._read_one("SELECT * FROM jobs WHERE job_id=?", (current["job_id"],))
+        if job and job["state"] in {"ready", "running", "unknown"}:
+            facts = {"known_failure_or_human_decision": True}
+            audit = None
+            if job["state"] == "unknown":
+                facts["reconciliation_verified"] = True
+                audit = {"reconciliation_ref": f"job:{job['job_id']}:{status}"}
+            self._transition("job", job["job_id"], "blocked", facts=facts, audit_payload=audit)
+        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (current["mission_id"],))
+        if mission and mission["state"] in {"running", "unknown"}:
+            facts = {"known_failure_or_human_decision": True}
+            audit = None
+            if mission["state"] == "unknown":
+                facts["reconciliation_verified"] = True
+                audit = {"reconciliation_ref": f"mission:{mission['mission_id']}:{status}"}
+            self._transition("mission", mission["mission_id"], "blocked", facts=facts, audit_payload=audit)
+
+    def _create_outbox_candidates(self, assignment: dict, report: dict, trigger: dict, ticket: dict) -> None:
+        reply = report.get("reply")
+        if not isinstance(reply, str) or not reply.strip():
+            return
+        ticket = self._authorization.ticket(ticket["ticket_id"])
+        if ticket is None or ticket.get("state") != "open":
+            return
+        mandate = ticket.get("mandate") or {}
+        if not mandate.get("mandate_id"):
+            return
+        check = self._authorization.revalidate_mandate(mandate["mandate_id"], actor=_ACTOR)
+        if check.get("status") not in {"valid", "affected"}:
+            return
+        if "reply" not in (mandate.get("scope") or {}).get("actions", []):
+            return
+        channels = self._sources.list_channels(
+            source_instance_id=trigger["source_instance_id"], thread_id=trigger.get("primary_thread_id"),
+        )
+        for channel in channels:
+            if not (channel.get("capabilities") or {}).get("reply") is True:
+                continue
+            message_id = "message_" + hashlib.sha256(
+                f"{assignment['assignment_id']}\0{channel['channel_id']}\0reply".encode()
+            ).hexdigest()[:32]
+            body_hash = hashlib.sha256(reply.encode("utf-8")).hexdigest()
+            body_ref = f"report:{assignment['assignment_id']}:{report['report_hash']}:reply"
+            with self._store.unit_of_work(actor=_ACTOR, correlation_id=f"ticket:{ticket['ticket_id']}") as uow:
+                old = uow.outbox.get(message_id)
+                if old is not None:
+                    if old["body_hash"] != body_hash or old["body_ref"] != body_ref:
+                        raise HarnessError("Outbox candidate idempotency conflict", code="superagent/outbox-conflict")
+                    continue
+                uow.outbox.create({
+                    "message_id": message_id, "ticket_id": ticket["ticket_id"],
+                    "channel_id": channel["channel_id"], "kind": "reply",
+                    "body_ref": body_ref, "body_hash": body_hash,
+                    "idempotency_key": f"superagent-v2:{message_id}",
+                })
+
+    def report(self, assignment_id: str) -> dict | None:
+        assignment = self._assignment(assignment_id)
+        if assignment is None:
+            raise LookupError("Assignment not found")
+        try:
+            report = json.loads(assignment["report_json"])
+        except (TypeError, ValueError):
+            return None
+        if report.get("kind") != "single_worker_report":
+            return None
+        report_hash = report.get("report_hash")
+        payload = {key: value for key, value in report.items() if key != "report_hash"}
+        if not isinstance(report_hash, str) or _hash(_json(payload)) != report_hash:
+            raise HarnessError("Frozen Worker Report hash does not match its payload", code="superagent/report-corrupt")
+        evidence = self._read_all(
+            "SELECT * FROM evidence WHERE assignment_id=? ORDER BY created_at,evidence_id",
+            (assignment_id,),
+        )
+        return {"assignment_id": assignment_id, "state": assignment["state"],
+                "report": report, "evidence": evidence}
+
+    def list_workers(self, ticket_id: str) -> list[dict]:
+        return self._read_all("SELECT * FROM workers WHERE ticket_id=? ORDER BY created_at,worker_id", (ticket_id,))
+
+    def list_attentions(self, ticket_id: str, *, state: str | None = None) -> list[dict]:
+        if state is None:
+            return self._read_all("SELECT * FROM attentions WHERE ticket_id=? ORDER BY created_at,attention_id", (ticket_id,))
+        if state not in {"open", "answered", "dismissed"}:
+            raise ValueError("invalid Attention state")
+        return self._read_all(
+            "SELECT * FROM attentions WHERE ticket_id=? AND state=? ORDER BY created_at,attention_id",
+            (ticket_id, state),
+        )
+
+    def resolve_attention(self, attention_id: str, answer_trigger_id: str) -> dict:
+        attention = self._read_one("SELECT * FROM attentions WHERE attention_id=?", (attention_id,))
+        if attention is None:
+            raise LookupError("Attention not found")
+        ticket = self._authorization.ticket(attention["ticket_id"])
+        if ticket is None or ticket.get("state") != "open":
+            raise PermissionError("Attention Ticket is not open")
+        mandate = ticket.get("mandate") or {}
+        check = self._authorization.revalidate_mandate(mandate.get("mandate_id"), actor=_ACTOR)
+        if check.get("status") not in {"valid", "affected"}:
+            raise PermissionError("Attention cannot be answered under the current Mandate")
+        trigger = self._sources.get_trigger(answer_trigger_id)
+        actor = (trigger or {}).get("actor") or {}
+        if trigger is None or actor.get("kind", actor.get("actor_kind")) != "human":
+            raise PermissionError("Attention answer must be a verified human Trigger")
+        input_row = self._input(attention["ticket_id"], answer_trigger_id)
+        if input_row is None or input_row["context_only"] or input_row["state"] == "handed_back":
+            raise PermissionError("Attention answer must be a work input on the same Ticket")
+        return self._transition(
+            "attention", attention_id, "answered",
+            facts={"human_answer_trigger_verified": True},
+            changes={"answer_trigger_id": answer_trigger_id, "resolved_at": _now()},
+        )
+
+    def outbox_body(self, message_id: str) -> str:
+        message = self._read_one("SELECT * FROM outbox_messages WHERE message_id=?", (message_id,))
+        if message is None:
+            raise LookupError("Outbox message not found")
+        prefix = "report:"
+        if not message["body_ref"].startswith(prefix) or not message["body_ref"].endswith(":reply"):
+            raise PermissionError("Outbox body reference is not a V2 Report reply")
+        parts = message["body_ref"].split(":")
+        if len(parts) != 4 or parts[0] != "report" or parts[3] != "reply":
+            raise PermissionError("Outbox Report body reference is malformed")
+        assignment_id, expected_report_hash = parts[1], parts[2]
+        report = self.report(assignment_id)
+        if report is None or report["report"].get("report_hash") != expected_report_hash:
+            raise HarnessError("Outbox Report body is unavailable or changed", code="superagent/outbox-body-missing")
+        body = report["report"].get("reply", "")
+        if hashlib.sha256(body.encode("utf-8")).hexdigest() != message["body_hash"]:
+            raise HarnessError("Outbox body hash does not match its frozen Report", code="superagent/outbox-body-conflict")
+        return body
+
+    async def stop(self, assignment_id: str, *, reason: str) -> dict:
+        self._ensure_open()
+        if not isinstance(reason, str):
+            raise ValueError("stop reason must be a string")
+        reason = reason.strip()
+        if not reason or len(reason) > 4096:
+            raise ValueError("stop reason must be between 1 and 4096 characters")
+        async with self._lock(f"assignment:{assignment_id}"):
+            assignment = self._assignment(assignment_id)
+            if assignment is None:
+                raise LookupError("Assignment not found")
+            if assignment["state"] not in {"accepted", "running", "stopping"}:
+                return {"state": assignment["state"], "stopped": False}
+            if assignment["state"] == "stopping":
+                return await self._reconcile_locked(assignment_id)
+            ticket = self._authorization.ticket(assignment["ticket_id"])
+            if ticket is None:
+                raise PermissionError("Ticket not found")
+            mandate = ticket.get("mandate") or {}
+            check = self._authorization.revalidate_mandate(mandate.get("mandate_id"), actor=_ACTOR)
+            if check.get("status") not in {"valid", "affected"}:
+                raise PermissionError("Current Mandate does not authorize stopping this Assignment")
+            worker = self._worker_row(assignment["worker_id"])
+            if worker is None:
+                raise HarnessError("Assignment Worker is missing", code="superagent/worker-unavailable")
+            if assignment["state"] != "stopping":
+                assignment = self._transition(
+                    "assignment", assignment_id, "stopping",
+                    facts={"stop_requested": True, "mandate_valid": True, "control_allows": True},
+                    changes={"error_ref": f"stop-request:{hashlib.sha256(reason.encode()).hexdigest()}"},
+                )
+            try:
+                receipt = await self._executor.stop(worker, assignment)
+            except Exception:
+                self._mark_unknown(assignment, "native stop outcome cannot be confirmed")
+                return {"state": "unknown", "stopped": False}
+            if not isinstance(receipt, dict) or type(receipt.get("stopped")) is not bool:
+                self._mark_unknown(assignment, "native stop receipt is invalid")
+                return {"state": "unknown", "stopped": False}
+            if not receipt["stopped"]:
+                return {"state": "stopping", "stopped": False, "receipt": receipt}
+            return await self._reconcile_locked(assignment_id)

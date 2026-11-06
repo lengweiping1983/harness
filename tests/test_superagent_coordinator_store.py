@@ -26,9 +26,9 @@ class CoordinatorStoreTests(unittest.TestCase):
         self.assertTrue(self.path.exists())
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute("PRAGMA application_id").fetchone()[0], _APPLICATION_ID)
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 11)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 13)
             self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 11)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 13)
             self.assertEqual(db.execute("SELECT instance_id FROM instances").fetchone()[0], "instance-a")
 
     def test_reopen_is_idempotent_and_identity_is_bound(self):
@@ -103,15 +103,15 @@ class CoordinatorStoreTests(unittest.TestCase):
             db.commit()
         return instance_id, identity, effect_id
 
-    def test_every_prior_schema_version_upgrades_to_v11_without_losing_effects(self):
-        for version in range(1, 11):
+    def test_every_prior_schema_version_upgrades_to_v13_without_losing_effects(self):
+        for version in range(1, 13):
             with self.subTest(from_version=version):
                 path = Path(self.temp.name) / f"schema-v{version}.sqlite3"
                 instance_id, identity, effect_id = self._create_legacy_schema_with_effect(path, version)
                 upgraded = CoordinatorStore(path, instance_id=instance_id, identity=identity)
                 with closing(sqlite3.connect(path)) as db:
-                    self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 11)
-                    self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 11)
+                    self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 13)
+                    self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 13)
                     columns = {row[1] for row in db.execute("PRAGMA table_info(effects)")}
                     self.assertTrue({"correlation_id", "last_event_id"} <= columns)
                     legacy = db.execute(
@@ -254,8 +254,8 @@ class CoordinatorStoreTests(unittest.TestCase):
 
     def test_future_schema_version_is_rejected(self):
         with closing(sqlite3.connect(self.path)) as db:
-            db.execute("INSERT INTO schema_migrations VALUES(12,'future','now')")
-            db.execute("PRAGMA user_version=12")
+            db.execute("INSERT INTO schema_migrations VALUES(14,'future','now')")
+            db.execute("PRAGMA user_version=13")
             db.commit()
         with self.assertRaises(HarnessError):
             CoordinatorStore(self.path, instance_id="instance-a", identity={"profile": "local"})
@@ -673,9 +673,12 @@ class CoordinatorStoreTests(unittest.TestCase):
                 "source_instances", "source_cursors", "threads", "triggers", "trigger_threads", "channels",
                 "trigger_dispositions", "policy_versions", "policy_rules", "source_policies",
                 "evaluations", "decisions", "mandates", "ticket_subscriptions", "ticket_inputs",
+                "workers", "evidence", "attentions",
             } <= names)
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 11)
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 11)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 13)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 13)
+            self.assertIn("updated_at", {row[1] for row in db.execute("PRAGMA table_info(workers)")})
+            self.assertIn("updated_at", {row[1] for row in db.execute("PRAGMA table_info(attentions)")})
 
     def test_unit_of_work_commits_aggregate_audit_and_effect_together(self):
         with self.store.unit_of_work(actor={"kind": "human"}, correlation_id="corr-1") as uow:

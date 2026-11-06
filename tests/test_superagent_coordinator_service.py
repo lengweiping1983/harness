@@ -356,7 +356,7 @@ class CoordinatorApplicationServiceTests(unittest.TestCase):
             suppressed = service.transition(
                 "mission", "mission-control", expected_revision=1,
                 target_state="suppressed",
-                facts={"authorized": True, "mandate_revoked": True},
+                facts={"authorized": True, "mandate_revoked": True, "mandate_unavailable": True},
             )
             self.assertEqual(suppressed["state"], "suppressed")
 
@@ -424,7 +424,7 @@ class CoordinatorApplicationServiceTests(unittest.TestCase):
             stopping = service.transition(
                 "assignment", "assignment-stop", expected_revision=4,
                 target_state="stopping",
-                facts={"authorized": True, "cancel_accepted": True},
+                facts={"authorized": True, "stop_requested": True, "mandate_valid": True, "control_allows": True},
             )
             self.assertEqual(stopping["state"], "stopping")
 
@@ -555,6 +555,7 @@ class CoordinatorApplicationServiceTests(unittest.TestCase):
                 "acceptance_verified": True, "original_integration_settled": True,
                 "integration_artifact_frozen": True,
                 "all_work_jobs_done": True, "required_deliveries_applied": True,
+                "mandate_valid": True, "control_allows": True,
             }
             with self.assertRaises(PermissionError):
                 service.transition(
