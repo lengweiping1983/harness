@@ -1,20 +1,33 @@
-import type {ClipboardEvent} from 'react'
 import {expect, it, vi} from 'vitest'
-import {copyMessageSelection} from '../copyMessageSelection'
+import {copyMessageSelection, observeMessageSelectionCopy} from '../copyMessageSelection'
 
 function fixture(text = '开发一款 3D CS 游戏，需要有真实感', sourceText = text) {
-  const inside = {}, outside = {}
-  const range = {startContainer: inside, endContainer: inside, toString: () => sourceText}
+  const inside = {nodeType: 3, parentElement: {closest: (): object | null => body}}, outside = {nodeType: 3, parentElement: {closest: () => null}}
+  const fragment = {textContent: '', querySelector: (_selector: string): object | null => null, querySelectorAll: () => [] as {remove: () => void}[]}
+  const outsideRange = {toString: () => '', setStart: vi.fn(), cloneContents: () => fragment}
+  const clippedRange = {toString: () => sourceText, setEnd: vi.fn()}
+  const range = {startContainer: inside, endContainer: inside, toString: () => sourceText,
+    cloneRange: vi.fn().mockReturnValueOnce(outsideRange).mockReturnValueOnce(clippedRange)}
   const selection = {isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => text}
   const data = new Map([['text/html', '<p>' + text + '</p>']])
+  const listeners = new Set<(event: ClipboardEvent) => void>()
+  const document = {
+    getSelection: (): typeof selection | null => selection,
+    createRange: () => ({selectNodeContents: vi.fn(), endContainer: body as unknown, endOffset: 1}),
+    addEventListener: vi.fn((_name: string, listener: (event: ClipboardEvent) => void) => listeners.add(listener)),
+    removeEventListener: vi.fn((_name: string, listener: (event: ClipboardEvent) => void) => listeners.delete(listener)),
+  }
+  const body = {ownerDocument: document, contains: (node: unknown): boolean => node === inside || node === body}
+  const scope = {ownerDocument: document, contains: (node: unknown): boolean => node === body}
   const event = {
-    defaultPrevented: false,
-    currentTarget: {ownerDocument: {getSelection: (): typeof selection | null => selection}, contains: (node: unknown) => node === inside},
+    defaultPrevented: false, target: null as {closest: () => object | null} | null,
+    currentTarget: body,
     clipboardData: {clearData: vi.fn(() => data.clear()), setData: vi.fn((type: string, value: string) => data.set(type, value))},
     preventDefault: vi.fn(),
   }
-  const copy = () => copyMessageSelection(event as unknown as ClipboardEvent<HTMLElement>)
-  return {event, data, selection, range, outside, copy}
+  event.preventDefault.mockImplementation(() => {event.defaultPrevented = true})
+  const copy = () => copyMessageSelection(event as unknown as ClipboardEvent, body as unknown as HTMLElement)
+  return {event, data, selection, range, outside, copy, scope, document, listeners, outsideRange, clippedRange, body, fragment}
 }
 
 it.each(['开发一款 3D CS 游戏，需要有真实感', 'CS 游戏', '  原文 😀\n\nSecond paragraph\n'])('选中正文只复制纯文本且逐字保留选择：%s', text => {
@@ -52,12 +65,98 @@ it.each([
   expect(data.get('text/plain')).toBe(selected)
 })
 
-it.each(['startContainer', 'endContainer'] as const)('选择的 %s 超出正文时保留浏览器行为', endpoint => {
-  const {event, range, outside, copy} = fixture()
+it.each(['startContainer', 'endContainer'] as const)('选择的 %s 跨到其他正文时保留浏览器行为', endpoint => {
+  const {event, range, outside, copy, fragment} = fixture()
   range[endpoint] = outside
+  fragment.textContent = '另一条消息'
   copy()
   expect(event.clipboardData.clearData).not.toHaveBeenCalled()
   expect(event.clipboardData.setData).not.toHaveBeenCalled()
+  expect(event.preventDefault).not.toHaveBeenCalled()
+})
+
+it('三击选区终点在正文外时仍去掉四个尾部换行，不改动原选区', () => {
+  const {event, data, range, outside, copy, outsideRange, clippedRange, body} = fixture('用户消息\n\n\n\n', '用户消息')
+  range.endContainer = outside
+  copy()
+  expect([...data]).toEqual([['text/plain', '用户消息']])
+  expect(outsideRange.setStart).toHaveBeenCalledWith(body, 1)
+  expect(clippedRange.setEnd).toHaveBeenCalledWith(body, 1)
+  expect(range.endContainer).toBe(outside)
+  expect(event.preventDefault).toHaveBeenCalledOnce()
+})
+
+it.each(['img', 'svg'])('不裁掉选区末尾的 %s 附件或非装饰图形', tag => {
+  const {event, range, outside, copy, fragment} = fixture()
+  range.endContainer = outside
+  fragment.querySelector = selector => selector.split(',').includes(tag) ? {} : null
+  copy()
+  expect(event.preventDefault).not.toHaveBeenCalled()
+  expect(event.clipboardData.setData).not.toHaveBeenCalled()
+})
+
+it.each(['链接文字', '正文内的按钮文字'])('不裁掉选区末尾的%s', text => {
+  const {event, range, outside, copy, fragment} = fixture()
+  range.endContainer = outside
+  fragment.textContent = text
+  copy()
+  expect(event.preventDefault).not.toHaveBeenCalled()
+  expect(event.clipboardData.setData).not.toHaveBeenCalled()
+})
+
+it('三击越过消息图标操作栏时只从克隆片段移除操作栏', () => {
+  const {range, outside, copy, fragment, data} = fixture('用户消息\n\n\n\n', '用户消息')
+  range.endContainer = outside
+  fragment.querySelector = () => ({})
+  fragment.textContent = 'Set as goal'
+  const remove = vi.fn(() => {fragment.querySelector = () => null; fragment.textContent = ''})
+  fragment.querySelectorAll = () => [{remove}]
+  copy()
+  expect(remove).toHaveBeenCalledOnce()
+  expect([...data]).toEqual([['text/plain', '用户消息']])
+})
+
+it('复制事件落在正文外时由对话观察器接收，卸载后移除同一监听器', () => {
+  const {scope, document, listeners, event, data, range, outside} = fixture('用户消息\n\n\n\n', '用户消息')
+  range.endContainer = outside
+  const cleanup = observeMessageSelectionCopy(scope as unknown as HTMLElement)
+  expect(document.addEventListener).toHaveBeenCalledWith('copy', expect.any(Function))
+  expect(listeners.size).toBe(1)
+  for (const listener of listeners) listener({...event, currentTarget: document} as unknown as ClipboardEvent)
+  expect([...data]).toEqual([['text/plain', '用户消息']])
+  const listener = [...listeners][0]
+  cleanup()
+  expect(document.removeEventListener).toHaveBeenCalledWith('copy', listener)
+  expect(listeners.size).toBe(0)
+})
+
+it('对话监听器不接管另一对话的选区或正文外编辑器', () => {
+  const {scope, listeners, event, data} = fixture()
+  scope.contains = () => false
+  const cleanup = observeMessageSelectionCopy(scope as unknown as HTMLElement)
+  for (const listener of listeners) listener(event as unknown as ClipboardEvent)
+  expect(data.has('text/plain')).toBe(false)
+  scope.contains = () => true
+  event.target = {closest: () => ({})}
+  for (const listener of listeners) listener(event as unknown as ClipboardEvent)
+  expect(data.has('text/plain')).toBe(false)
+  expect(event.preventDefault).not.toHaveBeenCalled()
+  cleanup()
+})
+
+it('正文已经处理的复制不会被对话监听器再次写入', () => {
+  const {scope, listeners, event, copy} = fixture()
+  const cleanup = observeMessageSelectionCopy(scope as unknown as HTMLElement)
+  copy()
+  for (const listener of listeners) listener(event as unknown as ClipboardEvent)
+  expect(event.clipboardData.setData).toHaveBeenCalledOnce()
+  cleanup()
+})
+
+it('没有剪贴板数据的复制事件不清空原有数据', () => {
+  const {event, scope} = fixture()
+  copyMessageSelection({...event, target: null, clipboardData: null}, scope as unknown as HTMLElement)
+  expect(event.clipboardData.clearData).not.toHaveBeenCalled()
   expect(event.preventDefault).not.toHaveBeenCalled()
 })
 

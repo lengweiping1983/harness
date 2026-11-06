@@ -1,14 +1,38 @@
-import type {ClipboardEvent} from 'react'
+type MessageCopyEvent = Pick<ClipboardEvent, 'defaultPrevented' | 'clipboardData' | 'preventDefault' | 'target'>
+
+/** 三击选区可能使复制事件落在正文外；按当前对话的真实选区接收。 */
+export function observeMessageSelectionCopy(scope: HTMLElement): () => void {
+  const document = scope.ownerDocument
+  const listener = (event: ClipboardEvent) => copyMessageSelection(event, scope)
+  document.addEventListener('copy', listener)
+  return () => document.removeEventListener('copy', listener)
+}
 
 /** 选中消息正文时只复制可见文本，避免富文本段落在粘贴处产生额外空行。 */
-export function copyMessageSelection(event: ClipboardEvent<HTMLElement>): void {
-  if (event.defaultPrevented) return
-  const body = event.currentTarget
-  const selection = body.ownerDocument.getSelection()
+export function copyMessageSelection(event: MessageCopyEvent, scope: HTMLElement): void {
+  if (event.defaultPrevented || !event.clipboardData) return
+  const target = event.target as Element | null
+  if (target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return
+  const document = scope.ownerDocument
+  const selection = document.getSelection()
   if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return
-  const range = selection.getRangeAt(0)
-  // 跨消息、附件或编辑器的选择继续交给浏览器，不截断用户选择。
-  if (!body.contains(range.startContainer) || !body.contains(range.endContainer)) return
+  let range = selection.getRangeAt(0)
+  const start = range.startContainer.nodeType === 1 ? range.startContainer as Element : range.startContainer.parentElement
+  const body = start?.closest<HTMLElement>('[data-user-message-body]')
+  if (!body || !scope.contains(body)) return
+  if (!body.contains(range.endContainer)) {
+    // 原生三击包含段落结束边界。只接纳正文外的空白，不裁掉其他消息、附件或控件文字。
+    const content = document.createRange()
+    content.selectNodeContents(body)
+    const outside = range.cloneRange()
+    outside.setStart(content.endContainer, content.endOffset)
+    const fragment = outside.cloneContents()
+    // 三击可能跨过本人消息的图标操作栏；它属于界面装饰，不属于所选消息正文。
+    fragment.querySelectorAll('[data-message-actions],svg[aria-hidden="true"]').forEach(decoration => decoration.remove())
+    if (fragment.textContent?.trim() || fragment.querySelector('img,video,audio,iframe,canvas,svg,input,textarea,select')) return
+    range = range.cloneRange()
+    range.setEnd(content.endContainer, content.endOffset)
+  }
   let text = selection.toString()
   if (!text) return
   // 可见选区会把块布局转换成换行；纯文本剪贴板也必须排除额外的尾部换行。

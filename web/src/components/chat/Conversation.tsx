@@ -1,5 +1,6 @@
 import { HarnessLogo } from '@/components/ui/HarnessLogo'
 import { noticeText } from '@/lib/noticeText'
+import { observeMessageSelectionCopy } from '@/lib/copyMessageSelection'
 import { messageNavigationEntries, type MessageNavigationEntry } from '@/lib/messageNavigation'
 import { MessageNavigator } from './MessageNavigator'
 import { t, useLocale } from '@/i18n'
@@ -105,6 +106,10 @@ export function Conversation({
   const [answerFeedback, setAnswerFeedback] = useState<Record<string, QuestionSubmissionFeedback | undefined>>({})
   const toast = useAppStore((s) => s.toast)
   const sessionId = useAppStore((s) => s.activeSessionId)
+  useEffect(() => {
+    const scope = parentRef.current
+    if (scope) return observeMessageSelectionCopy(scope)
+  }, [sessionId])
   const toolRunChoices = useMemo(() => toolRunState.sessionId === sessionId ? toolRunState.values : {}, [toolRunState, sessionId])
   const latestTurn = Object.keys(turns).reduce((latest, turn) => Math.max(latest, Number(turn)), 0)
   const queuedEmpty = useChatStore((state): 'none' | 'paused' | 'environment' | 'queued' => {
