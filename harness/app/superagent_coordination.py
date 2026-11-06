@@ -115,23 +115,147 @@ class CoordinatorInputDelivery:
     _TRANSITIONS = {
         "pending": {"submitting", "rejected"},
         "submitting": {"accepted", "applied", "unapplied", "unknown", "rejected"},
-        "accepted": {"applied", "unapplied", "unknown"},
+        "accepted": {"applied", "unapplied"},
         "unknown": {"accepted", "applied", "unapplied", "rejected"},
         "applied": set(), "unapplied": set(), "rejected": set(),
     }
+    _RECEIPT_STATES = {"accepted", "applied", "unapplied", "unknown", "rejected"}
 
     def __init__(self, store):
         self.store = store
 
+    @staticmethod
+    def _identity(input_id, assignment_id):
+        return "input_delivery_" + _hash(_json([input_id, assignment_id]))[:32]
+
+    @staticmethod
+    def make_receipt(delivery, status, *, native_receipt=None, reason_code=None):
+        if not isinstance(status, str) or status not in CoordinatorInputDelivery._RECEIPT_STATES:
+            raise ValueError(tr("superagent.invalid", field="input_delivery.receipt_status"))
+        if native_receipt is not None and not isinstance(native_receipt, dict):
+            raise ValueError(tr("superagent.invalid", field="input_delivery.native_receipt"))
+        if reason_code is not None:
+            reason_code = _text(reason_code, "reason_code", limit=96)
+        return {
+            "status": status,
+            "delivery_id": delivery["delivery_id"],
+            "input_id": delivery["input_id"],
+            "assignment_id": delivery["assignment_id"],
+            "delivery_key": delivery["delivery_key"],
+            "native_receipt": native_receipt,
+            "reason_code": reason_code,
+        }
+
+    @staticmethod
+    def _validate_scope(db, input_id, assignment_id):
+        row = db.execute(
+            "SELECT input.ticket_id AS input_ticket_id,mission.ticket_id AS mission_ticket_id "
+            "FROM ticket_inputs AS input JOIN assignments AS assignment ON assignment.assignment_id=? "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "JOIN missions AS mission ON mission.mission_id=job.mission_id "
+            "WHERE input.input_id=?",
+            (assignment_id, input_id),
+        ).fetchone()
+        if row is None or row["input_ticket_id"] != row["mission_ticket_id"]:
+            raise _conflict()
+
+    @classmethod
+    def _validate_envelope(cls, row, receipt, state):
+        if not isinstance(receipt, dict) or receipt.get("status") != state:
+            raise _conflict()
+        expected = {
+            "delivery_id": row["delivery_id"],
+            "input_id": row["input_id"],
+            "assignment_id": row["assignment_id"],
+            "delivery_key": row["delivery_key"],
+        }
+        if any(receipt.get(key) != value for key, value in expected.items()):
+            raise _conflict()
+        if set(receipt) - {
+            "status", "delivery_id", "input_id", "assignment_id",
+            "delivery_key", "native_receipt", "reason_code",
+        }:
+            raise _conflict()
+        native = receipt.get("native_receipt")
+        reason = receipt.get("reason_code")
+        if native is not None and not isinstance(native, dict):
+            raise _conflict()
+        if reason is not None and (not isinstance(reason, str) or not reason or len(reason) > 96):
+            raise _conflict()
+        if native is not None:
+            if native.get("source") == "original_run_input_receipt":
+                if state != "applied" or set(native) != {"source"}:
+                    raise _conflict()
+            else:
+                if native.get("request_id") != row["delivery_key"]:
+                    raise _conflict()
+                native_status = native.get("status")
+                if not isinstance(native_status, str) or native_status not in {"pending", "applied", "unapplied"}:
+                    raise _conflict()
+                if type(native.get("turn")) is not int or native["turn"] < 1:
+                    raise _conflict()
+                if type(native.get("accepted_seq")) is not int or native["accepted_seq"] < 1:
+                    raise _conflict()
+                applied_seq = native.get("applied_seq")
+                if native_status == "applied":
+                    if type(applied_seq) is not int or applied_seq <= native["accepted_seq"]:
+                        raise _conflict()
+                elif applied_seq is not None:
+                    raise _conflict()
+                expected_native = {
+                    "accepted": {"pending"},
+                    "applied": {"applied"},
+                    "unapplied": {"unapplied"},
+                    "unknown": {"pending", "applied", "unapplied"},
+                    "rejected": set(),
+                }[state]
+                if native_status not in expected_native:
+                    raise _conflict()
+        elif state in {"unapplied", "unknown", "rejected"} and not reason:
+            raise _conflict()
+
+    @classmethod
+    def _decode(cls, row):
+        result = dict(row)
+        expected_id = cls._identity(result["input_id"], result["assignment_id"])
+        if result["delivery_id"] != expected_id or not isinstance(result["delivery_key"], str) or not result["delivery_key"]:
+            raise _conflict()
+        try:
+            receipt = strict_loads(result.pop("receipt_json"))
+        except (TypeError, ValueError, RecursionError) as exc:
+            raise _conflict() from exc
+        if not isinstance(receipt, dict):
+            raise _conflict()
+        if result["state"] == "applied" and receipt == {
+            "status": "applied", "source": "original_run_input_receipt",
+        }:
+            receipt = cls.make_receipt(
+                result, "applied", native_receipt={"source": "original_run_input_receipt"},
+            )
+            cls._validate_envelope(result, receipt, "applied")
+        elif result["state"] in {"pending", "submitting"}:
+            if receipt:
+                raise _conflict()
+        elif result["state"] == "unknown" and receipt == {}:
+            # 兼容早期 V2 账本：空回执只允许保守停留在 unknown，绝不重新认领。
+            pass
+        elif result["state"] in cls._RECEIPT_STATES:
+            cls._validate_envelope(result, receipt, result["state"])
+        else:
+            raise _conflict()
+        result["receipt"] = receipt
+        return result
+
     def get(self, input_id, assignment_id):
+        _text(input_id, "input_id")
+        _text(assignment_id, "assignment_id")
         with self.store.transaction() as db:
             row = db.execute("SELECT * FROM input_deliveries WHERE input_id=? AND assignment_id=?",
                              (input_id, assignment_id)).fetchone()
             if row is None:
                 return None
-            result = dict(row)
-            result["receipt"] = strict_loads(result.pop("receipt_json"))
-            return result
+            self._validate_scope(db, input_id, assignment_id)
+            return self._decode(row)
 
     def prepare_in_transaction(self, db, input_id, assignment_id, *, actor,
                                delivery_key=None, initial_state="pending"):
@@ -141,7 +265,8 @@ class CoordinatorInputDelivery:
             _text(value, field)
         if initial_state not in {"pending", "submitting"}:
             raise ValueError(tr("superagent.invalid", field="input_delivery.state"))
-        identity = "input_delivery_" + _hash(_json([input_id, assignment_id]))[:32]
+        self._validate_scope(db, input_id, assignment_id)
+        identity = self._identity(input_id, assignment_id)
         key = delivery_key or "superagent:input:" + identity
         _text(key, "delivery_key", limit=1024)
         old = db.execute("SELECT * FROM input_deliveries WHERE delivery_id=?", (identity,)).fetchone()
@@ -152,33 +277,53 @@ class CoordinatorInputDelivery:
             self.store.append_audit(db, aggregate_type="input_delivery", aggregate_id=identity,
                 event_type="input_delivery.created", payload={"input_id": input_id, "assignment_id": assignment_id,
                     "state": initial_state}, actor=actor, correlation_id=identity)
-        elif delivery_key is not None and old["delivery_key"] != delivery_key:
-            raise _conflict()
-        return dict(db.execute("SELECT * FROM input_deliveries WHERE delivery_id=?", (identity,)).fetchone())
+            old = db.execute("SELECT * FROM input_deliveries WHERE delivery_id=?", (identity,)).fetchone()
+        else:
+            decoded = self._decode(old)
+            if old["delivery_key"] != key:
+                raise _conflict()
+            old = db.execute("SELECT * FROM input_deliveries WHERE delivery_id=?", (identity,)).fetchone()
+            if decoded["delivery_id"] != identity:
+                raise _conflict()
+        return self._decode(old)
 
     def prepare(self, input_id, assignment_id, *, actor):
         with self.store.transaction(write=True) as db:
             self.prepare_in_transaction(db, input_id, assignment_id, actor=actor)
         return self.get(input_id, assignment_id)
 
-    def transition_in_transaction(self, db, input_id, assignment_id, target, *, expected_revision, receipt, actor):
+    def transition_in_transaction(self, db, input_id, assignment_id, target, *,
+                                  expected_revision, receipt, actor):
         """消费原生回执的调用方可把投递、输入状态和审计一次提交。"""
         self.store._require_transaction(db)
         if type(expected_revision) is not int or expected_revision < 1:
             raise ValueError(tr("superagent.invalid", field="expected_revision"))
+        self._validate_scope(db, input_id, assignment_id)
         old = db.execute("SELECT * FROM input_deliveries WHERE input_id=? AND assignment_id=?",
                          (input_id, assignment_id)).fetchone()
         if old is None or old["aggregate_revision"] != expected_revision:
             raise _conflict()
+        decoded = self._decode(old)
         if target not in self._TRANSITIONS[old["state"]]:
             raise _conflict()
-        if target in {"accepted", "applied", "unapplied"}:
-            if not isinstance(receipt, dict) or receipt.get("status") != target:
+        if target in {"pending", "submitting"}:
+            if receipt not in (None, {}):
                 raise _conflict()
-        db.execute("UPDATE input_deliveries SET state=?,receipt_json=?,aggregate_revision=aggregate_revision+1,updated_at=? "
-                   "WHERE delivery_id=? AND aggregate_revision=?", (target, _json(receipt), _now(), old["delivery_id"], expected_revision))
+            normalized_receipt = {}
+        else:
+            self._validate_envelope(decoded, receipt, target)
+            normalized_receipt = receipt
+        changed = db.execute(
+            "UPDATE input_deliveries SET state=?,receipt_json=?,aggregate_revision=aggregate_revision+1,updated_at=? "
+            "WHERE delivery_id=? AND aggregate_revision=?",
+            (target, _json(normalized_receipt), _now(), old["delivery_id"], expected_revision),
+        ).rowcount
+        if changed != 1:
+            raise _conflict()
         self.store.append_audit(db, aggregate_type="input_delivery", aggregate_id=old["delivery_id"],
-            event_type="input_delivery." + target, payload={"receipt": receipt, "revision": expected_revision + 1},
+            event_type="input_delivery." + target,
+            payload={"input_id": input_id, "assignment_id": assignment_id,
+                     "receipt_hash": _hash(_json(normalized_receipt)), "revision": expected_revision + 1},
             actor=actor, correlation_id=old["delivery_id"])
 
     def transition(self, input_id, assignment_id, target, *, expected_revision, receipt, actor):

@@ -560,20 +560,190 @@ class HarnessExecutorAdapter:
         self._open()
         return self._inspect_run(worker["session_id"], assignment["run_id"])
 
+    @staticmethod
+    def _input_session_id(worker: dict, assignment: dict) -> str:
+        session_id = worker.get("session_id")
+        worker_id = worker.get("worker_id")
+        workspace_id = worker.get("workspace_id")
+        if (
+            not isinstance(session_id, str) or not session_id
+            or not isinstance(worker_id, str) or not worker_id
+            or not isinstance(workspace_id, str) or not workspace_id
+            or assignment.get("session_id") != session_id
+            or assignment.get("worker_id") != worker_id
+            or assignment.get("workspace_id") != workspace_id
+            or not isinstance(assignment.get("run_id"), str) or not assignment["run_id"]
+        ):
+            raise HarnessError(tr("superagent.conflict"), code="superagent/run-conflict")
+        return session_id
+
+    @staticmethod
+    def _validate_input_key(assignment: dict, operation_key: str) -> None:
+        assignment_id = assignment.get("assignment_id")
+        if (
+            not isinstance(assignment_id, str) or not assignment_id
+            or not isinstance(operation_key, str)
+            or not operation_key.startswith("superagent-v2:input:")
+            or not operation_key.endswith(f":{assignment_id}")
+        ):
+            raise HarnessError(tr("superagent.conflict"), code="superagent/run-conflict")
+
     async def deliver_input(self, worker: dict, assignment: dict, text: str, operation_key: str,
                             before_accept: Callable[[], None]) -> dict:
         self._open()
-        session = self.harness.get_session(worker["session_id"])
-        if worker["session_id"] not in self.harness.runtime.active:
+        self._validate_input_key(assignment, operation_key)
+        session_id = self._input_session_id(worker, assignment)
+        session = self.harness.get_session(session_id)
+        active_run_id = self.harness.runtime.active.get(session_id)
+        if active_run_id is None:
+            return {"accepted": False, "deferred": True}
+        record = getattr(self.harness.runtime, "_executions", {}).get(active_run_id)
+        agent = self.harness._agents.get(session_id)
+        original_run_id = assignment.get("run_id")
+        if (
+            not isinstance(original_run_id, str) or active_run_id != original_run_id
+            or record is None or getattr(record, "id", None) != original_run_id
+            or getattr(record, "session_id", None) != session_id
+            or agent is None or getattr(agent, "run_id", None) != original_run_id
+        ):
+            raise HarnessError(tr("superagent.conflict"), code="superagent/run-conflict")
+        if session.open_turn is None:
             return {"accepted": False, "deferred": True}
         return await self.harness.steer(
-            worker["session_id"], text, expected_turn=session.open_turn,
+            session_id, text, expected_turn=session.open_turn,
             request_id=operation_key, original_text=text, before_accept=before_accept,
         )
 
     def reconcile_input(self, worker: dict, assignment: dict, operation_key: str) -> dict | None:
         self._open()
-        return self.harness.steering_receipt(worker["session_id"], operation_key, summary=False)
+        self._validate_input_key(assignment, operation_key)
+        session_id = self._input_session_id(worker, assignment)
+        return self.harness.steering_receipt(session_id, operation_key, summary=False)
+
+    @staticmethod
+    def _validate_instruction_key(assignment: dict, operation_key: str) -> None:
+        assignment_id = assignment.get("assignment_id")
+        if (
+            not isinstance(assignment_id, str) or not assignment_id
+            or not isinstance(operation_key, str)
+            or not operation_key.startswith("superagent-v2:instruction:")
+            or not operation_key.endswith(f":{assignment_id}")
+            or len(operation_key) > 200
+        ):
+            raise HarnessError(tr("superagent.conflict"), code="superagent/run-conflict")
+
+    def _instruction_target(self, worker: dict, assignment: dict, turn_id: int | None = None):
+        session_id = self._input_session_id(worker, assignment)
+        session = self.harness.get_session(session_id)
+        active_run_id = self.harness.runtime.active.get(session_id)
+        record = getattr(self.harness.runtime, "_executions", {}).get(active_run_id)
+        agent = self.harness._agents.get(session_id)
+        original_run_id = assignment.get("run_id")
+        if (
+            not isinstance(original_run_id, str) or active_run_id != original_run_id
+            or record is None or getattr(record, "id", None) != original_run_id
+            or getattr(record, "session_id", None) != session_id
+            or agent is None or getattr(agent, "run_id", None) != original_run_id
+        ):
+            raise HarnessError(tr("superagent.conflict"), code="superagent/run-conflict")
+        current_turn = session.open_turn
+        if type(current_turn) is not int or current_turn < 1:
+            raise HarnessError(tr("superagent.conflict"), code="run/stale-turn")
+        if turn_id is not None and current_turn != turn_id:
+            raise HarnessError(tr("superagent.conflict"), code="run/stale-turn")
+        return session_id, session
+
+    def instruction_turn(self, worker: dict, assignment: dict, operation_key: str) -> int:
+        self._open()
+        self._validate_instruction_key(assignment, operation_key)
+        _, session = self._instruction_target(worker, assignment)
+        return session.open_turn
+
+    async def deliver_instruction(self, worker: dict, assignment: dict, text: str,
+                                  operation_key: str, turn_id: int,
+                                  before_accept: Callable[[], None]) -> dict:
+        self._open()
+        self._validate_instruction_key(assignment, operation_key)
+        session_id, _ = self._instruction_target(worker, assignment, turn_id)
+        if not isinstance(text, str) or not text.strip() or len(text) > 65536:
+            raise HarnessError(tr("superagent.conflict"), code="run/invalid")
+
+        def guard():
+            self._instruction_target(worker, assignment, turn_id)
+            return before_accept()
+
+        response = await self.harness.steer(
+            session_id, text, expected_turn=turn_id,
+            request_id=operation_key, before_accept=guard,
+        )
+        if isinstance(response, dict) and response.get("accepted") is True:
+            receipt = self.reconcile_instruction(
+                worker, assignment, operation_key, turn_id, text,
+            )
+            if receipt is None:
+                raise HarnessError(tr("superagent.conflict"), code="run/submission-unconfirmed")
+            response = {**response, "receipt": receipt}
+        return response
+
+    def reconcile_instruction(self, worker: dict, assignment: dict, operation_key: str,
+                              turn_id: int, expected_text: str) -> dict | None:
+        self._open()
+        self._validate_instruction_key(assignment, operation_key)
+        session_id = self._input_session_id(worker, assignment)
+        session = self.harness.get_session(session_id)
+        receipt = self.harness.steering_receipt(session_id, operation_key, summary=False)
+        if receipt is None:
+            return None
+        if not isinstance(receipt, Mapping):
+            raise HarnessError(tr("superagent.corrupt"), code="superagent/instruction-receipt-invalid")
+        try:
+            events = turn_events(session.events, run_id=assignment["run_id"])
+        except (TypeError, ValueError) as exc:
+            raise HarnessError(tr("superagent.corrupt"), code="superagent/instruction-receipt-invalid") from exc
+        accepted = [
+            event for event in events
+            if event.seq == receipt.get("accepted_seq") and event.type == "note"
+            and isinstance(event.data, Mapping)
+            and event.data.get("kind") == "steering/accepted"
+            and event.data.get("request_id") == operation_key
+            and event.data.get("run_id") == assignment["run_id"]
+            and type(event.data.get("turn")) is int and event.data["turn"] == turn_id
+            and event.data.get("text") == expected_text
+            and "original_text" not in event.data and "attachments" not in event.data
+        ]
+        status = receipt.get("status")
+        applied_seq = receipt.get("applied_seq")
+        if (
+            len(accepted) != 1 or type(receipt.get("request_id")) is not str
+            or receipt["request_id"] != operation_key
+            or type(receipt.get("turn")) is not int or receipt.get("turn") != turn_id
+            or type(receipt.get("accepted_seq")) is not int or receipt.get("accepted_seq") < 1
+            or type(receipt.get("text")) is not str or receipt["text"] != expected_text
+            or type(status) is not str or status not in {"pending", "applied", "unapplied"}
+        ):
+            raise HarnessError(tr("superagent.corrupt"), code="superagent/instruction-receipt-invalid")
+        if status == "applied":
+            applied = [
+                event for event in events
+                if event.seq == applied_seq and event.type == "user/message"
+                and isinstance(event.data, Mapping)
+                and event.seq > receipt["accepted_seq"]
+                and event.data.get("text") == expected_text
+                and event.data.get("source") == "steer"
+                and event.data.get("request_id") == operation_key
+                and type(event.data.get("turn")) is int and event.data["turn"] == turn_id
+                and event.data.get("run_id") == assignment["run_id"]
+                and "original_text" not in event.data and "attachments" not in event.data
+            ]
+            if type(applied_seq) is not int or applied_seq <= receipt["accepted_seq"] or len(applied) != 1:
+                raise HarnessError(tr("superagent.corrupt"), code="superagent/instruction-receipt-invalid")
+        elif applied_seq is not None:
+            raise HarnessError(tr("superagent.corrupt"), code="superagent/instruction-receipt-invalid")
+        return {
+            "request_id": operation_key, "turn": turn_id, "text": expected_text,
+            "status": status, "accepted_seq": receipt["accepted_seq"],
+            "applied_seq": applied_seq,
+        }
 
     async def stop(self, worker: dict, assignment: dict) -> dict:
         self._open()

@@ -18,6 +18,8 @@ from .superagent_outbox import OutboxEffectService
 from .superagent_authorization import CoordinatorAuthorizationEngine
 from .superagent_shadow import ShadowComparisonService
 from .superagent_source_registry import LocalIdentityVerifier, SecretResolver, SourceKind, SourceRegistry
+from .superagent_input_delivery import CoordinatorAssignmentInputDelivery
+from .superagent_mission_instruction import CoordinatorMissionInstruction
 
 
 _LEGACY_STATE_FILES = (
@@ -370,14 +372,33 @@ class _HostShadowComparison:
 
 
 class _HostExecutionService:
-    __slots__ = ("__host", "__service")
-    def __init__(self, host, service): self.__host, self.__service = host, service
+    __slots__ = ("__host", "__service", "__input_delivery", "__mission_instruction")
+    def __init__(self, host, service, input_delivery, mission_instruction):
+        self.__host, self.__service = host, service
+        self.__input_delivery, self.__mission_instruction = input_delivery, mission_instruction
     async def route_trigger(self, ticket_id, trigger_id):
         with self.__host._operation(): return await self.__service.route_trigger(ticket_id, trigger_id)
     async def reconcile(self, assignment_id):
         with self.__host._operation(): return await self.__service.reconcile(assignment_id)
     async def reconcile_ticket(self, ticket_id):
         with self.__host._operation(): return await self.__service.reconcile_ticket(ticket_id)
+    async def deliver_input_to_assignment(self, input_id, assignment_id):
+        with self.__host._operation():
+            return await self.__input_delivery.deliver(input_id, assignment_id)
+    async def reconcile_input_delivery(self, input_id, assignment_id):
+        with self.__host._operation():
+            return await self.__input_delivery.reconcile(input_id, assignment_id)
+    async def deliver_instruction(self, mission_id, job_id, assignment_id, request_id, trigger_id, text):
+        with self.__host._operation():
+            return await self.__mission_instruction.deliver(
+                mission_id, job_id, assignment_id, request_id, trigger_id, text,
+            )
+    async def reconcile_instruction(self, request_id):
+        with self.__host._operation():
+            return await self.__mission_instruction.reconcile(request_id)
+    def instruction_receipt(self, request_id):
+        with self.__host._operation():
+            return self.__mission_instruction.receipt(request_id)
     async def stop(self, assignment_id, *, reason):
         with self.__host._operation(): return await self.__service.stop(assignment_id, reason=reason)
     def report(self, assignment_id):
@@ -437,13 +458,26 @@ class CoordinatorHost:
         self._authorization = _HostAuthorizationEngine(self, self._authorization_service)
         self._shadow = _HostShadowComparison(self, self._shadow_service)
         self._execution_service = None
+        self._input_delivery_service = None
+        self._mission_instruction_service = None
         self._execution = None
         if executor_adapter is not None:
             from .superagent_execution import CoordinatorExecutionService
             self._execution_service = CoordinatorExecutionService(
                 store, self._authorization_service, self._source_service, executor_adapter, instance_id=instance_id,
             )
-            self._execution = _HostExecutionService(self, self._execution_service)
+            self._input_delivery_service = CoordinatorAssignmentInputDelivery(
+                store, self._authorization_service, self._source_service, executor_adapter,
+                admit_mission=self._execution_service._admit_mission,
+            )
+            self._mission_instruction_service = CoordinatorMissionInstruction(
+                store, self._authorization_service, self._source_service, executor_adapter,
+                admit_mission=self._execution_service._admit_mission,
+            )
+            self._execution = _HostExecutionService(
+                self, self._execution_service, self._input_delivery_service,
+                self._mission_instruction_service,
+            )
 
     @classmethod
     def open(

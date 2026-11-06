@@ -28,6 +28,7 @@
 | Mission | planning / running / integrating / reviewing / cancelling / completed / blocked / unknown / rejected / suppressed / cancelled | 一次有界交付活动 |
 | Job | pending / ready / running / checkpointed / done / blocked / unknown / cancelled | DAG 逻辑节点 |
 | Assignment | pending / submitting / accepted / running / capturing / stopping / succeeded / failed / interrupted / rejected / unknown / cancelled | 一次实际执行尝试 |
+| InputDelivery | pending / submitting / accepted / applied / unapplied / unknown / rejected | 一个 TicketInput 对一个 Assignment 的独立消费事实 |
 | Delivery | planned / applying / applied / conflict / unknown / cancelled | Artifact 导入 |
 | Effect | pending / leased / retry_wait / completed / failed / unknown / cancelled | 持久副作用 |
 | OutboxMessage | pending / sending / retry_wait / sent / dropped / withdrawn / unknown | 外部消息交付 |
@@ -290,6 +291,38 @@ stateDiagram-v2
 - 已知失败可在预算内创建新 Assignment；新 attempt 不覆盖旧 Assignment。
 - Assignment 的停止只针对该 Assignment 实际拥有的 Run / Background Job，不按 Session ID 或旧 PID 猜测目标。
 
+### 7.3 InputDelivery
+
+唯一消费身份为 (input_id, assignment_id)。同一 TicketInput 可由多个 DAG Assignment 独立消费，每条记录有独立 delivery_id、稳定 delivery_key、Revision 和原生回执。TicketInput.delivered_to_assignment_id 只是旧单 Worker 路径的投影，不是多节点消费权威状态。
+
+| 转移 | 守卫 |
+|---|---|
+| pending → submitting | 核验 Input / Assignment 同 Ticket、Mandate、Mission 控制及原活动 Run；先持久化稳定 delivery_key |
+| pending → rejected | 明确的提交前拒绝 |
+| submitting → accepted | 原生 request_id、Turn、accepted_seq 与原 delivery_key 匹配，状态为 pending |
+| submitting → applied / unapplied | 原生回执直接证明原请求的应用结果 |
+| submitting → unknown | 接受回执丢失、回查失败或回执无效；禁止重发 |
+| submitting → rejected | 原生适配器明确证明副作用接受前拒绝 |
+| accepted → applied / unapplied | 同一原生 request_id 的后续应用回执；applied_seq 必须大于 accepted_seq |
+| unknown → accepted / applied / unapplied / rejected | 只回查原 delivery_key / request_id，重新核验身份和序号；禁止回到 submitting |
+
+accepted 是已确认受理的单调事实，回查失败仍保持 accepted；unknown 是只读待核实状态，读取失败保持原状态。applied、unapplied、rejected 为终态。Handback 后不得开始新投递，但仍可回查既有投递的原回执。HarnessExecutorAdapter 只允许向 Assignment 绑定的 Worker / Workspace / Session / 原活动 Run 接受输入；身份或序号不匹配均保持 unknown，不进行重放。Schema v16 在 SQLite 层再次限制合法状态边、每次更新恰好递增一个 aggregate_revision、终态回执与 delivery / input / assignment 身份一致，并禁止删除投递历史；普通 SQL 更新不能绕过这些守卫。
+
+### 7.4 MissionInstruction
+
+唯一身份为 request_id；稳定原生操作键绑定 request_id 与 Assignment。payload_json / payload_hash 固定来源 Trigger、Source revision、Thread、Human Actor 和指令正文。MissionInstruction 额外绑定 Mission、Job、Assignment、原 Run 与原 Turn，并以 aggregate_revision 和 AuditEvent 记录每次状态变化。
+
+| 转移 | 守卫 |
+|---|---|
+| pending → submitting | 单一数据库事务中写入不可变身份、payload hash、Revision 与 submitting 审计；数据库触发器核对 Mission / Job / Assignment / Run 关系 |
+| submitting → accepted | 原生 request_id、Turn、正文、accepted_seq 与原操作键完全匹配；application 可为 pending / applied / unapplied |
+| submitting → unknown | 接受回执丢失、回查失败或原生事件证据无效；禁止重新 steer |
+| submitting → rejected | 原生适配器明确证明接受前拒绝 |
+| unknown → accepted | 只回查原 request_id，并重新核对原 Run 事件、Turn、正文与序号 |
+| accepted → accepted | 同一原生回执从 application=pending 单调推进到 applied / unapplied；只递增 Revision，不改变已受理事实 |
+
+accepted 是原生已受理事实，application 单独描述是否已应用；任何回查失败或畸形回执都不能将 accepted 降级。unknown 只能查询原操作，不能回到 submitting，也不能在新 Run 上重放。指令来源必须属于同一 Ticket 的非 context-only TicketInput，Thread 与 Source 必须在当前 Mandate 范围内；HarnessExecutorAdapter 在原生 steering 锁内再次核验活动 Run 与 Turn。applied 必须有 accepted_seq 之后的同请求 user/message 事件；错误 Run、错误 Turn、错误正文或序号不一致均不构成应用证据。Schema v16 将严格 JSON 类型、原生 request_id / Turn / status / 序号和 Revision 单调性固化为数据库守卫，并禁止删除指令历史。
+
 ## 8. Delivery、Effect 与 Outbox
 
 ### 8.1 Delivery
@@ -303,7 +336,7 @@ stateDiagram-v2
 | planned → cancelled | 尚未开始任何写入且 Mission 已取消 |
 | unknown → applied/conflict/cancelled | 只通过原 key、原目标树和 Git 元信息回查；只有证明未写入且已取消才可 cancelled |
 
-unknown 绝不自动回到 planned 或 applying。
+unknown 绝不自动回到 planned 或 applying。Schema v16 还要求 Delivery 插入的 Artifact 与目标 Assignment 属于同一 Mission / PlanRevision，且存在冻结的 requires_delivery DAG 边或同一 Job 的后续 Checkpoint Assignment；状态更新必须沿合法边并递增 Revision，已产生的交付历史不可删除。
 
 ### 8.2 Effect
 
@@ -368,7 +401,7 @@ MissionControl 模式：
 - cancelling：停止新派工，对确切 Run 和所属 Background Job 发起一次停止。
 - cancelled：所有拥有的运行和后台写入均已确切结算。
 
-命令携带 expected_revision 和稳定 idempotency_key。CAS 失败必须返回原状态，不得覆盖并发操作。
+命令携带 expected_revision 和稳定 idempotency_key。CAS 失败必须返回原状态，不得覆盖并发操作。Schema v16 额外要求 MissionControl 每次更新 generation 恰好递增 1，取消后不可恢复；终态 ControlCommand 的状态与回执不可改写，控制历史不可删除。
 
 Pause / Resume / Cancel 的业务含义：
 
@@ -387,6 +420,7 @@ healthy → stalled → blocked；有进展时 stalled → healthy。
 - action=block 时，在已确认无未知副作用且符合策略时将 Mission 置为 blocked。
 - Watchdog 不创建 Assignment、不重放 Effect、不凭没有文本输出判断失败。
 - 活动指纹必须基于已核验 Mission / Job / Assignment / Artifact / 原运行活动，不把外部正文当作控制命令。
+- Schema v16 固化观察时间与最近进展时间单调、指纹变化必须伴随新的 healthy 进展、同一指纹下状态只能 healthy → stalled → blocked；blocked 不得仅凭同一指纹恢复。
 
 ## 10. Stage 投影
 

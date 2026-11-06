@@ -37,14 +37,19 @@
 | 工作树创建等待期间暂停 | 执行服务在下一资源边界核验持久控制，恢复复用原工作树 | `test_pause_during_workspace_creation_prevents_session_and_submission` |
 | 缺失或损坏控制状态默认放行 | 控制模式核对原命令、代次与回执；缺失明确拒绝，不修补原件 | `test_missing_control_never_defaults_to_allowed_and_reads_do_not_recreate_it`、`test_corrupt_control_mode_and_receipt_are_rejected_without_repair` |
 | 暂停后原运行结束仍产生完成与回复 | 原报告可冻结，但最终结算及 Outbox Candidate 检查控制模式 | `test_pause_blocks_completion_and_reply_until_explicit_resume` |
-| 同一输入投递给多个执行，或未知投递被重新认领 | 独立投递身份、CAS、作用域约束和 unknown 转移限制 | `test_input_has_independent_assignment_receipts_and_cannot_cross_tickets` |
+| 同一 TicketInput 被多个 DAG Assignment 消费、未知投递被重放或原 Run 回执被错认 | CoordinatorAssignmentInputDelivery 按 Input / Assignment 独立幂等；unknown / submitting / accepted 只回查原 request_id；严格核对 Worker、Workspace、Session、原 Run、回执身份与原生序号；并发更新不允许状态回退 | test_input_has_independent_assignment_receipts_and_cannot_cross_tickets、test_one_ticket_input_is_consumed_independently_by_multiple_assignments、test_unknown_input_delivery_reconciles_the_original_receipt_without_resubmission、test_malformed_native_receipts_remain_unknown_and_are_never_replayed、test_unknown_delivery_can_be_reconciled_after_input_is_handed_back、test_receipt_lookup_failure_does_not_downgrade_confirmed_acceptance、test_concurrent_receipt_reconciliation_cannot_downgrade_applied_delivery、test_input_delivery_rejects_a_different_active_run_for_the_assignment、test_executor_adapter_rejects_steering_a_new_run_for_an_old_assignment、test_reconcile_returns_latest_terminal_state_after_native_lookup_race、test_native_receipt_storage_keeps_only_canonical_evidence_fields、test_input_delivery_revalidates_mission_authorization_before_native_acceptance |
+| 节点指令重复投递、错绑 Ticket / Assignment / Run，或受理与应用回执混淆 | CoordinatorMissionInstruction 以不可变 payload hash、aggregate_revision 和稳定原生键绑定 Mission / Job / Assignment / Run / Turn；受理锁内复核 Mandate / Mission；只接受同 Ticket 非 context-only Trigger；原生回执核对原 Run 事件，unknown 只回查，accepted 不降级 | test_mission_instruction_is_assignment_bound_and_tracks_native_application、test_unknown_mission_instruction_reconciles_original_receipt_without_replay、test_mission_instruction_request_id_cannot_be_reused_for_other_payload_or_assignment、test_mission_instruction_revalidates_mission_authorization_inside_native_accept_lock、test_mission_instruction_rejects_context_only_ticket_input、test_executor_adapter_reconciles_instruction_from_original_run_events_only |
 | 未提交二进制与删除项需要交接 | 冻结 Git 对象生成 Manifest，原生 Worktree 导入保留源仓库 | `test_real_uncommitted_binary_and_deleted_files_are_frozen_and_delivered` |
 | 捕获 / 导入已发生但返回丢失 | 稳定 Effect 加原工作树回执回查，不重放原写入 | `test_lost_capture_receipt_recovers_original_frozen_delivery_without_second_capture`、`test_lost_import_receipt_recovers_exact_original_import_without_second_write` |
 | Effect 已完成但 Delivery 投影确认丢失 | 按已存原回执补齐协调投影，不再次导入 | `test_completed_import_recovers_a_lost_delivery_projection_without_another_import` |
 | 伪造产物工作树，或原 Run 未确认收尾 | 消费前核对账本身份及原生 Run / Tool / Background 证据 | `test_forged_artifact_workspace_cannot_supply_dependency_files`、`test_capture_without_a_settled_original_run_never_creates_an_effect` |
 | 捕获无确切回执或预检期间暂停 | unknown 保留；预检后重新准入，不执行迟到写入 | `test_missing_capture_receipt_remains_unknown_without_repeating_the_operation`、`test_pause_after_import_preflight_prevents_late_workspace_write` |
+| Artifact 被交付给无冻结依赖的 Job | Schema v16 的 SQLite 触发器要求同 Mission / PlanRevision 的 requires_delivery 边或同 Job 后续 Checkpoint；拒绝时不创建 Delivery 或导入 Effect | `test_artifact_delivery_requires_a_frozen_dag_dependency` |
+| Review 引用错误角色或共享执行资源 | 数据库守卫要求冻结 Acceptance Hash、Integrator 候选及独立 Reviewer Workspace / Session | `test_review_requires_frozen_integrator_candidate_and_independent_reviewer` |
+| 跨 Host 并发提交同一 MissionInstruction | SQLite 唯一身份认领配合原回执查询，竞争实例不重复调用原生 steer；严格拒绝 bool / float 冒充整数及非字符串回执字段 | `test_concurrent_mission_instruction_claim_across_hosts_never_submits_twice`、`test_mission_instruction_native_status_rejects_noncanonical_types` |
+| 直接 SQL 试图回退投递、指令、控制或 Watchdog 状态 | Schema v16 将 Revision、状态边、终态回执、取消后不可恢复和进度指纹单调性固化到数据库层 | `test_mission_instruction_control_and_watchdog_state_guards_are_monotonic`、`test_input_has_independent_assignment_receipts_and_cannot_cross_tickets` |
 
-文件适配回归使用真实临时 Git 工作树和确定性模型传输驱动的原生 Run，不代表模型判断质量、生产账号、长期负载或跨平台实机验收。后续缺口以领域模型的当前实现边界为准。
+文件适配回归使用真实临时 Git 工作树和确定性模型传输驱动的原生 Run，不代表模型判断质量、生产账号、长期负载或跨平台实机验收。2026-11-06，`test_superagent_coordinator_store`、`test_superagent_unified_artifacts`、`test_superagent_unified_execution`、`test_superagent_execution` 与 `test_superagent_unified_model` 共 112 项回归全部通过，相关新增守卫的直接 SQL 越界、跨 Host 并发和畸形回执用例均在其中。后续缺口以领域模型的当前实现边界为准。
 
 ## 已核对问题与防回归依据
 
@@ -95,7 +100,7 @@
 | 控制队列前部都是未知目标，或时钟回拨改变动作顺序 | 持久插入顺序、有限轮转及每目标先后校验 | `test_unknown_targets_do_not_starve_later_valid_control_or_reorder_one_target`、`test_wall_clock_rollback_does_not_reorder_control_intent` |
 | 停止慢后台进程阻塞其他目标，或停止失败被自动重试 | 每个所属作业拥有单次停止任务，状态保留未知，关闭继续传播原失败 | `test_slow_background_cancellation_does_not_block_another_goal`、`test_failed_background_stop_stays_unknown_and_is_not_replayed_by_control` |
 | 原提交或重启后的后台进程未确认，被取消回执误称停止成功 | 控制模式与实际收尾分开；确切后台回执可核对，不可用保持未知，不向旧 PID 投递 | `test_cancel_does_not_resolve_or_replay_an_unknown_submission`、`test_restart_uses_exact_background_receipt_and_never_signals_an_old_process_id` |
-| 最近十六项目标全部暂停，隐藏的活动目标没有计入待执行 | 全部活动清单与展示统计来自同一目标读事务，再按原控制模式计数 | `test_pending_counts_include_active_goals_hidden_by_the_recent_list`、`test_full_active_inventory_and_display_counts_share_one_snapshot` |
+| 最近十六项目标全部暂停，隐藏的活动目标没有计入待执行 | 全部活动清单与展示统计来自同一目标读事务，再按原控制模式计数 | `test_pending_counts_include_active_goals_hidden_by_the_recent_list`、`test_full_active_inventory_and_d
 | 损坏控制 JSON、模式或修订被当作合法历史或默认运行 | 严格解析、模式关联原已应用回执、修订核对真实已结算命令数，失败保留原件 | `test_corrupt_command_is_rejected_on_read_duplicate_and_reconcile_without_repair`、`test_mode_and_meta_corruption_are_not_treated_as_default_running` |
 | 并发操作者重复控制、控制回执缺失或原动作被拒绝 | 稳定请求原子认领；独立只读回执入口，单批 CLI 按本条原回执核对退出码 | `test_concurrent_operators_share_one_stable_control_receipt`、`test_missing_receipt_is_read_only_and_known_receipts_keep_original_status`、`test_once_control_exit_code_comes_from_the_original_receipt` |
 | 多模板有效配置超过单个说明字段大小 | 控制配置身份允许完整已验证配置，不按单个说明的大小截断 | `test_large_valid_profile_configuration_opens_and_closes_without_model_requests` |
@@ -104,7 +109,7 @@
 
 ## 账本读取基准
 
-2026-11-03 在本机 macOS、Python 3.14.7 使用同一 `scripts/benchmark_superagent_reads.py::benchmark` 比较基线 `8862d91` 与快照实现 `506ffc2` 的目标存储源码。两版源码分别在隔离临时数据库运行，未切换或改写主工作区。固定八个待执行工作节点、十六条完成标准，预热二十次后各采样一百次；连接与原事件次数单独统计，计时阶段不保留计数包装，分配峰值由另一次读取测量。
+2026-11-03 在本机 macOS、Python 3.14.7 使用同一 `scripts/benchmark_superagent_reads.py::benchmark` 比较基线 `8862d91` 与快照实现 `506ffc2` 的目标
 
 | `jobs()` 单次读取 | 基线 | 快照实现 |
 |---|---:|---:|

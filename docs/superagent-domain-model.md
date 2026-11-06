@@ -238,6 +238,10 @@ Ticket 可以跟随自己创建的 PR，也可以跟随相关 PR / Issue。follo
 
 **TicketInput** 是 Ticket 收到的有序输入。kind 至少支持 trigger | policy_changed | reopen | resumed | text | note。Trigger Input 记录 trigger_id, human, context_only, delivered_to_assignment_id, delivered_at, read_at, state。同一 Ticket 对同一 Trigger 只能存在一个有效 Trigger Input。
 
+**InputDelivery** 是一条 TicketInput 投递给一个特定 Assignment 的独立消费记录。唯一身份为 (input_id, assignment_id)，至少包括 delivery_id、input_id、assignment_id、delivery_key、state、receipt_json、aggregate_revision、created_at 和 updated_at。同一 Input 可以有多个 Assignment 的独立 InputDelivery；TicketInput.delivered_to_assignment_id 只保留单 Worker 路径的单目标投影，不是多节点消费的权威状态。
+
+状态按 pending → submitting → accepted → applied / unapplied 推进；提交或回执不确定时进入 unknown，明确的提交前拒绝可进入 rejected。submitting、accepted 和 unknown 只能按原 delivery_key 回查原生 request_id，不能重新投递。回执信封绑定 delivery_id、input_id、assignment_id 和 delivery_key，并校验原生 request_id、Turn、accepted_seq 与 applied_seq；只有该 Assignment 绑定的原始活动 Run / Session 可以接受输入。
+
 **Attention** 是等待人作决定的问题，字段至少包括 attention_id, ticket_id, mission_id, trigger_id, question_ref, options_json, state, answer_trigger_id, created_at, resolved_at。Attention 是人工协作状态，不是一个新的授权来源。
 
 ### 5.8 Mission、PlanRevision、Job 与 Assignment
@@ -423,7 +427,7 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 
 Phase 2 已实现的来源与授权能力：
 
-- `SourceRegistry` 提供带 API 版本兼容检查的 `SourceKind` 插件契约、SourceInstance 配置修订，以及 GitHub、Feishu、Local 三种内置来源规范化；版本不匹配的插件按 unavailable 处理。`CoordinatorHost.open(source_kinds=...)` 可在启动时注入自定义插件，并核对持久化 SourceInstance 与当前插件清单；缺失或版本不匹配会撤销相关 Mandate、取消在途 Evaluation、过滤待评估 Trigger。运行期插件注册/卸载由注册表锁与宿主操作租约保护，卸载与事件规范化串行执行；插件恢复不会自动恢复旧授权或重放旧事件。Webhook 在调用插件前统一限制请求体、Header 数量及单值/总量大小，拒绝 NUL 与大小写不敏感的重复 Header；Feishu 数字字符串 `event_time` 按 Unix 时间规范化。规范化 Trigger 的 SourceInstance / Event / Actor / Thread / Adapter 身份字段均有长度上限；正文、元数据、Thread 元数据和 Channel 地址也有独立大小边界，并拒绝 NUL、无效空标识与空元数据类型。SourceCursor 只允许启用且插件版本兼容的来源推进，并以 CAS 防止并发覆盖；重复推进返回原持久化时间。`legacy_source_id` 是唯一的一对一映射，绑定后不可重映射，防止 Shadow 对照键发生碰撞。Trigger 去重、Trigger 事实及处置历史的有界查询、Thread / Channel 投影与 SourceCursor 均由独立协调账本持久化；GitHub Thread 生命周期按 Provider 更新时间排序，迟到事件不能覆盖较新状态，同一观察时间冲突时 `closed` 优先。
+- `SourceRegistry` 提供带 API 版本兼容检查的 `SourceKind` 插件契约、SourceInstance 配置修订，以及 GitHub、Feishu、Local 三种内置来源规范化；版本不匹配的插件按 unavailable 处理。`CoordinatorHost.open(source_kinds=...)` 可在启动时注入自定义插件，并核对持久化 SourceInstance 与当前插件清单；缺失或版本不匹配会撤销相关 Mandate、取消在途 Evaluation、过滤待评估 Trigger。运行期插件注册/卸载由注册表锁与宿主操作租约保护，卸载与事件规范化串行执行；插件恢复不会自动恢复旧授权或重放旧事件。Webhook 在调用插件前统一限制请求体、Header 数量及单值
 - `CoordinatorAuthorizationEngine` 提供不可变 PolicyRevision、Gate、Evaluation、Decision、Mandate、Ticket、Subscription 和 TicketInput；accept 在单一事务中创建 Decision、Mandate、Ticket、订阅、输入和审计记录。accept 的 direction.evidence 与 intent_evidence 必须是同一条 Gate 放行 Trigger 正文或标题中的原文片段，不能以模型自述替代来源事实；Proposal 和 Policy 字段及快照有明确大小上限。Gate 同时检查 Thread 生命周期：GitHub close 事件仅更新状态，已关闭 Thread 上的新消息不会进入评估或 fanout；关闭来源主 Thread 会在同一事务中撤销相关 Mandate。SourceInstance 停用或配置修订变化也会在配置事务中立即撤销该来源的 Mandate；SourceKind 卸载、宿主启动时缺失或 API 版本不匹配同样会撤销 Mandate、取消在途 Evaluation 并过滤待评估 Trigger。每个新 Trigger 在复用既有 Ticket Subscription 前重新执行当前 Gate；只有主 Thread 命中 work Subscription 才能形成 work fanout，相关 Thread 命中保持 context-only，work 与 context 投影分别记录；Policy 变化可触发 Mandate revalidation。
 - 授权宿主 API 提供 PolicyRevision、Evaluation、Decision、Mandate 的有界只读历史查询；Evaluation 详情包含冻结 Policy 与逐 Trigger Gate 快照，Mandate 详情包含追加式状态事件。
 - `ShadowComparisonService` 只读对照 v1 Inbox / Router 与 v2 来源事实和决策；决策比较按每个 Trigger 的 Gate 结果映射，Gate 拒绝项按 ignore 对照，并报告新旧两侧未匹配项及有界样本是否截断，不写任一账本、不执行 Ticket。
@@ -434,7 +438,7 @@ Phase 3 已实现的单 Worker 执行闭环：
 - `HarnessExecutorAdapter` 为 Worker 创建并核验专属 Worktree / Session，绑定不可变 Worker Profile、工具白名单与来源能力；Session metadata 与持久 Worker 账本双向核验，不能仅凭 Session 元数据取得 Worker 身份。
 - Run 提交结果不确定时只按原 submission key 回查，不盲目重提；重启后按原 Run ID 恢复。`HarnessEvidenceProvider` 从 Harness 原生 Run / Tool / Background Job 事件日志只读提取证据，不复制或伪造 Runtime 历史。
 - Mandate 的 max_turns / max_seconds 约束进入 Assignment；时间预算 Watchdog 只尝试取消精确匹配的原生 Run，取消无法确认时将 Assignment 标为 unknown，禁止把不确定结果当作成功。排队但尚未启动的原生 Run 可按原 Run ID 移除。
-- TicketInput 可按幂等 delivery key 送入当前 Assignment；交付前重新核验 Ticket、Mandate 和 Assignment。context-only 输入不启动执行；Handback 必须指向实际交付给该 Assignment 的非源始 TicketInput，无法验证时转为 Attention。
+- Phase 3 单 Worker 路径按幂等 delivery key 将 TicketInput 送入当前 Assignment；交付前重新核验 Ticket、Mandate 和 Assignment。context-only 输入不启动执行；Handback 必须指向实际交付给该 Assignment 的非源始 TicketInput，无法验证时转为 Attention。该路径的单目标字段不代表多节点消费状态。
 - Worker Report 先冻结并校验内容哈希，再幂等完成 Mission、Attention、Handback 和 Outbox Candidate；进程中断后可从冻结 Report 恢复后续效果。Outbox Candidate 创建时再次检查 Ticket 状态、Mandate 和 reply Scope，不把 Candidate 误报为已发送。
 - Schema v13 为 Worker 与 Attention 聚合补齐 `updated_at`，并将旧行回填为 `created_at`；迁移覆盖 v1–v12 的升级路径。`tests/test_superagent_execution.py` 覆盖原 Run 恢复、报告效果幂等、后续输入 Handback、Mandate 撤销、预算 Watchdog、排队 Run 停止和并发去重。
 
@@ -447,7 +451,7 @@ Phase 3 已实现的单 Worker 执行闭环：
 - 持久 CoordinatorControl 已接入部分实际暂停边界，具体见下节；统一目标取消／停止 Runtime 和所有写入边界的控制代次核验仍未完成。状态观测中的 `control_allows=True` 不能替代新写入前对持久模式及当前授权的实际核验。
 - 推断自动接受仅在具体 Source 策略显式启用 `auto` 且 Gate、规则、意图与 Scope 全部通过时可用；它不会因此切换生产默认路由。远程 Worker 与 OS Sandbox 尚未启用。
 
-因此，Phase 1 按持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 的来源事实、授权闭环和只读 Shadow 已交付；Phase 3 的单 Worker 执行、原 Run 恢复、冻结 Report 与后续效果恢复已在显式 CoordinatorHost API 中实现。多 Worker DAG / Artifact Delivery 调度、统一 MissionControl、生产 Channel 外发和唯一入口仍待接通；后续只沿统一链路补齐，不回退旧编排。
+因此，Phase 1 按持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 的来源事实、授权闭环和只读 Shadow 已交付；Phase 3 的单 Worker 执行、原 Run 恢复、冻结 Report 与后续效果恢复已在显式 CoordinatorHost API 中实现；Phase 4.1 的统一协调契约与数据库状态守卫已由 Schema v16 固化，并通过 5 个测试模块的 112 项回归。多 Worker DAG / Artifact Delivery 调度、统一服务生命周期、完整目标停止、质量门、生产 Channel 外发和唯一入口仍待接通；后续只沿统一链路补齐，不回退旧编排。
 
 ### Phase 4 当前模型与适配基础
 
@@ -457,9 +461,10 @@ Phase 4 的实施顺序及出口统一见[总体方案](superagent-next-generati
 - PlanRevisionRepository.create 的可信宿主参数 `system_profiles` 在封存前物化 integrate / review 系统节点及依赖；Planner 输入仍只能含 work 节点。读取核对完整封存计划、角色、哈希与依赖。
 - HarnessExecutorAdapter 支持来源允许的多 Profile 集；来源有多个 Profile 时必须显式指定 default_profiles。工作树共同组按 Mission 绑定，每个 Worker 仍有独立成员与 Session 身份。
 - 单 Worker 路径先建立冻结基线、计划及持久控制记录，再创建资源。`execution.control_mission`、`mission_control`、`control_receipt` 仅向可信宿主提供模式及回执；资源创建、后续输入接受、Mission 完成及回复候选遵守暂停。取消目前只记录意图，尚无统一目标停止 Runtime，不能称为真实停止已完成。
-- 独立 InputDelivery 表及服务按 Input / Assignment 保存投递状态、Revision 和原回执；当前单 Worker 消费链已记录独立投递，但仍使用 TicketInput 的单目标字段选取输入。多节点投递与阶段消费接线尚未完成。
+- CoordinatorAssignmentInputDelivery 已接入 CoordinatorHost.execution.deliver_input_to_assignment / reconcile_input_delivery：同一 TicketInput 可分别投递给多个 Job Assignment，不修改 TicketInput 的全局单目标投影；每条投递使用稳定幂等键、Revision 和身份绑定回执。submitting / accepted / unknown 只回查原 request_id，HarnessExecutorAdapter 同时核对 Assignment 的 Worker、Workspace、Session 和原活动 Run；原生回执只持久化 request_id、Turn、status、accepted_seq、applied_seq 等规范证据字段。多节点消费、丢回执恢复、Handback 后回查、受理前 Mandate / Mission 复核、跨 Ticket、错投 Run、畸形回执及并发状态单调性均有针对性回归。该能力仍是显式 Host API，尚未接入统一 Scheduler 或生产默认路由。
 - CoordinatorArtifacts 通过显式内部调用核验持久 Assignment、原 Run、工具及后台收尾后捕获真实文件；通过原生 Worktree 预检和导入交接。Effect 保存稳定操作身份；未知捕获或导入只回查原回执，已确认 Effect 可恢复丢失的 Delivery 投影，不再次执行文件写入。Manifest 含冻结文件内容 SHA-256 和删除项，支持最多 4096 个文件、单文件 16 MiB、总内容 64 MiB，Git 文件列表与删除列表各限 2 MiB；超限明确拒绝并保留原件。
-- Review、MissionInstruction、WatchdogSnapshot 的协调表已建立，但其统一运行服务尚未接线。独立 Artifact / Delivery 服务也尚未接入统一 Scheduler 或生产 CLI；当前无默认后台任务调用它们。
+- CoordinatorMissionInstruction 已接入 CoordinatorHost.execution 的显式 deliver_instruction / reconcile_instruction / instruction_receipt API：指令绑定同 Ticket 的非 context-only Trigger、Source / Thread / Human Actor、Mission / Job / Assignment / 原 Run / Turn；先持久化不可变 payload hash 与 Revision，再在 Harness 原生 steering 锁内复核 Mandate / Mission，并校验原生 accepted / applied 事件序号。unknown 只回查原 request_id，accepted 不因回查失败降级；仅允许 pending 应用回执推进为 applied / unapplied。该能力尚未接入统一 Scheduler 或生产默认路由。
+- Review、WatchdogSnapshot 的协调表已建立，但其统一运行服务尚未接线。Schema v16 增加数据库级守卫：InputDelivery 状态与 Revision 单调、回执身份一致且历史不可删除；Artifact Delivery 插入必须满足同 Mission / PlanRevision 的冻结 DAG 依赖或后续 Checkpoint Assignment，状态转移与历史删除受约束；Review 只能引用封存计划中的 Integrator 候选，并要求 Reviewer 的 Workspace 与 Session 均独立；MissionInstruction 严格校验版本、原生回执类型与状态单调性；MissionControl generation 只能递增且取消后不可恢复，终态 ControlCommand 回执不可改写；WatchdogSnapshot 的时间、指纹和 stalled / blocked 状态只允许单调推进。对应迁移与回归不代表 Review / Watchdog 统一运行服务已经接线。独立 Artifact / Delivery 服务也尚未接入统一 Scheduler 或生产 CLI；当前无默认后台任务调用它们。
 - 通用参数、严格 JSON 和运行进度投影已抽离为无旧账本依赖的组件；旧 Router、MissionStore 及信道仍在生产链上，没有删除有效业务回归。
 
 后续仍需完成统一服务生命周期与真实目标停止、单多节点共用 Scheduler、质量门及 Checkpoint / Watchdog、持续协作与生产 Outbox Sender、CLI 切换及旧编排退役。不开发旧版运行数据导入、历史协议兼容或双轨运行工具。
@@ -469,12 +474,16 @@ Phase 4 的实施顺序及出口统一见[总体方案](superagent-next-generati
 ### Harness
 
 - harness/app/superagent_coordinator_migration_14.py：执行资源作用域、InputDelivery、Artifact / Delivery / Review 及控制协调表。
+- harness/app/superagent_coordinator_migration_15.py：MissionInstruction Revision、Assignment / Run 作用域触发器及查询索引。
+- harness/app/superagent_coordinator_migration_16.py：InputDelivery、Artifact Delivery、Review、MissionInstruction、MissionControl、ControlCommand 与 WatchdogSnapshot 的数据库状态和作用域守卫。
 - harness/app/superagent_coordination.py：持久控制模式与回执、逐 Assignment 输入投递。
 - harness/app/superagent_artifacts.py：真实捕获、导入、稳定 Effect 与原回执恢复。
 - harness/app/superagent_coordinator_store.py：统一协调账本、带校验和的 Schema 迁移、Revision、AuditEvent、Durable Effect 与 UOW。
 - harness/app/superagent_coordinator_migration_13.py：Worker / Attention `updated_at` 字段及历史行回填。
 - harness/app/superagent_coordinator_host.py：v2 宿主组合、活动操作租约、来源 / 授权 / Shadow / Execution API 与 v1 隔离。
 - harness/app/superagent_execution.py：单 Worker Mission / Job / Assignment 编排、TicketInput、Run reconciliation、冻结 Report、Attention / Handback 与 Outbox Candidate。
+- harness/app/superagent_input_delivery.py：按 Input / Assignment 独立消费、原生回执校验与未知投递只读恢复。
+- harness/app/superagent_mission_instruction.py：Mission / Job / Assignment / Run / Turn 绑定、源 Trigger 授权、幂等指令投递及原生回执单调恢复。
 - harness/app/superagent_executor.py：Harness 原生 Worktree / Session 适配、受限工具、Run / Tool / Background 只读证据和精确 Run 预算 Watchdog。
 - harness/app/superagent_source_registry.py：SourceKind、SourceInstance、GitHub / Feishu / Local 规范化、Trigger Intake、Thread / Channel 和 Cursor。
 - harness/app/superagent_authorization.py：PolicyRevision、Gate、Evaluation、Decision、Mandate、Ticket、Subscription、TicketInput 与审计查询。

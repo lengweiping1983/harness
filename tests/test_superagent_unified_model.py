@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from harness.app.superagent_coordinator_store import CoordinatorStore, _hash, _now
+from harness.app.superagent_coordinator_store import CoordinatorStore, _hash, _json, _now
 from harness.core.errors import HarnessError
 from harness.app.superagent_authorization import CoordinatorAuthorizationEngine
 from harness.app.superagent_source_registry import SourceRegistry
@@ -104,15 +104,55 @@ class UnifiedModelTests(unittest.TestCase):
         first = deliveries.prepare("input", "assignment-0", actor={})
         self.assertEqual(deliveries.prepare("input", "assignment-0", actor={}), first)
         first = deliveries.transition("input", "assignment-0", "submitting", expected_revision=1, receipt=None, actor={})
-        first = deliveries.transition("input", "assignment-0", "unknown", expected_revision=2, receipt=None, actor={})
+        first = deliveries.transition("input", "assignment-0", "unknown", expected_revision=2, receipt=deliveries.make_receipt(first, "unknown", reason_code="lost-ack"), actor={})
         self.assertEqual(deliveries.prepare("input", "assignment-0", actor={})["state"], "unknown")
         with self.assertRaises(HarnessError):
             deliveries.transition("input", "assignment-0", "submitting", expected_revision=3, receipt=None, actor={})
         deliveries.transition("input", "assignment-0", "applied", expected_revision=3,
-                              receipt={"status": "applied", "accepted_seq": 1, "applied_seq": 2}, actor={})
+                              receipt=deliveries.make_receipt(first, "applied", native_receipt={"request_id": first["delivery_key"], "turn": 1, "status": "applied", "accepted_seq": 1, "applied_seq": 2}), actor={})
         deliveries.prepare("input", "assignment-1", actor={})
         with self.store.transaction() as db:
             self.assertEqual([r[0] for r in db.execute("SELECT state FROM input_deliveries ORDER BY assignment_id")],
                              ["applied", "pending"])
-        with self.assertRaises(sqlite3.IntegrityError):
+        second = deliveries.get("input", "assignment-1")
+        second = deliveries.transition("input", "assignment-1", "submitting",
+                                       expected_revision=1, receipt=None, actor={})
+        second = deliveries.transition(
+            "input", "assignment-1", "accepted", expected_revision=2,
+            receipt=deliveries.make_receipt(second, "accepted", native_receipt={
+                "request_id": second["delivery_key"], "turn": 1, "status": "pending",
+                "accepted_seq": 1, "applied_seq": None,
+            }), actor={},
+        )
+        with self.assertRaises(HarnessError):
+            deliveries.transition(
+                "input", "assignment-1", "unknown", expected_revision=3,
+                receipt=deliveries.make_receipt(second, "unknown", reason_code="lookup-failed"), actor={},
+            )
+        with self.assertRaises(HarnessError):
             deliveries.prepare("input", "assignment-2", actor={})
+        applied = deliveries.get("input", "assignment-0")
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "UPDATE input_deliveries SET state='pending',receipt_json='{}',"
+                    "aggregate_revision=aggregate_revision+1 WHERE input_id=? AND assignment_id=?",
+                    ("input", "assignment-0"),
+                )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "DELETE FROM input_deliveries WHERE input_id=? AND assignment_id=?",
+                    ("input", "assignment-0"),
+                )
+        native = dict(applied["receipt"]["native_receipt"])
+        native["applied_seq"] = native["accepted_seq"]
+        corrupted = {**applied["receipt"], "native_receipt": native}
+        with self.store.transaction(write=True) as db:
+            db.execute("DROP TRIGGER input_deliveries_transition_guard")
+            db.execute(
+                "UPDATE input_deliveries SET receipt_json=? WHERE input_id=? AND assignment_id=?",
+                (_json(corrupted), "input", "assignment-0"),
+            )
+        with self.assertRaises(HarnessError):
+            deliveries.get("input", "assignment-0")

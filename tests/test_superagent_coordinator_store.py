@@ -78,7 +78,7 @@ class CoordinatorStoreTests(unittest.TestCase):
             for migration_version, script in MIGRATIONS[:version]:
                 pending = ""
                 for line in script.splitlines():
-                    pending += line + "\n"
+                    pending += line + "\r\n"
                     if sqlite3.complete_statement(pending):
                         db.execute(pending)
                         pending = ""
@@ -168,7 +168,7 @@ class CoordinatorStoreTests(unittest.TestCase):
             for migration_version, script in MIGRATIONS[:6]:
                 pending = ""
                 for line in script.splitlines():
-                    pending += line + "\n"
+                    pending += line + "\r\n"
                     if sqlite3.complete_statement(pending):
                         db.execute(pending)
                         pending = ""
@@ -254,8 +254,8 @@ class CoordinatorStoreTests(unittest.TestCase):
 
     def test_future_schema_version_is_rejected(self):
         with closing(sqlite3.connect(self.path)) as db:
-            db.execute("INSERT INTO schema_migrations VALUES(14,'future','now')")
-            db.execute("PRAGMA user_version=13")
+            db.execute("INSERT INTO schema_migrations VALUES(17,'future','now')")
+            db.execute("PRAGMA user_version=16")
             db.commit()
         with self.assertRaises(HarnessError):
             CoordinatorStore(self.path, instance_id="instance-a", identity={"profile": "local"})
@@ -577,13 +577,13 @@ class CoordinatorStoreTests(unittest.TestCase):
                 payload={"run": "original"},
             )
         code = (
-            "import os,sys\n"
-            "from harness.app.superagent_coordinator_store import CoordinatorStore\n"
-            "store=CoordinatorStore(sys.argv[1],instance_id='instance-a',identity={'profile':'local'})\n"
-            "with store.transaction(write=True) as db:\n"
-            "    claimed=store.claim_effects(db,owner='crashed-worker',limit=1,lease_until='2999-01-01T00:00:00Z')\n"
-            "    assert len(claimed)==1\n"
-            "    os._exit(73)\n"
+            "import os,sys\r\n"
+            "from harness.app.superagent_coordinator_store import CoordinatorStore\r\n"
+            "store=CoordinatorStore(sys.argv[1],instance_id='instance-a',identity={'profile':'local'})\r\n"
+            "with store.transaction(write=True) as db:\r\n"
+            "    claimed=store.claim_effects(db,owner='crashed-worker',limit=1,lease_until='2999-01-01T00:00:00Z')\r\n"
+            "    assert len(claimed)==1\r\n"
+            "    os._exit(73)\r\n"
         )
         result = subprocess.run([sys.executable, "-c", code, str(self.path)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 73, result.stderr)
@@ -605,13 +605,13 @@ class CoordinatorStoreTests(unittest.TestCase):
                 payload={"run": "original"},
             )
         code = (
-            "import os,sys\n"
-            "from harness.app.superagent_coordinator_store import CoordinatorStore\n"
-            "store=CoordinatorStore(sys.argv[1],instance_id='instance-a',identity={'profile':'local'})\n"
-            "with store.transaction(write=True) as db:\n"
-            "    claimed=store.claim_effects(db,owner='crashed-worker',limit=1,lease_until='2999-01-01T00:00:00Z')\n"
-            "    assert len(claimed)==1\n"
-            "os._exit(73)\n"
+            "import os,sys\r\n"
+            "from harness.app.superagent_coordinator_store import CoordinatorStore\r\n"
+            "store=CoordinatorStore(sys.argv[1],instance_id='instance-a',identity={'profile':'local'})\r\n"
+            "with store.transaction(write=True) as db:\r\n"
+            "    claimed=store.claim_effects(db,owner='crashed-worker',limit=1,lease_until='2999-01-01T00:00:00Z')\r\n"
+            "    assert len(claimed)==1\r\n"
+            "os._exit(73)\r\n"
         )
         result = subprocess.run([sys.executable, "-c", code, str(self.path)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 73, result.stderr)
@@ -681,6 +681,252 @@ class CoordinatorStoreTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], len(MIGRATIONS))
             self.assertIn("updated_at", {row[1] for row in db.execute("PRAGMA table_info(workers)")})
             self.assertIn("updated_at", {row[1] for row in db.execute("PRAGMA table_info(attentions)")})
+            self.assertIn("aggregate_revision", {
+                row[1] for row in db.execute("PRAGMA table_info(mission_instructions)")
+            })
+
+    def test_mission_instruction_control_and_watchdog_state_guards_are_monotonic(self):
+        with self.store.unit_of_work(actor={"kind": "test"}) as uow:
+            mission = self._create_mission(uow, "phase4-1-state-guards")
+            plan = uow.plans.create(
+                mission["mission_id"], expected_mission_revision=1,
+                plan={"nodes": [{
+                    "node_id": "work", "role": "work", "profile_id": "worker", "dependencies": [],
+                }]},
+                acceptance={"criteria": ["evidence recorded"]},
+                created_by_kind="human", created_by_ref="actor:phase4-1",
+            )
+        job_id = plan["jobs"][0]["job_id"]
+        stamp = "2026-11-06T00:00:00.000Z"
+        request_id = "instruction-state-guard"
+        assignment_id = "assignment-state-guard"
+        payload_json = "{}"
+        payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        operation_key = f"superagent-v2:instruction:{request_id}:{assignment_id}"
+        with self.store.transaction(write=True) as db:
+            db.execute(
+                "INSERT INTO assignments(assignment_id,job_id,attempt_no,run_id,submission_key,state,report_json,aggregate_revision) "
+                "VALUES(?,?,1,?,?, 'pending','{}',1)",
+                (assignment_id, job_id, "run-state-guard", "submit-state-guard"),
+            )
+            db.execute(
+                "INSERT INTO mission_instructions(request_id,mission_id,job_id,assignment_id,run_id,turn_id,"
+                "payload_json,payload_hash,state,receipt_json,created_at,updated_at,aggregate_revision) "
+                "VALUES(?,?,?,?,?,1,?,?, 'pending','{}',?,?,1)",
+                (request_id, mission["mission_id"], job_id, assignment_id, "run-state-guard",
+                 payload_json, payload_hash, stamp, stamp),
+            )
+            db.execute(
+                "UPDATE mission_instructions SET state='submitting',aggregate_revision=2,updated_at=? WHERE request_id=?",
+                (stamp, request_id),
+            )
+            unknown = (
+                '{"version":1,"state":"unknown","reason_code":"test/unknown","native_receipt":null}'
+            )
+            db.execute(
+                "UPDATE mission_instructions SET state='unknown',receipt_json=?,aggregate_revision=3,updated_at=? "
+                "WHERE request_id=?",
+                (unknown, stamp, request_id),
+            )
+            accepted = (
+                '{"version":1,"state":"accepted","reason_code":null,"native_receipt":'
+                '{"request_id":"' + operation_key + '","turn":1,"status":"pending","accepted_seq":1,"applied_seq":null}}'
+            )
+            db.execute(
+                "UPDATE mission_instructions SET state='accepted',receipt_json=?,aggregate_revision=4,updated_at=? "
+                "WHERE request_id=?",
+                (accepted, stamp, request_id),
+            )
+            applied = (
+                '{"version":1,"state":"accepted","reason_code":null,"native_receipt":'
+                '{"request_id":"' + operation_key + '","turn":1,"status":"applied","accepted_seq":1,"applied_seq":2}}'
+            )
+            db.execute(
+                "UPDATE mission_instructions SET receipt_json=?,aggregate_revision=5,updated_at=? WHERE request_id=?",
+                (applied, stamp, request_id),
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "UPDATE mission_instructions SET state='unknown',receipt_json=?,aggregate_revision=6,updated_at=? "
+                    "WHERE request_id=?",
+                    (unknown, stamp, request_id),
+                )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute("DELETE FROM mission_instructions WHERE request_id=?", (request_id,))
+
+        with self.store.transaction(write=True) as db:
+            db.execute(
+                "UPDATE mission_controls SET mode='paused',generation=2,updated_at=? WHERE mission_id=?",
+                (stamp, mission["mission_id"]),
+            )
+            db.execute(
+                "UPDATE mission_controls SET mode='running',generation=3,updated_at=? WHERE mission_id=?",
+                (stamp, mission["mission_id"]),
+            )
+            db.execute(
+                "UPDATE mission_controls SET mode='cancelled',generation=4,updated_at=? WHERE mission_id=?",
+                (stamp, mission["mission_id"]),
+            )
+            db.execute(
+                "INSERT INTO control_commands(sequence,request_id,mission_id,action,payload_hash,state,receipt_json,created_at,updated_at) "
+                "VALUES(1,'control-state-guard',?,'cancel',?,'applied','{}',?,?)",
+                (mission["mission_id"], "f" * 64, stamp, stamp),
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute("DELETE FROM mission_controls WHERE mission_id=?", (mission["mission_id"],))
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "UPDATE control_commands SET receipt_json='{}' WHERE request_id='control-state-guard'"
+                )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute("DELETE FROM control_commands WHERE request_id='control-state-guard'")
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "UPDATE mission_controls SET mode='running',generation=5,updated_at=? WHERE mission_id=?",
+                    (stamp, mission["mission_id"]),
+                )
+
+        with self.store.transaction(write=True) as db:
+            db.execute(
+                "INSERT INTO watchdog_snapshots(mission_id,fingerprint,state,last_progress_at,observed_at,aggregate_revision) "
+                "VALUES(?,?,'healthy',?,?,1)",
+                (mission["mission_id"], "a" * 64, stamp, stamp),
+            )
+            db.execute(
+                "UPDATE watchdog_snapshots SET state='stalled',observed_at=?,aggregate_revision=2 WHERE mission_id=?",
+                ("2026-11-06T00:15:00.000Z", mission["mission_id"]),
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "UPDATE watchdog_snapshots SET state='healthy',observed_at=?,aggregate_revision=3 WHERE mission_id=?",
+                    ("2026-11-06T00:16:00.000Z", mission["mission_id"]),
+                )
+        with self.store.transaction(write=True) as db:
+            db.execute(
+                "UPDATE watchdog_snapshots SET fingerprint=?,state='healthy',last_progress_at=?,observed_at=?,"
+                "aggregate_revision=3 WHERE mission_id=?",
+                ("b" * 64, "2026-11-06T00:20:00.000Z", "2026-11-06T00:20:00.000Z", mission["mission_id"]),
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute("DELETE FROM watchdog_snapshots WHERE mission_id=?", (mission["mission_id"],))
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "UPDATE watchdog_snapshots SET observed_at=?,aggregate_revision=4 WHERE mission_id=?",
+                    ("2026-11-06T00:19:00.000Z", mission["mission_id"]),
+                )
+
+    def test_review_requires_frozen_integrator_candidate_and_independent_reviewer(self):
+        with self.store.unit_of_work(actor={"kind": "test"}) as uow:
+            mission = self._create_mission(uow, "phase4-1-review-scope")
+            plan = uow.plans.create(
+                mission["mission_id"], expected_mission_revision=1,
+                plan={"nodes": [{
+                    "node_id": "work", "role": "work", "profile_id": "worker", "dependencies": [],
+                }]},
+                acceptance={"criteria": ["all checks pass"]},
+                created_by_kind="human", created_by_ref="actor:phase4-1",
+                system_profiles={"integrate": "integrator", "review": "reviewer"},
+            )
+        jobs = {job["role"]: job for job in plan["jobs"]}
+        stamp = "2026-11-06T00:00:00.000Z"
+        manifest = "{}"
+        manifest_hash = hashlib.sha256(manifest.encode("utf-8")).hexdigest()
+        with self.store.transaction(write=True) as db:
+            db.execute(
+                "INSERT INTO assignments(assignment_id,job_id,attempt_no,workspace_id,session_id,submission_key,state,report_json,aggregate_revision) "
+                "VALUES('assignment-integrator',?,1,'workspace-integrator','session-integrator','submit-integrator','pending','{}',1)",
+                (jobs["integrate"]["job_id"],),
+            )
+            db.execute(
+                "INSERT INTO assignments(assignment_id,job_id,attempt_no,workspace_id,session_id,submission_key,state,report_json,aggregate_revision) "
+                "VALUES('assignment-reviewer',?,1,'workspace-reviewer','session-reviewer','submit-reviewer','pending','{}',1)",
+                (jobs["review"]["job_id"],),
+            )
+            db.execute(
+                "INSERT INTO assignments(assignment_id,job_id,attempt_no,workspace_id,session_id,submission_key,state,report_json,aggregate_revision) "
+                "VALUES('assignment-work-as-reviewer',?,1,'workspace-other','session-other','submit-work-as-reviewer','pending','{}',1)",
+                (jobs["work"]["job_id"],),
+            )
+            db.execute(
+                "INSERT INTO artifacts(artifact_id,assignment_id,workspace_id,repo,base_commit,commit_id,tree_hash,"
+                "manifest_json,manifest_hash,receipt_json,created_at) "
+                "VALUES('artifact-review-candidate','assignment-integrator','workspace-integrator','D:/repo',?,?,?,'{}',?,'{}',?)",
+                ("a" * 40, "b" * 40, "c" * 40, manifest_hash, stamp),
+            )
+            acceptance_hash = db.execute(
+                "SELECT acceptance_hash FROM mission_plans WHERE mission_id=? AND plan_revision=1",
+                (mission["mission_id"],),
+            ).fetchone()[0]
+            db.execute(
+                "INSERT INTO reviews(review_id,mission_id,reviewer_assignment_id,candidate_artifact_id,plan_revision,"
+                "acceptance_hash,verdict_json,evidence_set_hash,state,created_at) "
+                "VALUES('review-valid',?,'assignment-reviewer','artifact-review-candidate',1,?,'{\"decision\":\"passed\"}',?,'passed',?)",
+                (mission["mission_id"], acceptance_hash, "d" * 64, stamp),
+            )
+        with self.store.unit_of_work(actor={"kind": "test"}) as uow:
+            same_mission = self._create_mission(uow, "phase4-1-review-same-workspace")
+            same_plan = uow.plans.create(
+                same_mission["mission_id"], expected_mission_revision=1,
+                plan={"nodes": [{
+                    "node_id": "work", "role": "work", "profile_id": "worker", "dependencies": [],
+                }]},
+                acceptance={"criteria": ["reviewer must be independent"]},
+                created_by_kind="human", created_by_ref="actor:phase4-1-independent",
+                system_profiles={"integrate": "integrator", "review": "reviewer"},
+            )
+        same_jobs = {job["role"]: job for job in same_plan["jobs"]}
+        with self.store.transaction(write=True) as db:
+            db.execute(
+                "INSERT INTO assignments(assignment_id,job_id,attempt_no,workspace_id,session_id,submission_key,state,report_json,aggregate_revision) "
+                "VALUES('assignment-same-integrator',?,1,'workspace-shared','session-integrator','submit-same-integrator','pending','{}',1)",
+                (same_jobs["integrate"]["job_id"],),
+            )
+            db.execute(
+                "INSERT INTO assignments(assignment_id,job_id,attempt_no,workspace_id,session_id,submission_key,state,report_json,aggregate_revision) "
+                "VALUES('assignment-same-reviewer',?,1,'workspace-shared','session-reviewer','submit-same-reviewer','pending','{}',1)",
+                (same_jobs["review"]["job_id"],),
+            )
+            db.execute(
+                "INSERT INTO artifacts(artifact_id,assignment_id,workspace_id,repo,base_commit,commit_id,tree_hash,"
+                "manifest_json,manifest_hash,receipt_json,created_at) "
+                "VALUES('artifact-same-workspace','assignment-same-integrator','workspace-shared','D:/repo',?,?,?,'{}',?,'{}',?)",
+                ("a" * 40, "b" * 40, "c" * 40, manifest_hash, stamp),
+            )
+            same_acceptance_hash = db.execute(
+                "SELECT acceptance_hash FROM mission_plans WHERE mission_id=? AND plan_revision=1",
+                (same_mission["mission_id"],),
+            ).fetchone()[0]
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "INSERT INTO reviews(review_id,mission_id,reviewer_assignment_id,candidate_artifact_id,plan_revision,"
+                    "acceptance_hash,verdict_json,evidence_set_hash,state,created_at) "
+                    "VALUES('review-same-workspace',?,'assignment-same-reviewer','artifact-same-workspace',1,?,'{}',?,'passed',?)",
+                    (same_mission["mission_id"], same_acceptance_hash, "e" * 64, stamp),
+                )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "INSERT INTO reviews(review_id,mission_id,reviewer_assignment_id,candidate_artifact_id,plan_revision,"
+                    "acceptance_hash,verdict_json,evidence_set_hash,state,created_at) "
+                    "VALUES('review-wrong-role',?,'assignment-work-as-reviewer','artifact-review-candidate',1,?,'{}',?,'passed',?)",
+                    (mission["mission_id"], acceptance_hash, "f" * 64, stamp),
+                )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute("UPDATE reviews SET state='failed' WHERE review_id='review-valid'")
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute("DELETE FROM reviews WHERE review_id='review-valid'")
 
     def test_unit_of_work_commits_aggregate_audit_and_effect_together(self):
         with self.store.unit_of_work(actor={"kind": "human"}, correlation_id="corr-1") as uow:

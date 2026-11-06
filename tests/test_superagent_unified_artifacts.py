@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import asyncio
 import json
+import sqlite3
 import tempfile
 import unittest
 from dataclasses import fields
@@ -55,12 +56,20 @@ class UnifiedArtifactTests(unittest.IsolatedAsyncioTestCase):
             uow.missions.create({"mission_id": "mission", "ticket_id": "ticket", "sequence": 1,
                                  "repo": str(self.repo), "base_commit": self.base})
             self.plan = uow.plans.create("mission", expected_mission_revision=1,
-                plan={"nodes": [{"node_id": node, "role": "work", "profile_id": "builder", "dependencies": []}
-                                for node in ("first", "second")]}, acceptance={},
+                plan={"nodes": [
+                    {"node_id": "first", "role": "work", "profile_id": "builder", "dependencies": []},
+                    {"node_id": "second", "role": "work", "profile_id": "builder",
+                     "dependencies": [{"node_id": "first", "requires_delivery": True}]},
+                    {"node_id": "independent", "role": "work", "profile_id": "builder", "dependencies": []},
+                ]}, acceptance={},
                 created_by_kind="host", created_by_ref="fixture")
         self.workers = []
         self.assignments = []
-        for index, job in enumerate(self.plan["jobs"]):
+        ordered_jobs = sorted(
+            self.plan["jobs"],
+            key=lambda job: ("first", "second", "independent").index(job["node_id"]),
+        )
+        for index, job in enumerate(ordered_jobs):
             worker = {"worker_id": f"worker-{index}", "ticket_id": "ticket", "mission_id": "mission",
                 "job_id": job["job_id"], "stage": 1, "profile_id": "builder", "repo": str(self.repo),
                 "base_commit": self.base, "runtime_instance_id": "unified", "identity_hash": _hash(f"worker-{index}"),
@@ -124,6 +133,25 @@ class UnifiedArtifactTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), self.base)
         with self.store.transaction() as db:
             self.assertEqual(db.execute("SELECT state FROM deliveries").fetchone()[0], "applied")
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute("DELETE FROM deliveries")
+
+    async def test_artifact_delivery_requires_a_frozen_dag_dependency(self):
+        (self.path(0) / "dependency.txt").write_text("upstream\n", encoding="utf-8")
+        artifact = await self.artifacts.capture(self.assignments[0], self.workers[0])
+        with self.assertRaises(sqlite3.IntegrityError):
+            await self.artifacts.deliver(self.assignments[2], self.workers[2], [artifact])
+        with self.store.transaction() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM deliveries WHERE target_assignment_id=?",
+                           (self.assignments[2]["assignment_id"],)).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM effects WHERE kind='artifact.import'").fetchone()[0],
+                0,
+            )
 
     async def test_lost_capture_receipt_recovers_original_frozen_delivery_without_second_capture(self):
         original = self.adapter.capture_workspace

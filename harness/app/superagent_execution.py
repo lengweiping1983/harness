@@ -289,7 +289,7 @@ class CoordinatorExecutionService:
             if delivery["state"] != "applied":
                 self._input_deliveries.transition_in_transaction(db, input_id, owner, "applied",
                     expected_revision=delivery["aggregate_revision"],
-                    receipt={"status": "applied", "source": "original_run_input_receipt"}, actor=_ACTOR)
+                    receipt=self._input_deliveries.make_receipt(dict(delivery), "applied", native_receipt={"source": "original_run_input_receipt"}), actor=_ACTOR)
         CoordinatorStore.append_audit(
             db, aggregate_type="ticket_input", aggregate_id=input_id,
             event_type=f"ticket_input.{target}",

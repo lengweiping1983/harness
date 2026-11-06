@@ -12,7 +12,7 @@
 - **不再沿旧链路开发。** 不为旧 Router / Autonomy 编排增加功能，不包装旧 Router、Dispatcher 或 MissionStore 来实现新服务，不新增 V1 / V2 服务、执行开关、兼容 Facade 或自动回退。缺失能力在统一链路补齐，不能转交旧链路执行。
 - **只保留可复用能力与有效业务回归。** 文件交接、证据核验、停止和引导等能力抽离后接入统一接口；每项能力接通后清除对应旧编排与依赖。Phase 4.6 做最终收口核对，不是到该阶段才开始删除旧实现。
 - **不开发旧运行数据转换。** 当前没有旧 Superagent 运行数据，不开发旧配置别名、旧任务导入、离线转换、双写、双轨运行或旧版回退工具。意外发现的旧目录保留原件并拒绝混用；已登记的 Coordinator Schema 迁移和原始 Harness 事实继续按现有规则保护。
-- **从现有成果继续。** Phase 1–3 为已交付基础，不重做 Phase 0，不重新比较或移植 dsh 运行时。首批统一基础层审查基线为 `a0fbf7d`；以当前源码接续，不回退该提交覆盖后续工作。下一步按第 11 节补齐 Phase 4.1 的消费闭环，再推进 4.2。
+- **从现有成果继续。** Phase 1–3 为已交付基础，不重做 Phase 0，不重新比较或移植 dsh 运行时。首批统一基础层审查基线为 `a0fbf7d`；以当前源码接续，不回退该提交覆盖后续工作。Phase 4.1 的统一协调契约、Schema v16 状态守卫及 112 项模块回归已验收；下一步按第 11 节推进 Phase 4.2 统一服务生命周期，不将这一模型层验收误写成生产入口已经切换。
 - **以实际消费和业务证据验收。** 建表、增加内部 API、适配器单测或某个阶段提交，均不能代替统一服务接线和真实业务闭环。未接线阶段可通过统一应用服务定向验证，不能借旧链路完成验收。Phase 4 总体验收必须包含唯一入口和旧编排退役。
 
 当前源码中尚存的旧入口、旧账本依赖和 Shadow 装配是待清除的实现缺口，不是获准继续维护的第二套方案。本次计划更新不代表这些代码已经删除。
@@ -52,7 +52,7 @@
 
 ### 2.1 开发接续基线
 
-Phase 1–3 已建立 CoordinatorStore、来源与授权服务、原生 Harness 执行适配及单 Worker 内部闭环；首批 Phase 4 改造已补充执行资源作用域、宿主系统节点封存、独立输入投递记录、持久暂停和真实 Artifact / Delivery 适配。
+Phase 1–3 已建立 CoordinatorStore、来源与授权服务、原生 Harness 执行适配及单 Worker 内部闭环；首批 Phase 4 改造已补充执行资源作用域、宿主系统节点封存、独立 InputDelivery 账本与逐 Assignment 消费 API、持久暂停和真实 Artifact / Delivery 适配。
 
 生产入口、统一 Scheduler、质量门、完整停止及信道发送尚未全部接通。具体已实现行为与限制只维护在[领域模型第 9 节](superagent-domain-model.md#9-phase-14-当前实现边界)。现存旧模块仅用于定位能力抽离、调用方改造和删除范围，不能作为后续开发入口。
 
@@ -577,11 +577,11 @@ Phase 0–3 是已经形成的领域和基础能力背景，不再作为待执�
 #### Phase 4.1：整合契约与协调模型
 
 - 沿现有统一账本补齐 Worker 的 Mission / Job / stage 绑定、独立 InputDelivery，以及 Artifact / Delivery / Review、控制、指令和 Watchdog 的约束与状态转移。
-- 输入投递消费不再依赖 TicketInput 的单 Assignment 字段判断所有节点是否已读取；每条 Input / Assignment 投递使用自己的稳定身份、原生回执与 CAS，禁止跨 Ticket 或节点冒用。
+- 输入投递消费不再依赖 TicketInput 的单 Assignment 字段判断所有节点是否已读取；每条 Input / Assignment 投递使用自己的稳定身份、原生回执与 CAS，禁止跨 Ticket 或节点冒用。 当前已由 CoordinatorAssignmentInputDelivery 提供显式 Host API，并覆盖多 Assignment、丢回执恢复、Handback 后回查、畸形回执、原 Run 冲突和并发单调性；尚未接入统一 Scheduler 或生产默认路由。
 - Planner 只提出 work DAG；宿主按允许的多角色 Profile 集确定性建立 Integrator / Reviewer 后整体封存。Assignment 的接续和修正不能覆盖旧 Run，不能改写冻结计划。
-- 保持普通 Repository 更新不能绕过状态机；新增结构使用新迁移，不改写已有迁移校验和。
+- 保持普通 Repository 更新不能绕过状态机；新增结构使用新迁移，不改写已有迁移校验和。Schema v16 必须在数据库层守住 InputDelivery / MissionInstruction / Delivery 状态与 Revision 单调、DAG 交付作用域、独立 Review 身份、MissionControl 取消终态、终态控制回执及 Watchdog 进度单调性。
 
-**出口：** 相同 Profile 多节点及多阶段资源隔离、完整计划不可变、跨作用域拒绝、输入逐执行消费和未知投递不重放均有针对性证据。建表完成不足以关闭此阶段。
+**出口：** 相同 Profile 多节点及多阶段资源隔离、完整计划不可变、跨作用域拒绝、输入逐执行消费和未知投递不重放均有针对性证据。InputDelivery 已有显式 Host API 和服务级回归；Schema v16 已补充数据库级状态、Revision、回执、DAG 交付、独立 Review、MissionControl 与 Watchdog 守卫。2026-11-06，Coordinator Store、Unified Artifacts、Unified Execution、原 Execution 和 Unified Model 五个测试模块共 112 项全部通过，Phase 4.1 的统一协调契约与持久化状态模型出口完成。此结论仅限模型与约束层；Phase 4.2 起的统一服务生命周期、Scheduler 消费及生产路由仍按后续阶段验收。
 
 #### Phase 4.2：唯一服务生命周期与持久控制
 
@@ -612,7 +612,7 @@ Phase 0–3 是已经形成的领域和基础能力背景，不再作为待执�
 
 #### Phase 4.5：持续协作与既有信道
 
-- 普通跟进进入 TicketInput，节点指令绑定 Mission / Job / Assignment / Run / Turn，在原生接受锁内复核权限。无法唯一定位目标时产生 Attention，不默认广播全部 Worker。
+- 普通跟进进入 TicketInput，节点指令绑定 Mission / Job / Assignment / 原 Run / Turn。统一协调 Host 已提供显式 MissionInstruction API：持久化稳定 request_id、payload hash 与 Revision；在原生接受锁内复核 Mandate / Mission；accepted 与 applied 分开记录，unknown 只回查原 request_id，不重放到新 Run。无法唯一定位目标时产生 Attention，不默认广播全部 Worker。
 - 接通 Attention、Handback、原生指令接受／应用回执和阶段间有界上下文；context-only 不启动执行，不扩大授权，迟到结果不进入新运行。
 - GitHub / Feishu 以 Source / Channel Adapter 接入统一 Trigger、Cursor、正文解析、Outbox Sender 和周期性回查，不保留旧信道的独立业务账本或依赖旧 Results 获取候选。
 - Candidate、pending、sent、unknown 严格区分；未找到、重复匹配或分页不完整均不能授权重发。文件仅承担输入或投影职责。

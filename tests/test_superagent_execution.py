@@ -22,10 +22,15 @@ class FakeExecutionAdapter:
         self.profiles = {profile.profile_id: profile}
         self.max_workers = 8
         self.shared = shared or {
-            "resources": {}, "runs": {}, "submit_calls": [], "input_receipts": {},
+            "resources": {}, "runs": {}, "submit_calls": [], "input_receipts": {}, "input_calls": [],
             "workspace_calls": 0, "session_calls": 0, "fail_workspace_receipt": False,
-            "fail_session_receipt": False, "fail_submit_ack": False,
+            "fail_session_receipt": False, "fail_submit_ack": False, "fail_input_ack": False,
         }
+        self.shared.setdefault("input_calls", [])
+        self.shared.setdefault("fail_input_ack", False)
+        self.shared.setdefault("instruction_calls", [])
+        self.shared.setdefault("instruction_receipts", {})
+        self.shared.setdefault("fail_instruction_ack", False)
         self.worker_lookup = None
         self.closed = False
 
@@ -94,12 +99,56 @@ class FakeExecutionAdapter:
         return self.reconcile(worker, assignment)
 
     async def deliver_input(self, worker, assignment, prompt, delivery_key, before_accept):
+        snapshot = self.shared["runs"].get(assignment["assignment_id"])
+        if snapshot is None or snapshot.get("run_id") != assignment.get("run_id"):
+            raise HarnessError("Input delivery does not match the original Run", code="superagent/run-conflict")
+        if snapshot.get("settled") or snapshot.get("status") != "running":
+            return {"accepted": False, "deferred": True}
         before_accept()
-        self.shared["input_receipts"][delivery_key] = {"status": "applied"}
-        return {"accepted": True, "deferred": False}
+        self.shared["input_calls"].append(delivery_key)
+        receipt = {"request_id": delivery_key, "turn": 1, "status": "applied",
+                   "accepted_seq": 1, "applied_seq": 2}
+        self.shared["input_receipts"][delivery_key] = receipt
+        if self.shared.get("fail_input_ack"):
+            self.shared["fail_input_ack"] = False
+            raise RuntimeError("input delivery acknowledgement lost")
+        return {"accepted": True, "deferred": False, "request_id": delivery_key,
+                "turn": 1, "receipt": copy.deepcopy(receipt)}
 
     def reconcile_input(self, worker, assignment, delivery_key):
-        return copy.deepcopy(self.shared["input_receipts"].get(delivery_key, {"status": "unapplied"}))
+        return copy.deepcopy(self.shared["input_receipts"].get(delivery_key))
+
+    def instruction_turn(self, worker, assignment, operation_key):
+        snapshot = self.shared["runs"].get(assignment["assignment_id"])
+        if snapshot is None or snapshot.get("run_id") != assignment.get("run_id"):
+            raise HarnessError("Instruction target Run does not match its Assignment", code="superagent/run-conflict")
+        if snapshot.get("settled") or snapshot.get("status") != "running":
+            raise HarnessError("Instruction target Run is not active", code="run/stale-turn")
+        return 1
+
+    async def deliver_instruction(self, worker, assignment, text, operation_key, turn_id, before_accept):
+        snapshot = self.shared["runs"].get(assignment["assignment_id"])
+        if snapshot is None or snapshot.get("run_id") != assignment.get("run_id"):
+            raise HarnessError("Instruction target Run does not match its Assignment", code="superagent/run-conflict")
+        if snapshot.get("settled") or snapshot.get("status") != "running":
+            raise HarnessError("Instruction target Run is not active", code="run/stale-turn")
+        before_accept()
+        self.shared["instruction_calls"].append(operation_key)
+        receipt = {
+            "request_id": operation_key, "turn": turn_id, "text": text,
+            "status": "pending", "accepted_seq": 1, "applied_seq": None,
+        }
+        self.shared["instruction_receipts"][operation_key] = copy.deepcopy(receipt)
+        if self.shared["fail_instruction_ack"]:
+            self.shared["fail_instruction_ack"] = False
+            raise RuntimeError("instruction acknowledgement lost")
+        return {
+            "accepted": True, "deferred": False, "request_id": operation_key,
+            "turn": turn_id, "receipt": copy.deepcopy(receipt),
+        }
+
+    def reconcile_instruction(self, worker, assignment, operation_key, turn_id, expected_text):
+        return copy.deepcopy(self.shared["instruction_receipts"].get(operation_key))
 
     async def stop(self, worker, assignment):
         snapshot = self.shared["runs"][assignment["assignment_id"]]

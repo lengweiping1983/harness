@@ -16,6 +16,8 @@ from harness.i18n import tr
 from .superagent_coordinator_migration_12 import MIGRATION_12
 from .superagent_coordinator_migration_13 import MIGRATION_13
 from .superagent_coordinator_migration_14 import MIGRATION_14
+from .superagent_coordinator_migration_15 import MIGRATION_15
+from .superagent_coordinator_migration_16 import MIGRATION_16
 
 _APPLICATION_ID = int.from_bytes(b"SUPA", "big")
 _MAX_EFFECT_BATCH = 100
@@ -804,6 +806,7 @@ MIGRATIONS = (
     (7, _MIGRATION_7), (8, _MIGRATION_8), (9, _MIGRATION_9),
     (10, _MIGRATION_10), (11, _MIGRATION_11), (12, MIGRATION_12),
     (13, MIGRATION_13), (14, MIGRATION_14),
+    (15, MIGRATION_15), (16, MIGRATION_16),
 )
 
 class CoordinatorStore:
