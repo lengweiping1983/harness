@@ -29,7 +29,7 @@ globalThis.fetch=async(raw,options)=>{
  if(path==='/state')result=clone(state)
  if(path==='/claim'){
   claimedPhase=input.phase
-  claims++;state.pending={id:'intent',prompt:'[Harness intent] continue'};result=clone(state.pending)
+  claims++;state.pending={id:'intent',prompt:'继续'};result=clone(state.pending)
  }
  if(path==='/receipt'){
   if(input.outcome==='confirmed'){state.pending=null;state.sent_phases.push(claimedPhase)}
@@ -43,10 +43,15 @@ const {tick}=await import('../../extensions/chatgpt-companion/background.mjs')
 test('a confirmed continuation is not sent again without new durable progress',async()=>{
  reset();await tick();await tick();assert.equal(sends,1);assert.equal(claims,1)
 })
-test('uncertain sends pause and are reconciled by observed user message without resend',async()=>{
+test('uncertain sends stay paused even when an identical historical continuation exists',async()=>{
  reset();mode='unknown';await tick();assert.equal(saved.binding.enabled,false);await tick();assert.equal(sends,1)
  saved.binding.enabled=true;page.userMessages.push(state.pending.prompt);await tick()
- assert.equal(state.pending,null);assert.equal(sends,1)
+ assert.ok(state.pending);assert.equal(sends,1);assert.equal(saved.binding.enabled,false)
+ assert.equal(saved.binding.reason,'send_unconfirmed')
+})
+test('a locally confirmed send can finish its original receipt without sending again',async()=>{
+ reset();state.pending={id:'intent',prompt:'继续'};saved.pending={...state.pending,outcome:'confirmed'}
+ await tick();assert.equal(state.pending,null);assert.equal(saved.pending,undefined);assert.equal(sends,0)
 })
 test('drafts, active generation and changed controls prevent a send claim',async()=>{
  for(const reason of ['draft','composing','busy','unsupported_page']){
@@ -61,7 +66,7 @@ test('a stopped binding, an expired binding and completed work do not create mes
  reset();state.state='complete';await tick();assert.equal(claims,0);assert.equal(saved.binding.enabled,false)
 })
 test('bridge reconnection uses reads and does not replay an unknown dispatch',async()=>{
- reset();state.pending={id:'old',prompt:'[Harness old] continue'};await tick()
+ reset();state.pending={id:'old',prompt:'继续'};page.userMessages=['继续'];await tick()
  assert.equal(claims,0);assert.equal(sends,0);assert.equal(saved.binding.enabled,false)
 })
 

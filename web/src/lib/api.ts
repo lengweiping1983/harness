@@ -41,7 +41,7 @@ export type {McpServiceState} from './protocol.generated'
 
 export const mcpServiceStatus = (signal?: AbortSignal) => request<McpServiceState>('/api/v1/mcp-service', { signal })
 export const mcpServiceStart = async (tunnel?: McpTunnelSettings) => {
-  const result = await request<McpServiceState>('/api/v1/mcp-service/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'all', ...(tunnel ? {tunnel} : {}) }) })
+  const result = await request<McpServiceState>('/api/v1/mcp-service/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({scope: 'all', ...(tunnel ? {tunnel} : {})}) })
   if (!result.ok && result.code === 'mcp/tunnel-config' && result.details && typeof result.details === 'object') {
     const copy = (result.details as {copy?: {key?: unknown; params?: unknown}}).copy
     const keys = ['ui.mcpService.error.tunnelConfig', 'ui.mcpService.error.tunnelConfigFile', 'ui.mcpService.error.cleanupPending', 'ui.mcpService.error.configChanged']

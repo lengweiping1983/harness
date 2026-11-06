@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp, mkdir, writeFile, readFile, rm} from 'node:fs/promises'
+import {mkdtemp, mkdir, writeFile, readFile, rm, stat, copyFile} from 'node:fs/promises'
+import {existsSync} from 'node:fs'
+import {spawnSync} from 'node:child_process'
 import {createHash} from 'node:crypto'
 import path from 'node:path'
 import {tmpdir} from 'node:os'
@@ -32,7 +34,7 @@ async function miniRoot(t, {version = '3.3.0', source = 'https://example.invalid
   const root = await mkdtemp(path.join(tmpdir(), 'harness-hex-manifest-'))
   t.after(() => rm(root, {recursive: true, force: true}))
   const tag = 'windows-x86_64'
-  const engine = path.join(root, 'desktop', 'hex-engine', tag)
+  const engine = path.join(root, 'harness', 'resources', 'hex', tag)
   await mkdir(engine, {recursive: true})
   const binary = path.join(engine, 'hex.exe')
   await writeFile(binary, pe)
@@ -40,6 +42,7 @@ async function miniRoot(t, {version = '3.3.0', source = 'https://example.invalid
     schema: 1, version, platform: 'win32', arch: 'x64',
     sha256: declaredSha256 ?? digest(pe), source, binary: 'hex.exe',
   }, null, 2) + '\n')
+  await mkdir(path.join(root, 'desktop'), {recursive: true})
   await writeFile(path.join(root, 'desktop', 'voice-native.ps1'), '# fixture helper')
   const staging = path.join(root, '.run', 'desktop-release', 'resources')
   await mkdir(staging, {recursive: true})
@@ -86,8 +89,9 @@ test('assertEngineIntegrity 只校验当前平台，缺清单/内容不符/身�
   assert.throws(() => assertEngineIntegrity(data.root, 'windows-arm64'), /缺少该平台的引擎清单/)
 })
 
-test('prepareVoice 从版本库引擎取件时写入 version/source 并复制作副本', async t => {
+test('prepareVoice 直接读取唯一资源目录，保留源文件身份并写入 version/source', async t => {
   const data = await miniRoot(t)
+  const original = await stat(data.binary)
   const metadata = await prepareVoice({
     root: data.root, staging: data.staging, platform: 'win32', arch: 'x64',
     execute: async () => {}, copy: key => key, binary: null,
@@ -97,11 +101,22 @@ test('prepareVoice 从版本库引擎取件时写入 version/source 并复制作
   assert.equal(metadata.sha256, digest(data.pe))
   assert.deepEqual({platform: metadata.platform, arch: metadata.arch}, {platform: 'win32', arch: 'x64'})
   assert.equal(metadata.path, 'harness/resources/hex/windows-x86_64/hex.exe')
-  // 运行时工作副本被版本库引擎覆盖，且内容与清单一致。
-  const copy = path.join(data.root, 'harness', 'resources', 'hex', 'windows-x86_64', 'hex.exe')
-  assert.equal(await voiceDigest(copy), digest(data.pe))
+  const current = await stat(data.binary)
+  assert.deepEqual([current.ino, current.mtimeMs], [original.ino, original.mtimeMs])
+  assert.equal(await voiceDigest(data.binary), digest(data.pe))
+  assert.equal(existsSync(path.join(data.root, 'desktop', 'hex-engine')), false)
   assert.deepEqual(JSON.parse(await readFile(path.join(data.staging, 'voice', 'engine.json'), 'utf8')), metadata)
   assert.equal(await readFile(path.join(data.staging, 'voice', 'voice-native.ps1'), 'utf8'), '# fixture helper')
+})
+
+test('prepareVoice 拒绝唯一资源目录缺失清单，不将裸引擎作为回退来源', async t => {
+  const data = await miniRoot(t)
+  await rm(path.join(data.engine, 'engine.json'))
+  await assert.rejects(prepareVoice({
+    root: data.root, staging: data.staging, platform: 'win32', arch: 'x64',
+    execute: async () => {}, copy: key => key, binary: null,
+  }), /voiceMismatch/)
+  assert.equal(await voiceDigest(data.binary), digest(data.pe))
 })
 
 test('prepareVoice 拒绝清单 sha256 与实际引擎不符的版本漂移', async t => {
@@ -110,6 +125,22 @@ test('prepareVoice 拒绝清单 sha256 与实际引擎不符的版本漂移', as
     root: data.root, staging: data.staging, platform: 'win32', arch: 'x64',
     execute: async () => {}, copy: key => key, binary: null,
   }), error => /voiceMismatch/.test(error.message) && /引擎内容/.test(error.cause?.message))
+})
+
+test('登记脚本在唯一资源目录内重新登记时保留二进制并更新清单', async t => {
+  const data = await miniRoot(t)
+  await mkdir(path.join(data.root, 'scripts'))
+  const script = path.join(data.root, 'scripts', 'vendor-hex-engine.mjs')
+  await copyFile(new URL('../../scripts/vendor-hex-engine.mjs', import.meta.url), script)
+  await copyFile(new URL('../hex-engine-manifest.mjs', import.meta.url), path.join(data.root, 'desktop', 'hex-engine-manifest.mjs'))
+  const original = await stat(data.binary)
+  const result = spawnSync(process.execPath, [script, data.binary, '--version', '3.3.0', '--source', 'fixture-source'], {encoding:'utf8'})
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.equal((await stat(data.binary)).ino, original.ino)
+  const manifest = assertEngineIntegrity(data.root, data.tag)
+  assert.equal(manifest.source, 'fixture-source')
+  assert.equal(manifest.sha256, digest(data.pe))
+  assert.equal(existsSync(path.join(data.root, 'desktop', 'hex-engine')), false)
 })
 
 test('verify-runtime 打包前核对引擎版本与版本库清单，不匹配时拒绝', async t => {

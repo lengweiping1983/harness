@@ -1,3 +1,4 @@
+import {SecretInput} from '@/components/ui/SecretInput'
 import {collaborationFeedbackMessage} from '@/lib/collaborationError'
 import {answerSharedQuestion} from '@/lib/sharedDecisions'
 import {SharedTaskInput} from './SharedTaskInput'
@@ -214,7 +215,7 @@ export function SharedSessionPage({initialToken}: {initialToken: string}) {
       : <section className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-5">
         {access && !access.enabled ? <p className="max-w-md text-sm text-muted">{t('ui.shared.unavailable')}</p> : <form onSubmit={event => void signIn(event)} className="w-full max-w-md space-y-4 rounded-xl border border-line bg-raised p-6">
           <h2 className="text-xl font-semibold">{t('ui.shared.join')}</h2><p className="text-sm text-muted">{t('ui.shared.hint')}</p>
-          <label className="block space-y-2 text-sm">{t('ui.shared.credential')}<input type="password" autoFocus={visible} autoComplete="off" spellCheck={false} maxLength={4096} value={token} onChange={event => setToken(event.target.value)} className="block h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm outline-none focus:border-brand" /></label>
+          <label className="block space-y-2 text-sm">{t('ui.shared.credential')}<SecretInput autoFocus={visible} autoComplete="off" spellCheck={false} maxLength={4096} value={token} onChange={event => setToken(event.target.value)} className="block h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm outline-none focus:border-brand" /></label>
           <div className="flex flex-wrap gap-3"><Button type="submit" variant="primary" disabled={busy || !token.trim()}>{t('ui.shared.join')}</Button><Button variant="ghost" onClick={refresh}>{t('ui.shared.retry')}</Button></div>
         </form>}
       </section>}

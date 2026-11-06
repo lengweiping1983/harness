@@ -2743,7 +2743,6 @@
   "ui.companion.enable": "启用接续",
   "ui.companion.disable": "停用接续",
   "ui.companion.port": "连接端口",
-  "ui.companion.savePort": "保存端口",
   "ui.companion.running": "接续服务已启动。",
   "ui.companion.stopped": "等待 MCP 启动。",
   "ui.companion.disabled": "接续已关闭。",
@@ -4973,5 +4972,15 @@
   "ui.providers.catalogUnavailable": "模型目录读取失败：{reason}。已保存的模型仍可编辑或移除。",
   "ui.providers.modelNotInCatalog": "暂未出现在可用模型目录中。",
   "ui.sidebar.projectsRetrying": "正在重新读取项目…",
-  "ui.sidebar.retryProjects": "重试读取项目"
+  "ui.sidebar.retryProjects": "重试读取项目",
+  "ui.mcpService.savedHint": "启动时自动保存配置；已保存的令牌和登录密码会继续使用。",
+  "ui.secrets.show": "显示密码或密钥",
+  "ui.secrets.hide": "隐藏密码或密钥",
+  "ui.companion.portAutoSave": "端口编辑完成后，离开输入框即自动保存。",
+  "ui.companion.portSaved": "端口已自动保存。",
+  "ui.companion.invalidPort": "请输入 1024～65535 之间的整数端口。",
+  "ui.companion.saveUnconfirmed": "保存结果未确认，不会自动重复保存；请核对连接状态。",
+  "ui.companion.tokenHint": "配对码由 Harness 自动生成，只需复制到浏览器扩展中，无需在此输入。",
+  "ui.companion.tokenPending": "启动 MCP 后自动生成",
+  "ui.companion.tokenDisabled": "启用接续并启动 MCP 后可用"
 }

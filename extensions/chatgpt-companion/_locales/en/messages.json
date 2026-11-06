@@ -211,5 +211,11 @@
   },
   "install_readme": {
     "message": "Open INSTALL.html for the complete bilingual installation and pairing steps."
+  },
+  "show_token": {
+    "message": "Show pairing token"
+  },
+  "hide_token": {
+    "message": "Hide pairing token"
   }
 }

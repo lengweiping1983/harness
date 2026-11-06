@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 把一份合法的 Hex 预编译引擎登记到 desktop/hex-engine/<平台>-<架构>/。
+ * 把一份合法的 Hex 预编译引擎登记到 harness/resources/hex/<平台>-<架构>/。
  *
  * 用法：
  *   node scripts/vendor-hex-engine.mjs /path/to/hex \
@@ -16,14 +16,14 @@
  * 二进制本身。仓库已不再保留 Hex 源码，登记是唯一的引擎来源。
  * 跨平台登记（例如 macOS 上登记 Windows PE）无法执行时仅提示，不阻断。
  *
- * 详见 desktop/hex-engine/README.md。
+ * 详见 harness/resources/hex/README.md。
  */
 
 import {existsSync, writeFileSync, copyFileSync, mkdirSync, chmodSync} from 'node:fs'
 import {spawnSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import path from 'node:path'
-import {identifyBinary, sha256File, assertEngineIntegrity, platformTag} from '../desktop/hex-engine-manifest.mjs'
+import {identifyBinary, sha256File, assertEngineIntegrity, platformTag, engineDir} from '../desktop/hex-engine-manifest.mjs'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const argv = process.argv.slice(2)
@@ -92,7 +92,7 @@ function main() {
   if (options.check) {
     if (options.version) assertDeclaredVersion(options.version, probeVersion(source))
     // --check 传入已登记目录时可顺带核对现有清单。
-    const manifest = path.join(ROOT, 'desktop', 'hex-engine', tag, 'engine.json')
+    const manifest = path.join(engineDir(ROOT), tag, 'engine.json')
     if (existsSync(manifest)) {
       const checked = assertEngineIntegrity(ROOT, tag)
       console.log(`  · 现有清单 v${checked.version} 完整性校验通过`)
@@ -105,10 +105,10 @@ function main() {
   if (!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(options.version)) throw Error(`版本格式不合法: ${options.version}`)
   assertDeclaredVersion(options.version, probeVersion(source))
 
-  const dir = path.join(ROOT, 'desktop', 'hex-engine', tag)
+  const dir = path.join(engineDir(ROOT), tag)
   mkdirSync(dir, {recursive: true})
   const destination = path.join(dir, filename)
-  copyFileSync(source, destination)
+  if (source !== destination) copyFileSync(source, destination)
   if (platform !== 'win32') chmodSync(destination, 0o755)
 
   const dirs = licenseDirs(path.dirname(source))
@@ -139,7 +139,7 @@ function main() {
   writeFileSync(path.join(dir, 'engine.json'), JSON.stringify(metadata, null, 2) + '\n')
   assertEngineIntegrity(ROOT, tag)
   console.log(`\n已登记到 ${path.relative(ROOT, dir)} (v${options.version})，完整性复检通过`)
-  console.log('请检查改动后执行: git add desktop/hex-engine')
+  console.log('请检查改动后执行: git add harness/resources/hex')
 }
 
 try {

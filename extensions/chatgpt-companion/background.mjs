@@ -44,11 +44,12 @@ export async function tick() {
     try {page = await chrome.tabs.sendMessage(binding.tabId, {type: 'probe', url: binding.url});}
     catch {return await status('page_unavailable', false);}
     if (state.pending) {
-      if (page.userMessages?.some(text => text.includes(state.pending.prompt))) {
+      const {pending} = await chrome.storage.local.get('pending');
+      if (pending?.id === state.pending.id && pending.outcome === 'confirmed') {
         await api(settings, '/receipt', {binding_id: binding.id, id: state.pending.id, outcome: 'confirmed'});
+        await chrome.storage.local.remove('pending');
         return await status('waiting_reply');
       }
-      const {pending} = await chrome.storage.local.get('pending');
       if (pending?.id === state.pending.id && pending.outcome === 'not_sent') {
         await api(settings, '/receipt', {binding_id: binding.id, id: pending.id, outcome: 'not_sent'});
         await chrome.storage.local.remove('pending');

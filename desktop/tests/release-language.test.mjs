@@ -32,7 +32,8 @@ import {Arch} from 'builder-util'
 async function expectedVoice(root,platform,arch) {
   const tag=`${platform==='darwin'?'macos':'windows'}-${arch==='x64'?'x86_64':arch}`
   const relative=`harness/resources/hex/${tag}/${platform==='win32'?'hex.exe':'hex'}`
-  return {path:relative,sha256:createHash('sha256').update(await readFile(path.join(root,relative))).digest('hex'),platform,arch}
+  const manifest=JSON.parse(await readFile(path.join(root,path.dirname(relative),'engine.json'),'utf8'))
+  return {path:relative,sha256:createHash('sha256').update(await readFile(path.join(root,relative))).digest('hex'),platform,arch,version:manifest.version,source:manifest.source}
 }
 
 async function fixture(t,{electron=true,count=1,identity={},failure,failureAt=()=>true}={}) {
@@ -51,6 +52,9 @@ async function fixture(t,{electron=true,count=1,identity={},failure,failureAt=()
     if (platform==='darwin') {header.writeUInt32LE(0xfeedfacf,0);header.writeUInt32LE(arch==='arm64'?0x100000c:0x1000007,4)}
     else {header.write('MZ',0);header.writeUInt32LE(64,60);header.writeUInt32LE(0x4550,64);header.writeUInt16LE(0x8664,68)}
     await writeFile(file,header)
+    await writeFile(path.join(path.dirname(file),'engine.json'),JSON.stringify({version:'3.3.0',source:'fixture',sha256:createHash('sha256').update(header).digest('hex')}))
+    await writeFile(path.join(path.dirname(file),'LICENSE'),'Vendored license 原文')
+    await writeFile(path.join(path.dirname(file),'THIRD_PARTY_NOTICES.md'),'Vendored notices 原文')
   }
 
   await mkdir(path.join(root,'web/dist'),{recursive:true})
@@ -79,7 +83,10 @@ async function fixture(t,{electron=true,count=1,identity={},failure,failureAt=()
       const site=args[args.indexOf('--target')+1]
       await mkdir(path.join(site,'harness'),{recursive:true})
       await writeFile(path.join(site,'harness/cli.py'),'# fixture')
-      if(args.includes('--no-deps'))await cp(path.join(root,'harness/resources'),path.join(site,'harness/resources'),{recursive:true})
+      if(args.includes('--no-deps')) {
+        const tag=identity.platform==='win32'?'windows-x86_64':identity.machine==='x86_64'?'macos-x86_64':'macos-arm64'
+        await cp(path.join(root,'harness/resources/hex',tag),path.join(site,'harness/resources/hex',tag),{recursive:true})
+      }
     } else if(args[1].includes('platform.machine')) {
       return JSON.stringify({platform:'darwin',machine:'arm64',version:'3.14.10',...identity})
     } else if(args[1].includes('build_default_registry'))return JSON.stringify(['fixture-skill'])
@@ -144,6 +151,34 @@ test('release preparation stages current files and verifies metadata without exe
         {version:'fixture',platform,arch,python:'3.14.10',bundledSkills:['fixture-skill'],voice:await expectedVoice(data.root,platform,arch)})
       await beforePack({packager:{projectDir:path.join(data.root,'desktop'),appInfo:{version:'fixture'}},electronPlatformName:platform,arch:Arch[arch]})
       assert.deepEqual(data.logs,[setupCopy(language)('desktop.release.staged',{path:data.staging})])
+    })
+  }
+})
+
+test('release preparation stages an explicit voice override without changing repository resources',async t=>{
+  for(const language of ['en','zh-CN','en'])for(const [platform,arch,machine] of [['darwin','arm64','arm64'],['win32','x64','AMD64']]) {
+    await t.test(`${language}: ${platform}`,async t=>{
+      const data=await fixture(t,{identity:{platform,machine}})
+      const original=await expectedVoice(data.root,platform,arch)
+      const source=path.join(data.root,'custom',platform==='win32'?'hex.exe':'hex')
+      const bytes=Buffer.from(await readFile(path.join(data.root,original.path)))
+      bytes[100]=42
+      await mkdir(path.dirname(source),{recursive:true})
+      await writeFile(source,bytes)
+      await writeFile(path.join(path.dirname(source),'LICENSE'),'Override license 原文')
+      await prepareRelease({...data.options,platform,arch,language,voiceBinary:source})
+      assert.deepEqual(await expectedVoice(data.root,platform,arch),original)
+      assert.equal(await readFile(path.join(data.root,path.dirname(original.path),'LICENSE'),'utf8'),'Vendored license 原文')
+      assert.equal(await readFile(path.join(data.root,path.dirname(original.path),'THIRD_PARTY_NOTICES.md'),'utf8'),'Vendored notices 原文')
+      const installed=path.join(data.staging,'site',original.path)
+      assert.deepEqual(await readFile(installed),bytes)
+      assert.equal(await readFile(path.join(path.dirname(installed),'LICENSE'),'utf8'),'Override license 原文')
+      assert.equal(existsSync(path.join(path.dirname(installed),'engine.json')),false)
+      assert.equal(existsSync(path.join(path.dirname(installed),'THIRD_PARTY_NOTICES.md')),false)
+      const runtime=JSON.parse(await readFile(path.join(data.staging,'runtime.json'),'utf8'))
+      assert.deepEqual(runtime.voice,{path:original.path,sha256:createHash('sha256').update(bytes).digest('hex'),platform,arch})
+      assert.equal(existsSync(path.join(data.root,'desktop/hex-engine')),false)
+      await beforePack({packager:{projectDir:path.join(data.root,'desktop'),appInfo:{version:'fixture'}},electronPlatformName:platform,arch:Arch[arch]})
     })
   }
 })

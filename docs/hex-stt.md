@@ -1,6 +1,6 @@
 # 语音输入与全局听写
 
-Harness 将 Hex 作为内部语音识别引擎；录音、输入框草稿、全局听写设置与浮窗由 Harness 自己管理。桌面安装包必须包含本机引擎，不要求用户另行安装或打开 Hex。官方预编译引擎与其许可证随版本库分发于 `desktop/hex-engine/<平台>-<架构>/`，仓库内不含引擎源码，打包时也不编译；运行时不隐式编译、安装独立应用或修改已有 Hex 配置。
+Harness 将 Hex 作为内部语音识别引擎；录音、输入框草稿、全局听写设置与浮窗由 Harness 自己管理。桌面安装包必须包含本机引擎，不要求用户另行安装或打开 Hex。官方预编译引擎与其许可证随版本库分发于 `harness/resources/hex/<平台>-<架构>/`，仓库内不含引擎源码，打包时也不编译；运行时不隐式编译、安装独立应用或修改已有 Hex 配置。
 
 ## 输入框与模型
 
@@ -30,15 +30,15 @@ Harness 将 Hex 作为内部语音识别引擎；录音、输入框草稿、全�
 
 ## 构建与分发
 
-桌面准备由 `desktop/prepare-voice.mjs` 核对真实 Mach-O／PE 文件头、操作系统和 CPU，复制识别引擎及许可证，再编译 macOS 粘贴辅助程序或包含 Windows 辅助脚本。麦克风用途说明使用双语资源，写入应用元数据及本地化 `InfoPlist.strings`。引擎、辅助程序及独立录音页面都属于安装包必需资源。
+桌面准备由 `desktop/prepare-voice.mjs` 核对真实 Mach-O／PE 文件头、操作系统、CPU 和内容身份，再编译 macOS 粘贴辅助程序或包含 Windows 辅助脚本。麦克风用途说明使用双语资源，写入应用元数据及本地化 `InfoPlist.strings`。引擎、辅助程序及独立录音页面都属于安装包必需资源。
 
-桌面打包直接使用随版本库分发的官方预编译引擎 `desktop/hex-engine/<平台>-<架构>/`（当前 macOS arm64 与 Windows x64 均为 3.3.0），**不在打包时编译引擎源码**，因此不需要 Rust／C/C++ 编译器／CMake／MSVC／Vulkan SDK，也不需要设置 `HARNESS_HEX_BINARY`：
+桌面打包直接使用随版本库分发的官方预编译引擎 `harness/resources/hex/<平台>-<架构>/`（当前 macOS arm64 与 Windows x64 均为 3.3.0），**不在打包时编译引擎源码**，因此不需要 Rust／C/C++ 编译器／CMake／MSVC／Vulkan SDK，也不需要设置 `HARNESS_HEX_BINARY`：
 
 ```sh
 npm --prefix desktop run package -- --x64
 ```
 
-升级或新增平台引擎的标准入口是 `node scripts/vendor-hex-engine.mjs`（流程见 [桌面端文档](../desktop/hex-engine/README.md)）。已有合法的自备引擎时，可用 `HARNESS_HEX_BINARY` 显式覆盖取件来源：
+升级或新增平台引擎的标准入口是 `node scripts/vendor-hex-engine.mjs`（流程见 [Hex 资源说明](../harness/resources/hex/README.md)）。已有合法的自备引擎时，可用 `HARNESS_HEX_BINARY` 显式覆盖取件来源：
 
 ```sh
 HARNESS_HEX_BINARY=/absolute/path/to/hex \
@@ -46,7 +46,7 @@ HARNESS_UPDATE_REPOSITORY=lengweiping1983/SuperHarness \
 npm --prefix desktop run package -- --arm64
 ```
 
-引擎写入 `harness/resources/hex/<平台>-<架构>/` 后进入本机 wheel；桌面运行时记录相对路径、系统、CPU 和 SHA-256。从版本库引擎取件时还会记录版本与来源（`engine.json` 清单），打包前重新核对实际文件身份、内容与版本，不一致直接拒绝打包；校验实现见 `desktop/hex-engine-manifest.mjs`。准备阶段还在临时数据目录中直接启动随包 `hex service --embedded`，完成带认证的健康检查并关闭，不访问用户 discovery、下载模型或录音。这证明随包服务可以启动，不能代替麦克风、识别质量或系统粘贴验收。
+`harness/resources/hex/` 是源码运行和打包的唯一引擎资源目录，同时保留各平台子目录；不再创建第二份源码工作副本。wheel 仅包含本机平台的引擎、许可证和清单，sdist 保留全部平台资源。显式自备引擎只覆盖安装暂存副本，不改写版本库资源；桌面运行时记录相对路径、系统、CPU 和 SHA-256。从版本库引擎取件时还会记录版本与来源（`engine.json` 清单），打包前重新核对实际文件身份、内容与版本，不一致直接拒绝打包；校验实现见 `desktop/hex-engine-manifest.mjs`。准备阶段还在临时数据目录中直接启动随包 `hex service --embedded`，完成带认证的健康检查并关闭，不访问用户 discovery、下载模型或录音。这证明随包服务可以启动，不能代替麦克风、识别质量或系统粘贴验收。
 
 SDK／源码未携带引擎时仍可显式复用已有 Hex 安装。Windows 指针读取有界，拒绝损坏版本及越界路径；有随包引擎时不读取外部安装指针。用户模型、历史、配置和损坏 discovery 均不自动清理或迁移。默认数据位置仍遵循 Hex，`HEX_APPLICATION_SUPPORT_DIR` 可显式覆盖。
 

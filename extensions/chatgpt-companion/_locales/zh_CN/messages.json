@@ -211,5 +211,11 @@
   },
   "install_readme": {
     "message": "请打开 INSTALL.html，按完整的中英文安装与配对步骤操作。"
+  },
+  "show_token": {
+    "message": "显示配对码"
+  },
+  "hide_token": {
+    "message": "隐藏配对码"
   }
 }

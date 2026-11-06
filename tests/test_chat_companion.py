@@ -47,7 +47,7 @@ class ChatCompanionTests(unittest.IsolatedAsyncioTestCase):
         state = self.bridge.state(self.binding)
         self.assertEqual(state['state'], 'continue')
         first = self.bridge.claim(self.binding, state['milestone'], 'continue')
-        self.assertIn(self.sid, first['prompt'])
+        self.assertEqual(first['prompt'], '继续')
         recreated = Companion(self.config)
         pending = recreated.state(self.binding)['pending']
         self.assertEqual(pending['id'], first['id'])
@@ -59,6 +59,19 @@ class ChatCompanionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises((ValueError, sqlite3.IntegrityError)):
             recreated.claim(self.binding, state['milestone'], 'continue')
 
+    async def test_every_phase_sends_only_continue_across_language_changes(self):
+        for language in ('en', 'zh-CN', 'en'):
+            with current_language.set(language):
+                for phase in ('continue', 'generate', 'deliver'):
+                    binding = self.bridge.bind(self.sid, self.url)['binding_id']
+                    state = self.bridge.state(binding)
+                    if phase != 'continue':
+                        state = {**state, 'state': 'image'}
+                    with patch.object(self.bridge, 'state', return_value=state):
+                        intent = self.bridge.claim(binding, state['milestone'], phase)
+                    self.assertEqual(intent['prompt'], '继续')
+                    self.assertEqual(Companion(self.config).state(binding)['pending'], intent)
+
     async def test_proven_unsent_receipt_can_reuse_same_intent_and_preserves_record(self):
         state = self.bridge.state(self.binding)
         first = self.bridge.claim(self.binding, state['milestone'], 'continue')
@@ -67,6 +80,16 @@ class ChatCompanionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second, first)
         with self.bridge.database() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM dispatches').fetchone()[0], 1)
+
+    async def test_explicit_retry_of_proven_unsent_intent_uses_the_current_short_message(self):
+        state = self.bridge.state(self.binding)
+        intent = self.bridge.claim(self.binding, state['milestone'], 'continue')
+        self.bridge.receipt(self.binding, intent['id'], 'not_sent')
+        with self.bridge.database() as db, db:
+            db.execute('UPDATE dispatches SET prompt=? WHERE id=?', ('Saved original instructions ' + intent['id'], intent['id']))
+        retried = self.bridge.claim(self.binding, state['milestone'], 'continue')
+        self.assertEqual(retried, {'id': intent['id'], 'prompt': '继续'})
+        self.assertEqual(self.bridge.state(self.binding)['pending'], retried)
 
     async def test_reading_resume_does_not_create_new_continuation_milestones(self):
         original = self.bridge.state(self.binding)['milestone']

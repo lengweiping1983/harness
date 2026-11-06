@@ -1,7 +1,7 @@
 /**
  * 随版本库分发的 Hex 语音引擎清单读取与完整性校验（构建期使用）。
  *
- * 单一事实来源是 desktop/hex-engine/<tag>/engine.json，由 scripts/vendor-hex-engine.mjs
+ * 单一事实来源是 harness/resources/hex/<tag>/engine.json，由 scripts/vendor-hex-engine.mjs
  * 登记：version / source / sha256 / binary / platform / arch。本模块只负责
  * 「当前打包平台」的清单读取、文件头身份识别与内容核对，不跨平台比较版本。
  *
@@ -29,7 +29,7 @@ export function engineFilename(platform) {
 }
 
 export function engineDir(root = REPO_ROOT) {
-  return path.join(root, 'desktop', 'hex-engine')
+  return path.join(root, 'harness', 'resources', 'hex')
 }
 
 /** 从标签反推平台/架构，用于核对二进制文件头：windows-x86_64 → win32/x64。 */

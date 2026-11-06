@@ -29,6 +29,8 @@ class ChatCompanionPackageTests(unittest.TestCase):
                     self.assertEqual(hashlib.sha256(bundle.read(name)).hexdigest(), digest)
                 for name in ASSETS:
                     self.assertEqual(bundle.read(name), (source / name).read_bytes())
+                self.assertIn(b"from './secret-input.mjs'", bundle.read('popup.mjs'))
+                self.assertIn('secret-input.mjs', hashes)
                 for language in ('zh_CN', 'en'):
                     messages = json.loads(bundle.read(f'_locales/{language}/messages.json'))
                     for key in GUIDE:

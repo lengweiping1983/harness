@@ -62,9 +62,8 @@ harness = [
   "academy/content/**/*.json",
   "academy/content/**/*.md",
   "academy/content/**/*.py",
-  # hex 语音服务二进制：由 desktop/prepare-voice.mjs 从 desktop/hex-engine/
-  # （随版本库分发的官方预编译引擎）复制到打包期运行时路径，再随 wheel 分发；
-  # 本仓库不再包含 Hex 源码，也不在打包时编译引擎。
+  # Hex 官方预编译引擎与许可证直接使用包内唯一资源目录。
+  # sdist 保留所有平台资源，build_support.BuildPy 只将本机平台资源写入 wheel。
   # hex_tools.py 以包内固定路径加载，缺失即是安装包不完整。
   "resources/hex/**/*",
 ]
