@@ -91,3 +91,14 @@ class TodoProgressReminder:
         self._final_checked.add(self.fingerprint)
         return {'kind': 'todo_final_review', 'source_seq': event.seq,
                 'text': tr('owned.todo_progress.final_review')}
+
+    def snapshot_context(self, event: Any, *, session_id: str, start_seq: int) -> str | None:
+        """请求尾部携带当前快照，避免模型遗漏版本；不自动替换调用参数。"""
+        if event is None or not event.data.get('todos'):
+            return None
+        if event.seq <= start_seq and not self._unfinished(event):
+            return None
+        saved = TodoSnapshot(session_id, event.data['list_id'], event.data.get('plan_id'), event.seq)
+        facts = {**saved.metadata(), 'tasks': [
+            {'id': row['id'], 'status': row['status']} for row in event.data['todos']]}
+        return tr('todo.runtime_snapshot') + '\n' + json.dumps(facts, ensure_ascii=False)

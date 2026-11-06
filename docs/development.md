@@ -392,6 +392,8 @@ MCP 服务及隧道准备的自有错误用 `McpServiceError` 保存资源键和
 
 ## 工具说明资源与消费者回归
 
+`tests/test_browser_delivery_review.py` 复现文件修复后沿用旧截图/诊断、重载失败后普通观察成功、用户接管及清单全部勾选时仍缺少复验的组合，经过真实 `AgentLoop` 和工具结果提交路径核对有限复核、当前轮次与对话隔离、无自动重放；另保留正常检查、后续输入和页面错配的边界。`tests/test_delivery_tool_guidance.py` 经实际模型请求核对清单版本随成功更新变化、不提升任务正文，以及同一实例英文→中文→英文的工具链与前台/后台说明消费。这些确定性回归不启动真实浏览器或服务，也不评价在线模型遵从率；交付复核的实际边界见[事件和上下文](architecture.md#事件和上下文)。
+
 工具 schema 在 `harness/llm/types.py` 保存显式资源身份；模型入口 `AgentLoop._eligible_tool_schemas` 与网页目录 `harness/web/views.py` 都调用 `resolve_description(language)`。工具搜索使用同一解析视图，权限指纹使用注册原件。后端 `harness.i18n` 只提供资源读取与 `tr`，不再提供原文反向匹配代理。
 
 `tests/test_schema_resource_identity.py` 核对同一注册实例在英文→中文→英文中与目标语言重新构建的完整协议一致，且不污染注册原件；覆盖文件、Shell、图片、提问、作业、终端、检索、项目、记忆、计划、Goal、Todo、智能体、workflow、工具发现、插件编写、浏览器及 MCP 资源工具。保留后台开关、权限组合、非默认限制值和嵌套说明的矩阵，不能用只检查顶层说明代替完整协议比较。
