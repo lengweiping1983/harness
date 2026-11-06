@@ -39,6 +39,7 @@ import { cn, formatNumber } from '@/lib/utils'
 import {MessageTimestamp} from './MessageTimestamp'
 import { formatSize } from '@/lib/attachments'
 import { userMessageText } from '@/lib/userMessageText'
+import { copyMessageSelection } from '@/lib/copyMessageSelection'
 import { api, unwrap } from '@/lib/api'
 import { modelFailure } from '@/lib/modelFailure'
 import { turnOutcomeCopy } from '@/lib/turnOutcome'
@@ -184,7 +185,7 @@ const UserContent = memo(function UserContent({ block, sessionId, speakerLabel, 
             <Button size="sm" variant="secondary" disabled={sending} onClick={() => sessionId && useDraftStore.getState().setInlineEdit(sessionId, editKey)}>{t('ui.messageEdit.cancelInline')}</Button>
             <Button size="sm" disabled={sending || (!editText.trim() && !block.attachments?.length)} onClick={() => void submitEdit()}>{t('ui.components.chat.Composer.edecf0ae6e51')}</Button>
           </div>
-        </div> : <div className="md text-base leading-reading text-ink">
+        </div> : <div data-user-message-body="" onCopy={copyMessageSelection} className="md text-base leading-reading text-ink">
           <Markdown dense>{userMessageText(block.text)}</Markdown>
         </div>}
       </div>

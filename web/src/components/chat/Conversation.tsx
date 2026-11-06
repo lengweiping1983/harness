@@ -152,7 +152,7 @@ export function Conversation({
     const loadedIds = new Set(body.map(block => block.id))
     for (const id of toolRunIdentities.current.aliases.keys()) if (!loadedIds.has(id)) toolRunIdentities.current.aliases.delete(id)
     const out: Item[] = []
-    if (history && history.total > 0) out.push({ kind: 'history', id: 'conversation-history' })
+    if (history && (history.has_more || history.loading || history.error || history.resetRequired)) out.push({ kind: 'history', id: 'conversation-history' })
     const formatDay = createDateHeadingFormatter()
     let lastDay = ''
     for (const row of completionRows(groupToolRuns(conversationRows(changeRows.filter(row => row.kind !== 'changes' || changeCardVisible(row, sessionId, changeChoices)), turns, activityChoices), toolRunChoices, toolRunIdentities.current.aliases), turns)) {
@@ -164,7 +164,7 @@ export function Conversation({
       out.push(row)
     }
     return out
-  }, [body, changeRows, changeChoices, history?.total, turns, activityChoices, toolRunChoices, sessionId, locale])
+  }, [body, changeRows, changeChoices, history?.has_more, history?.loading, history?.error, history?.resetRequired, turns, activityChoices, toolRunChoices, sessionId, locale])
 
   const navigationEntries = useMemo(() => messageNavigationEntries(items, history), [items, history])
   const navigationRead = useRef<Promise<void> | null>(null)
@@ -599,13 +599,12 @@ export function Conversation({
                 if (!row) return null
                 if (row.kind === 'history') return <div key={row.id} data-index={item.index} data-row-id={row.id} ref={restoreSettled ? virtualizer.measureElement : undefined}
                   className="flex flex-col items-center gap-2 py-3 text-xs text-muted">
-                  <span>{t('ui.conversation.historyCount', {loaded: history ? history.end - history.start : 0, total: history?.total ?? 0})}</span>
                   {history?.error ? <p role="alert" className="max-w-full text-center text-danger">{noticeText(history.error)}</p> : null}
                   {history?.resetRequired ? <Button size="sm" variant="secondary" icon={<RotateCw aria-hidden className="h-3.5 w-3.5" />} onClick={onRefreshHistory}>{t("ui.components.chat.Conversation.3014a4a1a292")}</Button>
                     : history?.has_more ? <ShowMoreControl className="w-auto" disabled={history.loading} onClick={loadOlder}>
                       {history.loading ? t("ui.components.chat.Conversation.3e8f9af3b2e4") : history.error ? t("ui.components.chat.Conversation.6d7f1def5670") : t("ui.showMore")}</ShowMoreControl>
                     : null}
-                  <span role="status" aria-live="polite" className="sr-only">{history?.loading ? t("ui.components.chat.Conversation.bca2a7dd358e") : history?.error ? '' : t("ui.components.chat.Conversation.64b4a67b6241")}</span>
+                  <span role="status" aria-live="polite" className={history?.loading && !history.has_more && !history.resetRequired ? undefined : 'sr-only'}>{history?.loading ? t("ui.components.chat.Conversation.bca2a7dd358e") : history?.error ? '' : t("ui.components.chat.Conversation.64b4a67b6241")}</span>
                 </div>
                 if (row.kind === 'day') {
                   return (

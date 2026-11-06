@@ -85,6 +85,18 @@ await browserScenario(async ({server,browser}) => {
     await page.evaluate(config=>window.configure(config),{language,dark,short:true,active:false,tasks:false,withHistory})
     await page.getByText('Original user message 原文',{exact:true}).waitFor()
     await page.getByText('Short reply 原文',{exact:true}).waitFor()
+    assert.equal(await page.locator('[data-row-id="conversation-history"]').count(),0,'Complete history does not show an event count or reserve a history row')
+    const copied=await page.locator('[data-user-message-body]').evaluate(body=>{
+      const selection=window.getSelection(),range=document.createRange()
+      range.selectNodeContents(body);selection.removeAllRanges();selection.addRange(range)
+      const clipboardData=new DataTransfer()
+      clipboardData.setData('text/html','<p>Original user message 原文</p>')
+      const event=new ClipboardEvent('copy',{clipboardData,bubbles:true,cancelable:true})
+      body.dispatchEvent(event)
+      selection.removeAllRanges()
+      return {text:clipboardData.getData('text/plain'),html:clipboardData.getData('text/html'),handled:event.defaultPrevented}
+    })
+    assert.deepEqual(copied,{text:'Original user message 原文',html:'',handled:true},'User selection copies only its visible text without paragraph markup or added blank lines')
     await page.waitForFunction(()=>{
       const scroll=document.querySelector('.conversation-scroll'),first=scroll.querySelector('[data-row-id]')
       return first&&Math.abs(first.getBoundingClientRect().top-scroll.getBoundingClientRect().top)<3
