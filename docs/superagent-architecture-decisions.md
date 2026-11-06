@@ -8,7 +8,7 @@
 
 每项 ADR 记录背景、决策、替代方案和影响。维护者确认后将状态更新为 Accepted；若实施中需要偏离，新增 ADR 并说明迁移，不静默改写旧决定。
 
-本轮只冻结领域与接口边界，不修改运行代码、现有数据库或 dsh-superagent 参考源码。
+Phase 0 冻结领域与接口边界；后续实际交付见领域模型的当前实现边界。Phase 4 的整合路线以 ADR-011 和总体方案为准。参考原型不进入运行依赖。
 
 ## 2. ADR 摘要
 
@@ -24,7 +24,7 @@
 | ADR-008 | Job 是逻辑节点，Assignment 是执行尝试 | Proposed |
 | ADR-009 | Artifact / Evidence / Review 以真实文件和原始运行证据为准 | Proposed |
 | ADR-010 | Pause / Resume / Cancel 与真实 Run 收尾分离 | Proposed |
-| ADR-011 | v1 → v2 新 state_dir、离线迁移、只读 Shadow、禁止双写 | Proposed |
+| ADR-011 | Phase 4 统一替换，无旧版运行数据转换 | Accepted |
 | ADR-012 | 不把工具白名单或 Worktree 宣称为 OS Sandbox | Proposed |
 | ADR-013 | Domain / Application / Ports / Adapters 依赖方向 | Proposed |
 | ADR-014 | Phase 0 先冻结协议，Phase 1 再实现协调账本 | Proposed |
@@ -212,25 +212,15 @@ Phase 2 先实现静态 SourceRegistry 和内置 GitHub / Feishu / Local Adapter
 - 仅将 Mission 状态改为 cancelled：拒绝，可能遗留写入进程。
 - 根据 Session ID 停止整个会话：拒绝，Session 可能复用且包含其他 Run。
 
-### ADR-011：v1 → v2 新 state_dir、离线迁移、只读 Shadow、禁止双写
+### ADR-011：Phase 4 统一替换，无旧版运行数据转换
 
 **决策**
 
-- v1 保持原配置和 state_dir，不原地升级。
-- v2 使用显式配置版本和独立 state_dir。
-- v1 / v2 共用实例进程锁；v2 CoordinatorHost 拒绝 v1 状态目录，v1 SuperagentService 拒绝已有 v2 协调账本的目录。
-- 离线导出、导入、哈希核对和迁移报告先于切换。
-- Shadow 只读比较，不发送消息、不启动 Worker、不修改账本。
-- 不进行 v1 / v2 双写。
-- 缺少授权证据的旧任务标记 legacy_unverified，恢复写操作前重新授权。
-- 旧 unknown / applying / sending 保持未知，不自动重放。
-- 回退通过恢复旧配置和旧 state_dir 完成；旧目录保留至维护者批准归档。
-
-**替代方案**
-
-- 启动时自动迁移所有 SQLite：拒绝，用户数据和外部副作用不可逆。
-- 迁移时重新调用模型：拒绝，可能改变历史决策并创建新工作。
-- 把 dsh 原型数据库当作生产迁移源：拒绝，dsh 是代码参考，不是 Harness 运行数据来源。
+- Phase 4 结束时只有一个 SuperagentService、一个协调账本、一套调度、执行和恢复机制；Phase 5 起仅扩展同一系统。
+- 当前没有旧版运行数据，不开发旧任务导入、离线转换、历史协议兼容或双轨运行工具；本决策取代此前将迁移退役延后至 Phase 7 的路线。
+- 旧目录仍属于用户数据。发现旧账本或目录混用时在写入前拒绝，保留原件，不隐式清理或迁移。
+- Coordinator 已登记的迁移内容及校验和不变，新增结构使用新迁移；Harness 原生执行事实不复制。
+- 生产宿主不依赖旧目录和 Shadow；旧源码仅在调用方、动态绑定、资源分发及有效业务回归完成迁接后删除。
 
 ### ADR-012：不把工具白名单或 Worktree 宣称为 OS Sandbox
 

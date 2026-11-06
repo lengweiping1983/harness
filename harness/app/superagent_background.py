@@ -2,7 +2,7 @@
 from collections.abc import Mapping
 
 from ..session.tool_activity import confirmed_tool_result
-from .superagent_inbox import _error
+from .superagent_common import _error
 
 
 def _display(call):

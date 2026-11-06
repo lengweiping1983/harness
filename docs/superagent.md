@@ -529,12 +529,10 @@ Watchdog 仍不是跨设备租约、操作系统级进程监督或业务验收�
 
 `--superagent CONFIG` 开启前述运行模式，按配置选择本地文件及可选 GitHub／飞书信道；以上尚未实现的完整闭环不能由该参数开启，也不能直接加载绑定其他 Harness 运行时的 Superagent 插件。
 
-## 下一代架构方案
+## 统一整合架构与当前边界
 
-当前文件描述已经实现的运行行为、配置、状态和限制。下一代总体架构（领域模型、模块拆分、协调数据表、状态机、调用时序、迁移路线和分阶段实施计划）统一维护在[下一代 Harness Superagent 总体架构方案](superagent-next-generation-architecture.md)。
+当前 `--superagent CONFIG` 仍启动前述事件路由或自主目标服务。统一协调账本、来源授权与单 Worker 执行基础已通过显式 CoordinatorHost API 提供；这不等于生产入口已经替换。
 
-Phase 1 的统一协调账本已经在源码中实现，包括 CoordinatorStore、CoordinatorApplicationService、Durable Effect / Outbox、恢复审计和 Migration 1–8。内部 Runtime Composition Root 为 `CoordinatorHost`：它只管理独立 v2 state_dir 中的 `superagent.sqlite3`，与旧版共用实例进程锁，同目录及父子嵌套路径双向拒绝混用 v1/v2 状态目录；`CoordinatorHost.open` 必须显式传入 `legacy_state_dir`，并核对两个规范化路径不重叠。Unit of Work、状态转移、Outbox 和 Recovery 操作均受宿主租约保护，在途操作存在时拒绝关闭并释放锁，缓存服务句柄关闭后不能继续访问数据库。普通 Repository.update 不能直接修改聚合 state。状态转移必须由注入的 `HostEvidenceVerifier` 将原始宿主回执核验为 `VerifiedTransitionEvidence`，未注入核验器时会拒绝转移。
+Phase 4 已增加执行资源作用域、宿主系统节点物化、逐 Assignment 输入投递记录、持久暂停准入，以及经原生 Run 核验的真实文件捕获和导入适配。Artifact / Delivery 服务当前仅能显式内部调用，尚未接入统一 Scheduler；取消意图也尚未接入统一目标停止 Runtime。完整已实现边界和缺口统一见[领域模型](superagent-domain-model.md#9-phase-14-当前实现边界)。
 
-Phase 2 已在显式 `CoordinatorHost` API 中实现 Source Registry 与 Authorization Engine：内置 GitHub、Feishu、Local SourceKind，完成来源事件验签与规范化、Trigger 去重、Thread / Channel 事实记录、SourceCursor CAS，以及 PolicyRevision、Gate、Evaluation、Decision、Mandate、Ticket 的授权闭环。SourceInstance 配置变化会在同一事务中核验并撤销旧 Mandate；Thread 关闭会阻止后续事件进入授权，并撤销其来源 Thread 上的 Mandate。GitHub 生命周期按 Provider 更新时间排序，同一观察时间冲突时关闭状态优先。Shadow 只读比较 v1 Inbox / Router 与 v2 来源事实、决策结果，不写任一账本、不执行 Ticket。accept 的意图与方向证据必须引用同一条 Gate 放行来源正文或标题中的原文片段；模型自述不能单独构成授权依据。具体协议与边界见[领域模型](superagent-domain-model.md)和[下一代架构方案](superagent-next-generation-architecture.md)。
-
-Phase 2 仍未接入 CLI / HTTP / Panel 默认路由，也不创建旧版 Harness、Router、Worker 或新版 Executor；`--superagent CONFIG` 仍只启动旧版 v1。Channel 目前只记录地址，reply / read_context 均为 false；真实 Harness Run / Provider Receipt 核验 Adapter、Executor、生产外发及新架构默认入口仍属后续阶段。v1/v2 不双写、不原地迁移；生产默认路由保持 v1，Phase 2 不代表新架构已经替换生产运行路径。
+[总体实施计划](superagent-next-generation-architecture.md#phase-4完整-superagent-整合与替换)要求 Phase 4 结束时完成唯一入口、完整业务能力接线及旧编排退役。当前没有旧版运行数据，不开发旧任务导入或历史协议兼容工具；意外发现的旧目录保留原件并明确拒绝混用。工作台、远程执行及跨平台 Sandbox 分别在同一系统上扩展和验收。

@@ -26,6 +26,26 @@
 
 用户提供的文章把强依赖任务协作列为开放问题；参考原型的 Ticket／Assignment 主要承接独立任务。这些是选择目标依赖图与真实产物交接的背景，不构成质量或吞吐优于其他系统的证据。
 
+## Phase 4 协调模型与文件适配审查
+
+本节相对于整合改造前 `5f1c3b7` 核对当前增量，仅覆盖统一模型和显式内部适配入口，未核验或宣称统一 Scheduler、生产 CLI、目标停止 Runtime、独立复核及生产 Sender 已交付。当前旧生产链仍保留。
+
+| 触发条件 | 源码措施 | 对应回归 |
+|---|---|---|
+| 同一模板承接多个节点或阶段 | 迁移及执行服务按 Mission / Job / stage 绑定 Worker，工作树共同组采用 Mission | `test_same_profile_has_independent_node_and_continuation_resources`、`test_worker_scope_and_input_receipt_bind_the_original_assignment` |
+| 模型提出系统角色，或封存后改写节点 | Planner 只接收 work，宿主 system_profiles 物化 integrate / review 后整体封存并回查 | `test_planner_cannot_propose_system_roles`、`test_host_materializes_system_roles_and_seals_the_complete_plan` |
+| 工作树创建等待期间暂停 | 执行服务在下一资源边界核验持久控制，恢复复用原工作树 | `test_pause_during_workspace_creation_prevents_session_and_submission` |
+| 缺失或损坏控制状态默认放行 | 控制模式核对原命令、代次与回执；缺失明确拒绝，不修补原件 | `test_missing_control_never_defaults_to_allowed_and_reads_do_not_recreate_it`、`test_corrupt_control_mode_and_receipt_are_rejected_without_repair` |
+| 暂停后原运行结束仍产生完成与回复 | 原报告可冻结，但最终结算及 Outbox Candidate 检查控制模式 | `test_pause_blocks_completion_and_reply_until_explicit_resume` |
+| 同一输入投递给多个执行，或未知投递被重新认领 | 独立投递身份、CAS、作用域约束和 unknown 转移限制 | `test_input_has_independent_assignment_receipts_and_cannot_cross_tickets` |
+| 未提交二进制与删除项需要交接 | 冻结 Git 对象生成 Manifest，原生 Worktree 导入保留源仓库 | `test_real_uncommitted_binary_and_deleted_files_are_frozen_and_delivered` |
+| 捕获 / 导入已发生但返回丢失 | 稳定 Effect 加原工作树回执回查，不重放原写入 | `test_lost_capture_receipt_recovers_original_frozen_delivery_without_second_capture`、`test_lost_import_receipt_recovers_exact_original_import_without_second_write` |
+| Effect 已完成但 Delivery 投影确认丢失 | 按已存原回执补齐协调投影，不再次导入 | `test_completed_import_recovers_a_lost_delivery_projection_without_another_import` |
+| 伪造产物工作树，或原 Run 未确认收尾 | 消费前核对账本身份及原生 Run / Tool / Background 证据 | `test_forged_artifact_workspace_cannot_supply_dependency_files`、`test_capture_without_a_settled_original_run_never_creates_an_effect` |
+| 捕获无确切回执或预检期间暂停 | unknown 保留；预检后重新准入，不执行迟到写入 | `test_missing_capture_receipt_remains_unknown_without_repeating_the_operation`、`test_pause_after_import_preflight_prevents_late_workspace_write` |
+
+文件适配回归使用真实临时 Git 工作树和确定性模型传输驱动的原生 Run，不代表模型判断质量、生产账号、长期负载或跨平台实机验收。后续缺口以领域模型的当前实现边界为准。
+
 ## 已核对问题与防回归依据
 
 | 触发条件 | 当前源码措施 | 回归 |

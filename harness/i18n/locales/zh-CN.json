@@ -8555,5 +8555,17 @@
   "ui.companion.saveUnconfirmed": "保存结果未确认，不会自动重复保存；请核对连接状态。",
   "ui.companion.tokenHint": "配对码由 Harness 自动生成，只需复制到浏览器扩展中，无需在此输入。",
   "ui.companion.tokenPending": "启动 MCP 后自动生成",
-  "ui.companion.tokenDisabled": "启用接续并启动 MCP 后可用"
+  "ui.companion.tokenDisabled": "启用接续并启动 MCP 后可用",
+  "superagent.mission.not-running": "当前目标状态不允许接受新的工作。",
+  "superagent.mission.paused": "此目标已暂停。请先继续目标，再启动新的工作或发布结果。",
+  "superagent.mandate.unavailable": "当前授权不允许执行此操作。",
+  "superagent.artifact.scope": "产物操作与原目标、执行任务或工作树不匹配。",
+  "superagent.artifact.run-unsettled": "捕获前必须确认原运行、工具操作和后台作业均已收尾。",
+  "superagent.artifact.unknown": "无法确认原捕获结果。已保留原状态，不会重复捕获。",
+  "superagent.artifact.capacity": "产物超过支持的文件数量或内容大小限制。已保留原文件。",
+  "superagent.delivery.scope": "此交付不属于同一目标、仓库或冻结基线。",
+  "superagent.delivery.started": "目标执行任务启动后不能再导入文件。",
+  "superagent.delivery.unknown": "无法确认原导入结果。已保留原状态，不会重复导入。",
+  "superagent.delivery.conflict": "此交付身份与原冻结输入冲突。",
+  "superagent.control.capacity": "控制历史已达到容量上限。已保留现有请求和回执。"
 }

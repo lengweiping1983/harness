@@ -26,9 +26,9 @@ class CoordinatorStoreTests(unittest.TestCase):
         self.assertTrue(self.path.exists())
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute("PRAGMA application_id").fetchone()[0], _APPLICATION_ID)
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 13)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], len(MIGRATIONS))
             self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 13)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], len(MIGRATIONS))
             self.assertEqual(db.execute("SELECT instance_id FROM instances").fetchone()[0], "instance-a")
 
     def test_reopen_is_idempotent_and_identity_is_bound(self):
@@ -103,15 +103,15 @@ class CoordinatorStoreTests(unittest.TestCase):
             db.commit()
         return instance_id, identity, effect_id
 
-    def test_every_prior_schema_version_upgrades_to_v13_without_losing_effects(self):
-        for version in range(1, 13):
+    def test_every_prior_schema_version_upgrades_without_losing_effects(self):
+        for version in range(1, len(MIGRATIONS)):
             with self.subTest(from_version=version):
                 path = Path(self.temp.name) / f"schema-v{version}.sqlite3"
                 instance_id, identity, effect_id = self._create_legacy_schema_with_effect(path, version)
                 upgraded = CoordinatorStore(path, instance_id=instance_id, identity=identity)
                 with closing(sqlite3.connect(path)) as db:
-                    self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 13)
-                    self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 13)
+                    self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], len(MIGRATIONS))
+                    self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], len(MIGRATIONS))
                     columns = {row[1] for row in db.execute("PRAGMA table_info(effects)")}
                     self.assertTrue({"correlation_id", "last_event_id"} <= columns)
                     legacy = db.execute(
@@ -674,9 +674,11 @@ class CoordinatorStoreTests(unittest.TestCase):
                 "trigger_dispositions", "policy_versions", "policy_rules", "source_policies",
                 "evaluations", "decisions", "mandates", "ticket_subscriptions", "ticket_inputs",
                 "workers", "evidence", "attentions",
+                "input_deliveries", "artifacts", "deliveries", "reviews", "mission_controls",
+                "control_commands", "mission_instructions", "watchdog_snapshots",
             } <= names)
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 13)
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 13)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], len(MIGRATIONS))
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], len(MIGRATIONS))
             self.assertIn("updated_at", {row[1] for row in db.execute("PRAGMA table_info(workers)")})
             self.assertIn("updated_at", {row[1] for row in db.execute("PRAGMA table_info(attentions)")})
 

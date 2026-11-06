@@ -1,6 +1,6 @@
 # 下一代 Harness Superagent 领域模型与数据契约
 
-> 文档状态：目标领域模型 v0.1；Phase 1 / Phase 2 当前实现边界见第 9 节。\
+> 文档状态：目标领域模型 v0.1；Phase 1–4 当前实现边界见第 9 节。\
 > 文档性质：目标领域模型，不代表当前代码已经实现。\
 > 关联总览：[下一代 Harness Superagent 总体架构方案](superagent-next-generation-architecture.md)。\
 > 关联规范：[状态机与合法转移](superagent-state-machines.md) · [架构决策与接口协议](superagent-architecture-decisions.md)。\
@@ -418,7 +418,7 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 | Results drafts | Report / Outbox Candidate | Draft 不等于 Sent |
 | Harness 原生存储 | Evidence Provider | 不复制 Run / Tool Event 历史 |
 
-## 9. Phase 1 / Phase 2 / Phase 3 当前实现边界
+## 9. Phase 1–4 当前实现边界
 
 本文件定义完整目标领域模型。Phase 1 的独立持久化基础设施、状态机基础与宿主隔离已完成；Phase 2 的 Source Registry、Authorization Engine 和只读 Shadow 已通过显式 CoordinatorHost API 提供；Phase 3 的单 Worker 执行闭环也已通过显式 CoordinatorHost API 实现并完成专项回归。所有新能力仍保持显式 opt-in，不切换 v1 生产默认路由。
 
@@ -463,11 +463,29 @@ Phase 3 已实现的单 Worker 执行闭环：
 
 因此，Phase 1 按持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 的来源事实、授权闭环和只读 Shadow 已交付；Phase 3 的单 Worker 执行、原 Run 恢复、冻结 Report 与后续效果恢复已在显式 CoordinatorHost API 中实现。多 Worker DAG / Artifact Delivery、V2 MissionControl、生产 Channel 外发和新架构默认入口仍未交付；v1 生产默认路由保持不变。
 
+### Phase 4 当前模型与适配基础
+
+Phase 4 的实施顺序及出口统一见[总体方案](superagent-next-generation-architecture.md#phase-4完整-superagent-整合与替换)。当前只完成以下基础接线，不能据此宣称 Phase 4 已完成或生产入口已统一：
+
+- 新增协调库迁移，保留已登记迁移及校验和。Worker 增加 Mission / Job / stage 归属，同一 Profile 可用于多个节点或阶段；既有协调记录仅保留原身份，不合成授权或重放运行。
+- PlanRevisionRepository.create 的可信宿主参数 `system_profiles` 在封存前物化 integrate / review 系统节点及依赖；Planner 输入仍只能含 work 节点。读取核对完整封存计划、角色、哈希与依赖。
+- HarnessExecutorAdapter 支持来源允许的多 Profile 集；来源有多个 Profile 时必须显式指定 default_profiles。工作树共同组按 Mission 绑定，每个 Worker 仍有独立成员与 Session 身份。
+- 单 Worker 路径先建立冻结基线、计划及持久控制记录，再创建资源。`execution.control_mission`、`mission_control`、`control_receipt` 仅向可信宿主提供模式及回执；资源创建、后续输入接受、Mission 完成及回复候选遵守暂停。取消目前只记录意图，尚无统一目标停止 Runtime，不能称为真实停止已完成。
+- 独立 InputDelivery 表及服务按 Input / Assignment 保存投递状态、Revision 和原回执；当前单 Worker 消费链已记录独立投递，但仍使用 TicketInput 的单目标字段选取输入。多节点投递与阶段消费接线尚未完成。
+- CoordinatorArtifacts 通过显式内部调用核验持久 Assignment、原 Run、工具及后台收尾后捕获真实文件；通过原生 Worktree 预检和导入交接。Effect 保存稳定操作身份；未知捕获或导入只回查原回执，已确认 Effect 可恢复丢失的 Delivery 投影，不再次执行文件写入。Manifest 含冻结文件内容 SHA-256 和删除项，支持最多 4096 个文件、单文件 16 MiB、总内容 64 MiB，Git 文件列表与删除列表各限 2 MiB；超限明确拒绝并保留原件。
+- Review、MissionInstruction、WatchdogSnapshot 的协调表已建立，但其统一运行服务尚未接线。独立 Artifact / Delivery 服务也尚未接入统一 Scheduler 或生产 CLI；当前无默认后台任务调用它们。
+- 通用参数、严格 JSON 和运行进度投影已抽离为无旧账本依赖的组件；旧 Router、MissionStore 及信道仍在生产链上，没有删除有效业务回归。
+
+后续仍需完成统一服务生命周期与真实目标停止、单多节点共用 Scheduler、质量门及 Checkpoint / Watchdog、持续协作与生产 Outbox Sender、CLI 切换及旧编排退役。不开发旧版运行数据导入、历史协议兼容或双轨运行工具。
+
 ## 10. 源码依据
 
 ### Harness
 
-- harness/app/superagent_coordinator_store.py：v2 独立协调账本、Schema v1–v13 迁移、Revision、AuditEvent、Durable Effect 与 UOW。
+- harness/app/superagent_coordinator_migration_14.py：执行资源作用域、InputDelivery、Artifact / Delivery / Review 及控制协调表。
+- harness/app/superagent_coordination.py：持久控制模式与回执、逐 Assignment 输入投递。
+- harness/app/superagent_artifacts.py：真实捕获、导入、稳定 Effect 与原回执恢复。
+- harness/app/superagent_coordinator_store.py：统一协调账本、带校验和的 Schema 迁移、Revision、AuditEvent、Durable Effect 与 UOW。
 - harness/app/superagent_coordinator_migration_13.py：Worker / Attention `updated_at` 字段及历史行回填。
 - harness/app/superagent_coordinator_host.py：v2 宿主组合、活动操作租约、来源 / 授权 / Shadow / Execution API 与 v1 隔离。
 - harness/app/superagent_execution.py：单 Worker Mission / Job / Assignment 编排、TicketInput、Run reconciliation、冻结 Report、Attention / Handback 与 Outbox Candidate。

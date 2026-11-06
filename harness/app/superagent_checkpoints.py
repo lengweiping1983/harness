@@ -1,7 +1,7 @@
 """工作节点的阶段交接协议；模型报告不能代替原运行与冻结文件事实。"""
 from __future__ import annotations
 
-from .superagent_inbox import _error, _text
+from .superagent_common import _error, _text
 
 
 def validate_checkpoint(value):

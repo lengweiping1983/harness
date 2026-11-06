@@ -432,6 +432,16 @@ UI Stage 不单独持久化，建议按以下优先级从同一只读快照派�
 - Job ready 必须满足 DAG 依赖、Delivery、Mandate 与控制条件；done 必须有角色对应的冻结结果和 SHA-256。Assignment 的 accepted / running / capturing / terminal 结果必须绑定原 submission_key、原 Run 和角色输出，不能以模型报告代替。
 - 取消等待不等于撤销已接受写入；资源收尾必须由原操作所有者完成。
 
+## Phase 4 的统一运行约束
+
+实施顺序见[总体方案](superagent-next-generation-architecture.md#phase-4完整-superagent-整合与替换)。控制、输入和文件交付的状态均在同一协调账本，不以文件投影替代业务事实。
+
+- InputDelivery 独立记录 pending / submitting / accepted / applied / unapplied / unknown / rejected；原生接受和实际应用分别核验，unknown 不自动再次投递。
+- Delivery 的 pending / planning / applying / applied / conflict / unknown / cancelled 不与 Assignment 状态混用；原文件导入操作未知时仅回查。
+- 控制模式 running / paused / cancelled 与 Mission 的真实取消收尾状态分离。没有完整 Run / Background Job 收尾证据不能标记 cancelled。
+- work 阶段结束不等于 Job done；Checkpoint 接续创建新 Assignment，最终阶段才解锁依赖。
+- 文件交付完成必须绑定冻结候选及独立 Review；普通报告的完成分支不能绕过该质量门。
+
 ## 13. Phase 0 验收用例
 
 Phase 1 应把下列用例转成纯确定性单元测试和 SQLite 事务测试：

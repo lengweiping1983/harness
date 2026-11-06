@@ -12,6 +12,7 @@ from ..core.errors import HarnessError
 from .superagent_coordinator_service import CoordinatorApplicationService
 from .superagent_coordinator_store import CoordinatorStore, _hash, _json, _now
 from .superagent_executor import ExecutionAdapter, WorkerProfile
+from .superagent_coordination import CoordinatorControl, CoordinatorInputDelivery
 
 
 _ACTOR = {"kind": "host", "component": "superagent-v2-execution"}
@@ -35,6 +36,8 @@ class CoordinatorExecutionService:
             raise ValueError("V2 execution requires at least one WorkerProfile")
         self._locks: dict[str, asyncio.Lock] = {}
         self._closed = False
+        self._control = CoordinatorControl(store)
+        self._input_deliveries = CoordinatorInputDelivery(store)
         executor.set_worker_lookup(self._worker_row)
 
     def close(self) -> None:
@@ -42,6 +45,26 @@ class CoordinatorExecutionService:
             return
         self._closed = True
         self._executor.close()
+
+    def control_mission(self, mission_id, action, *, request_id, actor):
+        """可信宿主控制入口；继续前重新核验授权，重复请求只返回原回执。"""
+        self._ensure_open()
+        previous = self._control.receipt(request_id)
+        if previous is None and action == "resume":
+            mission = self._read_one("SELECT ticket_id FROM missions WHERE mission_id=?", (mission_id,))
+            ticket = self._authorization.ticket(mission["ticket_id"]) if mission else None
+            mandate_id = ((ticket or {}).get("mandate") or {}).get("mandate_id")
+            if not mandate_id or self._authorization.revalidate_mandate(mandate_id, actor=actor).get("status") not in {"valid", "affected"}:
+                raise HarnessError(tr("superagent.mandate.unavailable"), code="superagent/mandate-unavailable")
+        return self._control.command(mission_id, action, request_id=request_id, actor=actor)
+
+    def control_receipt(self, request_id):
+        self._ensure_open()
+        return self._control.receipt(request_id)
+
+    def mission_control(self, mission_id):
+        self._ensure_open()
+        return self._control.mode(mission_id)
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -254,6 +277,19 @@ class CoordinatorExecutionService:
         ).rowcount
         if changed != 1:
             raise HarnessError("Ticket Input changed concurrently", code="superagent/revision-conflict")
+        if target == "delivered":
+            delivery = self._input_deliveries.prepare_in_transaction(db, input_id, assignment_id,
+                delivery_key=delivery_key, initial_state="submitting", actor=_ACTOR)
+            if delivery["state"] not in {"pending", "submitting"}:
+                raise HarnessError(tr("superagent.conflict"), code="superagent/input-delivery-conflict")
+        elif owner is not None and target == "read":
+            delivery = db.execute("SELECT * FROM input_deliveries WHERE input_id=? AND assignment_id=?", (input_id, owner)).fetchone()
+            if delivery is None:
+                raise HarnessError(tr("superagent.corrupt"), code="superagent/input-delivery-missing")
+            if delivery["state"] != "applied":
+                self._input_deliveries.transition_in_transaction(db, input_id, owner, "applied",
+                    expected_revision=delivery["aggregate_revision"],
+                    receipt={"status": "applied", "source": "original_run_input_receipt"}, actor=_ACTOR)
         CoordinatorStore.append_audit(
             db, aggregate_type="ticket_input", aggregate_id=input_id,
             event_type=f"ticket_input.{target}",
@@ -268,44 +304,59 @@ class CoordinatorExecutionService:
         with self._store.transaction(write=True) as db:
             return self._mark_input_db(db, input_id, target, assignment_id=assignment_id, delivery_key=delivery_key)
 
-    def _worker_identity(self, ticket_id: str, profile: WorkerProfile, base_commit: str) -> tuple[str, str]:
-        worker_id = "worker_" + hashlib.sha256(f"{self.instance_id}\0{ticket_id}\0{profile.profile_id}".encode()).hexdigest()[:32]
+    def _worker_identity(self, ticket_id: str, profile: WorkerProfile, base_commit: str,
+                         *, mission_id: str, job_id: str, stage: int) -> tuple[str, str]:
+        worker_id = "worker_" + _hash(_json([self.instance_id, mission_id, job_id, stage]))[:32]
         identity_hash = _hash(_json({
             "instance_id": self.instance_id, "ticket_id": ticket_id,
+            "mission_id": mission_id, "job_id": job_id, "stage": stage,
             "profile_id": profile.profile_id, "profile_fingerprint": profile.fingerprint,
             "repo": profile.repo, "base_commit": base_commit,
         }))
         return worker_id, identity_hash
 
-    async def _ensure_worker(self, ticket_id: str, profile: WorkerProfile, mandate_valid: bool) -> dict:
-        provisional_id = "worker_" + hashlib.sha256(f"{self.instance_id}\0{ticket_id}\0{profile.profile_id}".encode()).hexdigest()[:32]
-        existing = self._worker_row(provisional_id)
-        base_commit = existing["base_commit"] if existing else self._executor.base_commit(profile)
-        worker_id, identity_hash = self._worker_identity(ticket_id, profile, base_commit)
+    def _admit_mission(self, mission_id: str) -> dict:
+        """在每次新资源或写入边界重新核验持久控制与当前授权。"""
+        self._ensure_open()
+        mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
+        if mission is None or mission["state"] not in {"planning", "running", "integrating", "reviewing"}:
+            raise HarnessError(tr("superagent.mission.not-running"), code="superagent/mission-not-running")
+        if not self._control.allows(mission_id):
+            raise HarnessError(tr("superagent.mission.paused"), code="superagent/mission-paused")
+        ticket = self._authorization.ticket(mission["ticket_id"])
+        mandate_id = ((ticket or {}).get("mandate") or {}).get("mandate_id")
+        if not mandate_id or self._authorization.revalidate_mandate(mandate_id, actor=_ACTOR).get("status") not in {"valid", "affected"}:
+            raise HarnessError(tr("superagent.mandate.unavailable"), code="superagent/mandate-unavailable")
+        return mission
+
+    async def _ensure_worker(self, ticket_id: str, profile: WorkerProfile, mandate_valid: bool,
+                             *, mission: dict, job: dict, stage: int = 1) -> dict:
+        self._admit_mission(mission["mission_id"])
+        base_commit = mission["base_commit"]
+        worker_id, identity_hash = self._worker_identity(ticket_id, profile, base_commit,
+            mission_id=mission["mission_id"], job_id=job["job_id"], stage=stage)
+        existing = self._worker_row(worker_id)
         if existing is None:
             with self._store.unit_of_work(actor=_ACTOR, correlation_id=f"ticket:{ticket_id}") as uow:
                 count = uow.db.execute("SELECT COUNT(*) FROM workers WHERE runtime_instance_id=?", (self.instance_id,)).fetchone()[0]
                 if count >= getattr(self._executor, "max_workers", 32):
-                    raise HarnessError("Worker capacity is exhausted", code="superagent/worker-capacity")
-                try:
-                    existing = uow.workers.create({
-                        "worker_id": worker_id, "ticket_id": ticket_id, "profile_id": profile.profile_id,
-                        "repo": profile.repo, "base_commit": base_commit, "runtime_instance_id": self.instance_id,
-                        "identity_hash": identity_hash,
-                    })
-                except Exception:
-                    existing = uow.workers.get(worker_id)
-                    if existing is None:
-                        raise
+                    raise HarnessError(tr("superagent.worker-capacity"), code="superagent/worker-capacity")
+                existing = uow.workers.create({
+                    "worker_id": worker_id, "ticket_id": ticket_id,
+                    "mission_id": mission["mission_id"], "job_id": job["job_id"], "stage": stage,
+                    "profile_id": profile.profile_id, "repo": profile.repo,
+                    "base_commit": base_commit, "runtime_instance_id": self.instance_id,
+                    "identity_hash": identity_hash,
+                })
         if existing["identity_hash"] != identity_hash or existing["repo"] != profile.repo:
             raise PermissionError("Persisted Worker identity does not match the current host-owned Profile")
-        lock = self._lock(worker_id)
-        async with lock:
+        async with self._lock(worker_id):
             return await self._ensure_worker_locked(existing, profile, mandate_valid)
 
     async def _ensure_worker_locked(self, worker: dict, profile: WorkerProfile, mandate_valid: bool) -> dict:
         state = worker["state"]
         if state == "planned":
+            self._admit_mission(worker["mission_id"])
             worker = self._transition("worker", worker["worker_id"], "workspace_creating", facts={"worker_profile_valid": True, "mandate_valid": mandate_valid, "control_allows": True})
             try:
                 await self._executor.create_workspace(worker, profile)
@@ -338,6 +389,7 @@ class CoordinatorExecutionService:
                 worker = self._transition("worker", worker["worker_id"], "workspace_ready", facts={"reconciliation_verified": True, "workspace_identity_verified": True}, changes={"workspace_id": found["workspace_id"]}, audit_payload={"reconciliation_ref": f"worker:{worker['worker_id']}:workspace"})
                 state = "workspace_ready"
         if state == "workspace_ready":
+            self._admit_mission(worker["mission_id"])
             worker = self._transition("worker", worker["worker_id"], "session_creating", facts={"workspace_identity_verified": True, "mandate_valid": mandate_valid, "control_allows": True})
             try:
                 await self._executor.create_session(worker, profile)
@@ -392,76 +444,67 @@ class CoordinatorExecutionService:
             (ticket_id, *_ACTIVE_ASSIGNMENTS),
         )
 
-    def _create_mission_assignment(self, ticket: dict, trigger: dict, mandate: dict,
-                                   profile: WorkerProfile, budget: dict, worker: dict,
-                                   prompt: str, input_ids: list[str]) -> tuple[dict, dict, dict]:
+    def _create_mission_plan(self, ticket, trigger, mandate, profile, budget, prompt):
+        """先建立冻结目标和控制记录，再创建任何执行资源。"""
         ticket_id, trigger_id = ticket["ticket_id"], trigger["trigger_id"]
-        mission_id = "mission_" + hashlib.sha256(f"{ticket_id}\0{trigger_id}".encode()).hexdigest()[:32]
-        assignment_id = "assignment_" + hashlib.sha256(f"{mission_id}\0work\0{1}".encode()).hexdigest()[:32]
-        submission_key = f"superagent-v2:{assignment_id}"
+        mission_id = "mission_" + _hash(f"{ticket_id}\0{trigger_id}")[:32]
+        original = self._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
+        base_commit = original["base_commit"] if original else self._executor.base_commit(profile)
         with self._store.unit_of_work(actor=_ACTOR, correlation_id=f"ticket:{ticket_id}") as uow:
-            existing = uow.missions.get(mission_id)
-            if existing is not None:
-                job = uow.db.execute("SELECT * FROM jobs WHERE mission_id=? AND plan_revision=? AND role='work'", (mission_id, existing["plan_revision"])).fetchone()
-                assignment = uow.assignments.get(assignment_id)
-                if job is None or assignment is None:
-                    raise HarnessError("Existing single-node Mission is missing its durable Assignment", code="superagent/mission-corrupt")
-                return existing, dict(job), {**assignment, "max_seconds": budget["max_seconds"]}
-            sequence = uow.db.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM missions WHERE ticket_id=?", (ticket_id,)).fetchone()[0]
-            mission = uow.missions.create({
-                "mission_id": mission_id, "ticket_id": ticket_id, "sequence": sequence,
-                "goal_ref": trigger_id, "policy_version_at_start": mandate.get("policy_version"),
-                "source_revision_at_start": trigger.get("source_revision"),
-                "repo": profile.repo, "base_commit": worker["base_commit"],
-                "budgets_json": budget,
-            })
-            plan = uow.plans.create(
-                mission_id, expected_mission_revision=mission["aggregate_revision"],
-                plan={"nodes": [{
-                    "node_id": "work", "role": "work", "profile_id": profile.profile_id,
-                    "instruction_ref": f"trigger:{trigger_id}",
-                    "instruction_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
-                    "dependencies": [],
-                }]},
-                acceptance={"kind": "single_worker_report", "schema_version": 1},
-                created_by_kind="host", created_by_ref="single-mission-router",
-            )
-            if plan is None:
-                raise HarnessError("Mission changed while creating its immutable plan", code="superagent/revision-conflict")
             mission = uow.missions.get(mission_id)
             if mission is None:
-                raise HarnessError("Mission disappeared after plan creation", code="superagent/mission-corrupt")
+                sequence = uow.db.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM missions WHERE ticket_id=?", (ticket_id,)).fetchone()[0]
+                mission = uow.missions.create({
+                    "mission_id": mission_id, "ticket_id": ticket_id, "sequence": sequence,
+                    "goal_ref": trigger_id, "policy_version_at_start": mandate.get("policy_version"),
+                    "source_revision_at_start": trigger.get("source_revision"),
+                    "repo": profile.repo, "base_commit": base_commit, "budgets_json": budget,
+                })
+                plan = uow.plans.create(mission_id, expected_mission_revision=mission["aggregate_revision"],
+                    plan={"nodes": [{"node_id": "work", "role": "work", "profile_id": profile.profile_id,
+                        "instruction_ref": f"trigger:{trigger_id}", "instruction_hash": _hash(prompt), "dependencies": []}]},
+                    acceptance={"kind": "single_worker_report", "schema_version": 1},
+                    created_by_kind="host", created_by_ref="single-mission-router")
+                if plan is None:
+                    raise HarnessError(tr("superagent.conflict"), code="superagent/revision-conflict")
+                mission = uow.missions.get(mission_id)
+            plan = uow.plans.get(mission_id, mission["plan_revision"])
+            if plan is None or len(plan["jobs"]) != 1:
+                raise HarnessError(tr("superagent.corrupt"), code="superagent/mission-corrupt")
+            return mission, plan["jobs"][0]
+
+    def _create_mission_assignment(self, ticket, trigger, mandate, profile, budget, worker,
+                                   prompt, input_ids):
+        mission_id = worker["mission_id"]
+        assignment_id = "assignment_" + _hash(f"{mission_id}\0work\0{1}")[:32]
+        with self._store.unit_of_work(actor=_ACTOR, correlation_id=f"ticket:{ticket['ticket_id']}") as uow:
+            mission = uow.missions.get(mission_id)
+            job = uow.jobs.get(worker["job_id"])
+            assignment = uow.assignments.get(assignment_id)
+            if assignment is not None:
+                return mission, job, {**assignment, "max_seconds": budget["max_seconds"]}
+            control = uow.db.execute("SELECT mode FROM mission_controls WHERE mission_id=?", (mission_id,)).fetchone()
+            if control is None or control["mode"] != "running":
+                raise HarnessError(tr("superagent.mission.paused"), code="superagent/mission-paused")
             app = CoordinatorApplicationService(uow)
-            mission = app.transition(
-                "mission", mission_id, expected_revision=mission["aggregate_revision"],
-                target_state="running",
-                facts={"authorized": True, "plan_valid": True, "base_commit_frozen": True,
-                       "mandate_valid": True, "control_allows": True},
-            )
-            job = plan["jobs"][0]
-            job = app.transition(
-                "job", job["job_id"], expected_revision=job["aggregate_revision"],
-                target_state="ready",
-                facts={"authorized": True, "dependencies_satisfied": True,
-                       "mandate_valid": True, "control_allows": True},
-            )
-            assignment = uow.assignments.create({
-                "assignment_id": assignment_id, "job_id": job["job_id"], "attempt_no": 1,
-                "worker_id": worker["worker_id"], "session_id": worker["session_id"],
-                "workspace_id": worker["workspace_id"], "submission_key": submission_key,
-                "report_json": {"pending_prompt": prompt, "pending_input_ids": input_ids},
-            })
-            assignment = app.transition(
-                "assignment", assignment_id, expected_revision=assignment["aggregate_revision"],
-                target_state="submitting",
-                facts={"authorized": True, "stable_submission_persisted": True,
-                       "mandate_valid": True, "control_allows": True},
-            )
+            if mission["state"] == "planning":
+                mission = app.transition("mission", mission_id, expected_revision=mission["aggregate_revision"],
+                    target_state="running", facts={"authorized": True, "plan_valid": True,
+                    "base_commit_frozen": True, "mandate_valid": True, "control_allows": True})
+            if job["state"] == "pending":
+                job = app.transition("job", job["job_id"], expected_revision=job["aggregate_revision"],
+                    target_state="ready", facts={"authorized": True, "dependencies_satisfied": True,
+                    "mandate_valid": True, "control_allows": True})
+            assignment = uow.assignments.create({"assignment_id": assignment_id, "job_id": job["job_id"],
+                "attempt_no": 1, "worker_id": worker["worker_id"], "session_id": worker["session_id"],
+                "workspace_id": worker["workspace_id"], "submission_key": f"superagent-v2:{assignment_id}",
+                "report_json": {"pending_prompt": prompt, "pending_input_ids": input_ids}})
+            assignment = app.transition("assignment", assignment_id, expected_revision=assignment["aggregate_revision"],
+                target_state="submitting", facts={"authorized": True, "stable_submission_persisted": True,
+                "mandate_valid": True, "control_allows": True})
             for input_id in input_ids:
-                self._mark_input_db(
-                    uow.db, input_id, "delivered", assignment_id=assignment_id,
-                    delivery_key=f"superagent-v2:input:{input_id}:{assignment_id}",
-                )
+                self._mark_input_db(uow.db, input_id, "delivered", assignment_id=assignment_id,
+                    delivery_key=f"superagent-v2:input:{input_id}:{assignment_id}")
             return mission, job, {**assignment, "max_seconds": budget["max_seconds"]}
 
     async def route_trigger(self, ticket_id: str, trigger_id: str) -> dict:
@@ -509,15 +552,18 @@ class CoordinatorExecutionService:
             )["total"]
             if turns_used >= budget["max_turns"]:
                 raise PermissionError("Ticket Mandate execution turn budget is exhausted")
-            worker = await self._ensure_worker(ticket_id, profile, True)
             prompt, input_ids = self._build_prompt(ticket, trigger, mandate)
+            mission, job = self._create_mission_plan(ticket, trigger, mandate, profile, budget, prompt)
+            worker = await self._ensure_worker(ticket_id, profile, True, mission=mission, job=job)
+            self._admit_mission(mission["mission_id"])
             mission, job, assignment = self._create_mission_assignment(
                 ticket, trigger, mandate, profile, budget, worker, prompt, input_ids,
             )
+            self._admit_mission(mission["mission_id"])
             try:
                 await self._executor.submit(worker, assignment, prompt, input_ids)
             except Exception:
-                # The durable submission key is authoritative; never issue a second submit here.
+                # 原提交键是唯一身份，返回丢失时只回查，不再次提交。
                 result = await self.reconcile(assignment["assignment_id"])
             else:
                 result = await self.reconcile(assignment["assignment_id"])
@@ -526,6 +572,10 @@ class CoordinatorExecutionService:
 
     def _assert_delivery_still_authorized(self, ticket_id: str, assignment_id: str,
                                           trigger: dict, mandate_id: str) -> None:
+        assignment = self._assignment(assignment_id)
+        if assignment is None:
+            raise HarnessError(tr("superagent.conflict"), code="superagent/assignment-unavailable")
+        self._admit_mission(assignment["mission_id"])
         ticket = self._authorization.ticket(ticket_id)
         if ticket is None or ticket["state"] != "open":
             raise PermissionError("Ticket stopped while delivering follow-up input")
@@ -654,9 +704,7 @@ class CoordinatorExecutionService:
             return {"state": assignment["state"], "assignment_id": assignment_id, "run_id": assignment["run_id"]}
         if status == "running":
             if assignment["state"] in {"accepted", "unknown"}:
-                # CoordinatorHost currently has no V2 MissionControl adapter; absent a control
-                # runtime, preserve the legacy default-admit behavior. A wired control runtime
-                # must replace this with its persisted per-Mission admission decision.
+                # 这里只记录原运行事实；新的资源或写入另经持久控制准入。
                 facts = {"exact_original_run_active": True, "control_allows": True}
                 audit = None
                 if assignment["state"] == "unknown":
@@ -1048,6 +1096,8 @@ class CoordinatorExecutionService:
                 changes={"outcome": "attention"},
                 audit_payload=audit)
             return
+        if not self._control.allows(mission["mission_id"]):
+            return
         facts = {"single_node_report_frozen": True, "all_work_jobs_done": True,
                  "original_run_settled": True, "mandate_valid": True, "control_allows": True}
         audit = None
@@ -1106,6 +1156,8 @@ class CoordinatorExecutionService:
             return
         ticket = self._authorization.ticket(ticket["ticket_id"])
         if ticket is None or ticket.get("state") != "open":
+            return
+        if not self._control.allows(assignment["mission_id"]):
             return
         mandate = ticket.get("mandate") or {}
         if not mandate.get("mandate_id"):

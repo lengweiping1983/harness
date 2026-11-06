@@ -390,6 +390,13 @@ class _HostExecutionService:
         with self.__host._operation(): return self.__service.resolve_attention(attention_id, answer_trigger_id)
     def outbox_body(self, message_id):
         with self.__host._operation(): return self.__service.outbox_body(message_id)
+    def control_mission(self, mission_id, action, *, request_id, actor):
+        with self.__host._operation():
+            return self.__service.control_mission(mission_id, action, request_id=request_id, actor=actor)
+    def control_receipt(self, request_id):
+        with self.__host._operation(): return self.__service.control_receipt(request_id)
+    def mission_control(self, mission_id):
+        with self.__host._operation(): return self.__service.mission_control(mission_id)
 
 
 class CoordinatorHost:

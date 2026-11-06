@@ -16,11 +16,14 @@ from harness.i18n import tr
 from ..core.language import current_language, resolve_language
 
 from ..core.errors import HarnessError
+from ..core.cleanup import join_cleanup
+from ..core.text_encoding import diagnostic_text
 from ..session.tool_activity import confirmed_tool_result, tool_invocations
 from ..session.turn_scope import turn_events
 from .superagent_background import background_invocation, background_status
-from .superagent_mission_status import run_progress
+from .superagent_run_evidence import run_progress
 from .superagent_coordinator_store import _hash, _json
+from .git_process import run_git
 
 
 _LOG = logging.getLogger(__name__)
@@ -185,7 +188,8 @@ class HarnessExecutorAdapter:
     """将 Worker 绑定到专属 Worktree/Session，并且只提交具备幂等键的原生 Harness Run。"""
 
     def __init__(self, harness, *, instance_id: str, owner_session_id: str,
-                 profiles: tuple[WorkerProfile, ...] | list[WorkerProfile], max_workers: int = 32):
+                 profiles: tuple[WorkerProfile, ...] | list[WorkerProfile], max_workers: int = 32,
+                 default_profiles: Mapping[str, str] | None = None):
         self.harness = harness
         self.instance_id = _text(instance_id, "instance_id", limit=128)
         self.owner_session_id = _text(owner_session_id, "owner_session_id", limit=128)
@@ -203,7 +207,7 @@ class HarnessExecutorAdapter:
         self.profiles = {profile.profile_id: profile for profile in profiles}
         if not self.profiles or len(self.profiles) != len(profiles):
             raise ValueError("HarnessExecutorAdapter requires unique WorkerProfiles")
-        source_owners: dict[str, str] = {}
+        source_owners: dict[str, list[str]] = {}
         available_tools = set(harness.tools.names())
         for profile in self.profiles.values():
             if not set(profile.tools) <= available_tools:
@@ -212,10 +216,20 @@ class HarnessExecutorAdapter:
             if root != Path(profile.repo).resolve():
                 raise ValueError(f"WorkerProfile {profile.profile_id} repo must be a Git root")
             for source_id in profile.source_instance_ids:
-                if source_id in source_owners:
-                    raise ValueError(f"source {source_id} maps to more than one WorkerProfile")
-                source_owners[source_id] = profile.profile_id
-        self._source_profiles = source_owners
+                source_owners.setdefault(source_id, []).append(profile.profile_id)
+        if default_profiles is not None and not isinstance(default_profiles, Mapping):
+            raise ValueError(tr("superagent.invalid", field="default_profiles"))
+        selected = dict(default_profiles or {})
+        if any(source not in source_owners or profile not in source_owners[source]
+               for source, profile in selected.items()):
+            raise ValueError(tr("superagent.invalid", field="default_profiles"))
+        for source, profiles_for_source in source_owners.items():
+            if source not in selected:
+                if len(profiles_for_source) != 1:
+                    raise ValueError(tr("superagent.invalid", field="default_profiles"))
+                selected[source] = profiles_for_source[0]
+        self._source_profiles = {source: tuple(identities) for source, identities in source_owners.items()}
+        self._default_profiles = selected
         self._worker_lookup: Callable[[str], dict | None] | None = None
         self._evidence = HarnessEvidenceProvider(harness)
         self.team = "superagent-v2-" + hashlib.sha256(self.instance_id.encode()).hexdigest()[:20]
@@ -238,8 +252,92 @@ class HarnessExecutorAdapter:
         self._worker_lookup = lookup
 
     def profile_for_source(self, source_instance_id: str) -> WorkerProfile | None:
-        profile_id = self._source_profiles.get(source_instance_id)
+        profile_id = self._default_profiles.get(source_instance_id)
         return self.profiles.get(profile_id) if profile_id else None
+
+    def profiles_for_source(self, source_instance_id: str) -> tuple[WorkerProfile, ...]:
+        """只提供宿主配置允许的模板；来源默认模板不限制多角色选择。"""
+        return tuple(self.profiles[identity] for identity in self._source_profiles.get(source_instance_id, ()))
+
+    def snapshot_workspace(self, worker):
+        """核对所属工作树并读取含未提交文件的真实树身份。"""
+        from .worktree_delivery import snapshot_tree
+        self._open()
+        profile = self.profiles[worker["profile_id"]]
+        workspace = self._workspace(worker, profile)
+        if workspace is None:
+            raise HarnessError(tr("superagent.worker-unavailable"), code="superagent/worker-unavailable")
+        _, tree = snapshot_tree(self.harness.worktrees, workspace)
+        return {"workspace": workspace, "tree": tree}
+
+    async def capture_workspace(self, worker):
+        """Git 写入归单次任务所有，取消等待不能遗落已接受的捕获。"""
+        return await join_cleanup(asyncio.create_task(asyncio.to_thread(
+            self.harness.worktrees.capture_delivery, worker["workspace_id"])))
+
+    def artifact_manifest(self, worker, receipt):
+        """从冻结 Git 对象计算文件内容哈希；不读取仍可变化的工作文件。"""
+        manager = self.harness.worktrees
+        view = self.snapshot_workspace(worker)
+        workspace = view["workspace"]
+        target = manager._target(workspace)
+        if (receipt.get("base_commit") != worker["base_commit"]
+                or manager.git(target, "rev-parse", "--verify", receipt["ref"] + "^{tree}").strip() != receipt["tree"]
+                or manager.git(target, "rev-parse", "--verify", receipt["ref"] + "^{commit}").strip() != receipt["commit"]):
+            raise HarnessError(tr("superagent.corrupt"), code="superagent/artifact-corrupt")
+        def bounded(*args, limit):
+            result = run_git(target, *args, output_limit=limit)
+            if result.returncode != 0:
+                raise HarnessError(diagnostic_text(result.stderr).strip(), code="git/failed")
+            if len(result.stdout) > limit:
+                raise HarnessError(tr("superagent.artifact.capacity"), code="superagent/artifact-capacity")
+            return result.stdout
+
+        entries = bounded("ls-tree", "-r", "-l", "-z", receipt["tree"], limit=2 * 1024 * 1024).split(b"\0")
+        if len(entries) > 4097:
+            raise HarnessError(tr("superagent.artifact.capacity"), code="superagent/artifact-capacity")
+        files, total = [], 0
+        for entry in entries:
+            if not entry:
+                continue
+            metadata, raw_path = entry.split(b"\t", 1)
+            mode, kind, object_id, raw_size = metadata.split()
+            path = raw_path.decode("utf-8")
+            if kind == b"commit":
+                files.append({"path": path, "mode": mode.decode("ascii"), "kind": "gitlink",
+                              "object_id": object_id.decode("ascii")})
+                continue
+            size = int(raw_size)
+            total += size
+            if size > 16 * 1024 * 1024 or total > 64 * 1024 * 1024:
+                raise HarnessError(tr("superagent.artifact.capacity"), code="superagent/artifact-capacity")
+            content = bounded("cat-file", "blob", object_id.decode("ascii"), limit=16 * 1024 * 1024)
+            if len(content) != size:
+                raise HarnessError(tr("superagent.corrupt"), code="superagent/artifact-corrupt")
+            files.append({"path": path, "mode": mode.decode("ascii"), "kind": "blob", "size": size,
+                          "sha256": hashlib.sha256(content).hexdigest()})
+        deleted = bounded("diff", "--name-only", "--diff-filter=D", "-z",
+                          worker["base_commit"], receipt["tree"], "--", limit=2 * 1024 * 1024)
+        return {"files": files, "deleted": [p.decode("utf-8") for p in deleted.split(b"\0") if p]}
+
+    async def plan_artifact_delivery(self, worker, artifacts):
+        """依赖预检只接收经协调账本核验的冻结来源。"""
+        source_ids = [artifact["workspace_id"] for artifact in artifacts]
+        manager = self.harness.worktrees
+        for artifact in artifacts:
+            source = manager.get(artifact["workspace_id"])
+            receipt = json.loads(artifact["receipt_json"])
+            if source.get("delivery") != receipt:
+                raise HarnessError(tr("superagent.corrupt"), code="superagent/artifact-corrupt")
+        return await join_cleanup(asyncio.create_task(asyncio.to_thread(
+            manager.plan_delivery_merge, worker["workspace_id"], source_ids)))
+
+    async def apply_artifact_delivery(self, worker, artifacts, plan):
+        manager = self.harness.worktrees
+        return await join_cleanup(asyncio.create_task(asyncio.to_thread(
+            manager.apply_delivery_merge, worker["workspace_id"],
+            [artifact["workspace_id"] for artifact in artifacts],
+            expected_target_tree=plan["target_tree"], expected_tree=plan["tree"])))
 
     def _open(self) -> None:
         if self.closed or self.harness.runtime.closed or self.harness._close_task is not None:
@@ -263,7 +361,7 @@ class HarnessExecutorAdapter:
     def _workspace(self, worker: dict, profile: WorkerProfile) -> dict | None:
         matches = [item for item in self.harness.worktrees.list()
                    if item.get("team") == self.team
-                   and item.get("team_run_id") == worker["worker_id"]
+                   and item.get("team_run_id") == (worker.get("mission_id") or worker["worker_id"])
                    and item.get("team_member") == worker["worker_id"]
                    and item.get("owner_session_id") == self.owner_session_id]
         if len(matches) > 1:
@@ -329,7 +427,7 @@ class HarnessExecutorAdapter:
             return existing
         created = self.harness.worktrees.create_team(
             profile.repo, [worker["worker_id"]], team=self.team,
-            owner_session_id=self.owner_session_id, run_id=worker["worker_id"],
+            owner_session_id=self.owner_session_id, run_id=worker.get("mission_id") or worker["worker_id"],
             ref=worker["base_commit"],
         )
         if len(created) != 1:

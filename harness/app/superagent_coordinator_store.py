@@ -15,6 +15,7 @@ from harness.i18n import tr
 
 from .superagent_coordinator_migration_12 import MIGRATION_12
 from .superagent_coordinator_migration_13 import MIGRATION_13
+from .superagent_coordinator_migration_14 import MIGRATION_14
 
 _APPLICATION_ID = int.from_bytes(b"SUPA", "big")
 _MAX_EFFECT_BATCH = 100
@@ -802,7 +803,7 @@ MIGRATIONS = (
     (4, _MIGRATION_4), (5, _MIGRATION_5), (6, _MIGRATION_6),
     (7, _MIGRATION_7), (8, _MIGRATION_8), (9, _MIGRATION_9),
     (10, _MIGRATION_10), (11, _MIGRATION_11), (12, MIGRATION_12),
-    (13, MIGRATION_13),
+    (13, MIGRATION_13), (14, MIGRATION_14),
 )
 
 class CoordinatorStore:
@@ -1325,9 +1326,9 @@ _REPOSITORY_SPECS = {
     "workers": {
         "table": "workers", "identity": "worker_id", "aggregate_type": "worker",
         "required": ("worker_id", "ticket_id", "profile_id", "repo", "base_commit", "runtime_instance_id", "identity_hash"),
-        "create": ("worker_id", "ticket_id", "profile_id", "repo", "base_commit", "runtime_instance_id", "workspace_id", "session_id", "state", "identity_hash", "created_at", "last_seen_at"),
+        "create": ("worker_id", "ticket_id", "mission_id", "job_id", "stage", "profile_id", "repo", "base_commit", "runtime_instance_id", "workspace_id", "session_id", "state", "identity_hash", "created_at", "last_seen_at"),
         "update": ("state", "workspace_id", "session_id", "last_seen_at"),
-        "defaults": {"workspace_id": None, "session_id": None, "state": "planned", "last_seen_at": None},
+        "defaults": {"mission_id": None, "job_id": None, "stage": 0, "workspace_id": None, "session_id": None, "state": "planned", "last_seen_at": None},
         "json": (), "times": ("created_at", "last_seen_at"),
     },
     "attentions": {
@@ -1464,7 +1465,7 @@ class PlanRevisionRepository:
             expected_spec = {key: value for key, value in node.items() if key != "dependencies"}
             if (
                 job["job_id"] != expected_job_id
-                or job["role"] != "work"
+                or job["role"] != node.get("role")
                 or job["profile_id"] != node.get("profile_id")
                 or job["instruction_ref"] != node.get("instruction_ref")
                 or job["instruction_hash"] != node.get("instruction_hash")
@@ -1494,7 +1495,8 @@ class PlanRevisionRepository:
         return [self.get(mission, row["plan_revision"]) for row in revisions]
 
     def create(self, mission_id: str, *, expected_mission_revision: int, plan: dict,
-               acceptance: object, created_by_kind: str, created_by_ref: str) -> dict | None:
+               acceptance: object, created_by_kind: str, created_by_ref: str,
+               system_profiles: dict[str, str] | None = None) -> dict | None:
         mission = _text(mission_id, "mission_id")
         if type(expected_mission_revision) is not int or expected_mission_revision < 1:
             raise ValueError("expected_mission_revision must be a positive integer")
@@ -1560,6 +1562,21 @@ class PlanRevisionRepository:
                 **node, "node_id": node_id, "role": "work", "profile_id": profile_id,
                 "dependencies": normalized_dependencies,
             })
+        if system_profiles is not None:
+            if (not isinstance(system_profiles, dict)
+                    or set(system_profiles) != {"integrate", "review"}):
+                raise ValueError("system profiles require integrate and review roles")
+            work_ids = [node["node_id"] for node in normalized_nodes]
+            for role, dependencies in (
+                ("integrate", work_ids), ("review", ["__system__integrate"]),
+            ):
+                normalized_nodes.append({
+                    "node_id": "__system__" + role, "role": role,
+                    "profile_id": _text(system_profiles[role], role + " profile"),
+                    "instruction_ref": None, "instruction_hash": None,
+                    "dependencies": [{"node_id": node_id, "requires_delivery": True}
+                                     for node_id in dependencies],
+                })
         by_id = {node["node_id"]: node for node in normalized_nodes}
         graph = {}
 
@@ -1628,7 +1645,7 @@ class PlanRevisionRepository:
             spec = {key: value for key, value in node.items() if key != "dependencies"}
             self._uow.jobs.create({
                 "job_id": job_id, "mission_id": mission, "plan_revision": revision,
-                "node_id": node["node_id"], "role": "work", "profile_id": node["profile_id"],
+                "node_id": node["node_id"], "role": node["role"], "profile_id": node["profile_id"],
                 "instruction_ref": node.get("instruction_ref"),
                 "instruction_hash": node.get("instruction_hash"),
                 "spec_hash": _hash(_json(spec)),

@@ -8555,5 +8555,17 @@
   "ui.companion.saveUnconfirmed": "The save result is unconfirmed. No save will be repeated automatically; check the connection status.",
   "ui.companion.tokenHint": "Harness generates this pairing token. Copy it into the browser extension; no input is needed here.",
   "ui.companion.tokenPending": "Generated automatically after MCP starts",
-  "ui.companion.tokenDisabled": "Available after enabling continuation and starting MCP"
+  "ui.companion.tokenDisabled": "Available after enabling continuation and starting MCP",
+  "superagent.mission.not-running": "This mission cannot accept new work in its current state.",
+  "superagent.mission.paused": "This mission is paused. Resume it before starting new work or publishing a result.",
+  "superagent.mandate.unavailable": "The current mandate does not authorize this operation.",
+  "superagent.artifact.scope": "The artifact operation does not match its original mission, assignment, and workspace.",
+  "superagent.artifact.run-unsettled": "The original run and its tool and background work must be confirmed settled before capture.",
+  "superagent.artifact.unknown": "The original capture could not be confirmed. Its state has been preserved and capture will not be repeated.",
+  "superagent.artifact.capacity": "The artifact exceeds the supported file or content limit. The original files have been preserved.",
+  "superagent.delivery.scope": "The delivery does not belong to the same mission, repository, and frozen baseline.",
+  "superagent.delivery.started": "Files cannot be imported after the target assignment has started.",
+  "superagent.delivery.unknown": "The original import could not be confirmed. Its state has been preserved and import will not be repeated.",
+  "superagent.delivery.conflict": "The delivery identity conflicts with its original frozen inputs.",
+  "superagent.control.capacity": "The control history limit has been reached. Existing requests and receipts have been preserved."
 }

@@ -394,6 +394,10 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["assignment_id"], second["assignment_id"])
         self.assertEqual(first["run_id"], second["run_id"])
         self.assertEqual(self.shared["submit_calls"], [first["assignment_id"]])
+        worker = self.host.execution.list_workers(accepted["ticket_id"])[0]
+        assignment = self.host._execution_service._assignment(first["assignment_id"])
+        self.assertEqual((worker["mission_id"], worker["job_id"], worker["stage"]),
+                         (assignment["mission_id"], assignment["job_id"], 1))
 
     async def test_budget_cancellation_uncertainty_keeps_assignment_unknown(self):
         origin, accepted, _ = self.accept_event()

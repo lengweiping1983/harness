@@ -240,7 +240,7 @@ flowchart TB
 
 ### 4.2 建议的包结构
 
-新代码逐步收敛到以下包；现有扁平模块先保留为兼容 Facade，不做一次性大搬迁。
+以下包结构表达职责边界。实施时改造现有模块并按实际消费者抽离共用能力，不保留旧编排的兼容 Facade。
 
 ~~~text
 harness/app/superagent/
@@ -564,9 +564,9 @@ Docker 的默认配置不自动等于安全隔离；Sandbox 必须按实际挂�
 - 所有列表 API 有分页和硬上限。
 - 长期数据有显式归档策略；不能静默删除未确认或仍有审计价值的事实。
 
-## 10. 现有实现到下一代的迁移映射
+## 10. 现有能力的统一归属
 
-| 当前 Harness | 下一代目标 | 迁移原则 |
+| 当前 Harness | 统一模型 | 整合原则 |
 |---|---|---|
 | Inbox sources / triggers / routes | SourceInstance / Trigger / Thread / Disposition | 保留外部身份和原始内容哈希 |
 | Inbox tasks | Worker Binding 或 Ticket 关联 | 不把 Session ID 直接当 Ticket |
@@ -582,33 +582,11 @@ Docker 的默认配置不自动等于安全隔离；Sandbox 必须按实际挂�
 | GitHub / Feishu outbound | Channel / OutboxMessage | pending / unknown 不自动重发 |
 | Harness 原生存储 | Session / Run / Tool Evidence | 继续作为唯一执行事实来源 |
 
-### 10.1 兼容策略
+### 10.1 统一替换与数据边界
 
-新版本使用显式配置版本，例如 Superagent Config v2，并建立新的专用 state_dir。现有 v1 配置和数据库继续由旧实现处理。
+当前没有旧版 Superagent 运行数据。统一替换不提供旧配置别名、旧任务导入、离线转换或双轨运行工具；不再将旧版迁移作为生产接入的前置阶段。Phase 4 结束时只支持当前配置和统一服务。
 
-不要在现有 v1 state_dir 中直接创建 v2 数据库并开始混合运行；不要同时向 v1、v2 两套账本双写；不要在启动时自动升级旧数据库。
-
-推荐迁移过程：
-
-1. v1 继续运行，先备份配置、协调账本和 Harness 原生 Home。
-2. 导出工具以只读方式读取 v1 所有相关 SQLite 和原 Harness 引用。
-3. 生成迁移清单、记录数、哈希、未确认操作、丢失引用和冲突报告。
-4. 导入到新的 v2 state_dir，所有迁移记录使用稳定 import key。
-5. 用只读 Shadow 模式核对 Trigger、Subscription、Mission、Job、Run 引用和状态投影；Shadow 不得发送消息或启动 Worker。
-6. 对不能确认的操作标记 unknown；不自动补造 Mandate。
-7. 由维护者显式选择切换时点和新配置。
-8. 切换后 v1 目录保留为只读回退依据；只有明确批准后才能归档或删除。
-
-### 10.2 旧数据的特殊处理
-
-- 旧 Task 缺少完整授权来源时，不能自动合成 Mandate；导入为 legacy_unverified，恢复写操作前要求重新授权。
-- 旧 Router 批次和模型决策可以作为审计历史导入，但不重新提交模型请求。
-- 旧 Mission / Job 的原 Run / Workspace 引用只有在原 Harness 存储能精确核对时才可关联。
-- 旧 Delivery 的 applying / unknown 必须保留 unknown，不能再次导入。
-- 旧 Draft 是候选，不是已发送消息。
-- 旧 Outbound 的 sending / unknown 需要 Provider 回查或人工核实。
-- 已取消、已完成和已停止任务只导入历史，不重放。
-- dsh-superagent-prototype 是代码参考，不是运行数据来源；本方案不导入它的运行数据库。
+旧状态目录不属于源码删除范围；若发现则在创建宿主或写入前明确拒绝混用，保留原件。Harness 原生 Session / Run / Tool / Workspace 仍是执行事实源，不能迁入协调库制造第二事实源。现有 Coordinator schema_migrations 的校验和及事务性保留，不手工改写历史迁移。
 
 ## 11. 分阶段实施计划
 
@@ -677,66 +655,48 @@ Phase 1 仅持久化 `job_dependencies.requires_delivery` 与逐边 Delivery 回
 
 针对性回归覆盖签名错误与有效签名、Feishu 租户与聊天范围、Local 身份、事件重复与冲突、跨 SourceInstance ID 隔离、Policy 更新竞态、显式 / 推断模式、deadline、Scope、Mandate 撤销、work / context、handback、Cursor CAS 并发，以及 Shadow 只读对照。
 
-### Phase 3：统一单 Worker 执行
+### Phase 3：单 Worker 执行基础
 
-交付：
+已通过显式 CoordinatorHost API 实现 Harness Executor Adapter、Worker Profile / Assignment、单节点 Mission、TicketInput 跟进、原 Run / Tool / Background Evidence 回查，以及冻结 Report、Attention、Handback 和 Outbox Candidate。
 
-- Harness Executor Adapter；
-- Worker Profile 和 Assignment；
-- 将默认 Router 映射为单节点 Mission；
-- Ticket 持续上下文和后续消息；
-- Run / Tool / Background Evidence 回查；
-- 统一 Report / Attention / Outbox。
+本阶段没有替换生产默认 Router，也没有 V2 Outbox Sender 或统一 MissionControl Runtime。此前“简单事件不再走独立旧 Router”的生产替换验收尚未实现，明确列入 Phase 4；不追认其已完成。单 Worker 内部闭环与生产整合分别记录。
 
-验收：简单事件任务不再走独立旧 Router 状态机；同一事件只产生一个 Assignment；重启后沿用原 Run；超范围请求只 handback 一次。
+### Phase 4：完整 Superagent 整合与替换
 
-### Phase 4：DAG、Artifact 和质量门
+本阶段结束时，产品只保留一个入口、一套协调状态机、一套调度、执行与恢复机制。Phase 1–3 的协调账本、来源授权及原生执行适配作为基础保留；其交付状态是基础能力已完成、生产整合尚未完成。不得将当前显式宿主 API 已实现写成生产入口已替换。
 
-交付：
+已确认没有旧版运行数据，不开发旧任务导入、离线转换、历史协议兼容或双轨运行工具。意外发现的旧状态目录保留原件并拒绝混用；既有协调库迁移的校验和与事务规则继续保留。
 
-- Planner / PlanRevision / DAG Scheduler；
-- 依赖解锁、并发、公平和背压；
-- Capture / Artifact / Delivery；
-- Integrator / Reviewer；
-- Checkpoint、有限修正和 Watchdog。
+统一调用链为：Source → Gate / Evaluation → Ticket / Mandate → Mission / PlanRevision → Scheduler → Assignment → Harness Runtime → Report / Artifact / Review → Outbox。简单任务使用单节点计划，代码和文件交付即使只有一个工作节点也必须冻结真实产物并独立复核。模型不能自行降低完成契约。
 
-验收：真实 Git 工作树验证未提交文件交接、冲突保留、冻结基线、后台写入收尾、伪造 Evidence 拒绝、独立复核、有限修正和未知操作不重放。
+按以下依赖顺序实施；各出口取得对应源码与针对性回归证据后才能标记完成：
 
-### Phase 5：持续协作产品闭环
+| 子阶段 | 交付 | 出口 |
+|---|---|---|
+| 4.1 整合契约与协调模型 | Worker 按 Mission / Job / 阶段绑定；输入按 Input / Assignment 独立投递；Artifact、Delivery、Review、控制、指令及 Watchdog 进入同一账本；宿主在封存计划前物化系统角色 | 相同 Profile 多节点隔离、身份约束、不可变计划及跨作用域拒绝可验证 |
+| 4.2 服务生命周期与控制 | 改造唯一 SuperagentService，组合 CoordinatorHost、原生 Assessor / Planner、Executor、Effect 与恢复循环；持久控制进入所有资源及写入边界 | 单节点经完整服务运行，暂停、取消及关闭有真实收尾依据；状态查询只读 |
+| 4.3 DAG 与真实交付 | 单多节点共用 Scheduler；冻结单仓库基线；公平、背压；Capture / Delivery 使用原生 Worktree 原语及稳定操作身份 | 未提交文件真实交接，冲突保留，未知结果不重放 |
+| 4.4 质量门与阶段接续 | 独立 Reviewer、冻结候选、逐项原生证据、有限修正、Checkpoint、Watchdog | 运行成功不代替业务验收；阶段接续不提前解锁下游 |
+| 4.5 持续协作与既有信道 | TicketInput、精确节点指令、Attention / Handback；GitHub / Feishu Source / Channel、Outbox Sender 及回查接线 | 本地与受控 Provider 经同一链路完成任务，重复事件及丢响应不重复执行或发送 |
+| 4.6 唯一入口与旧编排退役 | CLI 全部接入统一服务；抽离有效共用能力、迁接业务回归后删除旧编排、独立账本及生产 Shadow 装配 | 只有一个服务入口、协调账本及执行恢复链；既有业务能力有对应回归证据 |
 
-交付：
+Worker 的相同逻辑节点可有多个 Assignment。接续与修正不能覆盖原 Run 身份。Planner 仅提出 work DAG；系统 Integrator / Reviewer 由宿主验证并在计划封存前确定性建立。修正通过新 Assignment 推进，不改写冻结计划。
 
-- GitHub Issue / PR / Review / Checks 生命周期；
-- Feishu 消息、图片读取和 Channel 回执；
-- Source 配置和 Policy 管理；
-- Overview / Events / Tickets / Missions / Workers / Review / Attention 面板；
-- 分页查询、人工核实和归档入口。
+Pause 阻止新派工与后续写入，Resume 重新核验授权，Cancel 只停止确切所属 Run / Background Job。控制请求已受理不等于真实资源已停止；未知停止、提交、导入和发送保持 unknown，只回查原操作。
 
-验收：真实受控 Provider 验证重复 Webhook、历史补拉、发送后丢响应、重启恢复、权限撤销和人工回执；测试不依赖真实生产账号。
+普通问答采用只读报告契约；文件或代码任务采用 Artifact / Review 契约；无法确认类型时采用严格契约。完成 Mission 不授予合并、部署或外部发布权限。
 
-### Phase 6：安全隔离与远程 Worker
+### Phase 5：统一系统上的产品协作完善
 
-交付：
+扩展同一应用服务，提供工作台、分页详情、人工未知结果核实、来源与策略管理、更完整的 GitHub 生命周期及飞书媒体支持。不再建立独立后台编排；既有信道接通属于 Phase 4，不能推迟到本阶段。
 
-- Sandbox Runner；
-- Secret Broker；
-- Device Identity / Worker Lease；
-- 远程执行回执和断线恢复；
-- 多设备容量调度；
-- 可审计的设备授权和撤销。
+验收以对应界面、调用链、受控 Provider 和人工操作证据为准；外部账号、真实模型质量及长期负载单列，不由替身测试推断。
 
-验收：真实双机、不同 OS、断网、进程崩溃、租约过期、旧 Worker 迟到回执、凭证撤销和 Sandbox 越权测试。平台模拟不能替代实机证据。
+### Phase 6：统一执行边界上的隔离与远程 Worker
 
-### Phase 7：v1 迁移与退役
+Sandbox Runner、Secret Broker、Device Identity / Worker Lease、远程回执、断线恢复和多设备调度均实现同一 Executor Port，保持同一任务、授权及恢复语义。真实双机、不同 OS、断网、迟到回执及 Sandbox 越权须单独实机验收。
 
-交付：
-
-- v1 → v2 离线导出 / 导入工具；
-- Dry-run 报告、哈希校验和回滚手册；
-- v2 Shadow 核对工具；
-- 明确的版本支持周期和退役计划。
-
-验收：旧数据不丢失；迁移可重复但不会重复副作用；unknown 仍为 unknown；回退只需恢复旧配置和旧 state_dir；没有未经批准的清理。
+原 Phase 7 的旧版迁移路线取消；旧编排退役已纳入 Phase 4 的必需出口。
 
 ## 12. 质量门禁与可量化指标
 
@@ -801,12 +761,12 @@ Phase 1 仅持久化 `job_dependencies.requires_delivery` 与逐边 Delivery 回
 | 副作用 | Transactional Effects + Outbox + unknown |
 | Source 扩展 | SourceKind / SourceRegistry |
 | 管理面 | 先稳定 API，再建设统一 Panel |
-| 迁移 | 新配置版本、新 state_dir、只读导出、显式切换 |
+| 统一替换 | Phase 4 完成唯一入口与旧编排退役；无旧运行数据转换 |
 | 远程和 Sandbox | 后续阶段，不作为第一阶段前置实现 |
 
 **最终判断：下一代 Harness Superagent 不应该只是一个更复杂的 Router，也不应该只是一个能生成 DAG 的 Multi-Agent。它应该成为一个具有明确授权、长期工作身份、可恢复执行、真实产物交接、证据验证和外部协作能力的持续自主工作系统。**
 
-本提案优先统一领域语义和协调事务边界，再逐步迁移执行和产品闭环；不建议直接合并两套源码或进行一次性大重构。
+Phase 4 按依赖顺序完成协调模型、执行、交付、质量门、信道及唯一入口；不能将旧编排退役延后到远程执行或新增工作台之后。
 
 ## 15. 源码依据
 
