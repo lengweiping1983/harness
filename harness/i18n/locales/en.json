@@ -4785,7 +4785,6 @@
   "ui.companion.enable": "Enable continuation",
   "ui.companion.disable": "Disable continuation",
   "ui.companion.port": "Connection port",
-  "ui.companion.savePort": "Save port",
   "ui.companion.running": "Continuation service running.",
   "ui.companion.stopped": "Waiting for MCP to start.",
   "ui.companion.disabled": "Continuation is off.",
@@ -8548,5 +8547,12 @@
   "ui.sidebar.retryProjects": "Retry reading projects",
   "ui.mcpService.savedHint": "Starting saves settings automatically. Saved tokens and the login password are reused.",
   "ui.secrets.show": "Show password or key",
-  "ui.secrets.hide": "Hide password or key"
+  "ui.secrets.hide": "Hide password or key",
+  "ui.companion.portAutoSave": "The port is saved automatically when you leave the field.",
+  "ui.companion.portSaved": "Port saved automatically.",
+  "ui.companion.invalidPort": "Enter an integer port from 1024 to 65535.",
+  "ui.companion.saveUnconfirmed": "The save result is unconfirmed. No save will be repeated automatically; check the connection status.",
+  "ui.companion.tokenHint": "Harness generates this pairing token. Copy it into the browser extension; no input is needed here.",
+  "ui.companion.tokenPending": "Generated automatically after MCP starts",
+  "ui.companion.tokenDisabled": "Available after enabling continuation and starting MCP"
 }

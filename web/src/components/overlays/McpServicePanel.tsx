@@ -25,6 +25,8 @@ export function McpServicePanel() {
   const mounted = useRef(false)
   const generation = useRef(0)
   const working = useRef(false)
+  const companionWorking = useRef(false)
+  const companionSave = useRef<Promise<boolean> | null>(null)
   const edited = useRef(false)
   const [mode, setMode] = useState<'quick' | 'named'>('quick')
   const [publicUrl, setPublicUrl] = useState('')
@@ -48,7 +50,7 @@ export function McpServicePanel() {
     const refresh = async () => {
       const current = generation.current
       try {
-        if (working.current) return
+        if (working.current || companionWorking.current) return
         const result = await mcpServiceStatus(controller.signal)
         if (controller.signal.aborted || !mounted.current || current !== generation.current) return
         if (result.ok) {
@@ -70,6 +72,12 @@ export function McpServicePanel() {
     working.current = true
     setBusy(true); setError(''); setReadError(''); setNotice(''); setPassword(''); generation.current++
     try {
+      const pending = companionSave.current
+      if (pending) {
+        const saved = await pending
+        if (companionSave.current === pending) companionSave.current = null
+        if (!mounted.current || (!saved && action === 'start')) return
+      }
       const settings = {mode, public_url: publicUrl, origin_port: Number(originPort), ...(token ? {token} : {})}
       const result = await (action === 'stop' ? mcpServiceStop() : mcpServiceStart(settings))
       if (!mounted.current) return
@@ -136,10 +144,9 @@ export function McpServicePanel() {
       {state?.tunnel_diagnostic && <details className="text-xs text-muted"><summary className="cursor-pointer">{t('ui.mcpService.diagnostic')}</summary><pre className="mt-2 whitespace-pre-wrap break-all">{state.tunnel_diagnostic}</pre></details>}
       {notice && <p role="status" className="text-xs text-muted">{noticeText(notice)}</p>}
     </div>
-    <McpCompanionPanel state={state} changing={changing} onChange={setState} onBusy={value=>{
-      working.current=value
+    <McpCompanionPanel state={state} changing={changing} onChange={setState} onSavePending={pending=>{companionSave.current=pending}} onBusy={value=>{
+      companionWorking.current=value
       if(value) {generation.current++; setPassword('')}
-      if(mounted.current) setBusy(value)
     }}/>
   </section>
 }

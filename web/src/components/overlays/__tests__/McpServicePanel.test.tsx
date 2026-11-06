@@ -45,6 +45,11 @@ beforeEach(() => {
       const body = options.body ? JSON.parse(String(options.body)) : undefined; writes.push({path, body})
       if (path.endsWith('/password')) return Response.json({password: 'fixture-password'})
       if (path.endsWith('/companion/token')) return Response.json({token: 'fixture-pairing-token'})
+      if (path.endsWith('/stop')) {saved = {...saved, status: 'stopped'}; return Response.json(saved)}
+      if (path.endsWith('/companion')) {
+        saved = {...saved, companion: {...saved.companion, ...body, endpoint: `http://127.0.0.1:${body.port}/`, status: body.enabled ? saved.status === 'running' ? 'running' : 'stopped' : 'disabled'}}
+        return Response.json(saved)
+      }
       if (rejectSave) return Response.json({code: 'mcp/tunnel-config', message: 'original', details: {copy: {key: 'ui.mcpService.error.tunnelConfig', params: {}}}}, {status: 400})
       const tunnel = path.endsWith('/start') ? body.tunnel : body
       privateToken = tunnel.token || privateToken
@@ -117,6 +122,8 @@ it('uses the same controlled input for pairing tokens and keeps unavailable reve
     return tree
   }
   const secret = () => nodes(companion()).find(node => node.type === SecretInput)!
+  expect(secret().props.readOnly).toBe(true)
+  expect(text(companion())).toContain(t('ui.companion.tokenHint'))
   expect(secret().props.toggleDisabled).toBe(true)
   expect(writes).toHaveLength(0)
   saved.companion.status = 'running'
@@ -128,4 +135,141 @@ it('uses the same controlled input for pairing tokens and keeps unavailable reve
   expect(secret().props.revealed).toBe(false)
   expect(secret().props.value).toBe('pa••••en')
   expect(writes).toEqual([{path: '/api/v1/mcp-service/companion/token', body: undefined}])
+})
+
+function prepareCompanion() {
+  saved.companion = {enabled: true, port: 8877, status: 'stopped', endpoint: 'http://127.0.0.1:8877/', token_mask: '',
+    executor: 'offline', external: false, error: '', error_copy: null, extension_path: '/fixture/extension', extension_version: '1.0.0'}
+}
+let pendingSave: Promise<boolean> | undefined
+function companionTree() {
+  hooks.cursor = 0
+  const tree = McpCompanionPanel({state: saved, changing: false, onChange: value => {saved = value}, onBusy: () => {}, onSavePending: value => {pendingSave = value}})
+  for (const effect of hooks.effects.splice(0)) effect()
+  return tree
+}
+const portField = () => nodes(companionTree()).find(node => node.type === 'input' && node.props.type === 'number')!
+
+it('saves an edited port on blur without a save button, and restores it after reopening', async () => {
+  prepareCompanion(); pendingSave = undefined
+  for (const locale of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(locale)
+    expect(text(companionTree())).toContain(t('ui.companion.portAutoSave'))
+    expect(nodes(companionTree()).some(node => ['Save port', '保存端口'].includes(text(node)))).toBe(false)
+  }
+  expect(writes).toHaveLength(0)
+  portField().props.onChange({target: {value: '8899'}})
+  expect(writes).toHaveLength(0)
+  portField().props.onBlur()
+  expect(await pendingSave).toBe(true)
+  expect(writes).toEqual([{path: '/api/v1/mcp-service/companion', body: {enabled: true, port: 8899}}])
+  expect(saved.companion.endpoint).toBe('http://127.0.0.1:8899/')
+  expect(text(companionTree())).toContain(t('ui.companion.portSaved'))
+  portField().props.onBlur()
+  expect(writes).toHaveLength(1)
+  portField().props.onChange({target: {value: '8899'}})
+  portField().props.onBlur()
+  expect(writes).toHaveLength(1)
+  unmount(); companionTree()
+  expect(portField().props.value).toBe('8899')
+  expect(writes).toHaveLength(1)
+})
+
+it('rejects invalid port drafts without saving or blocking disable, and never submits during composition', async () => {
+  prepareCompanion(); pendingSave = undefined
+  for (const value of ['', '1000', '65536', '8877.5']) {
+    portField().props.onChange({target: {value}})
+    portField().props.onBlur()
+    expect(text(companionTree())).toContain(t('ui.companion.invalidPort'))
+    expect(writes).toHaveLength(0)
+  }
+  const disable = nodes(companionTree()).find(node => text(node) === t('ui.companion.disable'))!
+  disable.props.onClick()
+  expect(await pendingSave).toBe(true)
+  expect(writes[0].body).toEqual({enabled: false, port: 8877})
+  portField().props.onChange({target: {value: '9000'}})
+  portField().props.onCompositionStart()
+  portField().props.onBlur()
+  portField().props.onCompositionEnd()
+  expect(writes).toHaveLength(1)
+  portField().props.onBlur()
+  expect(await pendingSave).toBe(true)
+  expect(writes[1].body).toEqual({enabled: false, port: 9000})
+})
+
+it.each(['network', 'mismatched', 'invalid-json'])('keeps an unknown %s autosave visible, reads status once and never automatically repeats it', async kind => {
+  prepareCompanion(); pendingSave = undefined
+  const transport = globalThis.fetch, calls: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit) => {
+    calls.push(path)
+    const response = await transport(path, options)
+    if (options.method === 'POST') {
+      if (kind === 'network') throw new TypeError('lost save response')
+      if (kind === 'mismatched') return Response.json({...saved, companion: {...saved.companion, port: 8877}})
+      return new Response('{broken', {status: 200, headers: {'Content-Type': 'application/json'}})
+    }
+    return response
+  }))
+  portField().props.onChange({target: {value: '8899'}})
+  portField().props.onBlur()
+  expect(await pendingSave).toBe(false)
+  expect(calls).toEqual(['/api/v1/mcp-service/companion', '/api/v1/mcp-service'])
+  expect(text(companionTree())).toContain(t('ui.companion.saveUnconfirmed'))
+  portField().props.onBlur()
+  expect(writes).toHaveLength(1)
+  expect(portField().props.value).toBe('8899')
+})
+
+it.each(['start', 'stop', 'stop-after-failed-save'])('waits for the accepted companion save before MCP %s, with one control request', async kind => {
+  const action = kind === 'start' ? 'start' : 'stop'
+  saved.status = action === 'start' ? 'stopped' : 'running'
+  render()
+  await vi.waitFor(() => {
+    expect(button(`ui.mcpService.${action}`)).toBeDefined()
+    expect(button(`ui.mcpService.${action}`).props.disabled).toBeFalsy()
+  })
+  const child = nodes(render()).find(node => node.type === McpCompanionPanel)!
+  let finish!: (saved: boolean) => void
+  child.props.onSavePending(new Promise<boolean>(resolve => {finish = resolve}))
+  child.props.onBusy(true)
+  const control = button(`ui.mcpService.${action}`)
+  expect(control.props.disabled).toBeFalsy()
+  control.props.onClick(); control.props.onClick()
+  expect(writes).toHaveLength(0)
+  child.props.onBusy(false); finish(kind !== 'stop-after-failed-save')
+  await vi.waitFor(() => expect(writes).toHaveLength(1))
+  expect(writes[0].path).toBe(`/api/v1/mcp-service/${action}`)
+})
+
+it('finishes an accepted port save after the panel closes without publishing into the closed instance', async () => {
+  prepareCompanion(); pendingSave = undefined
+  const transport = globalThis.fetch
+  let release!: () => void
+  const held = new Promise<void>(resolve => {release = resolve})
+  vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit) => {
+    const response = await transport(path, options)
+    await held
+    return response
+  }))
+  portField().props.onChange({target: {value: '8899'}})
+  portField().props.onBlur()
+  const accepted = pendingSave
+  unmount(); release()
+  expect(await accepted).toBe(true)
+  expect(saved.companion.port).toBe(8899)
+  expect(writes).toHaveLength(1)
+})
+
+it('explains the empty read-only pairing token and never fetches it before MCP starts', async () => {
+  prepareCompanion()
+  for (const locale of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(locale)
+    const field = nodes(companionTree()).find(node => node.type === SecretInput)!
+    expect(field.props.readOnly).toBe(true)
+    expect(field.props.value).toBe('')
+    expect(field.props.placeholder).toBe(t('ui.companion.tokenPending'))
+    expect(field.props['aria-description']).toBe(t('ui.companion.tokenHint'))
+    expect(field.props.toggleDisabled).toBe(true)
+  }
+  expect(writes).toHaveLength(0)
 })

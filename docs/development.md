@@ -382,7 +382,7 @@ python -m venv .run/semantic-eval
 
 MCP 服务及隧道准备的自有错误用 `McpServiceError` 保存资源键和参数，状态接口读取时按当前语言解析；普通异常诊断保留原文，即使恰好与产品文案相同也不反向匹配。启动线程继承本次调用上下文，线程创建失败明确进入失败状态。`tests/test_mcp_service_resource_identity.py` 覆盖真实启动线程的语言、状态序列化、原文边界、意外退出仅回收一次及线程启动失败，使用隔离目录和故障屏障，不启动进程或下载依赖。
 
-`tests/test_mcp_named_tunnel.py` 的配置保存回归通过实际启动路由与隔离目录核对启动自动保存、实例重建、免重填启动、遮罩、本机访问限制及损坏原件保留；托管启动使用真实登录凭据存储与服务替身核对密码复用。`McpServicePanel.test.tsx` 调用实际组件事件和共享 HTTP 传输，核对自动保存、重开回填、空令牌复用、同实例英中英错误呈现，以及密码和配对码通过共享输入控件显隐。`SecretInput.test.tsx` 核对内置图标、文本留白、键盘焦点边界、禁用与忙碌状态和双语无障碍名称；`ModelConnections.test.tsx` 覆盖模型密钥及私密环境变量的实际渲染。扩展弹窗使用 `secret-input.mjs` 提供相同图标交互，`chatgpt-companion-secret.test.mjs` 覆盖显隐、焦点离开与英中英名称切换，打包回归核对该依赖随包分发。这些组件和受控节点验证不代表浏览器布局验收。
+`tests/test_mcp_named_tunnel.py` 的配置保存回归通过实际启动路由与隔离目录核对启动自动保存、实例重建、免重填启动、遮罩、本机访问限制及损坏原件保留；托管启动使用真实登录凭据存储与服务替身核对密码复用。`McpServicePanel.test.tsx` 调用实际组件事件和共享 HTTP 传输，核对自动保存、重开回填、空令牌复用、同实例英中英错误呈现，以及密码和配对码通过共享输入控件显隐。`SecretInput.test.tsx` 核对内置图标、文本留白、键盘焦点边界、禁用与忙碌状态和双语无障碍名称；`ModelConnections.test.tsx` 覆盖模型密钥及私密环境变量的实际渲染。扩展弹窗使用 `secret-input.mjs` 提供相同图标交互，`chatgpt-companion-secret.test.mjs` 覆盖显隐、焦点离开与英中英名称切换，打包回归核对该依赖随包分发。`McpServicePanel.test.tsx` 另核对端口失焦自动保存、输入法及非法值拒绝、未知结果只读回查和启动等待配置收尾；配对码保持只读，空态与使用说明按同实例英中英切换。`test_mcp_companion_service.py` 通过真实隔离回环监听核对端口持久化及配对码在换端口、停止和服务重建后复用。这些组件和受控节点验证不代表浏览器布局验收。
 
 `tests/test_preset_skill_resource_identity.py` 验证四个预设与已持有摘要视图按显式键反复切换语言、安装参数嵌套副本隔离、外部原文恰等于产品文案时不被翻译，以及可选系统发现路径下的技能目录/加载/网页投影保持原文。真实 Harness 安装仅使用临时目录，核对首次配套技能模板及重装不覆盖用户编辑，不连接远端服务。
 

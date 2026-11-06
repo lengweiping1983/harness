@@ -93,6 +93,28 @@ class ManagedCompanionTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ApiError):
                 handler(blocked, **params)
 
+    async def test_generated_pairing_token_and_port_are_reused_after_reconfiguration(self):
+        key = self.manager.home / 'state' / 'companion-key.json'
+        self.assertFalse(key.exists())
+        self.assertEqual(self.manager.companion.snapshot()['token_mask'], '')
+        self.running_manager()
+        self.manager.configure_companion({'enabled': True, 'port': self.port})
+        token = self.manager.companion_token()
+        self.assertEqual(len(token), 64)
+        original = key.read_bytes()
+        with socket.socket() as available:
+            available.bind(('127.0.0.1', 0))
+            next_port = available.getsockname()[1]
+        changed = self.manager.configure_companion({'enabled': True, 'port': next_port})
+        self.assertEqual(changed['companion']['endpoint'], f'http://127.0.0.1:{next_port}/')
+        self.assertEqual(changed['companion']['status'], 'running')
+        self.assertEqual(self.manager.companion_token(), token)
+        self.assertEqual(key.read_bytes(), original)
+        self.manager.stop()
+        recreated = ChatCompanionService(self.manager.home, self.manager.source)
+        self.assertEqual(recreated.settings()[0], {'enabled': True, 'port': next_port})
+        self.assertEqual(recreated.token(), token)
+
     async def test_foreign_port_collision_fails_only_companion_without_stopping_mcp(self):
         self.running_manager()
         with socket.socket() as foreign:
