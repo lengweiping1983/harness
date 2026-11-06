@@ -394,7 +394,9 @@ MCP 服务及隧道准备的自有错误用 `McpServiceError` 保存资源键和
 
 `tests/test_browser_delivery_review.py` 复现文件修复后沿用旧截图/诊断、重载失败后普通观察成功、用户接管及清单全部勾选时仍缺少复验的组合，经过真实 `AgentLoop` 和工具结果提交路径核对有限复核、当前轮次与对话隔离、无自动重放；另保留正常检查、后续输入和页面错配的边界，并经真实文件工具覆盖没有浏览器能力时生成 HTML 仍须复核的路径。`tests/test_delivery_tool_guidance.py` 经实际模型请求核对清单版本随成功更新变化、不提升任务正文，以及同一实例英文→中文→英文的工具链与前台/后台说明消费。这些确定性回归不启动真实浏览器或服务，也不评价在线模型遵从率；交付复核的实际边界见[事件和上下文](architecture.md#事件和上下文)。
 
-`tests/test_todo_request_schema.py` 经实际模型适配器的传输正文验证请求快照必填与枚举、共享注册原件不变、SDK 序号更新仍可用，以及非活动清单、空计划和并发冲突后的显式重读。`tests/test_tool_discovery_named_query.py` 使用真实 `present` 定义核对双语目录中包含工具名的查询和可见性边界。`tests/test_session_titles.py` 覆盖自动标题与临时标题的 50 码点边界、补充平面字符、超限回退及重开；`web/src/lib/__tests__/sessionTitle.test.ts` 核对标题展示函数保留完整原文。
+`tests/test_todo_request_schema.py` 经实际模型适配器的传输正文验证请求快照必填与枚举、共享注册原件不变、SDK 序号更新仍可用，以及非活动清单、空计划和并发冲突后的显式重读。`tests/test_tool_discovery_named_query.py` 使用真实 `present` 与待办定义核对同实例英中英目录查询、已加载工具可发现、多个点名工具、延迟加载和可见性边界。`tests/test_session_titles.py` 覆盖自动标题与临时标题的 50 码点边界、补充平面字符、超限回退及重开；`web/src/lib/__tests__/sessionTitle.test.ts` 核对标题展示函数保留完整原文。
+
+普通开发连续写入后漏建清单，原先会由 `TodoInitialization.denial` 跳过后续修改，再由 `take_notice` 终止任务；工具发现又曾只搜索延迟目录，使查询已加载的 `todo_write todo_read` 返回空。`tests/test_todo_initialization_advisory.py` 经真实循环和隔离文件工具覆盖连续三次写入后六次编辑各执行一次、清单参数反复失败仍可继续、有限提醒及同实例语言切换，另核对搜索后正式建单；已批准计划仍保留门禁、纠正上限与真实建单解除约束。`tests/test_todo_evidence_recovery.py` 的实际 Harness 恢复用例继续核对批准计划的错误证据拒绝、按回执重读与带真实证据建单。这些受控模型验证不代表在线模型成功率或实际游戏验收。
 
 工具 schema 在 `harness/llm/types.py` 保存显式资源身份；模型入口 `AgentLoop._eligible_tool_schemas` 与网页目录 `harness/web/views.py` 都调用 `resolve_description(language)`。工具搜索使用同一解析视图，权限指纹使用注册原件。后端 `harness.i18n` 只提供资源读取与 `tr`，不再提供原文反向匹配代理。
 
