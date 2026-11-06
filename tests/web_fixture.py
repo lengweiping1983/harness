@@ -8,17 +8,19 @@ from dataclasses import fields
 from pathlib import Path
 
 from harness import Harness, HarnessConfig
+from harness.app.session_titles import MAX_TITLE_CHARS
 from harness.i18n import resources
 from harness.llm.transport import Transport
 from harness.web.server import serve, stop
 
 FIXTURE_REPLY = 'fixture response verified'
-# 桩模型不产出可用标题：返回超过 36 字符上限的候选，让产品保留按用户消息截断的临时标题。
+# 桩模型不产出可用标题：返回超过自动标题上限的候选，让产品保留按用户消息截断的临时标题。
 # 若把正文原样当标题返回，会话标题会和回复正文同名，按正文定位回复的用例会同时命中标题、会话标签和消息正文。
 FIXTURE_TITLE = 'fixture title request keeps the message digest instead of this candidate'
 # 新建对话的标题是一次与正文无关的独立补全。桩模型若把正文原样当标题返回，会话标题就会和回复正文同名，
 # 按正文定位回复的用例会同时命中标题、会话标签和消息正文，定位不再唯一。
-TITLE_PROMPTS = frozenset(resources(language)['session.title.prompt'] for language in ('zh-CN', 'en'))
+TITLE_PROMPTS = frozenset(resources(language)['session.title.prompt'].format(limit=MAX_TITLE_CHARS)
+                         for language in ('zh-CN', 'en'))
 
 
 def is_title_request(messages):

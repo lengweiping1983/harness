@@ -442,6 +442,10 @@ class AgentLoop:
                     await self._run_pre_step_hooks(session, turn, step)
                 self._check_cancelled()
                 await session.agent_messages.apply(turn, run_id=self.run_id)
+                if self._todo_progress_enabled(session):
+                    self._todo_progress.begin_request(session)
+                else:
+                    self._todo_progress.clear_request()
                 self._check_cancelled()
                 await self._ensure_system_prompt(session)
 
@@ -465,11 +469,11 @@ class AgentLoop:
                         await session.append('note', {**notice, 'turn': turn, 'step': step}, ignorable=True)
                         runtime_messages = (*runtime_messages, DeveloperMessage(text=notice['text'], source='todo-initialization'))
                 if self._todo_progress_enabled(session):
-                    snapshot = self._todo_progress.snapshot_context(session.latest('todo/write'),
+                    snapshot = self._todo_progress.snapshot_context(self._todo_progress.request_event,
                         session_id=session.id, start_seq=start_event.seq)
                     if snapshot is not None:
                         runtime_messages = (*runtime_messages, DeveloperMessage(text=snapshot, source='todo-snapshot'))
-                    notice = self._todo_progress.take_notice(session.latest('todo/write'), session_id=session.id)
+                    notice = self._todo_progress.take_notice(self._todo_progress.request_event, session_id=session.id)
                     if notice is not None:
                         await session.append('note', {**notice, 'turn': turn, 'step': step}, ignorable=True)
                         runtime_messages = (*runtime_messages, DeveloperMessage(text=notice['text'], source='todo-progress-reminder'))
@@ -600,6 +604,7 @@ class AgentLoop:
                         await session.append('note', {**notice, 'turn': turn, 'step': step}, ignorable=True)
                         browser_completion_feedback = notice['text']
                         continue
+                    todo_event = self._todo_progress.selected_event(session)
                     if self._todo_progress_enabled(session) and todo_event is not None and (
                         todo_event.seq > start_event.seq or self._todo_progress.work_steps > 0
                     ):
@@ -761,6 +766,9 @@ class AgentLoop:
                     schema.name == 'update_goal' and not self.recovery_read_only
                     and getattr(self, 'team_goal', None) is not None
                     and getattr(self, 'team_goal_writer', False)]
+        reminder = getattr(self, '_todo_progress', None)
+        if reminder is not None:
+            schemas = reminder.project_schemas(schemas)
         return schemas
 
     def _active_tool_schemas(self) -> list[Any]:
@@ -1571,6 +1579,8 @@ class AgentLoop:
             )
             if self._browser_verification is not None:
                 self._browser_verification.observe(call, outcome, source_seq=result_event.seq)
+            if self._todo_progress is not None:
+                self._todo_progress.observe_result(call, outcome, session)
             if self.bus is not None and call.name == 'skill' and not outcome.is_error and isinstance(outcome.display, Mapping) and outcome.display.get('skill'):
                 await self.bus.emit('skill/loaded', session.id, {'session_id': session.id,
                     'name': outcome.display['skill'], 'path': outcome.display.get('path'),
@@ -1681,7 +1691,7 @@ class AgentLoop:
 
         # 每个完整提交的调用批次只计数一次，不在结果之间计数。
         if self._todo_progress_enabled(session):
-            self._todo_progress.observe_batch(session.latest('todo/write'), successful_work=successful_work)
+            self._todo_progress.observe_batch(self._todo_progress.selected_event(session), successful_work=successful_work)
         initialization = self._todo_initialization_for(session)
         if initialization is not None:
             initialization.observe_batch(session.latest('todo/write'), successful_write=successful_write,

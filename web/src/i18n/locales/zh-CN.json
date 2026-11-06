@@ -4982,5 +4982,9 @@
   "ui.companion.saveUnconfirmed": "保存结果未确认，不会自动重复保存；请核对连接状态。",
   "ui.companion.tokenHint": "配对码由 Harness 自动生成，只需复制到浏览器扩展中，无需在此输入。",
   "ui.companion.tokenPending": "启动 MCP 后自动生成",
-  "ui.companion.tokenDisabled": "启用接续并启动 MCP 后可用"
+  "ui.companion.tokenDisabled": "启用接续并启动 MCP 后可用",
+  "ui.process.runningCount": "{count} 项进行中",
+  "ui.process.failedCount": "{count} 项失败",
+  "ui.process.skippedCount": "{count} 项已跳过",
+  "ui.process.backgroundCount": "{count} 项后台运行"
 }

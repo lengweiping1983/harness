@@ -11,6 +11,7 @@ from harness.llm.types import StreamEvent, ToolUseBlock
 from harness.prompt.registry import SystemPromptRegistry
 from harness.session.store import SessionStore
 from harness.tools.builtin.todo_tools import TodoStore, build_todo_tools
+from harness.tools.builtin.fs_tools import build_fs_tools
 from harness.tools.registry import ToolDefinition, ToolRegistry, ToolResult
 
 
@@ -21,10 +22,12 @@ class ScriptedAdapter:
 
     def __init__(self):
         self.requests = []
+        self.tool_schemas = []
         self.responses = []
 
     async def stream(self, messages, *, config, tools):
         self.requests.append(list(messages))
+        self.tool_schemas.append([tool.to_dict() for tool in tools])
         response = self.responses.pop(0)
         response = response() if callable(response) else response
         if isinstance(response, ToolUseBlock):
@@ -48,6 +51,21 @@ def checked_page(reminder, start=2, *, page='page-a', warnings=0):
 
 
 class BrowserDeliveryReviewTests(unittest.TestCase):
+    def test_html_changes_require_runtime_review_even_without_browser_calls(self):
+        for suffix in ('.html', '.HTM', '.HTML'):
+            review = BrowserVerificationReminder()
+            review.observe(ToolUseBlock(id='html-write', name='write', input={'path': 'game' + suffix}),
+                           ToolResult(content=[], data={'changed': True}), source_seq=10)
+            notice = review.take_notice()
+            facts = json.loads(notice['text'].split('\n')[-1])
+            self.assertEqual(facts['last_html_change_seq'], 10)
+            self.assertIsNone(facts['last_browser_result'])
+            self.assertIsNone(review.take_notice())
+        review = BrowserVerificationReminder()
+        review.observe(ToolUseBlock(id='text-write', name='write', input={'path': 'notes.md'}),
+                       ToolResult(content=[]), source_seq=1)
+        self.assertIsNone(review.take_notice())
+
     def test_fix_after_warnings_and_user_takeover_keeps_evidence_stale(self):
         for language in ('en', 'zh-CN', 'en'):
             review = BrowserVerificationReminder()
@@ -140,6 +158,31 @@ class BrowserDeliveryReviewTests(unittest.TestCase):
 
 
 class BrowserDeliveryLoopTests(unittest.IsolatedAsyncioTestCase):
+    async def test_html_delivery_without_browser_tools_still_gets_one_review(self):
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            sessions = SessionStore(folder)
+            session = sessions.create(cwd=folder)
+            registry = ToolRegistry()
+            for tool in [*build_fs_tools(folder), *build_todo_tools(TodoStore(session_of=sessions.get))]:
+                registry.register(tool)
+            adapter = ScriptedAdapter()
+            adapter.responses = [
+                ToolUseBlock(id='create', name='todo_write', input={
+                    'todos': [{'content': 'Verify game', 'status': 'completed'}]}),
+                ToolUseBlock(id='html', name='write', input={'path': 'game.html', 'content': '<h1>Game 原文</h1>'}),
+                'Ready to play', 'HTML generated; runtime verification unavailable.',
+            ]
+            loop = AgentLoop(adapter, registry, SystemPromptRegistry(), max_steps=8)
+            result = await loop.prompt(session, 'Build a game')
+            self.assertEqual(result.reason, 'completed', result.error)
+            self.assertEqual(result.text, 'HTML generated; runtime verification unavailable.')
+            self.assertEqual(len(adapter.requests), 4)
+            self.assertEqual((Path(folder) / 'game.html').read_text(encoding='utf-8'), '<h1>Game 原文</h1>')
+            self.assertEqual(len([e for e in session.events_of_type('tool/result') if e.data['name'] == 'write']), 1)
+            notice = next(m for m in adapter.requests[-1] if getattr(m, 'source', None) == 'browser-final-review')
+            self.assertIsNone(json.loads(notice.text.split('\n')[-1])['last_browser_result'])
+
     async def test_completed_checklist_cannot_bypass_review_and_no_tool_is_replayed(self):
         with tempfile.TemporaryDirectory() as folder:
             sessions = SessionStore(folder)

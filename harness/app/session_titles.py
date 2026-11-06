@@ -13,12 +13,13 @@ from ..session.events import user_message_text
 from ..tools.processes import ProcessCleanupError
 
 logger = logging.getLogger(__name__)
+MAX_TITLE_CHARS = 50
 
 
 def provisional_title(text: str) -> str:
     """模式命令不进入名称，临时标题按码点截短。"""
     text = re.sub(r'^/(?:plan|goal)(?:\s+|$)', '', text.strip())
-    return ' '.join(text.split())[:60]
+    return ' '.join(text.split())[:MAX_TITLE_CHARS]
 
 
 class SessionTitles:
@@ -79,11 +80,11 @@ class SessionTitles:
                 config = self.harness._session_llm_config(session).merged(max_tokens=256, reasoning_effort=None)
                 async with asyncio.timeout(self.timeout):
                     response = await self.harness.adapter.complete(
-                        [SystemMessage(tr('session.title.prompt')), UserMessage(text[:12000])],
+                        [SystemMessage(tr('session.title.prompt', limit=MAX_TITLE_CHARS)), UserMessage(text[:12000])],
                         config=config, tools=[])
                 candidate = response.text.strip()
                 if (not response.has_tool_use and candidate and '\n' not in candidate
-                        and '\r' not in candidate and len(candidate) <= 36):
+                        and '\r' not in candidate and len(candidate) <= MAX_TITLE_CHARS):
                     title, state = candidate, 'generated'
         except (asyncio.CancelledError, ProcessCleanupError, BaseExceptionGroup) as exc:
             primary = exc

@@ -102,7 +102,8 @@ class ToolDiscovery:
         query, limit, offset = args.get('query', ''), args.get('limit', 5), args.get('offset', 0)
         if not isinstance(query, str) or len(query) > 1000 or type(limit) is not int or not 1 <= limit <= 10 or type(offset) is not int or offset < 0:
             raise ToolError(tr('tool.discovery.invalid'), code='tool-discovery/invalid')
-        tokens = re.findall(r'[\w]+', query.casefold())
+        normalized_query = query.casefold()
+        tokens = re.findall(r'[\w]+', normalized_query)
         exact = next((schema.name for schema in schemas if schema.name.casefold() == query.strip().casefold()
                       and registry.get(schema.name).defer_loading), None)
         ranked = []
@@ -116,9 +117,10 @@ class ToolDiscovery:
             namespace = (definition.discovery_namespace or '').casefold()
             description = schema.description.casefold()
             scores = [10 * (word in name) + 5 * (word in namespace) + (word in description) for word in tokens]
-            if tokens and not all(scores):
+            named = re.search(r'(?<![\w-])' + re.escape(name) + r'(?![\w-])', normalized_query) is not None
+            if tokens and not named and not all(scores):
                 continue
-            ranked.append((sum(scores), schema.name, schema, definition))
+            ranked.append((sum(scores) + (100 if named else 0), schema.name, schema, definition))
         ranked.sort(key=lambda row: (-row[0], row[1]))
         selected = ranked[offset:offset + limit]
         names = [row[1] for row in selected]

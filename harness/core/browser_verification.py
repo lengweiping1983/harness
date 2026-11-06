@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from pathlib import PurePath
 from typing import Any
 
 from harness.i18n import tr
@@ -13,6 +14,7 @@ class BrowserVerificationReminder:
 
     def __init__(self) -> None:
         self.change_seq: int | None = None
+        self.html_change_seq: int | None = None
         self.browser_result: dict[str, Any] | None = None
         self.screenshot: dict[str, Any] | None = None
         self.diagnostics: dict[str, Any] | None = None
@@ -30,6 +32,9 @@ class BrowserVerificationReminder:
             if isinstance(display, Mapping) and display.get('changed') is False:
                 return
             self.change_seq = source_seq
+            path = call.input.get('path') if isinstance(call.input, Mapping) else None
+            if isinstance(path, str) and PurePath(path).suffix.casefold() in {'.html', '.htm'}:
+                self.html_change_seq = source_seq
         if call.name != 'browser':
             return
         action = call.input.get('action') if isinstance(call.input, Mapping) else None
@@ -69,7 +74,8 @@ class BrowserVerificationReminder:
 
     def take_notice(self) -> dict[str, Any] | None:
         """清单全勾选也复核最新代码；缺证据只提醒，不补造通过或强行继续。"""
-        if self.checked or self.change_seq is None or self.browser_result is None:
+        if (self.checked or self.change_seq is None
+                or self.browser_result is None and self.html_change_seq is None):
             return None
         screenshot, diagnostics = self.screenshot, self.diagnostics
         current_checks = bool(screenshot and diagnostics
@@ -80,10 +86,12 @@ class BrowserVerificationReminder:
                        and diagnostics.get('warnings') == 0 and diagnostics.get('dropped') == 0)
         if self.health is not None:
             healthy = healthy and all(self.health.get(key) == 0 for key in ('errors', 'warnings', 'dropped'))
-        if current_checks and healthy and not self.browser_result['is_error'] and self.owner == 'agent':
+        if (current_checks and healthy and self.browser_result is not None
+                and not self.browser_result['is_error'] and self.owner == 'agent'):
             return None
         self.checked = True
         facts = {'last_file_change_seq': self.change_seq, 'last_browser_result': self.browser_result,
+                 'last_html_change_seq': self.html_change_seq,
                  'last_browser_failure_seq': self.failure_seq if self.failure_seq >= 0 else None,
                  'last_browser_input_seq': self.input_seq if self.input_seq >= 0 else None,
                  'screenshot': screenshot, 'diagnostics': diagnostics, 'owner': self.owner,
