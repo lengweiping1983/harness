@@ -1,14 +1,14 @@
-# 下一代 Harness Superagent 领域模型与数据契约
+# Harness Superagent 统一领域模型与数据契约
 
-> 文档状态：目标领域模型 v0.1；Phase 1–4 当前实现边界见第 9 节。\
+> 文档状态：统一开发契约；Phase 1–4 当前实现边界见第 9 节。\
 > 文档性质：目标领域模型，不代表当前代码已经实现。\
-> 关联总览：[下一代 Harness Superagent 总体架构方案](superagent-next-generation-architecture.md)。\
+> 后续开发唯一入口：[Harness Superagent 统一架构与开发计划](superagent-next-generation-architecture.md#开发执行规则)。\
 > 关联规范：[状态机与合法转移](superagent-state-machines.md) · [架构决策与接口协议](superagent-architecture-decisions.md)。\
-> 核查基线：Harness HEAD 1b506de；dsh-superagent-prototype HEAD 8c32a9d。
+> 初始领域设计参考（历史）：Harness 1b506de；dsh-superagent-prototype 8c32a9d。当前实现以第 9 节及实际源码为准。
 
 ## 1. 目的与规范用语
 
-本文冻结下一代 Superagent 的领域名词、身份边界、对象所有权、字段语义、关系和持久化映射。后续数据库 DDL、Repository、API、事件协议和迁移工具必须以本文及配套状态机为准。
+本文冻结下一代 Superagent 的领域名词、身份边界、对象所有权、字段语义、关系和持久化映射。后续数据库 DDL、Repository、API、事件协议及 Coordinator Schema 演进必须以本文及配套状态机为准；不开发旧 Superagent 数据导入或兼容运行工具。
 
 - **必须**：协议实现必须满足；偏离需要新的 ADR。
 - **建议**：默认采用；确有约束时可通过 ADR 说明替代方案。
@@ -135,9 +135,9 @@ SourceCursor 以 (source_instance_id, stream_key) 为唯一身份，保存不透
 
 **SourceInstance** 是某个具体 Provider 账号、仓库、Bot 或本机事件入口。字段至少包括：
 
-source_instance_id, kind, kind_api_version, enabled, config_json, config_revision, identity_hash, legacy_source_id, created_at, updated_at, health_json。
+source_instance_id, kind, kind_api_version, enabled, config_json, config_revision, identity_hash, created_at, updated_at, health_json。
 
-凭据只保存 Secret Reference，不保存 Token 明文。配置修订变更不能悄悄改变已接收 Trigger 的身份解释。legacy_source_id 只用于 v1/v2 Shadow 对照，不参与来源身份哈希；可以从未绑定状态绑定一次，绑定后不可更改或清空，避免历史 Trigger 的 Shadow 归属被追溯性重解释。
+凭据只保存 Secret Reference，不保存 Token 明文。配置修订变更不能悄悄改变已接收 Trigger 的身份解释。统一目标模型不包含旧版来源映射；现存 legacy_source_id 仅是 Shadow 专用实现遗留，其运行和 API 依赖随 Phase 4 收口清除，不进入新配置或新来源身份。已有迁移校验和与持久原件仍受保护，不能为清除依赖而改写历史迁移。
 
 ### 5.2 ActorRef、ThreadRef 与 ChannelRef
 
@@ -256,7 +256,7 @@ mission_id, plan_revision, plan_json, plan_hash, acceptance_json, acceptance_has
 
 created_by_kind = host | human | assignment；created_by_ref 指向对应 Actor 或生成该版本的 Planner Assignment。由 Planner 产生的 PlanRevision 必须引用其 Assignment。
 
-计划中的每个节点必须有稳定 node_id、role、profile_id、指令引用、依赖和资源范围。node_id 在同一 Mission / PlanRevision 内唯一；模型规划的业务节点不得使用保留前缀 __system__。宿主生成的 plan / integrate / review 节点使用保留身份，其中规划节点固定使用 plan_revision=0、node_id=__system__plan，真实 PlanRevision 从 1 开始；集成和复核节点使用包含 round_no 的稳定 node_id。修正或重规划产生新 PlanRevision，不能覆盖旧计划。
+计划中的每个节点必须有稳定 node_id、role、profile_id、指令引用、依赖和资源范围。node_id 在同一 Mission / PlanRevision 内唯一；模型规划的业务节点不得使用保留前缀 __system__。宿主生成的 plan / integrate / review 节点使用保留身份，其中规划节点固定使用 plan_revision=0、node_id=__system__plan，真实 PlanRevision 从 1 开始；集成和复核逻辑节点固定使用 __system__integrate / __system__review。有限修正沿用原 PlanRevision 和 Job，推进 round_no 并创建新 Assignment；不能每轮追加节点、改写依赖或重建计划。动态重规划不是 Phase 4 的隐式能力，后续若另行实现，必须明确授权并创建新 PlanRevision。
 
 **Job** 是 PlanRevision 中的逻辑节点，不代表一次执行。角色至少包括 plan | work | integrate | review。字段至少包括：
 
@@ -264,7 +264,7 @@ job_id, mission_id, plan_revision, node_id, role, profile_id, instruction_ref, i
 
 依赖使用 job_dependencies(job_id, depends_on_job_id, ordinal, requires_delivery) 关系表，不只存在于 JSON。每条依赖必须连接同一 mission_id 和 plan_revision 的 Job；Schema Contract 通过复合外键或等效事务校验拒绝跨 Mission / PlanRevision 依赖、自依赖和环。requires_delivery 标记该依赖边是否必须导入 Artifact；requires_delivery=true 用于消费上游文件 / Git 交付的边，false 用于仅依赖逻辑结果的边。下游 Job 只有在依赖 Job done 且所有 requires_delivery=true 的对应 Delivery 均 applied 并核验目标树后才可 ready；checkpointed 不算完成。
 
-**Assignment** 是 Job 的一次真实执行尝试。每次重试、续跑或重新提交都创建新 Assignment。字段至少包括：
+**Assignment** 是 Job 的一次真实执行尝试。获准的新执行、Checkpoint 接续及有界修正创建新 Assignment；原操作回查继续使用原 Assignment / Run，不因超时、失败或 unknown 自动重派。字段至少包括：
 
 assignment_id, job_id, attempt_no, worker_id, session_id, workspace_id, run_id, submission_key, state, report_json, started_at, ended_at, error_ref, aggregate_revision。
 
@@ -398,29 +398,15 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 16. 对外发送只能通过 Outbox；模型报告、Draft 和请求发起不是发送回执。
 17. PR Merge、部署和其他高风险外部动作需要独立授权和回执，不能隐含在 Mission completed 中。
 
-## 8. 与当前实现的映射
+## 8. 统一开发与能力归属
 
-| 当前实现事实 | 下一代领域映射 | 需要改变的语义 |
-|---|---|---|
-| Inbox sources | SourceInstance / Source Policy | 增加 SourceKind 契约与配置修订 |
-| Inbox triggers | Trigger | 保留远端身份和正文冲突检测；补充不可变内容引用 |
+功能进入哪一统一模块、接续顺序和完成门禁，统一维护在[总体计划第 10–11 节](superagent-next-generation-architecture.md#10-能力的唯一归属与数据边界)。不再提供旧任务／旧账本导入映射，不将旧 Router、Autonomy 或 MissionStore 作为并行开发路线。
 
-| Inbox tasks | Ticket / Worker 绑定拆分 | 当前 Task 绑定 Session，不等于长期 Ticket |
-
-| Inbox subscriptions.context_only | Subscription mode | 明确 work / context 及 owns_thread |
-| Router batches / inputs | Evaluation / Decision / TicketInput | 固定批次、Policy 快照和授权边界 |
-| Dispatcher deliveries | Assignment | 稳定提交键和原 Run 回查继续保留 |
-| Workers | Worker | Session / Workspace 资源仍引用 Harness |
-| MissionStore missions / jobs | Mission / Job / Assignment | 当前 Job ID 含 attempt；目标模型将逻辑 Job 与执行 Assignment 分开 |
-| MissionStore revision | source_revision / aggregate_revision 分离 | 禁止一个 revision 混合多个版本含义 |
-| Checkpoint / Delivery | Artifact / Delivery | 真实文件树和冻结基线继续作为交付事实 |
-| Watchdog heartbeats | WatchdogSnapshot | 活性观察与任务终态分离 |
-| Results drafts | Report / Outbox Candidate | Draft 不等于 Sent |
-| Harness 原生存储 | Evidence Provider | 不复制 Run / Tool Event 历史 |
+旧实现仅用于提取可复用原语、识别待改调用方并迁接有效业务回归。新增能力只进入统一协调账本、应用服务和原生 Harness 执行边界；接线缺失不能通过调用旧编排补足。
 
 ## 9. Phase 1–4 当前实现边界
 
-本文件定义完整目标领域模型。Phase 1 的独立持久化基础设施、状态机基础与宿主隔离已完成；Phase 2 的 Source Registry、Authorization Engine 和只读 Shadow 已通过显式 CoordinatorHost API 提供；Phase 3 的单 Worker 执行闭环也已通过显式 CoordinatorHost API 实现并完成专项回归。所有新能力仍保持显式 opt-in，不切换 v1 生产默认路由。
+本文件定义完整目标领域模型。Phase 1 的独立持久化基础设施、状态机基础与宿主隔离已完成；Phase 2 的 Source Registry、Authorization Engine 和只读 Shadow 已通过显式 CoordinatorHost API 提供；Phase 3 的单 Worker 执行闭环也已通过显式 CoordinatorHost API 实现并完成专项回归。目前统一应用服务仍需显式调用，生产入口尚未完成替换；这是 Phase 4 的未完成事实，不是继续维持旧路由的开发要求。
 
 已落地的持久化基础：
 
@@ -454,14 +440,14 @@ Phase 3 已实现的单 Worker 执行闭环：
 
 后续阶段仍未实现或尚未验收：
 
-- DAG 目前只验证结构、同版本依赖和环；多 Worker Job 的 Artifact Delivery applied、目标树核验、集成与 Review 完整生命周期仍待实现。
+- DAG 的统一调度消费尚未接通。已有真实 Artifact / Delivery 适配见下节，但多 Worker 依赖解锁、集成与 Review 的完整生命周期仍未接线，不能把适配器用例当作调度闭环。
 - EffectRecoveryService 提供同步与异步只读回查入口；OutboxProviderLookupAdapter 通过宿主注入的 Channel 与正文解析器分发到 GitHubIssueCommentLookupAdapter / FeishuThreadReplyLookupAdapter。两种适配器仅查询 Provider 资源 GET，只有在完整有界扫描中找到唯一、原幂等键标记和发送主体均匹配的远端对象才返回 applied；未找到、重复匹配或分页不完整均保持 indeterminate，不把缺失结果解释为安全重试。GitHub / 飞书列表接口不提供权威的“未执行”回执，因此这两种适配器不会返回 not_applied / permanent_rejection；retry_wait 仍必须由支持原操作状态查询的 Provider 明确证明。
 - Phase 3 只提供单 Worker Report / Attention / Handback / Outbox Candidate 闭环；尚无 V2 Outbox Sender、生产 Channel 注册表 / 正文 Artifact Resolver 接线或周期性恢复 Worker。Outbox Candidate 不等于已发送。
-- CoordinatorHost 的 Source / Authorization / Execution API 均须显式启用；尚未接入现有 Router、MissionStore、Dispatcher、Worker 或 Harness Runtime 的生产默认运行链，不会自动创建生产账本、迁移旧数据库、双写或切换 CLI / HTTP 路由。
-- V2 CoordinatorHost 尚未接入独立 MissionControl Runtime；当前 `control_allows` 在未配置 V2 控制适配器时沿用旧系统“无控制器则允许”的默认行为。生产接入前必须实现持久化的 V2 Mission 暂停 / 取消 / 审批控制，并将其实际决策接入状态转移，不能继续把默认允许当作控制能力已交付。
+- CoordinatorHost 的 Source / Authorization / Execution API 仍须显式调用；SuperagentService 尚未改造为统一装配，生产 CLI 的旧编排入口仍待替换。Phase 4 直接接入统一应用服务，不把接入旧 Router / MissionStore / Dispatcher 作为开发目标。
+- 持久 CoordinatorControl 已接入部分实际暂停边界，具体见下节；统一目标取消／停止 Runtime 和所有写入边界的控制代次核验仍未完成。状态观测中的 `control_allows=True` 不能替代新写入前对持久模式及当前授权的实际核验。
 - 推断自动接受仅在具体 Source 策略显式启用 `auto` 且 Gate、规则、意图与 Scope 全部通过时可用；它不会因此切换生产默认路由。远程 Worker 与 OS Sandbox 尚未启用。
 
-因此，Phase 1 按持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 的来源事实、授权闭环和只读 Shadow 已交付；Phase 3 的单 Worker 执行、原 Run 恢复、冻结 Report 与后续效果恢复已在显式 CoordinatorHost API 中实现。多 Worker DAG / Artifact Delivery、V2 MissionControl、生产 Channel 外发和新架构默认入口仍未交付；v1 生产默认路由保持不变。
+因此，Phase 1 按持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 的来源事实、授权闭环和只读 Shadow 已交付；Phase 3 的单 Worker 执行、原 Run 恢复、冻结 Report 与后续效果恢复已在显式 CoordinatorHost API 中实现。多 Worker DAG / Artifact Delivery 调度、统一 MissionControl、生产 Channel 外发和唯一入口仍待接通；后续只沿统一链路补齐，不回退旧编排。
 
 ### Phase 4 当前模型与适配基础
 

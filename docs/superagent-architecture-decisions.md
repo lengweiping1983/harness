@@ -1,8 +1,8 @@
-# 下一代 Harness Superagent 架构决策与接口协议
+# Harness Superagent 统一架构决策与接口协议
 
-> 文档状态：Phase 0 决策基线 v0.1，待维护者评审确认。\
-> ADR 状态说明：下列决策是推荐基线；在维护者确认前不得视为已实现的公共协议。\
-> 关联：[领域模型与数据契约](superagent-domain-model.md) · [状态机与合法转移](superagent-state-machines.md) · [总体架构](superagent-next-generation-architecture.md)。
+> 文档状态：统一 Superagent 开发约束；与[唯一开发计划](superagent-next-generation-architecture.md#开发执行规则)配套。
+> Accepted 表示架构取舍已确认，不代表目标接口已实现或业务验收已通过；实际交付见[领域模型第 9 节](superagent-domain-model.md#9-phase-14-当前实现边界)。
+> 关联：[领域模型与数据契约](superagent-domain-model.md) · [状态机与合法转移](superagent-state-machines.md)。
 
 ## 1. 决策记录规则
 
@@ -14,20 +14,20 @@ Phase 0 冻结领域与接口边界；后续实际交付见领域模型的当前
 
 | ADR | 决策 | 状态 |
 |---|---|---|
-| ADR-001 | Harness Runtime 继续作为唯一执行内核 | Proposed |
-| ADR-002 | Ticket / Mission / Job / Assignment 语义分离 | Proposed |
-| ADR-003 | 每个 Instance 一个 Coordinator SQLite；Harness 事实不复制 | Proposed |
-| ADR-004 | Transactional Effect Queue + Outbox；未知副作用不重放 | Proposed |
-| ADR-005 | SourceKind 与 SourceInstance 分离；先静态 Registry | Proposed |
-| ADR-006 | Mandate 不可变；Policy 快照与执行边界重新核验 | Proposed |
-| ADR-007 | 一个 Mission 一个 Repo 和冻结 Base Commit | Proposed |
-| ADR-008 | Job 是逻辑节点，Assignment 是执行尝试 | Proposed |
-| ADR-009 | Artifact / Evidence / Review 以真实文件和原始运行证据为准 | Proposed |
-| ADR-010 | Pause / Resume / Cancel 与真实 Run 收尾分离 | Proposed |
+| ADR-001 | Harness Runtime 继续作为唯一执行内核 | Accepted |
+| ADR-002 | Ticket / Mission / Job / Assignment 语义分离 | Accepted |
+| ADR-003 | 每个 Instance 一个 Coordinator SQLite；Harness 事实不复制 | Accepted |
+| ADR-004 | Transactional Effect Queue + Outbox；未知副作用不重放 | Accepted |
+| ADR-005 | SourceKind 与 SourceInstance 分离；先静态 Registry | Accepted |
+| ADR-006 | Mandate 不可变；Policy 快照与执行边界重新核验 | Accepted |
+| ADR-007 | 一个 Mission 一个 Repo 和冻结 Base Commit | Accepted |
+| ADR-008 | Job 是逻辑节点，Assignment 是执行尝试 | Accepted |
+| ADR-009 | Artifact / Evidence / Review 以真实文件和原始运行证据为准 | Accepted |
+| ADR-010 | Pause / Resume / Cancel 与真实 Run 收尾分离 | Accepted |
 | ADR-011 | Phase 4 统一替换，无旧版运行数据转换 | Accepted |
-| ADR-012 | 不把工具白名单或 Worktree 宣称为 OS Sandbox | Proposed |
-| ADR-013 | Domain / Application / Ports / Adapters 依赖方向 | Proposed |
-| ADR-014 | Phase 0 先冻结协议，Phase 1 再实现协调账本 | Proposed |
+| ADR-012 | 不把工具白名单或 Worktree 宣称为 OS Sandbox | Accepted |
+| ADR-013 | Domain / Application / Ports / Adapters 依赖方向 | Accepted |
+| ADR-014 | 领域协议先行的阶段顺序（历史阶段） | Completed |
 
 ## 3. ADR 详细内容
 
@@ -67,7 +67,7 @@ Phase 0 冻结领域与接口边界；后续实际交付见领域模型的当前
 - Job：Mission DAG 中的逻辑节点。
 - Assignment：Job 的一次真实执行尝试。
 - Worker：Harness Session / Workspace 等运行资源绑定。
-- 默认 Router 简单任务也创建单节点 Mission；Autonomy 创建多节点 DAG。
+- 简单与复杂任务共用 Scheduler；普通问答可采用单节点报告计划，文件和代码交付始终包含宿主质量门，不再分 Router / Autonomy 运行路径。
 
 同一 Ticket 可有多个顺序 Mission；同一 Ticket 同时最多一个活动或未知 Mission。Ticket 不是 Session，Mission 不是 Ticket，Job 不是 Assignment。
 
@@ -172,8 +172,8 @@ Phase 2 先实现静态 SourceRegistry 和内置 GitHub / Feishu / Local Adapter
 - Job ID 在 PlanRevision 内稳定；Job 不携带可被覆盖的唯一 Run 身份。
 - Assignment 每次执行单独创建，绑定 attempt_no / submission_key / worker / workspace / session / run。
 - Checkpoint continuation 创建新 Assignment，保留原 Job 和先前 Artifact 链。
-- 失败重试创建新 Assignment，不重写旧记录。
-- unknown Assignment 在回查前阻止新 attempt。
+- 已确认失败且另有明确重试授权时，新执行才创建新 Assignment，不重写旧记录；Checkpoint 和有界修正不构成未知副作用重放。
+- unknown Assignment 沿原提交键和 Run 回查，核实前阻止新 attempt；有限修正保留原 PlanRevision / Job，不按轮次重建计划。
 - 下游依赖必须同时满足源 Job done 和 requires_delivery=true 的对应 Delivery applied 且目标树核验通过；不认 Assignment succeeded 的单独文本报告，也不认 Job checkpointed。
 
 **替代方案**
@@ -216,11 +216,13 @@ Phase 2 先实现静态 SourceRegistry 和内置 GitHub / Feishu / Local Adapter
 
 **决策**
 
-- Phase 4 结束时只有一个 SuperagentService、一个协调账本、一套调度、执行和恢复机制；Phase 5 起仅扩展同一系统。
+- 从现在起只沿统一 SuperagentService、Coordinator、Scheduler、Executor 和 Outbox 开发；Phase 4 结束时完成唯一生产入口及旧编排清除，Phase 5 起仅扩展同一系统。
+- 旧链路不是开发选项或回退路径：不增加旧编排功能，不包装旧 Router / MissionStore 执行新任务，不新增 V1 / V2 服务和选择器。能力在统一接口接通后逐项删除旧实现；4.6 仅作最终收口。
 - 当前没有旧版运行数据，不开发旧任务导入、离线转换、历史协议兼容或双轨运行工具；本决策取代此前将迁移退役延后至 Phase 7 的路线。
 - 旧目录仍属于用户数据。发现旧账本或目录混用时在写入前拒绝，保留原件，不隐式清理或迁移。
 - Coordinator 已登记的迁移内容及校验和不变，新增结构使用新迁移；Harness 原生执行事实不复制。
-- 生产宿主不依赖旧目录和 Shadow；旧源码仅在调用方、动态绑定、资源分发及有效业务回归完成迁接后删除。
+- 唯一生产宿主不要求 legacy_state_dir，也不装配生产 Shadow。现存旧目录必填、Shadow 和旧默认路由均作为 Phase 4 缺口清除，不能写成必须保留的架构约束。
+- 删除前核对实际调用方、动态绑定、资源分发与有效业务回归；迁接业务断言，替换仅锁定旧架构的断言，不删除有效回归。
 
 ### ADR-012：不把工具白名单或 Worktree 宣称为 OS Sandbox
 
@@ -263,13 +265,13 @@ flowchart TB
 
 - Domain 直接 import harness.app 或 Provider SDK：拒绝，导致测试和迁移耦合。
 
-### ADR-014：Phase 0 先冻结协议，Phase 1 再实现协调账本
+### ADR-014：领域协议先行的阶段顺序（历史阶段）
 
 **决策**
 
-当前阶段只建立领域模型、状态机、Ports 和 ADR 文档。Phase 1 才实现 Coordinator SQLite、Repository、Unit of Work、CAS、AuditEvent、Effect Queue 和 Outbox。
+领域模型、状态机及 Ports 在协调账本实现之前冻结；后续实现同步维护契约、调用方、生成源及有效测试。Phase 1–3 基础已经交付，该历史顺序不构成重新启动 Phase 0 或等待旧评审清单的要求。
 
-不在本阶段创建数据库、修改现有模块、迁移数据或双写。文档确认后以纯状态转移测试和 Schema Contract 测试锁定协议，再开始实现。
+当前从已有统一基础层接续 Phase 4；具体顺序和完成门禁只维护在总体开发计划。Schema 的正常演进不等于旧 Superagent 运行数据导入，也不允许重新引入双轨运行。
 
 ## 4. 目标 Ports 接口契约
 
@@ -394,41 +396,17 @@ UnitOfWork 暴露 Ticket、Mission、Job、Assignment 等有类型的 Repository
 - PR Merge、部署、发布和凭证变更需要独立授权和回执。
 - 外部操作不能与 SQLite 事务组成 exactly-once 原子提交；unknown 是一等状态。
 - API 列表分页、有界；审计记录不可静默删除。
-- 数据迁移不得自动补造授权、发送消息或重放旧任务。
+- 不开发旧 Superagent 数据导入或历史协议兼容；正常 Schema 演进及原操作恢复同样不能补造授权、发送消息或重放未知副作用。
 
-## 7. 未决问题
+## 7. 后续扩展决策
 
-这些问题不阻止冻结基础领域模型，但在对应阶段开始前必须由维护者确认：
+统一开发路线、单实例 SQLite、静态 SourceRegistry、独立 Session / Workspace 复核及 unknown 不重放已经确定，不再作为 Phase 4 启动前待重新选择的事项。多人授权、完整人工核实工作台、跨仓库协作及具体 Sandbox / 远程设备方案，在 Phase 5 / 6 对应能力实施前按当前需求细化；不能为等待这些扩展而保留旧运行链路。
 
-| 问题 | 建议默认值 | 最迟决策阶段 |
-|---|---|---|
-| Source Plugin 是否支持第三方动态加载 | 先静态 Registry；插件代码视为可信代码 | Phase 2 |
-| SourceKind API 如何兼容升级 | 明确 kind_api_version，不兼容时停用并提示 | Phase 2 |
-| Ticket 是否允许多人 / 多操作者权限 | Phase 2 先单一可信操作者模型；多人授权后续单独设计 | Phase 5 |
-| Policy 更新是否撤销所有活动 Mandate | 只对 Gate Basis 失效者撤销；其余 affected 并重新核验 | Phase 2 |
-| unknown 由谁核实 | 先提供 CLI / API 只读回查和显式人工确认 | Phase 1 / 5 |
-| Coordinator SQLite 是否需要 PostgreSQL | 先单 Instance SQLite；按写竞争与部署数据评估 | Phase 1 / 6 |
-| 多仓库 Mission 如何交付 | 上层拆分多个单仓库 Mission | Phase 4 之后 |
-| PR Merge / 部署授权模型 | 与 Mission completed 分离，独立 Mandate / Control | Phase 5 |
-| Reviewer 是否必须使用不同模型 | 独立 Session / Workspace 为底线；关键任务可要求不同模型或人工 | Phase 4 |
-| OS Sandbox 技术选型 | 不在 Phase 0 预定；按平台和威胁模型评估 | Phase 6 |
+## 8. 后续开发准入与完成门禁
 
-## 8. Phase 0 出口门禁
+从[唯一开发计划第 11 节](superagent-next-generation-architecture.md#11-分阶段实施计划)接续 Phase 4.1 的消费闭环，再依次推进后续子阶段。Phase 0 的原始评审清单不再作为当前待执行任务。
 
-进入 Phase 1 前必须完成：
-
-- [ ] 维护者确认 SourceInstance / Trigger / Thread / Mandate / Ticket 的身份和授权语义。
-- [ ] 维护者确认 Ticket / Mission / Job / Assignment 的边界及恢复规则。
-- [ ] 确认所有 revision / round / attempt 字段含义不重叠。
-- [ ] 确认状态机中的终态、unknown、cancelling 和重试边界。
-- [ ] 确认 Coordinator SQLite 与 Harness 原生执行事实的所有权。
-- [ ] 确认 Source / Policy / Assessor / Executor / Artifact / Evidence / Channel / Repository Ports。
-- [ ] 确认迁移禁止双写、禁止自动补造 Mandate、unknown 不重放。
-- [ ] 将状态转移矩阵转换为确定性测试清单。
-- [ ] 将表清单转换为 Schema Contract 和唯一索引测试。
-- [ ] 由维护者将 ADR 状态从 Proposed 更新为 Accepted，或记录拒绝和替代决定。
-
-Phase 0 文档写入完成不代表这些评审门禁已经通过。没有维护者确认前，不应启动 Phase 1 的数据库和运行代码改造。
+验收必须通过统一应用服务的实际消费者、原始回执和业务断言取得证据；旧默认路由保持、旧服务仍可启动或只读 Shadow 比较不属于新架构的验收门禁。当前已实现与缺口以领域模型第 9 节为准，不以本页 ADR 状态代替实现证明。
 
 ## 9. 参考源码
 

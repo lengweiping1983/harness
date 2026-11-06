@@ -1,6 +1,6 @@
-# 下一代 Harness Superagent 状态机与合法转移
+# Harness Superagent 统一状态机与合法转移
 
-> 文档状态：Phase 0 设计基线 v0.1，待维护者评审确认。\
+> 文档状态：统一 Superagent 的目标状态契约；后续开发按[唯一开发计划](superagent-next-generation-architecture.md#开发执行规则)执行。\
 > 本文定义目标状态机，不代表当前代码已实现这些状态。\
 > 关联：[领域模型与数据契约](superagent-domain-model.md) · [架构决策与接口协议](superagent-architecture-decisions.md) · [总体架构](superagent-next-generation-architecture.md)。
 
@@ -213,7 +213,7 @@ Phase 1 尚未建立独立 Delivery 表；上述 Delivery 是按依赖边记录�
 | running | integrating | 所有 Work Job 最终 done，且所有必需 Artifact Delivery 均 applied 并核验目标树 | Checkpointed 或仅有文本报告不满足 |
 | integrating | reviewing | 所有 Work Job 与必需 Delivery 已结算；Integrator Assignment 已结束、Artifact Capture 已冻结、树哈希匹配 | 不以 Integrator 文本报告代替 Artifact |
 | reviewing | completed | 每项 Acceptance 都有当前候选的有效 Evidence；所有 Work Job / Delivery 已结算、Integration Artifact 冻结且没有活动 Assignment | 不接受过期 Verdict 或损坏缓存 |
-| reviewing | integrating | 修正预算未耗尽，新的修正 Job / PlanRevision 已明确生成 | 不无限循环复核 |
+| reviewing | integrating | 修正授权及预算有效，round_no 推进，原计划／Job 下的新修正 Assignment 已明确生成 | 不无限循环复核 |
 | 活动阶段 | blocked | 已知失败、冲突、预算耗尽或需人工决策 | 不将未知操作误标为 blocked |
 | 活动阶段 | cancelling | 宿主接受 cancel 命令 | 不把控制模式已改成 cancelling 当成 Run 已停止 |
 | cancelling | cancelled | 所属 Run、Background Job 和写入收尾均有确切终态 | 不用旧 PID、超时或控制回执冒充退出证据 |
@@ -442,9 +442,9 @@ UI Stage 不单独持久化，建议按以下优先级从同一只读快照派�
 - work 阶段结束不等于 Job done；Checkpoint 接续创建新 Assignment，最终阶段才解锁依赖。
 - 文件交付完成必须绑定冻结候选及独立 Review；普通报告的完成分支不能绕过该质量门。
 
-## 13. Phase 0 验收用例
+## 13. 统一状态机验收场景
 
-Phase 1 应把下列用例转成纯确定性单元测试和 SQLite 事务测试：
+保留已有有效单元及 SQLite 事务回归，Phase 4 按实际改动补齐下列场景的缺口；不要将它们理解为重做 Phase 0 / 1 或每次默认全量执行：
 
 1. 同一 SourceInstance 同一 external_event_id 同哈希重复接收，只创建一个 Trigger / Fan-out。
 2. 同一身份不同哈希返回 conflict，原 Trigger 字节不变。

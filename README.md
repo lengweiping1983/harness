@@ -67,6 +67,8 @@ python -m harness.cli --cwd /path/to/project --memory-import archive.jsonl
 
 显式 Superagent 模式使用 `python -m harness.cli --superagent /path/to/config.json`，可加 `--superagent-once` 处理当前批次后退出。配置 `autonomy` 后，一个目标可自动拆解为依赖任务，经并行工作、真实产物交接、集成、独立复核和有限修正后形成候选；默认 Router 继续支持单任务及 Thread 续接。可选 Watchdog 会持久记录长任务心跳并在明确阈值后生成关注项或安全阻塞，不会重放未知副作用。使用 `--superagent-submit "目标"` 直接提交，`--superagent-status` 读取状态，无需手写事件 JSON。可选 GitHub／飞书信道在显式授权后接收事件、发送并核实原来源回复；飞书加密回调需安装 `.[superagent]`。配置与当前限制见 [Superagent 模式](docs/superagent.md)；工作台、远程执行和跨设备任务监督仍待实现。
 
+Superagent 的后续开发只按[统一架构与开发计划](docs/superagent-next-generation-architecture.md#开发执行规则)推进；旧入口仅反映尚待替换的实现现状，不作为并行开发或兼容回退路线。
+
 自主目标还支持持久控制：`--superagent-pause/--superagent-resume/--superagent-cancel --superagent-mission MISSION_ID`。控制请求写入独立账本并按请求身份幂等处理；暂停冻结新的调度，取消停止目标活动运行，状态快照保留每条控制命令及修订号。
 
 三层记忆默认使用本地关键词召回；显式启用本地语义候选的依赖、缓存与限制见 [扩展文档](docs/extensions.md#可选本地语义记忆候选)。
