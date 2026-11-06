@@ -7598,7 +7598,7 @@
   "execution.companion.launch.port_occupied": "Port {port} is occupied by another service; no process was stopped or replaced.",
   "execution.companion.launch.starting": "Starting the local companion with {config} on port {port}.",
   "execution.companion.launch.key_invalid": "The local companion pairing file is invalid; the original file was not changed. Check the executor home.",
-  "execution.companion.prompt": "继续",
+  "execution.companion.prompt": "Continue",
   "ui.academy.quickCheck": "Check your understanding",
   "ui.academy.notesDisclosure": "Record your observation",
   "ui.academy.feedbackDisclosure": "Get detailed feedback",

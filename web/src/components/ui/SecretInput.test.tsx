@@ -32,7 +32,7 @@ it('places an icon without visible text inside the input boundary with space and
 
 it('toggles the original editable value and preserves focus without submitting or changing it', () => {
   const onChange = vi.fn(), preventDefault = vi.fn(), stopPropagation = vi.fn()
-  const props = {value: 'Original secret 原文', onChange}
+  const props = {value: 'Original secret value', onChange}
   const button = () => render(props).props.children[1]
   expect(render(props).props.children[0].props.type).toBe('password')
   button().props.onMouseDown({preventDefault})
