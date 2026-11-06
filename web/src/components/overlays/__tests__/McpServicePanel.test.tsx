@@ -86,6 +86,7 @@ it('automatically saves settings on start, restores them on reopen and reuses th
 it('keeps drafts on a refused start and translates the same error without repeating the write', async () => {
   await loaded(); rejectSave = true
   field('select').props.onChange({target: {value: 'named'}})
+  field('url').props.onChange({target: {value: 'https://mcp.example.test'}})
   field('password').props.onChange({target: {value: 'draft-token'}})
   button('ui.mcpService.start').props.onClick()
   await vi.waitFor(() => expect(nodes(render()).find(node => node.props.role === 'alert')).toBeTruthy())
@@ -95,6 +96,32 @@ it('keeps drafts on a refused start and translates the same error without repeat
     expect(field('password').props.value).toBe('draft-token')
   }
   expect(writes).toHaveLength(1)
+})
+
+it.each([
+  ['', 'https://mcp.example.test', 'fixture-token'],
+  ['0', 'https://mcp.example.test', 'fixture-token'],
+  ['70000', 'https://mcp.example.test', 'fixture-token'],
+  ['1.5', 'https://mcp.example.test', 'fixture-token'],
+  ['19000', '', 'fixture-token'],
+  ['19000', 'javascript:alert(1)', 'fixture-token'],
+  ['19000', 'https://mcp.example.test/path', 'fixture-token'],
+  ['19000', 'https://mcp.example.test?x=1', 'fixture-token'],
+  ['19000', 'https://user:pass@mcp.example.test', 'fixture-token'],
+  ['19000', 'https://mcp.example.test', ''],
+])('rejects invalid tunnel settings locally: %s %s', async (port, url, token) => {
+  await loaded()
+  field('select').props.onChange({target: {value: 'named'}})
+  field('url').props.onChange({target: {value: url}})
+  field('number').props.onChange({target: {value: port}})
+  field('password').props.onChange({target: {value: token}})
+  button('ui.mcpService.start').props.onClick()
+  expect(writes).toEqual([])
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(language)
+    expect(text(nodes(render()).find(node => node.props.role === 'alert'))).toBe(t('ui.mcpService.error.tunnelConfig'))
+    expect(field('number').props.value).toBe(port)
+  }
 })
 
 it('reveals the MCP password through the shared input control and hides it without another request', async () => {

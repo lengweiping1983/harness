@@ -312,12 +312,40 @@ def read_package(root: str | Path) -> PackageSpec:
     return PackageSpec(root, name, version, description, display_name, tuple(skills), servers, tuple(hooks), apps)
 
 
+def _snapshot_paths(source: Path) -> list[Path]:
+    """增量检查数量与文件类型，限额内才排序，避免先物化任意大目录。"""
+    paths = []
+    directories = [source]
+    files = 0
+    directory_count = 0
+    while directories:
+        directory = directories.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                path = Path(entry.path)
+                mode = entry.stat(follow_symlinks=False).st_mode
+                if stat.S_ISLNK(mode) or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+                    raise PackageError(tr('plugin.validation.a006be6939ac', p0=path.relative_to(source)))
+                if stat.S_ISDIR(mode):
+                    directory_count += 1
+                    if directory_count > MAX_FILES:
+                        raise PackageError(tr('plugin.validation.directoryLimit', limit=MAX_FILES))
+                    directories.append(path)
+                else:
+                    files += 1
+                    if files > MAX_FILES:
+                        raise PackageError(tr('plugin.validation.d1de9c1057bd', p0=MAX_FILES))
+                paths.append(path)
+    # 保持原来的全路径顺序，使相同包内容的审核摘要不随遍历策略变化。
+    return sorted(paths)
+
+
 def _snapshot(source: Path, destination: Path | None = None) -> str:
     """复制实际文件字节并计算确定摘要，不跟随符号链接或特殊文件。"""
     digest = hashlib.sha256()
     count = 0
     total = 0
-    for path in sorted(source.rglob('*')):
+    for path in _snapshot_paths(source):
         relative = path.relative_to(source)
         mode = path.lstat().st_mode
         if stat.S_ISLNK(mode) or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):

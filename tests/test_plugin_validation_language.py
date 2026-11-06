@@ -3,14 +3,69 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from harness.core.language import current_language
-from harness.plugins.packages import read_package, PackageError, PackageConflict, _inside
+from harness.i18n import tr
+from harness.plugins.packages import read_package, PackageError, PackageConflict, _inside, _snapshot
 from harness.plugins.sources import PackageSources
 from harness.plugins.git_sources import validate_source
 from harness.plugins.marketplaces import MarketplaceStore
+from harness.web.api.plugin_packages import build_router
+from harness.web.errors import ApiError
+from harness.web.router import Request
+from harness.web.error_messages import public_error_message
 
 
 class PluginValidationLanguageTests(unittest.TestCase):
+    def test_plugin_io_error_hides_paths_preserves_diagnostics_and_uses_shared_resources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / 'missing-plugin'
+            service = SimpleNamespace(preview=lambda path: lambda: _snapshot(Path(path)))
+            for language in ('en', 'zh-CN', 'en'):
+                for failure in ('missing', 'permission'):
+                    with self.subTest(language=language, failure=failure), current_language.set(language):
+                        def call(operation, **_options):
+                            if failure == 'permission':
+                                raise PermissionError(13, 'Original permission detail', str(missing))
+                            return operation()
+                        ctx = SimpleNamespace(harness=SimpleNamespace(plugin_service=service), call=call)
+                        handler, parameters = build_router(ctx).resolve('POST', '/api/v1/plugin-packages/preview')
+                        body = json.dumps({'path': str(missing)}).encode()
+                        with self.assertLogs('harness.web.api.plugin_packages', level='WARNING') as logs:
+                            with self.assertRaises(ApiError) as caught:
+                                handler(Request('POST', '/api/v1/plugin-packages/preview', {}, {}, body), **parameters)
+                        error = caught.exception
+                        copy = {'key': 'ui.collaboration.error.plugin-package/io-error'}
+                        self.assertEqual(error.status, 400)
+                        self.assertEqual(error.code, 'plugin-package/io-error')
+                        self.assertEqual(error.message, tr(copy['key']))
+                        self.assertEqual(error.details, {'copy': copy, 'errno': 2 if failure == 'missing' else 13})
+                        payload = json.dumps(error.to_dict(), ensure_ascii=False)
+                        self.assertNotIn(str(missing), payload)
+                        self.assertNotIn('[Errno', payload)
+                        self.assertIn(str(missing), '\n'.join(logs.output))
+                        self.assertIsInstance(error.__cause__, OSError)
+                        self.assertEqual(public_error_message(error.code, error.code), error.message)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_api_plugin_errors_preserve_language_conflict_details_and_clean_message(self):
+        for language in ('en', 'zh-CN', 'en'):
+            for conflict in (False, True):
+                with self.subTest(language=language, conflict=conflict), current_language.set(language):
+                    message = tr('plugin.validation.cded299936e1')
+                    error = (PackageConflict if conflict else PackageError)(message)
+                    error.details = {'diagnostic': 'Original 原文'}
+                    def call(_coroutine, **_options):
+                        raise error
+                    ctx = SimpleNamespace(harness=SimpleNamespace(plugin_service=SimpleNamespace(preview=lambda path: path)), call=call)
+                    handler, parameters = build_router(ctx).resolve('POST', '/api/v1/plugin-packages/preview')
+                    with self.assertRaises(ApiError) as caught:
+                        handler(Request('POST', '/api/v1/plugin-packages/preview', {}, {}, b'{"path":"/fixture"}'), **parameters)
+                    self.assertEqual(caught.exception.message, message)
+                    self.assertEqual(caught.exception.details, error.details)
+                    self.assertEqual(caught.exception.code, 'plugin-package/changed' if conflict else 'plugin-package/invalid')
+                    self.assertEqual(caught.exception.status, 409 if conflict else 400)
+
     def assert_language(self, text, language):
         self.assertEqual(any('\u4e00' <= c <= '\u9fff' for c in text), language == 'zh-CN', text)
 

@@ -68,9 +68,10 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     const aborted = controller.signal.aborted
     const copy: ResourceCopy = aborted
       ? { key: abortReason === 'cancelled' ? 'ui.lib.api.282c4cfbc8fd' : 'ui.lib.api.8b7f52f0dbb6' }
-      : { key: 'ui.lib.api.4a5f658ed9ae', params: { detail: error instanceof Error ? error.message : String(error) } }
+      : { key: 'ui.http.networkUnavailable' }
     return { ok: false, status: 0, code: aborted ? abortReason ?? 'cancelled' : 'network',
-      message: t(copy.key, copy.params), copy }
+      message: t(copy.key, copy.params), copy,
+      ...(!aborted ? {details: {cause: error instanceof Error ? error.message : String(error)}} : {}) }
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener('abort', cancel)

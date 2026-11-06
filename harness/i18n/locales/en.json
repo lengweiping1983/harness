@@ -7904,8 +7904,8 @@
   "ui.readiness.dismiss": "Dismiss readiness check",
   "ui.readiness.project": "Working directory: {directory}",
   "ui.readiness.noProject": "Choose a project directory so the agent works in the right place.",
-  "ui.readiness.model": "This configuration includes an API key. A real request is needed to confirm connectivity.",
-  "ui.readiness.noModel": "This configuration has no API key. Other connections or a signed-in subscription account may still provide model access.",
+  "ui.readiness.model": "Model access is configured through a key, connection or subscription account. A real request is needed to confirm connectivity.",
+  "ui.readiness.noModel": "No model access is configured. Add a model connection or sign in to a subscription account.",
   "ui.readiness.openModels": "Configure model connection",
   "ui.readiness.chooseProject": "Choose project directory",
   "ui.readiness.hint": "Describe your request to begin. Use a plan, task checklist or goal when the work needs it.",
@@ -8576,5 +8576,15 @@
   "ui.process.runningCount": "{count} in progress",
   "ui.process.failedCount": "{count} failed",
   "ui.process.skippedCount": "{count} skipped",
-  "ui.process.backgroundCount": "{count} in background"
+  "ui.process.backgroundCount": "{count} in background",
+  "ui.workspacePicker.missingDirectory": "Directory missing",
+  "ui.sessionCreation.emptyDraft": "Draft conversation",
+  "ui.boot.backendUnavailable": "Cannot connect to the Harness backend. Check that the service is running, then retry.",
+  "ui.http.networkUnavailable": "Unable to connect to the service. Check the connection and try again.",
+  "ui.settings.positiveInteger": "Enter a whole number of at least 1.",
+  "ui.settings.optionalPositiveInteger": "Enter a whole number of at least 1, or leave blank for no limit.",
+  "plugin.validation.directoryLimit": "Package contains more than {limit} directories.",
+  "ui.newConversation.checkPaused": "Project checks are paused while this page is in the background. Return to resume automatically.",
+  "ui.trace.titleRequest": "Conversation title",
+  "ui.collaboration.error.plugin-package/io-error": "Could not read or write the plugin files. Check that the source directory exists and is accessible."
 }

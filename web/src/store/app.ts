@@ -108,6 +108,7 @@ export interface Toast {
 
 let languageEpoch = 0
 let catalogLanguageEpoch = 0
+let settingsStatusRequest = 0
 
 interface AppState {
   language: LanguagePreference
@@ -483,7 +484,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   boot: async () => {
     if (get().booting) return
-    set({ booting: true, bootError: null })
+    set({ booting: true })
     applyTheme(get().theme)
     applyFontSize(get().uiFontSize)
     try {
@@ -509,10 +510,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         catalog = currentCatalog
         models = currentModels
       }
+      if (!catalog.status && !sessions.ok && !workspaces.ok && !models.ok && !settings.ok) {
+        set({booting: false, booted: true, bootError: {key: 'ui.boot.backendUnavailable'}})
+        return
+      }
       const list = sessionsTicket === sessionListRequest ? sessions.ok ? sessions.data.sessions ?? [] : [] : get().sessions
       let previousSession: string | null = null
       try { previousSession = localStorage.getItem('harness.active-session.v1') } catch { /* Preferences are optional. */ }
-      const selectedSession = get().activeSessionId ?? (list.some((s) => s.id === previousSession) ? previousSession : null) ?? list[0]?.id ?? null
+      const activeSession = get().activeSessionId
+      const selectedSession = (list.some((s) => s.id === activeSession) ? activeSession : null)
+        ?? (list.some((s) => s.id === previousSession) ? previousSession : null) ?? list[0]?.id ?? null
       const wsList = workspacesTicket === workspaceListRequest && workspaces.ok ? workspaces.data.workspaces : get().workspaces
       const modelCatalog: ModelCatalog | null = models.ok ? models.data : null
       set({
@@ -532,6 +539,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
         booting: false,
         booted: true,
+        bootError: null,
         activeSessionId: selectedSession,
         // 选中的项目要跟得上当前会话：新会话属于哪个项目就跟着切。
         activeWorkspaceId: get().activeWorkspaceId ?? workspaceOfSession(list, selectedSession, wsList) ?? null,
@@ -610,21 +618,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (state.sessionCreating || state.activeSessionId) return false
     const existingRequest = useDraftStore.getState().bySession.__unsaved__?.creationRequest
     const workspace = state.workspaces.find(row => row.id === state.activeWorkspaceId)
-    if (!existingRequest && (!workspace || workspace.exists === false)) {
+    const checkout = state.newSessionCheckout?.cwd === workspace?.path ? state.newSessionCheckout : null
+    const project = workspace && checkout ? {workspace_id: workspace.id, mode: checkout.mode,
+      ...(checkout.ref ? {ref: checkout.ref} : {}), expected_head: checkout.expected_head, expected_branch: checkout.expected_branch} : undefined
+    const agentSelection = useDraftStore.getState().bySession.__unsaved__?.agentSelection
+    const cwd = newSessionDirectory(state.workspaces, state.activeWorkspaceId)
+    const sameScope = (attempt: NonNullable<typeof existingRequest>) => attempt.cwd === cwd && attempt.agent === agentSelection?.name
+      && JSON.stringify(attempt.project) === JSON.stringify(project)
+    const recoveringCurrent = existingRequest && sameScope(existingRequest)
+    if (!recoveringCurrent && (!workspace || workspace.exists === false)) {
       get().setWorkspacePickerOpen(true, 'select')
       get().toast({title: {key: 'ui.newConversation.chooseProject'}, tone: 'warn'})
       return false
     }
-    if (!existingRequest && state.newSessionCheckoutStatus !== 'ready') {
+    if (!recoveringCurrent && state.newSessionCheckoutStatus !== 'ready') {
       get().toast({title: {key: 'ui.newConversation.checkBeforeSend'}, tone: 'warn'})
       return false
     }
-    const checkout = state.newSessionCheckout?.cwd === workspace?.path ? state.newSessionCheckout : null
-    const project = workspace && checkout ? {workspace_id: workspace.id, mode: checkout.mode,
-      ...(checkout.ref ? {ref: checkout.ref} : {}), expected_head: checkout.expected_head, expected_branch: checkout.expected_branch} : undefined
-    if (!existingRequest && checkout?.mode === 'local' && checkout.ref && checkout.ref !== 'HEAD' && checkout.ref !== checkout.expected_branch
+    if (!recoveringCurrent && checkout?.mode === 'local' && checkout.ref && checkout.ref !== 'HEAD' && checkout.ref !== checkout.expected_branch
       && !window.confirm(t('ui.newConversation.confirmBranch', {current: checkout.expected_branch ?? 'HEAD', target: checkout.ref, path: checkout.cwd}))) return false
-    const agentSelection = useDraftStore.getState().bySession.__unsaved__?.agentSelection
     const executionMode = useDraftStore.getState().bySession.__unsaved__?.executionMode
     set({ sessionCreating: true })
     try {
@@ -639,8 +651,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         get().toast({title: {key: 'ui.models.reasoningBeforeSend'}, tone: 'danger'})
         return false
       }
-      const cwd = newSessionDirectory(state.workspaces, state.activeWorkspaceId)
-      const existing = useDraftStore.getState().bySession.__unsaved__?.creationRequest
+      let existing = existingRequest
+      if (existing && !sameScope(existing)) {
+        // 旧作用域只读确认完成后才释放身份；本次提交随后使用当前项目的新身份。
+        const recovered = await recoverSessionCreation(existing.id)
+        if (!recovered.ok) {
+          get().toast({title: {key: 'ui.store.app.e3a3c5f92ee1'}, description: recovered.copy ?? recovered.message, tone: 'danger'})
+          return false
+        }
+        if (useDraftStore.getState().bySession.__unsaved__?.creationRequest?.id === existing.id) useDraftStore.getState().setCreationRequest()
+        sessionListRequest++
+        set(current => ({sessions: current.sessions.some(row => row.id === recovered.data.session.id) ? current.sessions : [recovered.data.session, ...current.sessions]}))
+        // 回查期间切换或离开草稿，不把原操作送入后来选择的目录。
+        if (get().activeSessionId || get().newSessionRevision !== state.newSessionRevision || get().activeWorkspaceId !== state.activeWorkspaceId
+          || get().newSessionCheckoutRevision !== state.newSessionCheckoutRevision
+          || useDraftStore.getState().bySession.__unsaved__?.agentSelection !== agentSelection) return false
+        existing = undefined
+      }
       const attempt = existing ?? {id: crypto.randomUUID(), cwd, agent: agentSelection?.name, ...(project ? {project} : {})}
       const clearAttempt = () => {
         if (useDraftStore.getState().bySession.__unsaved__?.creationRequest?.id === attempt.id) useDraftStore.getState().setCreationRequest()
@@ -667,14 +694,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!result.ok) {
         if (!isUnconfirmedWrite(result)) clearAttempt()
         get().toast({ title: {key: 'ui.store.app.e3a3c5f92ee1'}, description: result.copy ?? result.message, tone: 'danger' })
-        return false
-      }
-      if (attempt.cwd !== cwd || attempt.agent !== agentSelection?.name || JSON.stringify(attempt.project) !== JSON.stringify(project)) {
-        clearAttempt()
-        const recovered = result.data.session
-        sessionListRequest++
-        set(current => ({sessions: current.sessions.some(row => row.id === recovered.id) ? current.sessions : [recovered, ...current.sessions]}))
-        get().toast({title: {key: 'ui.sessionCreation.scopeChanged'}, tone: 'warn'})
         return false
       }
       if (agentSelection && (!result.data.agent_mount?.available || result.data.agent_mount.agent !== agentSelection.name)) {
@@ -1160,7 +1179,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   setConversationSearchOpen: (conversationSearchOpen) => set({ conversationSearchOpen }),
   setQuickOpen: (quickOpen) => set({ quickOpen: quickOpen && Boolean(get().activeSessionId) }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
-  setSettingsOpen: (settingsOpen, target, root) => set({ settingsOpen, settingsTarget: target ?? null, settingsWorkspaceRoot: root ?? null }),
+  setSettingsOpen: (settingsOpen, target, root) => {
+    const closing = get().settingsOpen && !settingsOpen
+    const ticket = ++settingsStatusRequest
+    set({ settingsOpen, settingsTarget: target ?? null, settingsWorkspaceRoot: root ?? null })
+    if (closing) {
+      // 设置可能改变连接或订阅；关闭后重新读取，不沿用启动时的凭据状态。
+      set({status: null})
+      void api.status().then(result => {
+        if (ticket === settingsStatusRequest && !get().settingsOpen) set({status: result.ok ? result.data : null})
+      })
+    }
+  },
   setWorkspacePickerOpen: (workspacePickerOpen, workspacePickerMode = 'add') => set({ workspacePickerOpen, workspacePickerMode }),
   setModelMenuOpen: (modelMenuOpen) => set({ modelMenuOpen }),
   setUiFontSize: (uiFontSize) => {

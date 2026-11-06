@@ -8,6 +8,7 @@ import { mcpServicePassword, mcpServiceStart, mcpServiceStatus, mcpServiceStop, 
 import { Button } from '@/components/ui/primitives'
 import { SecretInput } from '@/components/ui/SecretInput'
 import {McpCompanionPanel} from './McpCompanionPanel'
+import {parseInteger, validTunnelUrl} from '@/lib/settingsValidation'
 
 const statusKeys = { stopped: 'ui.mcpService.stopped', starting: 'ui.mcpService.starting', running: 'ui.mcpService.running', stopping: 'ui.mcpService.stopping', failed: 'ui.mcpService.failed' }
 
@@ -69,6 +70,12 @@ export function McpServicePanel() {
 
   async function change(action: 'start' | 'stop') {
     if (working.current) return
+    if (action === 'start' && (parseInteger(originPort, 1024, 65535) === undefined
+      || token.length > 8192 || /\s/.test(token)
+      || mode === 'named' && (!validTunnelUrl(publicUrl) || !token && !state?.tunnel?.has_token))) {
+      setError({key: 'ui.mcpService.error.tunnelConfig'})
+      return
+    }
     working.current = true
     setBusy(true); setError(''); setReadError(''); setNotice(''); setPassword(''); generation.current++
     try {
@@ -120,7 +127,7 @@ export function McpServicePanel() {
         {mode === 'quick' ? <p className="text-xs leading-relaxed text-muted">{t('ui.mcpService.quickWarning')}</p> : <>
           <p className="text-xs leading-relaxed text-muted">{t('ui.mcpService.namedSetup')} <a className="text-brand underline" href="https://developers.cloudflare.com/tunnel/get-started/" target="_blank" rel="noreferrer">{t('ui.mcpService.setupGuide')}</a></p>
           <label className="block text-sm text-ink">{t('ui.mcpService.hostname')}<input type="url" value={publicUrl} onChange={event => { edited.current = true; setPublicUrl(event.target.value) }} placeholder="https://mcp.example.com" className="mt-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" /></label>
-          <label className="block text-sm text-ink">{t('ui.mcpService.originPort')}<input type="number" min="1024" max="65535" value={originPort} onChange={event => { edited.current = true; setOriginPort(event.target.value) }} className="mt-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" /></label>
+          <label className="block text-sm text-ink">{t('ui.mcpService.originPort')}<input type="number" min="1024" max="65535" step="1" value={originPort} onChange={event => { edited.current = true; setOriginPort(event.target.value) }} className="mt-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" /></label>
           <p className="text-xs leading-relaxed text-muted">{t('ui.mcpService.originHint', {port: originPort})}</p>
           <label className="block text-sm text-ink">{t('ui.mcpService.tunnelToken')}<SecretInput containerClassName="mt-2" autoComplete="new-password" spellCheck={false} value={token} placeholder={state?.tunnel?.token_mask ?? ''} onChange={event => { edited.current = true; setToken(event.target.value) }} className="bg-surface text-sm" /></label>
           {!state?.tunnel?.has_token && <p className="text-xs leading-relaxed text-muted">{t('ui.mcpService.tokenPrivate')}</p>}

@@ -103,6 +103,7 @@ export function WorkspacePicker() {
     setMaking(false)
     setNewName('')
     const state = useAppStore.getState()
+    void state.refreshWorkspaces()
     void load(mode === 'select' ? state.workspaces.find(row => row.id === state.activeWorkspaceId)?.path : undefined)
     return () => {
       panelEpoch.current++
@@ -203,8 +204,8 @@ export function WorkspacePicker() {
   if (!open) return null
 
   return (
-    <Overlay onClose={() => setOpen(false)} className="max-w-2xl" labelledBy="picker-title">
-      <header className="flex items-center gap-2 border-b border-line px-4 py-3">
+    <Overlay onClose={() => setOpen(false)} className="flex max-h-dialog max-w-2xl flex-col overflow-y-auto sm:max-h-dialog-wide" labelledBy="picker-title">
+      <header className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-3">
         <Folder className="h-4 w-4 text-brand" />
         <h2 id="picker-title" className="ui-section-title">{t(mode === 'select' ? 'ui.newConversation.chooseProject' : 'ui.components.overlays.WorkspacePicker.8964f53ac30f')}</h2>
         <span className="truncate text-2xs text-faint">{t("ui.components.overlays.WorkspacePicker.0294c1647bf9")}</span>
@@ -218,12 +219,14 @@ export function WorkspacePicker() {
         </button>
       </header>
 
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
       {workspaces.length > 0 && <section className="space-y-2 border-b border-line px-4 py-3" aria-label={t('ui.newConversation.registeredProjects')}>
         <h3 className="ui-group-title text-muted">{t('ui.newConversation.registeredProjects')}</h3>
         <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto">
           {workspaces.map(workspace => <Button key={workspace.id} size="sm" disabled={busy || workspace.exists === false} active={normalizePath(selected) === normalizePath(workspace.path)}
             title={workspace.path} icon={<Folder className="h-3.5 w-3.5" />} onClick={() => enter(workspace.path)}>
             <span className="max-w-path truncate">{workspace.name}</span>
+            {workspace.exists === false ? <span className="text-warn">{t('ui.workspacePicker.missingDirectory')}</span> : null}
           </Button>)}
         </div>
       </section>}
@@ -301,7 +304,7 @@ export function WorkspacePicker() {
         ) : null}
       </div>
 
-      <div className="scroll-fade-y max-h-panel min-h-64 overflow-y-auto p-2">
+      <div className="min-h-32 p-2">
         {status === 'error' ? (
           <div className="space-y-3 px-3 py-6 text-center"><p role="alert" className="text-xs text-danger">{noticeText(error)}</p><Button size="sm" variant="secondary" onClick={() => void load(requestedPath.current)}>{t("ui.components.chat.Conversation.6d7f1def5670")}</Button></div>
         ) : status === 'loading' ? (
@@ -365,7 +368,10 @@ export function WorkspacePicker() {
       {selected && status === 'idle' && <div className="border-t border-line px-4 py-3">
         <ConversationCheckout cwd={selected} value={checkout} disabled={busy} onChange={updateCheckout} />
       </div>}
-      <footer className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
+      <p className="border-t border-line px-4 py-2 text-2xs text-faint">
+        <Search className="mr-1 inline h-3 w-3" />{t("ui.components.overlays.WorkspacePicker.be8e4dd716fb")}<Kbd>Enter</Kbd>{t("ui.components.overlays.WorkspacePicker.b752f04f6a55")}<Kbd>Esc</Kbd>{t("ui.components.overlays.WorkspacePicker.3fd47edce45b")}</p>
+      </div>
+      <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line px-4 py-3">
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs text-ink" title={selected}>
             {computer ? t('ui.workspacePicker.computer') : selected || '—'}
@@ -387,9 +393,6 @@ export function WorkspacePicker() {
           onClick={() => void commit(selected, true)}
         >{t(mode === 'select' ? 'ui.newConversation.useProject' : 'ui.components.overlays.WorkspacePicker.9246c4832cf4')}</Button>
       </footer>
-
-      <p className="border-t border-line px-4 py-2 text-2xs text-faint">
-        <Search className="mr-1 inline h-3 w-3" />{t("ui.components.overlays.WorkspacePicker.be8e4dd716fb")}<Kbd>Enter</Kbd>{t("ui.components.overlays.WorkspacePicker.b752f04f6a55")}<Kbd>Esc</Kbd>{t("ui.components.overlays.WorkspacePicker.3fd47edce45b")}</p>
     </Overlay>
   )
 }

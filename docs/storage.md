@@ -17,7 +17,7 @@
 | 对话 | `session/store.py`：`sessions/<id>/header.json`、`events.jsonl` |
 | 独立 MCP 执行器 | `execution/store.py`：执行器配置的 `home/executor.sqlite3`，同目录 `executor.owner` 文件持有进程所有权锁 |
 | 普通聊天接续 | `mcp_server/companion.py`：执行器运行根的 `companion.sqlite3` 保存浏览器绑定与单次发送意图，`companion-key.json` 保存回环桥专用配对码；执行器数据库只读 |
-| 请求诊断 | `session/request_traces.py`：运行根 `request-traces.sqlite3` |
+| 请求诊断 | `session/request_traces.py`：运行根 `request-traces.sqlite3`，包含实际命名传输的 `purpose=title` |
 | 文件证据 | `session/file_evidence.py`：运行根 `file-evidence` |
 | 项目看板 | `project/board.py`：工作区 `docs/harness-task-board.json`，当前任务合同与内容修订 |
 | 项目记忆 | `app/memory.py`：项目 `.harness/memory.sqlite3` |
@@ -79,7 +79,7 @@
 
 `runs.sqlite3` 的 `queue_orders.data` 必须是非空字符串组成的数组，身份不可重复；空数组合法。启动时先校验全部排序记录，再进行运行恢复。格式错误直接返回错误，不能据此改写其他运行状态。排序中保留已完成或已移出队列的历史身份是合法的，恢复时仅据此排列当前明确暂停的排队项，不重放历史运行。
 
-HTTP新建对话的`X-Request-ID`随首个头写入`metadata.creation_request_id`，此时`creation_completed=false`；模型选择和智能体初始化完成并成功写回头信息后才标记true。最后一次写入失败时保留原请求身份及未完成状态，不能根据对话存在就认定初始化完成。浏览器在发送前将该身份存入未保存对话草稿；存储不能保留身份时拒绝创建。丢失响应后按身份查找唯一且已完成的对话，并核对详情头后恢复；找不到、不完整、重复匹配或身份错误时保留待确认状态，再次发送只回查，不重放POST。刷新仍沿草稿保存的身份回查，项目或智能体已变更时只加入已找回的原对话，不自动选择或发送当前草稿。
+HTTP新建对话的`X-Request-ID`随首个头写入`metadata.creation_request_id`，此时`creation_completed=false`；模型选择和智能体初始化完成并成功写回头信息后才标记true。最后一次写入失败时保留原请求身份及未完成状态，不能根据对话存在就认定初始化完成。浏览器在发送前将该身份存入未保存对话草稿；存储不能保留身份时拒绝创建。丢失响应后按身份查找唯一且已完成的对话，并核对详情头后恢复；找不到、不完整、重复匹配或身份错误时保留待确认状态，再次发送只回查，不重放POST。刷新仍沿草稿保存的身份回查；项目、检出或智能体已变更时，先确认原创建完成并保留原记录，再由本次发送创建当前对话，当前草稿只归新对话。旧结果仍未知或回查期间再次切换时不创建、不提交。
 
 新对话创建草稿同时冻结可选 `project` 检出参数，刷新后继续回查原请求，不用当前分支选项重新创建工作树。Git 项目对话头保存 `project_cwd`、`workspace_id`、`checkout_mode`、`base_ref`，隔离检出另带 `worktree_id`；项目分组与下一次新对话使用来源项目，模型执行、文件与媒体仍使用实际 `cwd`。普通文件夹不伪造 Git 元信息。已有记录不迁移。分支、目录准备及失败处理见 [新对话接口](api.md#web-api)。
 

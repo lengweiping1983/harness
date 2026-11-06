@@ -64,18 +64,52 @@ it('unavailable browser storage prevents creation before any accepted write',asy
  expect(write).not.toHaveBeenCalled();expect(list).not.toHaveBeenCalled()
  expect(useDraftStore.getState().bySession.__unsaved__.creationRequest).toBeUndefined()
 })
-it('recovery in a changed project adds the original record without selecting or submitting it',async()=>{
- let id=''
- const write=vi.spyOn(api,'createSession').mockImplementation(async(_body,requestId)=>{id=requestId!;return unknown})
- vi.spyOn(api,'listSessions').mockResolvedValueOnce({ok:true,data:{sessions:[]}}).mockImplementation(async()=>({ok:true,data:{sessions:[row(id)]}}))
- vi.spyOn(api,'getSession').mockImplementation(async()=>({ok:true,data:detail(row(id))}))
+it.each(['project', 'agent', 'checkout'] as const)('recovery after changing %s submits once to the current scope in the same send',async kind=>{
+ const old = {id: 'old-request', cwd: '/fixture'}
+ useDraftStore.getState().setCreationRequest(old)
+ if(kind === 'project') useAppStore.setState({activeWorkspaceId:'other',workspaces:[{id:'other',path:'/other',name:'Other',color:'blue'}]})
+ if(kind === 'agent') useDraftStore.getState().setAgentSelection('__unsaved__',{name:'current-agent',agent_type:'agent'})
+ if(kind === 'checkout') useAppStore.getState().setNewSessionCheckout({cwd:'/fixture',mode:'worktree',ref:'feature',expected_head:'abc',expected_branch:'main'})
+ vi.spyOn(api,'listSessions').mockResolvedValue({ok:true,data:{sessions:[row(old.id)]}})
+ vi.spyOn(api,'getSession').mockResolvedValue({ok:true,data:detail(row(old.id))})
+ const write=vi.spyOn(api,'createSession').mockImplementation(async(body,id)=>({ok:true,data:{session:{id:'current',cwd:body?.cwd,metadata:{creation_request_id:id,creation_completed:true}},
+  ...(kind === 'agent' ? {agent_mount:{available:true,agent:'current-agent',revision:1}} : {})}}))
+ const submission={id:'send-current',text:'Current 原文',attachments:[],action:'send' as const,status:'sending' as const}
+ expect(await useAppStore.getState().materializeSession(submission)).toBe(true)
+ expect(write).toHaveBeenCalledTimes(1)
+ expect(write.mock.calls[0][1]).not.toBe(old.id)
+ expect(write.mock.calls[0][0]?.cwd).toBe(kind === 'project' ? '/other' : '/fixture')
+ if(kind === 'agent') expect(write.mock.calls[0][0]?.agent_selection).toBe('current-agent')
+ if(kind === 'checkout') expect(write.mock.calls[0][0]?.project).toMatchObject({workspace_id:'project',mode:'worktree',ref:'feature'})
+ expect(useAppStore.getState().activeSessionId).toBe('current')
+ expect(useAppStore.getState().sessions.map(value=>value.id)).toEqual(['current','created'])
+ expect(useDraftStore.getState().submissions.created).toBeUndefined()
+ expect(useDraftStore.getState().submissions.current[0].text).toBe(submission.text)
+ expect(useDraftStore.getState().bySession.__unsaved__.creationRequest).toBeUndefined()
+})
+it('changing project never discards an unknown creation or repeats its write',async()=>{
+ useDraftStore.getState().setCreationRequest({id:'unknown-original',cwd:'/old'})
+ vi.spyOn(api,'listSessions').mockResolvedValue({ok:true,data:{sessions:[]}})
+ const write=vi.spyOn(api,'createSession')
  expect(await useAppStore.getState().materializeSession()).toBe(false)
- useAppStore.setState({activeWorkspaceId:'other',workspaces:[{id:'other',path:'/other',name:'Other',color:'blue'}]})
  expect(await useAppStore.getState().materializeSession()).toBe(false)
- expect(useAppStore.getState().sessions.map(value=>value.id)).toEqual(['created'])
+ expect(write).not.toHaveBeenCalled()
+ expect(useDraftStore.getState().bySession.__unsaved__.creationRequest?.id).toBe('unknown-original')
+})
+it('leaving the draft during old-scope recovery does not create or submit into the new scope',async()=>{
+ useDraftStore.getState().setCreationRequest({id:'old-request',cwd:'/old'})
+ let release!:(value:Awaited<ReturnType<typeof api.getSession>>)=>void
+ vi.spyOn(api,'listSessions').mockResolvedValue({ok:true,data:{sessions:[row('old-request')]}})
+ vi.spyOn(api,'getSession').mockReturnValue(new Promise(done=>{release=done}))
+ const write=vi.spyOn(api,'createSession')
+ const creating=useAppStore.getState().materializeSession()
+ await vi.waitFor(()=>expect(api.getSession).toHaveBeenCalledOnce())
+ useAppStore.getState().startNewSession(null)
+ release({ok:true,data:detail(row('old-request'))})
+ expect(await creating).toBe(false)
+ expect(write).not.toHaveBeenCalled()
  expect(useAppStore.getState().activeSessionId).toBeNull()
  expect(useDraftStore.getState().submissions.created).toBeUndefined()
- expect(write).toHaveBeenCalledTimes(1)
 })
 it('an unconfirmed Agent mount retains the creation identity until its readback is available',async()=>{
  let id='',mounted=false

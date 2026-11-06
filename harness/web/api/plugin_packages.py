@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from harness.i18n import tr
+import logging
 from typing import Any
 
 from ...core.errors import HarnessError
@@ -9,6 +10,8 @@ from ...plugins.packages import PackageConflict
 from ..errors import BadRequest, Conflict, NotFound
 from ..responses import json_response
 from ..router import Router
+
+logger = logging.getLogger(__name__)
 
 
 def build_router(ctx: Any) -> Router:
@@ -30,18 +33,21 @@ def build_router(ctx: Any) -> Router:
         except KeyError as exc:
             raise NotFound(str(exc), code='plugin-package/not-found') from exc
         except PackageConflict as exc:
-            raise Conflict(str(exc), code='plugin-package/changed') from exc
+            raise Conflict(exc.message, code='plugin-package/changed', details=exc.details or None) from exc
         except HarnessError as exc:
-            raise BadRequest(str(exc), code='plugin-package/invalid') from exc
+            raise BadRequest(exc.message, code='plugin-package/invalid', details=exc.details or None) from exc
         except OSError as exc:
-            raise BadRequest(str(exc), code='plugin-package/io-error') from exc
+            key = 'ui.collaboration.error.plugin-package/io-error'
+            logger.warning(tr(key), exc_info=True)
+            raise BadRequest(tr(key), code='plugin-package/io-error',
+                             details={'copy': {'key': key}, 'errno': exc.errno}) from exc
 
     @router.get('/api/v1/plugin-packages')
     def catalog(request: Any) -> Any:
         try:
             return json_response(service.catalog())
         except HarnessError as exc:
-            raise BadRequest(str(exc), code='plugin-package/invalid') from exc
+            raise BadRequest(exc.message, code='plugin-package/invalid', details=exc.details or None) from exc
 
     @router.get('/api/v1/plugin-marketplaces')
     def marketplaces(request: Any) -> Any:

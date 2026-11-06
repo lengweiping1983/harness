@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
+from uuid import uuid4
 
 from ..core.cleanup import join_cleanup, preserve_cleanup_errors, raise_cleanup_errors
 from ..core.language import current_language, resolve_language
 from ..i18n import tr
 from ..llm.types import SystemMessage, UserMessage
 from ..session.events import user_message_text
+from ..session.request_traces import request_observer
 from ..tools.processes import ProcessCleanupError
 
 logger = logging.getLogger(__name__)
@@ -48,7 +51,8 @@ class SessionTitles:
             if session.header.title or session.header.metadata.get('auto_title') != 'awaiting':
                 return
             self.harness.sessions.update_header(session.id, title=fallback,
-                metadata={'auto_title': 'generating' if text.strip() else 'fallback'})
+                metadata={'auto_title': 'generating' if text.strip() else 'fallback',
+                          'auto_title_reason': None if text.strip() else 'attachment-only'})
         if not text.strip():
             return
         language = resolve_language(self.harness.config.language).effective_language
@@ -61,7 +65,7 @@ class SessionTitles:
         if not task.cancelled() and (error := task.exception()) is not None:
             self.errors.append(error)
 
-    def publish(self, session, expected, title, state):
+    def publish(self, session, expected, title, state, *, reason=None, request_id=None, error_type=None):
         """在头锁内比较标题及操作归属，手动改名始终优先。"""
         store = self.harness.sessions
         with store._header_lock(session.id):
@@ -69,31 +73,56 @@ class SessionTitles:
                     or session.header.title != expected
                     or session.header.metadata.get('auto_title') != 'generating'):
                 return
-            store.update_header(session.id, title=title, metadata={'auto_title': state})
+            store.update_header(session.id, title=title, metadata={'auto_title': state,
+                'auto_title_reason': reason, 'auto_title_request_id': request_id,
+                'auto_title_error_type': error_type})
 
     async def generate(self, session, text, fallback, language):
         token = current_language.set(language)
         title, state = fallback, 'fallback'
+        reason, request_id, error_type = 'no-credentials', None, None
         primary = None
         try:
             if self.harness.has_model_credentials:
+                reason = 'request-error'
+                request_id = 'title_' + uuid4().hex
                 config = self.harness._session_llm_config(session).merged(max_tokens=256, reasoning_effort=None)
+                try:
+                    parameters = inspect.signature(self.harness.adapter.complete).parameters
+                except (TypeError, ValueError):
+                    parameters = {}
+                options = {}
+                if 'on_request' in parameters or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+                    observer = request_observer(session, request_id=request_id, purpose='title')
+                    async def observe(data):
+                        # 删除后的迟到传输不能重新创建该对话的追踪记录。
+                        if not self.harness.sessions.has(session.id) or self.harness.sessions.get(session.id) is not session:
+                            return None
+                        return await observer(data)
+                    options['on_request'] = observe
                 async with asyncio.timeout(self.timeout):
                     response = await self.harness.adapter.complete(
                         [SystemMessage(tr('session.title.prompt', limit=MAX_TITLE_CHARS)), UserMessage(text[:12000])],
-                        config=config, tools=[])
+                        config=config, tools=[], **options)
                 candidate = response.text.strip()
-                if (not response.has_tool_use and candidate and '\n' not in candidate
-                        and '\r' not in candidate and len(candidate) <= MAX_TITLE_CHARS):
+                reason = ('tool-use' if response.has_tool_use else 'empty-output' if not candidate
+                          else 'multiline-output' if '\n' in candidate or '\r' in candidate
+                          else 'title-too-long' if len(candidate) > MAX_TITLE_CHARS else None)
+                if reason is None:
                     title, state = candidate, 'generated'
         except (asyncio.CancelledError, ProcessCleanupError, BaseExceptionGroup) as exc:
             primary = exc
-        except Exception:
+            reason = 'cancelled' if isinstance(exc, asyncio.CancelledError) else 'request-error'
+            error_type = type(exc).__name__
+        except Exception as exc:
+            reason = ('timeout' if isinstance(exc, TimeoutError) else 'empty-output'
+                      if getattr(exc, 'code', None) == 'llm/empty-response' else 'request-error')
+            error_type = type(exc).__name__
             logger.warning(tr('session.title.failed'), exc_info=True)
         finally:
             try:
                 with preserve_cleanup_errors([primary] if primary is not None else []):
-                    self.publish(session, fallback, title, state)
+                    self.publish(session, fallback, title, state, reason=reason, request_id=request_id, error_type=error_type)
             finally:
                 current_language.reset(token)
 

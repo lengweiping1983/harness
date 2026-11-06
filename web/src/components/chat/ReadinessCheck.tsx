@@ -18,7 +18,7 @@ export function ReadinessCheck() {
   return <section className="mx-4 mt-3 rounded-xl border border-line bg-raised/50 p-3 text-xs text-muted" aria-label={t('ui.readiness.title')}>
     <div className="flex items-center justify-between gap-3"><h2 className="ui-card-title text-ink">{t('ui.readiness.title')}</h2><button type="button" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-raised" aria-label={t('ui.readiness.dismiss')} onClick={() => setDismissed(directory)}><X className="h-4 w-4" /></button></div>
     <p className="mt-1 break-all">{directory ? t('ui.readiness.project', {directory}) : t('ui.readiness.noProject')}</p>
-    <p className="mt-1">{t(status?.config?.has_api_key === true ? 'ui.readiness.model' : status?.config?.has_api_key === false ? 'ui.readiness.noModel' : 'ui.readiness.modelUnknown')}</p>
+    <p className="mt-1">{t(status?.has_model_credentials === true ? 'ui.readiness.model' : status?.has_model_credentials === false ? 'ui.readiness.noModel' : 'ui.readiness.modelUnknown')}</p>
     <p className="mt-1">{t('ui.readiness.hint')}</p>
     <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={() => useAppStore.getState().setWorkspacePickerOpen(true, 'select')}>{t('ui.readiness.chooseProject')}</Button><Button size="sm" onClick={() => useAppStore.getState().setSettingsOpen(true, 'models')}>{t('ui.readiness.openModels')}</Button></div>
   </section>

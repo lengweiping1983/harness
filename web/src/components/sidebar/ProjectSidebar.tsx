@@ -377,6 +377,7 @@ function GroupSection(props: GroupSectionProps) {
   } = props
 
   const showAll = searching || expanded.has(group.key)
+  const missingDirectory = useAppStore(state => state.workspaces.some(workspace => workspace.id === group.workspaceId && workspace.exists === false))
   // 没有子项目的组永远不折叠：折叠一个只有 2 条会话的组是纯粹的噪音。
   const foldable = !searching && !group.hasChildren && group.sessions.length > DEFAULT_VISIBLE
   const { shown, overflow } = collapseSessions(group.sessions, !showAll, DEFAULT_VISIBLE, active)
@@ -413,6 +414,7 @@ function GroupSection(props: GroupSectionProps) {
           >
             {group.title}
           </span>
+          {missingDirectory ? <span className="shrink-0 text-2xs text-warn">{t('ui.workspacePicker.missingDirectory')}</span> : null}
           <span className="shrink-0 text-2xs text-faint">{group.sessions.length || ''}</span>
         </button>
 
@@ -429,7 +431,7 @@ function GroupSection(props: GroupSectionProps) {
 
       {group.collapsed ? null : (
         <div className="mt-0.5 space-y-px">
-          {shown.length === 0 ? (onCreate ? (
+          {shown.length === 0 ? (onCreate && !missingDirectory ? (
             <button
               type="button"
               onClick={() => void onCreate(group.workspaceId)}
@@ -556,11 +558,12 @@ function ContextMenu(props: {
   const sessions = useAppStore((s) => s.sessions)
 
   const group = groups.find((g) => g.key === menu.id || g.workspaceId === menu.id)
+  const missingDirectory = useAppStore(state => state.workspaces.some(workspace => workspace.id === group?.workspaceId && workspace.exists === false))
   const session = !group ? sessions.find((s) => s.id === menu.id) : null
 
   const items: Array<{ id: string; label: string; icon: React.ReactNode; run: () => void; danger?: boolean }> = []
   if (group) {
-    if (props.onCreate) items.push({ id: "b4e31cb234ba", label: t("ui.components.sidebar.ProjectSidebar.b4e31cb234ba"), icon: <MessageSquarePlus className="h-3.5 w-3.5" />, run: () => props.onCreate?.(group.workspaceId) })
+    if (props.onCreate && !missingDirectory) items.push({ id: "b4e31cb234ba", label: t("ui.components.sidebar.ProjectSidebar.b4e31cb234ba"), icon: <MessageSquarePlus className="h-3.5 w-3.5" />, run: () => props.onCreate?.(group.workspaceId) })
     if (group.workspaceId) {
       items.push({
         id: "rename-workspace", label: t("ui.components.sidebar.ProjectSidebar.84ba75cf3f85"),

@@ -285,7 +285,7 @@ function ModelMenuInstance({ models, current, effort, onClose, className, title 
         <div className="flex items-center gap-2">
           <Cpu className="h-3.5 w-3.5 shrink-0 text-brand" />
           <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ink">
-            {modelDisplayName(current, models, t('ui.models.unavailableName')) || t("ui.components.chat.ModelPicker.a44f9f9fcaca")}
+            {title}
           </span>
           {pending ? <span className="text-2xs text-faint">{t("ui.components.chat.ModelPicker.ad0196c88aaf")}</span> : null}
         </div>
@@ -312,18 +312,20 @@ function ModelMenuInstance({ models, current, effort, onClose, className, title 
               <span className="whitespace-nowrap text-2xs text-faint">{t("ui.components.chat.ModelPicker.8cf0105d35ee")}</span>
             </div>
             <div role="group" aria-label={t("ui.components.chat.ModelPicker.8cf0105d35ee")} className="flex flex-wrap items-center gap-0.5 rounded-lg border border-line bg-raised p-0.5">
-              <button type="button" disabled={!sessionId && creatingSession} onClick={() => void setReasoningEffort(null)} aria-pressed={effort == null}
-                className={cn('rounded-md px-1.5 py-0.5 text-2xs transition-colors disabled:opacity-50', effort == null ? 'bg-brand/15 text-brand' : 'text-muted hover:text-ink')}>{t("ui.components.chat.ModelPicker.9a36b187cea4")}</button>
+              {sessionId ? <button type="button" onClick={() => void setReasoningEffort(null, true)} aria-pressed={inheritedEffort}
+                className={cn('rounded-md px-1.5 py-0.5 text-2xs transition-colors', inheritedEffort ? 'bg-brand/15 text-brand' : 'text-muted hover:text-ink')}>{t('ui.components.chat.ModelPicker.2fb47e73f109')}</button> : null}
+              <button type="button" disabled={!sessionId && creatingSession} onClick={() => void setReasoningEffort(null)} aria-pressed={(!sessionId || !inheritedEffort) && effort == null}
+                className={cn('rounded-md px-1.5 py-0.5 text-2xs transition-colors disabled:opacity-50', (!sessionId || !inheritedEffort) && effort == null ? 'bg-brand/15 text-brand' : 'text-muted hover:text-ink')}>{t("ui.components.chat.ModelPicker.9a36b187cea4")}</button>
               {efforts.map((item) => (
                 <button
                   key={item}
                   type="button"
                   disabled={!sessionId && creatingSession}
                   onClick={() => void setReasoningEffort(item)}
-                  aria-pressed={effort === item}
+                  aria-pressed={(!sessionId || !inheritedEffort) && effort === item}
                   className={cn(
                     'rounded-md px-1.5 py-0.5 text-2xs capitalize transition-colors',
-                    effort === item ? 'bg-brand/15 text-brand' : 'text-muted hover:text-ink',
+                    (!sessionId || !inheritedEffort) && effort === item ? 'bg-brand/15 text-brand' : 'text-muted hover:text-ink',
                     'disabled:opacity-50',
                   )}
                 >
@@ -334,10 +336,6 @@ function ModelMenuInstance({ models, current, effort, onClose, className, title 
           </div>
         ) : null}
         {efforts.length > 0 ? <p className="mt-1 text-2xs text-faint">{!sessionId ? t("ui.components.chat.ModelPicker.80cf6df84c71") : inheritedEffort ? t("ui.components.chat.ModelPicker.8b6340d797b6", {p0: (effort ?? t("ui.components.chat.ModelPicker.9a36b187cea4"))}) : effort == null ? t("ui.components.chat.ModelPicker.134b6ccf3343") : t("ui.components.chat.ModelPicker.73ed98a2b58f", {p0: (effort)})}</p> : null}
-        {efforts.length > 0 && sessionId ? <button type="button" disabled={inheritedEffort}
-          onClick={() => void setReasoningEffort(null, true)} className="mt-1 text-2xs text-brand underline disabled:text-faint disabled:no-underline">
-          {inheritedEffort ? t("ui.components.chat.ModelPicker.e9b3a70f9c57") : t("ui.components.chat.ModelPicker.2fb47e73f109")}
-        </button> : null}
         {reasoningSave?.pending ? <p role="status" className="mt-2 text-2xs text-muted">{t("ui.components.chat.ModelPicker.7fe024e948c8")}</p> : null}
         {reasoningSave?.error ? <div role="alert" aria-label={t("ui.components.chat.ModelPicker.49fd236d4f7a")} className="mt-2 space-y-1 text-2xs text-danger [overflow-wrap:anywhere]">
           <p>{reasoningSave.unconfirmed ? t("ui.components.chat.ModelPicker.0253e2fec0d4") : t("ui.components.chat.ModelPicker.b4946a2d4971")}</p>

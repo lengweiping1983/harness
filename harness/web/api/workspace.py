@@ -67,8 +67,8 @@ def _resolved_root(ctx: Any, requested: str | None = None) -> Path:
     """取工作区根并归一化，供 ``_safe_join`` 与条目相对路径统一使用。
 
     ``requested`` 让文件浏览跟随侧栏选中的项目（多项目工作区下的必需能力）。
-    安全边界仍然在：**只接受默认根或已注册项目的根**，其余一律拒 ——
-    否则 ``?root=`` 就变成了任意目录读取接口。
+    文件入口只接受默认根或已登记项目，避免页面误用其他目录。
+    本机管理调用方可显式登记任意目录；这不是对本机进程的文件系统沙箱。
     """
     default = ctx.workspace_root().resolve()
     raw = (requested or "").strip()

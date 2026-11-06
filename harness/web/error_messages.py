@@ -3,6 +3,7 @@ from harness.i18n import tr
 
 
 _ERROR_CODES = (
+    'plugin-package/io-error',
     'session/workspace-invalid',
     'session/workspace-changed',
     'session/workspace-dirty',

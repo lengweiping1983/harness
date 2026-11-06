@@ -2106,6 +2106,7 @@ class Harness:
         return {
             "agent": agent.status.to_dict() if agent else None,
             "config": self.config.to_dict(),
+            "has_model_credentials": self.has_model_credentials,
             "tools": self.tools.names(),
             "skills": [s.name for s in self.skills.list()] if self.skills else [],
         }

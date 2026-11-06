@@ -185,10 +185,12 @@ it('retains transport resource identity and original detail for later language c
     const result = await request('/transport-test')
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.copy).toEqual({ key: 'ui.lib.api.4a5f658ed9ae', params: { detail: 'Original detail 原文' } })
+    expect(result.copy).toEqual({ key: 'ui.http.networkUnavailable' })
+    expect(result.details).toEqual({cause: 'Original detail 原文'})
     for (const language of ['en', 'zh-CN', 'en'] as const) {
       setLocale(language)
-      expect(noticeText(result.copy!)).toBe(t('ui.lib.api.4a5f658ed9ae', { detail: 'Original detail 原文' }))
+      expect(noticeText(result.copy!)).toBe(t('ui.http.networkUnavailable'))
+      expect(noticeText(result.copy!)).not.toContain('Original detail')
     }
     expect(fetchMock).toHaveBeenCalledTimes(1)
   } finally { setLocale('zh-CN') }

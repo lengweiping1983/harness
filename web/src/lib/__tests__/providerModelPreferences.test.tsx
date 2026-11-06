@@ -93,6 +93,19 @@ it('retains separate connection headings and model order within the provider', (
   expect(html).toContain(t('ui.models.contextUnknown'))
 })
 
+it('exposes the provider model ID and output capacity alongside its display name', () => {
+  const configured = {...provider, connections: [{...provider.connections[0], models: [{...provider.connections[0].models[0], model: 'vendor/complete-model-identifier-2026'}]}]}
+  const catalog = [{...models[1], max_output: 4000}]
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    setLocale(language)
+    const html = renderToStaticMarkup(<ProviderModelPreferences provider={configured} models={catalog} />)
+    expect(html).toContain('Flash 原文')
+    expect(html).toContain('vendor/complete-model-identifier-2026')
+    expect(html).toContain(t('ui.models.outputSize', {count: '4k'}))
+    expect(html).not.toContain('harness/')
+  }
+})
+
 it('delivers row actions and inline feedback to the full provider connection model identity through English Chinese English', () => {
   const multiple = {...provider, connections: [provider.connections[0], {...provider.connections[0], id: 'second'}]}
   for (const language of ['en', 'zh-CN', 'en'] as const) {

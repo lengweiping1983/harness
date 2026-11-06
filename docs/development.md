@@ -322,6 +322,8 @@ python -m venv .run/semantic-eval
 
 ## 防止再次引入已修复问题
 
+工作台与本机管理接口的 QA 逐项判定、源码依据和未验证边界见 [工作台审查记录](workbench-review.md)。`ConversationCheckout.test.tsx` 核对后台暂停提示、返回恢复、等待期间只读刷新及旧请求隔离；`workspace-picker-height-smoke.mjs` 保留 647×676 等视口的确认按钮几何与命中断言，以及明暗主题、英中英和字号边界，属于显式浏览器专项。数值与隧道输入的定向回归位于 `CapabilitiesPanel.test.tsx` 和 `McpServicePanel.test.tsx`，验证非法值不发送写请求、草稿保留、空值语义和同实例英中英；`test_plugin_preview_bounds.py` 验证提前停止枚举、句柄收尾和既有摘要顺序，`WebCorsTests` 验证实际请求与预检同源策略、Fetch Metadata 归一化及原生客户端保留；`web/tests/dev-api-cors.test.mjs` 用隔离 Vite 和 HTTP 后端核对代理预检与响应头不被开发入口提前放行。插件 I/O 错误的缺失目录、权限失败、日志诊断、无路径响应及双语消费由 `test_plugin_validation_language.py` 和 `httpErrorLanguage.test.ts` 的对应错误码用例验证。
+
 修改前按 [代码生成与防回归](code-generation.md) 核对相关不变量。新增缺陷回归应先固定触发条件，再检查真实入口及实际结果；受控异步屏障优先于固定睡眠。产品语言资源、机器协议、业务写入和观察请求分别处理，不能靠统一捕获、默认值或重试掩盖错误。
 
 权限参数用途的定向回归为 `python -m unittest tests.test_permission_argument_semantics tests.test_plan_security.PlanSecurityTests.test_content_search_does_not_treat_member_names_as_file_paths`，覆盖真实临时文件写入/编辑、POSIX heredoc 写入、敏感访问的执行前拒绝、授权声明隔离，以及内容搜索和文件范围的区别。详细边界与证据见 [安全与隐私](security-privacy.md#针对性验证入口)；该命令不调用在线模型，不写入用户项目，也不代表全量或跨平台验收。
@@ -488,7 +490,7 @@ Superagent 目标控制回归位于 `tests/test_superagent_control.py` 与 `test
 
 Superagent 长节点回归位于 `tests/test_superagent_checkpoints.py`，通过真实隔离工作树、文件工具、原运行和确定性模型检查阶段交接、最终依赖解锁、重启不重放、捕获确认丢失、后台写入、未知工具、预算和指令上下文。检查点协议为显式配置；完整行为及限制统一见 [Superagent 模式](superagent.md#长工作节点的阶段接续)。这些离线回归不证明真实模型的交接质量或长时吞吐。
 
-对话自动标题由 `tests/test_session_titles.py` 经真实事件总线和持久存储核对首次人工输入、独立模型配置、原文保持、后续消息稳定、手动同值改名保护、并发对话隔离、删除后的迟到回包、关闭收尾及同实例英中英提示词。纯附件只取文件名，不将附件模型正文发送给命名请求。`test_session_creation_receipt.py` 保留初始请求身份和完成标记断言，并核对无标题创建的自动命名登记；前端 `sessionCreationRecovery.test.ts` 核对创建请求不把用户消息写成显式标题，未知结果仍只回查原创建请求。
+对话自动标题由 `tests/test_session_titles.py` 经真实事件总线和持久存储核对首次人工输入、独立模型配置、原文保持、后续消息稳定、手动同值改名保护、并发对话隔离、删除后的迟到回包、关闭收尾及同实例英中英提示词。命名追踪回归通过真实适配器和受控 SSE 传输核对归档、失败原因、原件重开、删除后的迟到传输及自定义适配器签名；纯附件只取文件名，不将附件模型正文发送给命名请求。`test_session_creation_receipt.py` 保留初始请求身份和完成标记断言，并核对无标题创建的自动命名登记；前端 `sessionCreationRecovery.test.ts` 核对创建请求不把用户消息写成显式标题，未知结果仍只回查原创建请求；旧请求确认完成后，更换项目／检出／智能体的同一次发送继续创建当前对话，切换期间不误发。`test_model_readiness.py` 经实际状态路由、提供商凭据存储和标题消费者核对主配置无 Key 时的连接及订阅来源。
 
 
 `tests/test_runtime_validation_language.py` 核对运行和工具声明的双语拒绝：目标序列与绝对路径、输出上限、已取消请求、运行缓存身份/删除边界及轮次选择。workflow 元数据错误保留精确字段路径并使用本次语言，合法元数据及用户正文不改写；Node 引擎行为另运行现有 workflow 专项。
@@ -502,6 +504,8 @@ Superagent 长节点回归位于 `tests/test_superagent_checkpoints.py`，通过
 `deletionReceipt.test.ts` 验证对话删除/项目移除的原ID确认、失配保留、未知传输回执的单次缺席回查、读取失败保留草稿及明确拒绝不回查。`sidebar-deletion-receipt-smoke.mjs` 通过实际侧栏菜单操作对话与项目，覆盖目标仍存在/已不存在各两条路径；核对单DELETE、单GET，未知结果保留对话草稿，通知随中英文、明暗主题和390/1440宽度变化。
 
 `catalogReadRetry.test.ts` 固定连接拒绝、开发代理 500／503、持续不可用、取消退避、总截止时间、明确拒绝及损坏成功回执；同时确认普通回查和 POST／DELETE 仍只发送一次。原启动逻辑在项目 GET 失败后将目录设为空，且项目 GET 未导出成功响应契约，空对象也会被当作空列表；`projectCatalogRecovery.test.tsx` 以实际 store 和侧栏覆盖缓存保留、冷启动失败后的补读、英中英资源消费、未知分组与真实空目录的区别、隐藏及重复准入、读取期间用户选择和旧启动回包隔离。`test_i18n_generation_updates.py` 使用隔离资源源及产物验证未变化文件的修改时间保持，普通中文变化不改写英文及启动资源；它不重启开发服务。当前开发实例的项目 GET、状态和模型响应已通过浏览器契约检查，独立页面也读到原有三个项目；这不等于已重现截图那一次原始连接错误或完成全量浏览器矩阵。
+
+`creationCatalogOwnership.test.ts` 还核对启动时失效的内存／持久会话选择、空列表与有效后备选择，以及所有启动请求失败时的全局重试、确认数据和草稿保留。单项目录失败仍沿已有局部降级；完全不可用时不呈现可发送的空工作台。网络错误主提示使用资源键，浏览器原异常保留在失败回执的 `details.cause`。
 
 `creationCatalogOwnership.test.ts` 核对创建对话与目录读取的两种顺序：旧列表不抹掉已创建对话，先读到同ID记录时不重复插入且保留其新标题/解析目录。启动阶段的对话与项目目录也遵守请求代次，删除后的旧启动快照不能复活条目；测试额外确认启动无错误，避免提前退出造成假通过。目标/计划创建流程及迟到派生对话继续通过对应浏览器回归验证。
 

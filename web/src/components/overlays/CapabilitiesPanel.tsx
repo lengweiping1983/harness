@@ -8,6 +8,7 @@ import { useAppStore } from '@/store/app'
 import { permissionProfile, permissionProfiles } from '@/lib/permissions'
 import { usePermissionStore } from '@/store/permissions'
 import { Button } from '@/components/ui/primitives'
+import {parseInteger} from '@/lib/settingsValidation'
 
 const limits = {
   max_steps: 'ui.components.overlays.CapabilitiesPanel.a4e6d1de3d04',
@@ -19,11 +20,12 @@ type Limit = keyof typeof limits
 type RequiredLimit = keyof typeof requiredLimits
 type Config = { permission_policy: string } & Record<Limit, number | null> & Record<RequiredLimit, number>
 
-function NumberField({label, value, busy, placeholder, onBlur}: {
+export function NumberField({label, value, busy, placeholder, onBlur, allowEmpty = false}: {
   label: string
   value: number | null
   busy: boolean
   placeholder?: string
+  allowEmpty?: boolean
   onBlur: (raw: string) => Promise<number | null | undefined>
 }) {
   const [raw, setRaw] = useState(String(value ?? ''))
@@ -31,18 +33,25 @@ function NumberField({label, value, busy, placeholder, onBlur}: {
   const focused = useRef(false)
   const version = useRef(0)
   const alive = useRef(true)
+  const composing = useRef(false)
+  const [invalid, setInvalid] = useState(false)
   useLayoutEffect(() => {alive.current = true; return () => {alive.current = false}}, [])
   useEffect(() => {if (!dirty.current && !focused.current) setRaw(String(value ?? ''))}, [value])
-  return <label className="block space-y-2 text-xs font-medium text-ink"><span>{label}</span><input aria-label={label} className="ui-field" disabled={busy} type="number" min="1" placeholder={placeholder} value={raw}
+  useLocale()
+  return <label className="block space-y-2 text-xs font-medium text-ink"><span>{label}</span><input aria-label={label} aria-invalid={invalid} className="ui-field" disabled={busy} type="number" min="1" step="1" placeholder={placeholder} value={raw}
+    onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}
     onFocus={() => {focused.current = true}}
-    onChange={event => {dirty.current = true; version.current++; setRaw(event.target.value)}}
+    onChange={event => {dirty.current = true; version.current++; setRaw(event.target.value); setInvalid(false)}}
     onBlur={async event => {
       focused.current = false
       if (!dirty.current) {setRaw(String(value ?? '')); return}
+      if (composing.current) return
+      if (!(allowEmpty && event.target.value === '') && parseInteger(event.target.value) === undefined) {setInvalid(true); return}
+      setInvalid(false)
       const ticket = version.current
       const saved = await onBlur(event.target.value)
       if (alive.current && ticket === version.current && saved !== undefined) {dirty.current = false; setRaw(String(saved ?? ''))}
-    }} /></label>
+    }} />{invalid ? <span role="alert" className="block text-danger">{t(allowEmpty ? 'ui.settings.optionalPositiveInteger' : 'ui.settings.positiveInteger')}</span> : null}</label>
 }
 
 export function CapabilitiesPanel() {
@@ -129,7 +138,7 @@ export function CapabilitiesPanel() {
     <p id="capabilities-limit-save-hint" className="text-2xs leading-relaxed text-faint">{t('ui.capabilities.limitSaveHint')}</p>
     <div role="group" aria-describedby="capabilities-limit-hint capabilities-limit-save-hint" className="space-y-4">
       <p id="capabilities-limit-hint" className="text-2xs leading-relaxed text-faint [overflow-wrap:anywhere]">{t('ui.components.overlays.CapabilitiesPanel.cdf5a33e8019')}</p>
-      {(Object.keys(limits) as Limit[]).map(key => <NumberField key={key} label={t(limits[key])} value={config[key]} busy={busy} placeholder={t('ui.components.overlays.CapabilitiesPanel.8651f50cc425')} onBlur={async raw => {
+      {(Object.keys(limits) as Limit[]).map(key => <NumberField key={key} label={t(limits[key])} value={config[key]} busy={busy} allowEmpty placeholder={t('ui.components.overlays.CapabilitiesPanel.8651f50cc425')} onBlur={async raw => {
         const value = raw === '' ? null : Number(raw)
         if (value === config[key]) return config[key]
         const saved = await perform(() => runtimeRequest('/settings', 'PATCH', {[key]: value}))

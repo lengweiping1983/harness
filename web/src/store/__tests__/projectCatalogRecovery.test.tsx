@@ -3,10 +3,13 @@ import {renderToStaticMarkup} from 'react-dom/server'
 import {api, loadCatalogs, type ApiFailure} from '@/lib/api'
 import {setLocale, t} from '@/i18n'
 import {ProjectSidebar} from '@/components/sidebar/ProjectSidebar'
+import {WorkspacePicker} from '@/components/overlays/WorkspacePicker'
+import {ReadinessCheck} from '@/components/chat/ReadinessCheck'
 import {recoverProjectCatalog, useAppStore} from '../app'
 
 vi.mock('@/lib/theme', async original => ({...await original<typeof import('@/lib/theme')>(), applyTheme: vi.fn()}))
 vi.mock('@/lib/api', async original => ({...await original<typeof import('@/lib/api')>(), loadCatalogs: vi.fn()}))
+vi.mock('react-dom', async original => ({...await original<typeof import('react-dom')>(), createPortal: (node: import('react').ReactNode) => node}))
 // 服务端渲染验证消费同一份当前状态，不使用 Zustand 的初始空快照。
 vi.mock('@/store/app', async original => {
   const actual = await original<typeof import('@/store/app')>()
@@ -110,4 +113,34 @@ it('distinguishes a confirmed empty project registry from a failed catalog read'
   expect(useAppStore.getState().workspacesError).toBe('')
   expect(markup()).toContain(t('ui.lib.sidebarGroups.097dcbb620db'))
   expect(markup()).not.toContain(t('ui.sidebar.retryProjects'))
+})
+
+it('marks missing projects in the picker and sidebar while retaining their conversations', () => {
+  useAppStore.setState({workspaces: [{...workspace, exists: false}], workspacePickerOpen: true, workspacePickerMode: 'select'})
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    setLocale(language)
+    const picker = renderToStaticMarkup(<WorkspacePicker />)
+    expect(picker).toContain(t('ui.workspacePicker.missingDirectory'))
+    expect(picker).toMatch(/<button[^>]*disabled=""[^>]*>.*?Project 原文.*?<\/button>/)
+    expect(markup()).toContain(t('ui.workspacePicker.missingDirectory'))
+    expect(markup()).toContain('Conversation 原文')
+    expect(markup()).not.toContain(t('ui.components.sidebar.ProjectSidebar.e5fc62fa56e3'))
+  }
+  expect(useAppStore.getState().workspaces).toHaveLength(1)
+})
+
+it('renders readiness from unified credentials and draft conversations without changing user data', () => {
+  useAppStore.setState({activeSessionId: null, sessions: [{id: 'empty', cwd: '/project', message_count: 0, metadata: {auto_title: 'awaiting'}}]})
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    setLocale(language)
+    for (const has_model_credentials of [true, false, undefined]) {
+      useAppStore.setState({status: {config: {has_api_key: !has_model_credentials}, has_model_credentials}})
+      const html = renderToStaticMarkup(<ReadinessCheck />)
+      expect(html).toContain(t(has_model_credentials === undefined ? 'ui.readiness.modelUnknown' : has_model_credentials ? 'ui.readiness.model' : 'ui.readiness.noModel'))
+      expect(html).toContain('/project')
+    }
+    expect(markup()).toContain(t('ui.sessionCreation.emptyDraft'))
+    expect(markup()).not.toContain(t('ui.components.sidebar.ProjectSidebar.a91ae6035092'))
+  }
+  expect(useAppStore.getState().sessions[0]).toMatchObject({id: 'empty', message_count: 0, metadata: {auto_title: 'awaiting'}})
 })

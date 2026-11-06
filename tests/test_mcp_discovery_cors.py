@@ -78,7 +78,8 @@ class WebCorsTests(unittest.TestCase):
         handler._web_ctx = SimpleNamespace(shared_access=None)
         handler.server = SimpleNamespace(server_address=('127.0.0.1', 8765))
         for origin, allowed in [('http://127.0.0.1:8765', True),
-                                ('http://localhost:5173', True),
+                                ('http://localhost:5173', False),
+                                ('http://127.0.0.1:5273', False),
                                 ('https://client.example', False)]:
             with self.subTest(origin=origin):
                 handler.headers = Message()
@@ -97,7 +98,7 @@ class WebCorsTests(unittest.TestCase):
     def test_error_responses_keep_origin_request_id_and_compression_variance(self):
         for language in ('en', 'zh-CN', 'en'):
             with current_language.set(language):
-                for origin, allowed in (('http://localhost:5173', True), ('https://client.example', False)):
+                for origin, allowed in (('http://127.0.0.1:8765', True), ('https://client.example', False)):
                     for compressed in (False, True):
                         with self.subTest(language=language, origin=origin, compressed=compressed):
                             handler = object.__new__(Handler)
@@ -124,3 +125,34 @@ class WebCorsTests(unittest.TestCase):
                             body = gzip.decompress(response.body) if compressed else response.body
                             self.assertEqual(json.loads(body), {'error':message, 'code':'request/invalid-query',
                                 **({'details':details} if details is not None else {})})
+
+    def test_preflight_uses_the_same_origin_policy_and_no_origin_preserves_native_clients(self):
+        for origin, site, allowed in (
+                ('http://127.0.0.1:5273', 'same-origin', True),
+                ('http://localhost:5173', 'same-site', False),
+                ('https://evil.example', 'cross-site', False),
+                ('http://[', 'cross-site', False),
+                ('null', 'cross-site', False),
+                ('', '', True), ('', 'same-origin', True), ('', 'cross-site', False), ('', 'same-site', False),
+                ('', 'CROSS-SITE', False), ('', ' Same-Site ', False), ('', ' SAME-ORIGIN ', True)):
+            with self.subTest(origin=origin, site=site):
+                handler = object.__new__(Handler)
+                handler._web_ctx = SimpleNamespace(shared_access=None)
+                handler.server = SimpleNamespace(server_address=('127.0.0.1', 8765))
+                handler.headers = Message()
+                # Vite 保留浏览器 Host，后端实际端口与请求入口端口可以不同。
+                handler.headers['Host'] = '127.0.0.1:5273'
+                if origin:
+                    handler.headers['Origin'] = origin
+                if site:
+                    handler.headers['Sec-Fetch-Site'] = site
+                handler._send = Mock()
+                handler.do_OPTIONS()
+                response = handler._send.call_args.args[0]
+                self.assertEqual(response.status, 204 if allowed else 403)
+                self.assertEqual(response.headers.get('Access-Control-Allow-Origin'), origin if allowed and origin else None)
+                self.assertEqual('Access-Control-Allow-Methods' in response.headers, bool(allowed and origin))
+                if not allowed:
+                    with self.assertRaises(BadRequest) as denied:
+                        handler._dispatch(SimpleNamespace(method='POST', path='/api/v1/plugin-packages/preview'))
+                    self.assertEqual(denied.exception.code, 'request/origin')

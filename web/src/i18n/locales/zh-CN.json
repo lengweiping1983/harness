@@ -4417,8 +4417,8 @@
   "ui.readiness.dismiss": "关闭开始前检查",
   "ui.readiness.project": "工作目录：{directory}",
   "ui.readiness.noProject": "选择项目目录，让智能体在正确的位置工作。",
-  "ui.readiness.model": "此配置已提供 API 密钥；实际连通性需运行请求确认。",
-  "ui.readiness.noModel": "此配置未提供 API 密钥；其他连接或已登录的订阅账号仍可能提供模型。",
+  "ui.readiness.model": "已通过密钥、连接或订阅账号配置模型访问；实际连通性仍需发起请求确认。",
+  "ui.readiness.noModel": "尚未配置模型访问，请添加模型连接或登录订阅账号。",
   "ui.readiness.openModels": "配置模型连接",
   "ui.readiness.chooseProject": "选择项目目录",
   "ui.readiness.hint": "描述需求即可开始。复杂工作可按需使用计划、执行清单或持续目标。",
@@ -4986,5 +4986,14 @@
   "ui.process.runningCount": "{count} 项进行中",
   "ui.process.failedCount": "{count} 项失败",
   "ui.process.skippedCount": "{count} 项已跳过",
-  "ui.process.backgroundCount": "{count} 项后台运行"
+  "ui.process.backgroundCount": "{count} 项后台运行",
+  "ui.workspacePicker.missingDirectory": "目录不存在",
+  "ui.sessionCreation.emptyDraft": "草稿对话",
+  "ui.boot.backendUnavailable": "无法连接 Harness 后端。请确认服务正在运行后重试。",
+  "ui.http.networkUnavailable": "无法连接服务，请检查连接后重试。",
+  "ui.settings.positiveInteger": "请输入大于或等于 1 的整数。",
+  "ui.settings.optionalPositiveInteger": "请输入大于或等于 1 的整数，或留空表示不限。",
+  "ui.newConversation.checkPaused": "页面在后台，项目检查已暂停；返回此页面后会自动继续。",
+  "ui.trace.titleRequest": "对话命名",
+  "ui.collaboration.error.plugin-package/io-error": "无法读写插件文件，请检查来源目录是否存在，以及是否具有访问权限。"
 }

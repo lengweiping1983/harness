@@ -8,6 +8,7 @@ import {usePageVisible} from '@/hooks/usePageVisible'
 import {Button} from '@/components/ui/primitives'
 import {SecretInput} from '@/components/ui/SecretInput'
 import type {ResourceText} from '@/types'
+import {parseInteger} from '@/lib/settingsValidation'
 
 export function McpCompanionPanel({state, changing, onChange, onBusy, onSavePending}: {state: McpServiceState | null; changing: boolean; onChange: (state: McpServiceState) => void; onBusy: (busy: boolean) => void; onSavePending?: (pending: Promise<boolean>) => void}) {
   useLocale()
@@ -38,7 +39,7 @@ export function McpCompanionPanel({state, changing, onChange, onBusy, onSavePend
   function save(nextEnabled = enabled, applyPort = true): Promise<boolean> {
     if(inFlight.current || changing || !visible || !companion || composing.current) return Promise.resolve(false)
     const submittedPort = applyPort ? Number(port) : companion.port
-    if (applyPort && (!/^\d+$/.test(port) || !Number.isInteger(submittedPort) || submittedPort < 1024 || submittedPort > 65535)) {
+    if (applyPort && (!/^\d+$/.test(port) || parseInteger(port, 1024, 65535) === undefined)) {
       setError({key: 'ui.companion.invalidPort'})
       return Promise.resolve(false)
     }

@@ -5,7 +5,7 @@
  * 所有字段按"服务端可能不吐"来写（可选 + 运行时兜底），
  * 这样后端加字段不会让前端崩。
  */
-import type { CommandOutput, ConversationHistory, HookActivity as ProtocolHookActivity, ToolResultReference } from '@/lib/protocol.generated'
+import type { CommandOutput, ConversationHistory, HookActivity as ProtocolHookActivity, ToolResultReference, ModelCredentialStatus } from '@/lib/protocol.generated'
 export type HookActivity = ProtocolHookActivity & { reasonCopy?: ResourceCopy }
 export type { ConversationHistory } from '@/lib/protocol.generated'
 
@@ -348,7 +348,7 @@ export interface HarnessConfig {
   [key: string]: unknown
 }
 
-export interface StatusPayload {
+export interface StatusPayload extends Partial<ModelCredentialStatus> {
   agent?: Record<string, unknown> | null
   config?: HarnessConfig
   tools?: string[]

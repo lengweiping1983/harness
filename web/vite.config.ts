@@ -31,6 +31,8 @@ export default defineConfig({
   optimizeDeps: { include: ['@xterm/xterm', '@xterm/addon-fit'] },
   server: {
     port: 5273,
+    // API 的预检与响应头由后端统一决定，开发入口不提前应答或追加许可。
+    cors: false,
     // 测试代码不进入开发热更新；产品源码仍由 Vite 正常跟踪。
     watch: {
       ignored: ['**/tests/**', '**/test/**', '**/__tests__/**', '**/*.test.*', '**/*.spec.*', '**/test_*'],

@@ -77,6 +77,19 @@ afterEach(() => {
   vi.restoreAllMocks(); vi.unstubAllGlobals(); setLocale('en')
 })
 
+it('labels title-generation requests distinctly through English Chinese English without rereading', async () => {
+  const title = {...row(0, at(10)), request: {id: 'title-trace', purpose: 'title'} as TraceEntry['request']}
+  const reads = vi.spyOn(api, 'executionTrace').mockResolvedValue({ok: true, data: page([title])})
+  render()
+  await vi.waitFor(() => expect(hours()).toHaveLength(1))
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(language)
+    expect(text(render())).toContain(t('ui.trace.titleRequest'))
+    expect(entries(render())[0].props['data-trace-id']).toBe(title.id)
+  }
+  expect(reads).toHaveBeenCalledTimes(1)
+})
+
 it('首次读取跨过多页后显示 10 点和 11 点两组，组内展开不再影响其他小时发现', async () => {
   const reads = fixture()
   render()

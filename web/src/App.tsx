@@ -165,7 +165,7 @@ export default function App() {
   const visibleBlocks = useMemo(() => mainConversationBlocks(displayBlocks(chat), leadConversation), [chat.blocks, chat.draft, locale, leadConversation])
   const streaming = chat.running && (Boolean(chat.draft.text || chat.draft.thinking) || visibleBlocks.some(block => block.kind === 'assistant' && block.streaming))
 
-  if (booting && !booted) {
+  if (booting && (!booted || bootError)) {
     return (
       <div aria-busy="true" className="flex h-dvh bg-canvas text-muted">
         <aside className="hidden w-64 shrink-0 border-r border-line sm:block"><SessionListSkeleton /></aside>

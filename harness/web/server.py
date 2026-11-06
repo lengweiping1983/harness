@@ -449,16 +449,23 @@ class Handler(BaseHTTPRequestHandler):
         if shared is not None and shared.browser_origin is not None:
             return shared.origin_allowed(self.headers)
         host = self.headers.get("Host", "")
-        hostname = urllib.parse.urlparse("http://" + host).hostname if host else None
+        try:
+            hostname = urllib.parse.urlparse("http://" + host).hostname if host else None
+        except ValueError:
+            return False
         bound = getattr(getattr(self, "server", None), "server_address", (None,))[0]
         if hostname and hostname not in {"localhost", "127.0.0.1", "::1", bound}:
             return False
         origin = self.headers.get("Origin", "")
         if not origin:
-            return True
-        parsed = urllib.parse.urlparse(origin)
+            # 无浏览器来源的本机客户端继续可用；浏览器跨站请求不能借省略来源放行。
+            return self.headers.get('Sec-Fetch-Site', '').strip().lower() not in {'cross-site', 'same-site'}
+        try:
+            parsed = urllib.parse.urlparse(origin)
+        except ValueError:
+            return False
         host = self.headers.get("Host", "")
-        return parsed.scheme in {"http", "https"} and (parsed.netloc == host or parsed.hostname in {"localhost", "127.0.0.1", "::1"} and parsed.port == 5173)
+        return parsed.scheme in {"http", "https"} and parsed.netloc == host
 
     def _apply_cors(self, response: Response) -> Response:
         response.headers.setdefault("X-Request-ID", getattr(self, "_request_id", None) or uuid.uuid4().hex)
@@ -468,8 +475,8 @@ class Handler(BaseHTTPRequestHandler):
             vary = response.headers.get("Vary", "")
             if 'origin' not in {part.strip().lower() for part in vary.split(',')}:
                 response.headers["Vary"] = f"{vary}, Origin" if vary else "Origin"
-        response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type,Idempotency-Key,X-Request-ID")
-        response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
+            response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type,Idempotency-Key,X-Request-ID")
+            response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
         return response
 
     # -- HTTP 动词 -------------------------------------------------------
@@ -520,7 +527,12 @@ class Handler(BaseHTTPRequestHandler):
             self._error(exc)
 
     def do_OPTIONS(self) -> None:  # noqa: N802
-        self._send(self._apply_cors(Response(status=204)))
+        try:
+            if not self._origin_allowed():
+                raise BadRequest(tr('python.server.7ff293468b64'), code="request/origin", status=403)
+            self._send(self._apply_cors(Response(status=204)))
+        except Exception as exc:
+            self._error(exc)
 
     def send_error(self, code, message=None, explain=None) -> None:
         """未实现的 API 方法也经统一路由、鉴权和 JSON 错误出口处理。"""

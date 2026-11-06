@@ -106,3 +106,19 @@ it('allows selecting an explicitly reported single reasoning level', () => {
   expect(html).toContain('>' + t('ui.components.chat.ModelPicker.9a36b187cea4') + '</button>')
   expect(html).toContain('aria-pressed="true"')
 })
+
+it('selects inheritance independently of explicit levels and avoids repeating the selected model heading', () => {
+  const reasoningModels = [{id: 'model', label: 'Unique 模型', provider: 'test', supports_reasoning: true, reasoning_efforts: ['high', 'max']}]
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    setLocale(language)
+    for (const kind of ['inherited', 'explicit', 'model-default', 'global'] as const) {
+      useAppStore.setState({activeSessionId: kind === 'global' ? null : 'conversation', defaultReasoningEffort: 'high',
+        sessions: [{id: 'conversation', ...(kind === 'inherited' ? {} : {reasoning_effort: kind === 'model-default' ? null : 'high', metadata: {reasoning_effort: kind === 'model-default' ? '' : 'high'}})}]})
+      const html = renderToStaticMarkup(<ModelMenu models={reasoningModels} current="model" effort={kind === 'model-default' ? null : 'high'} onClose={() => undefined} />)
+      expect(html.match(/Unique 模型/g)).toHaveLength(1)
+      const selected = html.match(/<button[^>]*aria-pressed="true"[^>]*>(.*?)<\/button>/g) ?? []
+      expect(selected).toHaveLength(1)
+      expect(selected[0]).toContain('>' + (kind === 'inherited' ? t('ui.components.chat.ModelPicker.2fb47e73f109') : kind === 'model-default' ? t('ui.components.chat.ModelPicker.9a36b187cea4') : 'high') + '</button>')
+    }
+  }
+})

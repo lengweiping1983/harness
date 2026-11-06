@@ -214,7 +214,7 @@ export function ProviderModelPreferences({provider, models, renderActions, rende
       const source = new Map(connection.models.map(model => [`harness/${provider.id}/${connection.id}/${model.id}`, model]))
       return <section key={group.id} aria-label={provider.connections.length > 1 ? group.name : undefined} className="space-y-2">
       {provider.connections.length > 1 ? <h5 className="ui-group-title break-words">{group.name}</h5> : null}
-      <ModelPreferences models={group.models} grouped={false} heading={false} modelElements={modelElements} isAvailable={model => available.has(model.id)} renderActions={renderActions ? model => renderActions(connection, source.get(model.id)!) : undefined} renderFeedback={renderFeedback ? model => renderFeedback(connection, source.get(model.id)!) : undefined} />
+      <ModelPreferences models={group.models} grouped={false} heading={false} modelElements={modelElements} modelIdentifier={model => source.get(model.id)?.model} isAvailable={model => available.has(model.id)} renderActions={renderActions ? model => renderActions(connection, source.get(model.id)!) : undefined} renderFeedback={renderFeedback ? model => renderFeedback(connection, source.get(model.id)!) : undefined} />
     </section>})}
   </div>
 }

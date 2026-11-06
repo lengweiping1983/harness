@@ -1926,7 +1926,14 @@
         "operationId": "get_api_v1_status",
         "responses": {
           "200": {
-            "description": "操作成功"
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCredentialStatus"
+                }
+              }
+            }
           },
           "400": {
             "description": "稳定错误码",
@@ -19218,6 +19225,17 @@
   },
   "components": {
     "schemas": {
+      "ModelCredentialStatus": {
+        "type": "object",
+        "required": [
+          "has_model_credentials"
+        ],
+        "properties": {
+          "has_model_credentials": {
+            "type": "boolean"
+          }
+        }
+      },
       "WorkspaceRecord": {
         "type": "object",
         "required": [

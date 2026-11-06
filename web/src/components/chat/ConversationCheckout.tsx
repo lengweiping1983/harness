@@ -50,7 +50,10 @@ export function ConversationCheckout({cwd, value, disabled = false, compact = fa
   if (error) return <div role="alert" className={cn('flex min-w-0 flex-wrap items-center gap-2 text-xs text-danger', compact && 'basis-full')}>
     <span>{noticeText(error)}</span><Button size="xs" disabled={disabled} onClick={() => refresh(count => count + 1)}>{t('ui.requestComposition.retry')}</Button>
   </div>
-  if (loading || !options || value?.cwd !== cwd) return <p role="status" className="text-xs text-muted">{t('ui.newConversation.checking')}</p>
+  if (loading || !options || value?.cwd !== cwd) return <div className={cn('refresh-action-container flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted', compact && 'basis-full')}>
+    <p role="status">{t(visible ? 'ui.newConversation.checking' : 'ui.newConversation.checkPaused')}</p>
+    <RefreshButton size="xs" label={t('ui.newConversation.refresh')} disabled={disabled || !visible} onClick={() => refresh(count => count + 1)} />
+  </div>
   return <ConversationCheckoutFields options={options} value={value} disabled={disabled} compact={compact} onChange={onChange} onRefresh={() => refresh(count => count + 1)} />
 }
 

@@ -27,7 +27,7 @@ export function DefaultModelFeedback() {
   </>
 }
 
-export function ModelPreferences({models, grouped = true, heading = true, renderActions, renderFeedback, modelElements, isAvailable}: {
+export function ModelPreferences({models, grouped = true, heading = true, renderActions, renderFeedback, modelElements, isAvailable, modelIdentifier}: {
   models: ModelInfo[]
   grouped?: boolean
   heading?: boolean
@@ -35,6 +35,7 @@ export function ModelPreferences({models, grouped = true, heading = true, render
   renderFeedback?: (model: ModelInfo) => ReactNode
   modelElements?: Map<string, HTMLDivElement>
   isAvailable?: (model: ModelInfo) => boolean
+  modelIdentifier?: (model: ModelInfo) => string | undefined
 }) {
   const locale = useLocale()
 
@@ -64,11 +65,12 @@ export function ModelPreferences({models, grouped = true, heading = true, render
             const visibilitySave = visibilitySaves[model.id]
             const feedback = renderFeedback?.(model)
             const available = isAvailable?.(model) ?? true
+            const identifier = modelIdentifier?.(model) ?? (!model.id.startsWith('harness/') ? model.id : '')
             return (
               <div
                 key={model.id}
                 ref={modelElements ? element => {if (element) modelElements.set(model.id, element); else modelElements.delete(model.id)} : undefined}
-                className={cn("grid grid-cols-form-row items-center gap-x-3 gap-y-2 px-3 py-2 sm:grid-cols-model-row", heading ? "rounded-xl border border-line" : "rounded-lg bg-raised")}
+                className={cn("grid grid-cols-form-row items-start gap-x-3 gap-y-2 px-3 py-2", heading ? "rounded-xl border border-line" : "rounded-lg bg-raised")}
               >
                 <button
                   type="button"
@@ -88,9 +90,10 @@ export function ModelPreferences({models, grouped = true, heading = true, render
                 </button>
 
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-ink [overflow-wrap:anywhere] sm:truncate">{model.label}</p>
-                  {!model.id.startsWith('harness/') ? <p className="text-2xs text-faint [overflow-wrap:anywhere] sm:truncate">{model.id}</p> : null}
-                  <p className="text-2xs text-faint">{model.context_window ? t('ui.models.contextSize', {count: formatNumber(model.context_window)}) : t('ui.models.contextUnknown')}</p>
+                  <p className="text-xs font-medium text-ink [overflow-wrap:anywhere]">{model.label}</p>
+                  {identifier ? <p className="text-2xs text-faint [overflow-wrap:anywhere]">{identifier}</p> : null}
+                  <div className="flex flex-wrap gap-x-3 text-2xs text-faint"><span>{model.context_window ? t('ui.models.contextSize', {count: formatNumber(model.context_window)}) : t('ui.models.contextUnknown')}</span>
+                    {model.max_output ? <span>{t('ui.models.outputSize', {count: formatNumber(model.max_output)})}</span> : null}</div>
                   {!available ? <p className="text-2xs text-muted">{t('ui.providers.modelNotInCatalog')}</p> : null}
                   {visibilitySave?.pending ? <p role="status" aria-label={t("ui.components.overlays.SettingsDialog.dd9d81b48619")} className="mt-1 text-2xs text-muted">{t(visibilitySave.target ? 'ui.settings.models.showing' : 'ui.settings.models.hiding', {model: model.label})}</p> : null}
                   {!visibilitySave?.pending && visibilitySave?.error ? <div role="alert" aria-label={t("ui.components.overlays.SettingsDialog.cc6f6f1dda23")} className="mt-1 space-y-1 text-2xs text-danger [overflow-wrap:anywhere]">
@@ -100,7 +103,7 @@ export function ModelPreferences({models, grouped = true, heading = true, render
                   </div> : null}
                 </div>
 
-                <div className="col-start-2 flex flex-wrap items-center gap-1.5 sm:col-start-3 sm:justify-end">
+                <div className="col-start-2 flex flex-wrap items-center gap-1.5">
                 <Button
                   size="xs"
                   className={cn("shrink-0", isDefault && "disabled:opacity-100")}

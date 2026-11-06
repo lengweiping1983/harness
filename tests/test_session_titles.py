@@ -1,5 +1,6 @@
 """自动标题通过真实总线和存储验证归属、语言与持久化。"""
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ from harness.app.session_titles import SessionTitles
 from harness.core.events import EventBus
 from harness.core.language import current_language
 from harness.llm.types import LlmCallConfig
+from harness.llm.adapter import OpenRouterAdapter
 from harness.session.events import AppendOp
 from harness.session.store import SessionStore
 from harness.web.views import session_listing
@@ -71,16 +73,20 @@ class SessionTitleTests(unittest.IsolatedAsyncioTestCase):
             await entered.wait()
             chosen = session.header.title if same_value else '用户手动名称'
             self.store.update_header(session.id, title=chosen)
+            manual_metadata = dict(session.header.metadata)
             release.set()
             await self.settle()
             self.assertEqual(session.header.title, chosen)
             self.assertEqual(session.header.metadata['auto_title'], 'manual')
+            self.assertEqual(session.header.metadata, manual_metadata)
 
     async def test_failures_invalid_results_and_no_credentials_keep_stable_fallback(self):
-        for response in (RuntimeError('offline'), '', 'a\nb', 'x' * 51):
+        cases = [(RuntimeError('offline'), 'request-error'), ('', 'empty-output'),
+                 ('a\nb', 'multiline-output'), ('x' * 51, 'title-too-long'), ('Candidate', 'tool-use')]
+        for response, reason in cases:
             session = self.create()
             self.complete.side_effect = response if isinstance(response, Exception) else None
-            self.complete.return_value = SimpleNamespace(text=response, has_tool_use=False)
+            self.complete.return_value = SimpleNamespace(text=response, has_tool_use=reason == 'tool-use')
             await self.append(session, '/goal ' + '原始任务内容' * 30)
             fallback = session.header.title
             await self.settle()
@@ -88,12 +94,16 @@ class SessionTitleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(session.header.title, fallback)
             self.assertLessEqual(len(fallback), 50)
             self.assertEqual(session.header.metadata['auto_title'], 'fallback')
+            self.assertEqual(session.header.metadata['auto_title_reason'], reason)
+            self.assertTrue(session.header.metadata['auto_title_request_id'].startswith('title_'))
         self.app.has_model_credentials = False
         self.complete.reset_mock()
         session = self.create()
         await self.append(session, 'Offline task')
         await self.settle()
         self.complete.assert_not_awaited()
+        self.assertEqual(session.header.metadata['auto_title_reason'], 'no-credentials')
+        self.assertIsNone(session.header.metadata['auto_title_request_id'])
 
     async def test_attachment_only_uses_original_name_without_sending_private_body(self):
         session = self.create()
@@ -101,6 +111,7 @@ class SessionTitleTests(unittest.IsolatedAsyncioTestCase):
             'attachments': [{'name': '设计原文.txt'}]}, surface_op=AppendOp())
         self.assertEqual(session.header.title, '设计原文.txt')
         self.assertEqual(session.header.metadata['auto_title'], 'fallback')
+        self.assertEqual(session.header.metadata['auto_title_reason'], 'attachment-only')
         self.complete.assert_not_awaited()
         self.assertFalse(self.titles.tasks)
 
@@ -175,6 +186,7 @@ class SessionTitleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(results[0], asyncio.CancelledError)
         self.assertIsNone(results[1])
         self.assertEqual(session.header.metadata['auto_title'], 'fallback')
+        self.assertEqual(session.header.metadata['auto_title_reason'], 'cancelled')
         self.complete.assert_awaited_once()
 
     async def test_timeout_retains_fallback_without_replaying_model_request(self):
@@ -187,7 +199,93 @@ class SessionTitleTests(unittest.IsolatedAsyncioTestCase):
         await self.settle()
         self.assertEqual(session.header.title, 'Task')
         self.assertEqual(session.header.metadata['auto_title'], 'fallback')
+        self.assertEqual(session.header.metadata['auto_title_reason'], 'timeout')
+        self.assertEqual(session.header.metadata['auto_title_error_type'], 'TimeoutError')
         self.complete.assert_awaited_once()
+
+    async def test_title_requests_are_archived_at_transport_boundary_with_fallback_diagnostics(self):
+        for outcome in ('generated', 'empty', 'failed'):
+            with self.subTest(outcome=outcome):
+                bodies = []
+                class Transport:
+                    async def post_stream(self, url, *, headers, body, timeout):
+                        bodies.append(json.loads(body))
+                        if outcome == 'failed':
+                            raise RuntimeError('Original provider failure')
+                        chunks = [{'choices': [{'delta': {'content': 'Generated title' if outcome == 'generated' else ''}}]},
+                                  {'choices': [{'delta': {}, 'finish_reason': 'stop'}], 'usage': {'prompt_tokens': 12, 'completion_tokens': 3}}]
+                        for chunk in chunks:
+                            yield ('data: ' + json.dumps(chunk) + '\n\n').encode()
+                        yield b'data: [DONE]\n\n'
+                self.app.adapter = OpenRouterAdapter('fixture-secret', model='fixture', transport=Transport(), max_retries=0)
+                self.app._session_llm_config = lambda session: LlmCallConfig(model='fixture')
+                session = self.create()
+                await self.append(session, 'Original task')
+                await self.settle()
+                self.assertEqual(len(bodies), 1)
+                rows = self.store.request_traces.page(session.id)['requests']
+                self.assertEqual(len(rows), 1)
+                trace = rows[0]
+                self.assertEqual(trace['purpose'], 'title')
+                self.assertEqual(trace['request_id'], session.header.metadata['auto_title_request_id'])
+                self.assertEqual(trace['status'], 'completed' if outcome == 'generated' else 'failed')
+                self.assertEqual(session.header.metadata['auto_title_reason'], {'generated': None, 'empty': 'empty-output', 'failed': 'request-error'}[outcome])
+                self.assertEqual(session.header.metadata['auto_title'], 'generated' if outcome == 'generated' else 'fallback')
+                archived = self.store.request_traces.read(session.id, trace['id'])[1]
+                self.assertNotIn('fixture-secret', archived)
+                self.assertEqual(json.loads(archived)['messages'][1]['content'], 'Original task')
+                self.assertIsNone(self.store.request_traces.latest(session.id))
+                reopened = SessionStore(Path(self.directory.name))
+                self.assertEqual(reopened.request_traces.page(session.id)['requests'][0]['purpose'], 'title')
+                self.assertEqual(reopened.get(session.id).header.metadata['auto_title_reason'], session.header.metadata['auto_title_reason'])
+                await self.append(session, 'Next task')
+                self.assertEqual(len(bodies), 1)
+
+    async def test_deleted_conversation_does_not_regain_title_traces_from_late_transport_events(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def complete(messages, *, config, tools, on_request):
+            body = json.dumps({'model': 'fixture', 'messages': [{'role': 'user', 'content': messages[1].text}]})
+            trace_id = await on_request({'phase': 'started', 'body': body, 'url': 'https://example.invalid/v1'})
+            entered.set()
+            await release.wait()
+            await on_request({'phase': 'completed', 'trace_id': trace_id})
+            await on_request({'phase': 'started', 'body': body, 'url': 'https://example.invalid/v1'})
+            return SimpleNamespace(text='Generated', has_tool_use=False)
+        self.app.adapter.complete = complete
+        session = self.create()
+        await self.append(session, 'Original task')
+        await entered.wait()
+        self.store.delete(session.id)
+        release.set()
+        await self.settle()
+        self.assertEqual(self.store.request_traces.page(session.id)['requests'], [])
+        self.assertFalse(self.store.has(session.id))
+
+    async def test_title_adapter_without_observer_parameter_keeps_its_existing_signature(self):
+        calls = []
+        async def complete(messages, *, config, tools):
+            calls.append(messages)
+            return SimpleNamespace(text='Generated', has_tool_use=False)
+        self.app.adapter.complete = complete
+        session = self.create()
+        await self.append(session, 'Task')
+        await self.settle()
+        self.assertEqual(session.header.title, 'Generated')
+        self.assertEqual(len(calls), 1)
+
+    async def test_configuration_failure_records_reason_without_inventing_a_transport_request(self):
+        def invalid_config(session):
+            raise ValueError('Original configuration detail')
+        self.app._session_llm_config = invalid_config
+        session = self.create()
+        with self.assertLogs('harness.app.session_titles', level='WARNING'):
+            await self.append(session, 'Task')
+            await self.settle()
+        self.complete.assert_not_awaited()
+        self.assertEqual(session.header.metadata['auto_title_reason'], 'request-error')
+        self.assertEqual(session.header.metadata['auto_title_error_type'], 'ValueError')
+        self.assertEqual(self.store.request_traces.page(session.id)['requests'], [])
+        self.assertNotIn('Original configuration detail', json.dumps(session.header.metadata))
 
     async def test_parallel_sessions_delete_and_shutdown_keep_original_ownership(self):
         entered, release = asyncio.Event(), asyncio.Event()
