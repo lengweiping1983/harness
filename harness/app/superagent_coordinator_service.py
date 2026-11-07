@@ -35,6 +35,7 @@ _TRANSITIONS = {
         "ready": {"running", "done", "blocked", "unknown", "cancelled"},
         "running": {"checkpointed", "done", "blocked", "unknown"},
         "checkpointed": {"running", "blocked", "unknown", "cancelled"},
+        "done": {"checkpointed"},
         "unknown": {"running", "done", "blocked", "cancelled"},
     },
     "worker": {
@@ -68,10 +69,12 @@ _REQUIRED_FACTS = {
     ("mission", "running", "integrating"): ("all_work_jobs_done", "required_deliveries_applied", "mandate_valid", "control_allows"),
     ("mission", "integrating", "reviewing"): (
         "integration_artifact_frozen", "all_work_jobs_done", "required_deliveries_applied",
+        "mandate_valid", "control_allows",
     ),
     ("mission", "reviewing", "completed"): (
         "acceptance_verified", "integration_artifact_frozen",
         "all_work_jobs_done", "required_deliveries_applied",
+        "mandate_valid", "control_allows",
     ),
     ("mission", "reviewing", "integrating"): ("repair_authorized", "repair_budget_available", "mandate_valid", "control_allows"),
     ("mission", "cancelling", "cancelled"): ("owned_operations_settled",),
@@ -87,6 +90,7 @@ _REQUIRED_FACTS = {
     ("mission", "unknown", "reviewing"): (
         "reconciliation_verified", "original_integration_settled",
         "integration_artifact_frozen", "all_work_jobs_done", "required_deliveries_applied",
+        "mandate_valid", "control_allows",
     ),
     # Role-specific completion facts are enforced after inspecting the frozen PlanRevision.
     ("mission", "unknown", "completed"): ("reconciliation_verified",),
@@ -101,6 +105,7 @@ _REQUIRED_FACTS = {
     ("job", "running", "checkpointed"): ("checkpoint_and_capture_frozen",),
     ("job", "running", "done"): ("role_result_validated",),
     ("job", "checkpointed", "running"): ("new_assignment_created", "checkpoint_and_capture_imported", "control_allows"),
+    ("job", "done", "checkpointed"): ("review_failed", "repair_budget_available", "mandate_valid", "control_allows"),
     ("job", "unknown", "*"): ("reconciliation_verified",),
     ("job", "unknown", "running"): ("reconciliation_verified", "exact_original_assignment_active", "control_allows"),
     ("job", "unknown", "done"): ("reconciliation_verified", "role_result_validated", "report_frozen"),
@@ -216,6 +221,184 @@ class CoordinatorApplicationService:
         ).fetchone()[0]
         return count > 0
 
+    def _mission_has_inflight_assignments(self, mission_id: str) -> bool:
+        count = self._uow.db.execute(
+            "SELECT COUNT(*) FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? AND assignment.state IN "
+            "('submitting','accepted','running','capturing','stopping','unknown')",
+            (mission_id,),
+        ).fetchone()[0]
+        return count > 0
+
+    def _latest_integration_candidate(self, mission_id: str, plan_revision: int,
+                                      *, allow_checkpointed: bool = False) -> dict | None:
+        row = self._uow.db.execute(
+            "SELECT job.job_id,job.state AS job_state,assignment.assignment_id,assignment.run_id,"
+            "assignment.report_json,artifact.artifact_id,artifact.manifest_hash,artifact.tree_hash,"
+            "artifact.workspace_id,artifact.repo,artifact.base_commit "
+            "FROM jobs AS job JOIN assignments AS assignment ON assignment.job_id=job.job_id "
+            "JOIN artifacts AS artifact ON artifact.assignment_id=assignment.assignment_id "
+            "WHERE job.mission_id=? AND job.plan_revision=? AND job.role='integrate' "
+            "AND assignment.state='succeeded' ORDER BY assignment.attempt_no DESC LIMIT 1",
+            (mission_id, plan_revision),
+        ).fetchone()
+        # checkpointed 只为修正授权核对旧轮冻结候选，正常验收仍要求 done。
+        allowed_states = {"done", "checkpointed"} if allow_checkpointed else {"done"}
+        if row is None or row["job_state"] not in allowed_states:
+            return None
+        result = dict(row)
+        try:
+            report = json.loads(result["report_json"])
+        except (TypeError, ValueError):
+            return None
+        report_hash = report.get("report_hash") if isinstance(report, dict) else None
+        if (not isinstance(report, dict) or report.get("kind") != "work_artifact_report"
+                or report.get("artifact_id") != result["artifact_id"]
+                or report.get("manifest_hash") != result["manifest_hash"]
+                or not isinstance(report_hash, str)
+                or _hash(_json({key: value for key, value in report.items() if key != "report_hash"})) != report_hash):
+            return None
+        return result
+
+
+    def _job_deliveries_applied(self, job_id: str, assignment_id: str) -> bool:
+        dependencies = self._uow.db.execute(
+            "SELECT parent.job_id FROM job_dependencies AS dependency "
+            "JOIN jobs AS parent ON parent.job_id=dependency.depends_on_job_id "
+            "WHERE dependency.job_id=? AND dependency.requires_delivery=1", (job_id,),
+        ).fetchall()
+        for dependency in dependencies:
+            source = self._uow.db.execute(
+                "SELECT artifact.artifact_id FROM assignments AS assignment "
+                "JOIN artifacts AS artifact ON artifact.assignment_id=assignment.assignment_id "
+                "WHERE assignment.job_id=? AND assignment.state='succeeded' "
+                "ORDER BY assignment.attempt_no DESC LIMIT 1", (dependency["job_id"],),
+            ).fetchone()
+            if source is None or self._uow.db.execute(
+                "SELECT 1 FROM deliveries WHERE target_assignment_id=? AND artifact_id=? AND state='applied'",
+                (assignment_id, source["artifact_id"]),
+            ).fetchone() is None:
+                return False
+        return True
+
+    def _latest_review(self, mission_id: str, plan_revision: int) -> dict | None:
+        row = self._uow.db.execute(
+            "SELECT review.*,assignment.attempt_no,assignment.state AS assignment_state,"
+            "assignment.report_json,job.job_id,job.state AS job_state "
+            "FROM reviews AS review JOIN assignments AS assignment "
+            "ON assignment.assignment_id=review.reviewer_assignment_id "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE review.mission_id=? AND review.plan_revision=? AND job.role='review' "
+            "ORDER BY assignment.attempt_no DESC LIMIT 1", (mission_id, plan_revision),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def _review_frozen_for_assignment(self, mission_id: str, job: dict,
+                                      assignment_id: str, report: object,
+                                      *, allow_checkpointed_candidate: bool = False) -> bool:
+        plan = self._uow.plans.get(mission_id, job["plan_revision"])
+        candidate = self._latest_integration_candidate(
+            mission_id, job["plan_revision"],
+            allow_checkpointed=allow_checkpointed_candidate,
+        )
+        review = self._uow.db.execute(
+            "SELECT * FROM reviews WHERE reviewer_assignment_id=?", (assignment_id,),
+        ).fetchone()
+        if plan is None or candidate is None or review is None:
+            return False
+        try:
+            row = dict(review)
+            verdict = json.loads(row["verdict_json"])
+            if not isinstance(report, dict):
+                return False
+            unsigned = {key: value for key, value in report.items() if key != "report_hash"}
+            return bool(
+                row["mission_id"] == mission_id and row["plan_revision"] == job["plan_revision"]
+                and row["candidate_artifact_id"] == candidate["artifact_id"]
+                and row["acceptance_hash"] == plan["acceptance_hash"]
+                and row["state"] in {"passed", "failed", "invalid"}
+                and report.get("kind") == "review_verdict_report"
+                and report.get("review_id") == row["review_id"]
+                and report.get("candidate_artifact_id") == row["candidate_artifact_id"]
+                and report.get("acceptance_hash") == row["acceptance_hash"]
+                and report.get("state") == row["state"] and report.get("verdict") == verdict
+                and report.get("evidence_set_hash") == row["evidence_set_hash"]
+                and _hash(_json(unsigned)) == report.get("report_hash")
+            )
+        except (KeyError, TypeError, ValueError):
+            return False
+
+    def _review_passed(self, mission_id: str, mission: dict) -> bool:
+        plan = self._uow.plans.get(mission_id, mission["plan_revision"])
+        candidate = self._latest_integration_candidate(mission_id, mission["plan_revision"])
+        review = self._latest_review(mission_id, mission["plan_revision"])
+        if (plan is None or candidate is None or review is None or review["state"] != "passed"
+                or review["job_state"] != "done" or review["assignment_state"] != "succeeded"
+                or review["candidate_artifact_id"] != candidate["artifact_id"]
+                or review["acceptance_hash"] != plan["acceptance_hash"]):
+            return False
+        try:
+            report, verdict = json.loads(review["report_json"]), json.loads(review["verdict_json"])
+            criteria = verdict["criteria"]
+            expected = {item["id"] for item in plan["acceptance_json"]["criteria"]}
+            cited = {identity for item in criteria for identity in item["evidence_ids"]}
+            reviewer_ids = set(report["reviewer_evidence_ids"])
+            if (report.get("kind") != "review_verdict_report" or report.get("review_id") != review["review_id"]
+                    or report.get("candidate_artifact_id") != candidate["artifact_id"]
+                    or report.get("acceptance_hash") != plan["acceptance_hash"]
+                    or report.get("state") != "passed" or report.get("verdict") != verdict
+                    or report.get("evidence_set_hash") != review["evidence_set_hash"]
+                    or {item["id"] for item in criteria} != expected
+                    or any(item["status"] != "passed" or not item["evidence_ids"] for item in criteria)
+                    or not reviewer_ids):
+                return False
+            ids = sorted(cited | reviewer_ids)
+            marks = ",".join("?" for _ in ids)
+            rows = self._uow.db.execute(
+                "SELECT evidence.evidence_id,evidence.assignment_id,evidence.evidence_type,"
+                "evidence.reference_hash,evidence.payload_hash,job.role FROM evidence "
+                "JOIN assignments ON assignments.assignment_id=evidence.assignment_id "
+                "JOIN jobs AS job ON job.job_id=assignments.job_id "
+                f"WHERE job.mission_id=? AND job.plan_revision=? AND evidence.evidence_id IN ({marks})",
+                (mission_id, mission["plan_revision"], *ids),
+            ).fetchall()
+
+            if {row["evidence_id"] for row in rows} != set(ids):
+                return False
+            if any(
+                row["role"] not in {"work", "integrate"}
+                or (row["role"] == "integrate"
+                    and row["assignment_id"] != candidate["assignment_id"])
+                for row in rows if row["evidence_id"] in cited
+            ):
+                return False
+            reviewer_rows = [row for row in rows if row["evidence_id"] in reviewer_ids]
+            if (any(row["assignment_id"] != review["reviewer_assignment_id"] for row in reviewer_rows)
+                    or not any(row["evidence_type"] == "run" for row in reviewer_rows)):
+                return False
+            records = sorted(
+                [{"evidence_id": row["evidence_id"], "assignment_id": row["assignment_id"],
+                  "evidence_type": row["evidence_type"], "reference_hash": row["reference_hash"],
+                  "payload_hash": row["payload_hash"]} for row in rows], key=lambda item: item["evidence_id"],
+            )
+            unsigned = {key: value for key, value in report.items() if key != "report_hash"}
+            if (_hash(_json(records)) != review["evidence_set_hash"]
+                    or _hash(_json(unsigned)) != report.get("report_hash")):
+                return False
+            reviewer = self._uow.db.execute(
+                "SELECT workspace_id,session_id FROM assignments WHERE assignment_id=?",
+                (review["reviewer_assignment_id"],),
+            ).fetchone()
+            integrated = self._uow.db.execute(
+                "SELECT workspace_id,session_id FROM assignments WHERE assignment_id=?",
+                (candidate["assignment_id"],),
+            ).fetchone()
+            return bool(reviewer and integrated and reviewer["workspace_id"] != integrated["workspace_id"]
+                        and reviewer["session_id"] != integrated["session_id"])
+        except (KeyError, TypeError, ValueError):
+            return False
+
     def _single_node_report_plan(self, mission_id: str, mission: dict):
         revision = mission.get("plan_revision")
         if type(revision) is not int or revision < 1:
@@ -270,6 +453,14 @@ class CoordinatorApplicationService:
             raise ValueError(f"{name} must be a trimmed evidence reference of at most 2048 characters")
         return value
 
+    @staticmethod
+    def _require_git_tree_hash(value: object, name: str) -> str:
+        """接受当前 Git 使用的 SHA-1 / SHA-256 Tree OID，不能把它误当固定长度 64 的证据哈希。"""
+        if (not isinstance(value, str) or len(value) not in {40, 64}
+                or any(char not in "0123456789abcdef" for char in value)):
+            raise ValueError(f"{name} must be a canonical Git tree object identity")
+        return value
+
     def _validate_mission_integration_evidence(self, mission_id: str, current: dict,
                                                evidence: object) -> None:
         if not isinstance(evidence, dict):
@@ -300,9 +491,27 @@ class CoordinatorApplicationService:
         ):
             raise PermissionError("Integration Artifact must belong to the exact original Integrator Assignment and Run")
         self._require_evidence_text(artifact.get("artifact_ref"), "integration_artifact.artifact_ref")
-        self._require_digest(artifact.get("tree_hash"), "integration_artifact.tree_hash")
+        self._require_git_tree_hash(artifact.get("tree_hash"), "integration_artifact.tree_hash")
         self._require_digest(artifact.get("manifest_hash"), "integration_artifact.manifest_hash")
         self._require_evidence_text(artifact.get("evidence_ref"), "integration_artifact.evidence_ref")
+        # 结构完整不等于真实证明：必须与本轮已冻结 Integrator 原 Run 和 Artifact 一致。
+        candidate = self._latest_integration_candidate(mission_id, current["plan_revision"])
+        if (candidate is None
+                or integration_assignment_id != candidate["assignment_id"]
+                or integration_run_id != candidate["run_id"]
+                or artifact.get("artifact_ref") != f"artifact:{candidate['artifact_id']}"
+                or artifact.get("tree_hash") != candidate["tree_hash"]
+                or artifact.get("manifest_hash") != candidate["manifest_hash"]
+                or artifact.get("evidence_ref") !=
+                    f"artifact:{candidate['artifact_id']}:{candidate['manifest_hash']}"):
+            raise PermissionError("Mission recovery evidence must match the current frozen Integrator candidate")
+        original_evidence = self._uow.db.execute(
+            "SELECT 1 FROM evidence WHERE evidence_id=? AND assignment_id=? "
+            "AND evidence_type='run' LIMIT 1",
+            (integration["evidence_ref"], integration_assignment_id),
+        ).fetchone()
+        if original_evidence is None:
+            raise PermissionError("Mission recovery must cite persisted original Integrator Run evidence")
 
         required_edges = {
             (row["job_id"], row["depends_on_job_id"])
@@ -332,7 +541,38 @@ class CoordinatorApplicationService:
                 raise ValueError("Delivery evidence must not reuse a delivery_id")
             observed_delivery_ids.add(delivery_id)
             self._require_evidence_text(delivery.get("evidence_ref"), "delivery.evidence_ref")
-            self._require_digest(delivery.get("applied_tree_hash"), "delivery.applied_tree_hash")
+            self._require_git_tree_hash(delivery.get("applied_tree_hash"), "delivery.applied_tree_hash")
+            # Delivery 回执和 DAG 边必须同时对应当前目标 Assignment 与父级冻结产物。
+            target = self._uow.db.execute(
+                "SELECT assignment_id FROM assignments WHERE job_id=? "
+                "ORDER BY attempt_no DESC LIMIT 1",
+                (job_id,),
+            ).fetchone()
+            source = self._uow.db.execute(
+                "SELECT artifact.artifact_id FROM assignments AS assignment "
+                "JOIN artifacts AS artifact ON artifact.assignment_id=assignment.assignment_id "
+                "WHERE assignment.job_id=? AND assignment.state='succeeded' "
+                "ORDER BY assignment.attempt_no DESC LIMIT 1",
+                (depends_on_job_id,),
+            ).fetchone()
+            persisted = self._uow.db.execute(
+                "SELECT artifact_id,target_assignment_id,state,receipt_json "
+                "FROM deliveries WHERE delivery_id=?",
+                (delivery_id,),
+            ).fetchone()
+            if (target is None or source is None or persisted is None
+                    or persisted["artifact_id"] != source["artifact_id"]
+                    or persisted["target_assignment_id"] != target["assignment_id"]
+                    or persisted["state"] != "applied"
+                    or delivery["evidence_ref"] != f"delivery:{delivery_id}:applied"):
+                raise PermissionError("Mission recovery Delivery evidence does not match a persisted applied DAG edge")
+            try:
+                receipt = json.loads(persisted["receipt_json"])
+            except (TypeError, ValueError) as exc:
+                raise PermissionError("Mission recovery Delivery receipt is invalid") from exc
+            if (not isinstance(receipt, dict)
+                    or receipt.get("tree") != delivery["applied_tree_hash"]):
+                raise PermissionError("Mission recovery applied tree does not match the original Delivery receipt")
             observed_edges.add(edge)
         if observed_edges != required_edges:
             raise PermissionError("Mission reconciliation is missing applied evidence for a required Delivery")
@@ -448,7 +688,7 @@ class CoordinatorApplicationService:
         if source in {"integrating", "unknown"} and target == "reviewing":
             if not self._mission_jobs_done(identity, current["plan_revision"]):
                 raise PermissionError("reviewing requires every Work Job and required Delivery to be settled")
-            if source == "unknown" and self._mission_has_active_assignments(identity):
+            if source == "unknown" and self._mission_has_inflight_assignments(identity):
                 raise PermissionError("unknown Mission cannot enter reviewing while any original Assignment remains active")
             active_integrators = self._uow.db.execute(
                 "SELECT COUNT(*) FROM assignments AS assignment "
@@ -459,6 +699,14 @@ class CoordinatorApplicationService:
             ).fetchone()[0]
             if active_integrators:
                 raise PermissionError("reviewing requires the original Integrator Assignment to be settled")
+            integrators = self._uow.db.execute(
+                "SELECT job_id,state FROM jobs WHERE mission_id=? AND plan_revision=? AND role='integrate'",
+                (identity, current["plan_revision"]),
+            ).fetchall()
+            candidate = self._latest_integration_candidate(identity, current["plan_revision"])
+            if (len(integrators) != 1 or integrators[0]["state"] != "done" or candidate is None
+                    or not self._job_deliveries_applied(candidate["job_id"], candidate["assignment_id"])):
+                raise PermissionError("reviewing requires the frozen Integrator candidate and applied Work Deliveries")
         if target in {"completed", "blocked", "rejected", "suppressed", "cancelled"}:
             if self._mission_has_active_assignments(identity):
                 raise PermissionError("Mission terminal transition requires all owned Assignments to be settled")
@@ -473,8 +721,44 @@ class CoordinatorApplicationService:
                 raise PermissionError("integrating requires every Work Job settled and no active Assignment in the PlanRevision")
         if source == "reviewing" and target == "integrating":
             next_round = changes.get("round_no")
-            if type(next_round) is not int or next_round != current["round_no"] + 1:
-                raise ValueError("a repair round must advance round_no exactly once")
+            plan = self._uow.plans.get(identity, current["plan_revision"])
+            review = self._latest_review(identity, current["plan_revision"])
+            maximum = (plan or {}).get("acceptance_json", {}).get("max_repair_rounds", 1)
+            repair_jobs = self._uow.db.execute(
+                "SELECT role,state FROM jobs WHERE mission_id=? AND plan_revision=? AND role IN ('integrate','review')",
+                (identity, current["plan_revision"]),
+            ).fetchall()
+            review_job = self._uow.jobs.get(review["job_id"]) if review is not None else None
+            # 只允许结算最新 Reviewer Assignment；旧失败记录不可跨新尝试重放。
+            latest_reviewer = self._uow.db.execute(
+                "SELECT assignment_id FROM assignments WHERE job_id=? "
+                "ORDER BY attempt_no DESC LIMIT 1",
+                (review["job_id"],),
+            ).fetchone() if review is not None else None
+            try:
+                review_report = json.loads(review["report_json"]) if review is not None else None
+            except (TypeError, ValueError):
+                review_report = None
+            review_frozen = bool(
+                review is not None and review_job is not None
+                and latest_reviewer is not None
+                and latest_reviewer["assignment_id"] == review["reviewer_assignment_id"]
+                and not self._mission_has_active_assignments(identity)
+                and review["assignment_state"] == "succeeded"
+                and review["job_state"] in {"done", "checkpointed"}
+                and self._review_frozen_for_assignment(
+                    identity, review_job, review["reviewer_assignment_id"], review_report,
+                    allow_checkpointed_candidate=True,
+                )
+                and self._job_deliveries_applied(
+                    review["job_id"], review["reviewer_assignment_id"],
+                )
+            )
+            if (type(next_round) is not int or next_round != current["round_no"] + 1
+                    or type(maximum) is not int or current["round_no"] >= maximum
+                    or review is None or review["state"] != "failed" or not review_frozen
+                    or len(repair_jobs) != 2 or any(row["state"] != "checkpointed" for row in repair_jobs)):
+                raise PermissionError("repair requires a current frozen failed Review, applied evidence, checkpointed system Jobs and remaining repair budget")
         if source == "unknown" and target == "planning" and facts.get("mandate_valid") is not True:
             raise PermissionError("resuming planning requires a currently valid Mandate")
         if source == "unknown" and target == "running" and facts.get("next_step_safe") is not True:
@@ -494,18 +778,24 @@ class CoordinatorApplicationService:
                 row = dict(rows[0]); self._validate_frozen_report(row["assignment_id"], row, json.loads(row["report_json"]))
                 if json.loads(row["report_json"]).get("disposition") == "attention":
                     raise PermissionError("a Mission awaiting human Attention cannot be completed")
-            elif not all(facts.get(name) is True for name in (
-                "all_work_jobs_done", "original_integration_settled", "integration_artifact_frozen",
-                "required_deliveries_applied", "acceptance_verified", "mandate_valid", "control_allows",
-            )):
-                raise PermissionError("integrated Mission completion requires settled Work and Integrator operations, applied Deliveries, accepted output and current authorization")
+            else:
+                if not all(facts.get(name) is True for name in (
+                    "all_work_jobs_done", "original_integration_settled", "integration_artifact_frozen",
+                    "required_deliveries_applied", "acceptance_verified", "mandate_valid", "control_allows",
+                )):
+                    raise PermissionError("integrated Mission completion requires settled Work and Integrator operations, applied Deliveries, accepted output and current authorization")
+                review = self._latest_review(identity, current["plan_revision"])
+                if (not self._review_passed(identity, current) or review is None
+                        or not self._job_deliveries_applied(review["job_id"], review["reviewer_assignment_id"])):
+                    raise PermissionError("Mission completion requires a persisted passing Review and applied candidate Delivery")
 
     def _validate_job(self, identity: str, current: dict, source: str, target: str,
                       facts: dict[str, bool], changes: dict[str, Any]) -> None:
         if target == "ready":
             mission = self._uow.missions.get(current["mission_id"])
-            if mission is None or mission["state"] != "running":
-                raise PermissionError("Job can become ready only while its Mission is running")
+            expected_stage = {"work": "running", "integrate": "integrating", "review": "reviewing"}.get(current["role"])
+            if mission is None or expected_stage is None or mission["state"] != expected_stage:
+                raise PermissionError("Job can become ready only in its role-specific Mission stage")
             if current["plan_revision"] != mission["plan_revision"]:
                 raise PermissionError("Job plan revision must match the active Mission PlanRevision")
             for dependency in self._uow.dependencies.for_job(identity):
@@ -522,8 +812,20 @@ class CoordinatorApplicationService:
             if assignment is None:
                 raise PermissionError("running requires an Assignment bound to an active original Run")
         if target == "checkpointed":
-            if current["role"] not in {"work", "integrate"}:
-                raise PermissionError("only resumable work or integration Jobs can be checkpointed")
+            if source == "done":
+                mission = self._uow.missions.get(current["mission_id"])
+                plan = self._uow.plans.get(current["mission_id"], current["plan_revision"])
+                review = self._latest_review(current["mission_id"], current["plan_revision"])
+                maximum = (plan or {}).get("acceptance_json", {}).get("max_repair_rounds", 1)
+                if (current["role"] not in {"integrate", "review"} or mission is None
+                        or mission["state"] != "reviewing" or review is None or review["state"] != "failed"
+                        or type(maximum) is not int or mission["round_no"] >= maximum):
+                    raise PermissionError("completed system Jobs can resume only after a failed Review with remaining repair budget")
+            elif source == "running":
+                if current["role"] not in {"work", "integrate"}:
+                    raise PermissionError("only Work or Integrator Jobs can checkpoint a running Assignment")
+            else:
+                raise PermissionError("Job checkpoint source state is invalid")
             active_assignments = self._uow.db.execute(
                 "SELECT COUNT(*) FROM assignments WHERE job_id=? "
                 "AND state IN ('pending','submitting','accepted','running','capturing','stopping','unknown')",
@@ -532,13 +834,53 @@ class CoordinatorApplicationService:
             if active_assignments:
                 raise PermissionError("checkpointed requires the original Assignment to be settled")
         if source == "checkpointed" and target == "running":
+            mission = self._uow.missions.get(current["mission_id"])
+            stage = {"integrate": "integrating", "review": "reviewing"}.get(current["role"])
+            if mission is None or stage is None or mission["state"] != stage:
+                raise PermissionError("checkpoint resume requires the Job's role-specific Mission stage")
             assignment = self._uow.db.execute(
-                "SELECT 1 FROM assignments WHERE job_id=? AND state='running' AND run_id IS NOT NULL "
-                "ORDER BY attempt_no DESC LIMIT 1",
-                (identity,),
+                "SELECT assignment_id,attempt_no,state,run_id,report_json FROM assignments WHERE job_id=? "
+                "ORDER BY attempt_no DESC LIMIT 1", (identity,),
             ).fetchone()
-            if assignment is None:
+            previous = self._uow.db.execute(
+                "SELECT assignment_id,state FROM assignments WHERE job_id=? "
+                "ORDER BY attempt_no DESC LIMIT 1 OFFSET 1", (identity,),
+            ).fetchone()
+            if (assignment is None or previous is None
+                    or assignment["state"] not in {"running", "succeeded"}
+                    or assignment["run_id"] is None or assignment["attempt_no"] < 2
+                    or previous["state"] != "succeeded"):
                 raise PermissionError("checkpoint resume requires a new Assignment bound to its original Run")
+            if assignment["state"] == "succeeded":
+                # 原生 Run 可在首次 running 观察前完成；必须先有持久的角色产物。
+                if current["role"] == "integrate":
+                    frozen = self._uow.db.execute(
+                        "SELECT 1 FROM artifacts WHERE assignment_id=?",
+                        (assignment["assignment_id"],),
+                    ).fetchone()
+                    if frozen is None:
+                        raise PermissionError("settled checkpoint resume requires the frozen Integrator Artifact")
+                else:
+                    try:
+                        report = json.loads(assignment["report_json"])
+                    except (TypeError, ValueError) as exc:
+                        raise PermissionError("settled checkpoint resume requires the frozen Review Report") from exc
+                    if not self._review_frozen_for_assignment(
+                        current["mission_id"], current, assignment["assignment_id"], report,
+                    ):
+                        raise PermissionError("settled checkpoint resume requires the frozen Review Verdict")
+            if current["role"] == "integrate":
+                source_artifact = self._uow.db.execute(
+                    "SELECT artifact_id FROM artifacts WHERE assignment_id=?", (previous["assignment_id"],),
+                ).fetchone()
+            else:
+                candidate = self._latest_integration_candidate(current["mission_id"], current["plan_revision"])
+                source_artifact = {"artifact_id": candidate["artifact_id"]} if candidate else None
+            if (source_artifact is None or self._uow.db.execute(
+                "SELECT 1 FROM deliveries WHERE target_assignment_id=? AND artifact_id=? AND state='applied'",
+                (assignment["assignment_id"], source_artifact["artifact_id"]),
+            ).fetchone() is None):
+                raise PermissionError("checkpoint resume requires the frozen candidate to be imported into the new workspace")
         if source == "unknown" and target == "running":
             assignment = self._uow.db.execute(
                 "SELECT 1 FROM assignments WHERE job_id=? AND state='running' AND run_id IS NOT NULL LIMIT 1",
@@ -570,6 +912,15 @@ class CoordinatorApplicationService:
                 report = self._validate_frozen_report(row["assignment_id"], dict(row), json.loads(row["report_json"]))
                 if changes.get("result_hash") != report["report_hash"]:
                     raise PermissionError("single-node Job result_hash must equal its frozen Report hash")
+            elif current["role"] == "review":
+                row = self._uow.db.execute(
+                    "SELECT assignment_id,report_json FROM assignments WHERE job_id=? AND state='succeeded' "
+                    "ORDER BY attempt_no DESC LIMIT 1", (identity,),
+                ).fetchone()
+                if (row is None or not self._review_frozen_for_assignment(
+                    current["mission_id"], current, row["assignment_id"], json.loads(row["report_json"]),
+                )):
+                    raise PermissionError("Review Job completion requires its persisted immutable Review record")
         if target == "blocked" and facts.get("known_failure_or_human_decision") is not True:
             raise PermissionError("blocked requires a known failure or human decision")
         if target == "cancelled":
@@ -614,6 +965,10 @@ class CoordinatorApplicationService:
             if single_report:
                 assignment = {**current, **changes}
                 self._validate_frozen_report(identity, assignment, assignment.get("report_json"))
+            elif job["role"] == "review" and not self._review_frozen_for_assignment(
+                job["mission_id"], job, identity, changes.get("report_json"),
+            ):
+                raise PermissionError("Review Assignment success requires its persisted immutable Review record")
         if target == "failed":
             required_failure_fact = (
                 "capture_or_validation_failure_confirmed"

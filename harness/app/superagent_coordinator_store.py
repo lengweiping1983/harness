@@ -1830,6 +1830,63 @@ class AggregateRepository:
             causation_id=causation_id, actor=self._uow.actor,
         )
 
+class ReviewRepository:
+    def __init__(self, uow: "CoordinatorUnitOfWork"):
+        self._uow = uow
+
+    def get_by_reviewer_assignment(self, assignment_id: str) -> dict | None:
+        row = self._uow.db.execute(
+            "SELECT * FROM reviews WHERE reviewer_assignment_id=?",
+            (_text(assignment_id, "reviewer_assignment_id"),),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def create(self, *, mission_id: str, reviewer_assignment_id: str,
+               candidate_artifact_id: str, plan_revision: int, acceptance_hash: str,
+               verdict: dict, evidence_set_hash: str, state: str) -> dict:
+        mission = _text(mission_id, "mission_id")
+        reviewer = _text(reviewer_assignment_id, "reviewer_assignment_id")
+        candidate = _text(candidate_artifact_id, "candidate_artifact_id")
+        if type(plan_revision) is not int or plan_revision < 1:
+            raise ValueError("plan_revision must be positive")
+        for value in (acceptance_hash, evidence_set_hash):
+            if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                raise ValueError("Review hashes must be lowercase SHA-256 digests")
+        if not isinstance(verdict, dict) or state not in {"passed", "failed", "invalid"}:
+            raise ValueError("Review verdict or state is invalid")
+        encoded = _json(verdict)
+        old = self.get_by_reviewer_assignment(reviewer)
+        fields = (("mission_id", mission), ("candidate_artifact_id", candidate),
+                  ("plan_revision", plan_revision), ("acceptance_hash", acceptance_hash),
+                  ("verdict_json", encoded), ("evidence_set_hash", evidence_set_hash), ("state", state))
+        if old is not None:
+            if any(old[key] != value for key, value in fields):
+                raise HarnessError(tr("superagent.conflict"), code="superagent/review-conflict")
+            return old
+        identity = "review_" + _hash("\0".join(
+            (mission, str(plan_revision), reviewer, candidate, acceptance_hash)
+        ))[:32]
+        self._uow.db.execute(
+            "INSERT INTO reviews(review_id,mission_id,reviewer_assignment_id,candidate_artifact_id,"
+            "plan_revision,acceptance_hash,verdict_json,evidence_set_hash,state,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (identity, mission, reviewer, candidate, plan_revision, acceptance_hash,
+             encoded, evidence_set_hash, state, _now()),
+        )
+        self._uow.store.append_audit(
+            self._uow.db, aggregate_type="review", aggregate_id=identity,
+            event_type="review.frozen",
+            payload={"mission_id": mission, "plan_revision": plan_revision,
+                     "reviewer_assignment_id": reviewer, "candidate_artifact_id": candidate,
+                     "acceptance_hash": acceptance_hash, "evidence_set_hash": evidence_set_hash,
+                     "state": state},
+            actor=self._uow.actor, correlation_id=self._uow.correlation_id,
+        )
+        return dict(self._uow.db.execute(
+            "SELECT * FROM reviews WHERE review_id=?", (identity,),
+        ).fetchone())
+
+
 class CoordinatorUnitOfWork:
     """将聚合写入、CAS、审计和副作用意图合并为一个 SQLite 事务。"""
 
@@ -1852,6 +1909,7 @@ class CoordinatorUnitOfWork:
         self.outbox: AggregateRepository | None = None
         self.plans: PlanRevisionRepository | None = None
         self.dependencies: JobDependencyRepository | None = None
+        self.reviews: ReviewRepository | None = None
 
     def __enter__(self) -> "CoordinatorUnitOfWork":
         if self.db is not None:
@@ -1868,6 +1926,7 @@ class CoordinatorUnitOfWork:
         self.outbox = AggregateRepository(self, _REPOSITORY_SPECS["outbox"])
         self.plans = PlanRevisionRepository(self)
         self.dependencies = JobDependencyRepository(self)
+        self.reviews = ReviewRepository(self)
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> bool:

@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from harness.app.superagent_coordinator_host import CoordinatorHost
+from harness.app.superagent_coordinator_service import CoordinatorApplicationService
 from harness.app.superagent_coordinator_store import _hash, _json, _now
 from harness.app.superagent_executor import HarnessExecutorAdapter, WorkerProfile
 from harness.core.errors import HarnessError
@@ -40,6 +41,7 @@ class FakeExecutionAdapter:
         self.shared.setdefault("artifact_conflict", False)
         self.shared.setdefault("artifact_capture_calls", [])
         self.shared.setdefault("artifact_import_calls", [])
+        self.shared.setdefault("tool_effects", {})
         self.worker_lookup = None
         self.closed = False
 
@@ -48,6 +50,9 @@ class FakeExecutionAdapter:
 
     def profile_for_source(self, source_instance_id):
         return next((p for p in self.profiles.values() if source_instance_id in p.source_instance_ids), None)
+
+    def tool_effects(self, profile):
+        return {name: self.shared["tool_effects"].get(name, "unknown") for name in profile.tools}
 
     def base_commit(self, profile):
         return self.shared.get("base_commit", "a" * 40)
@@ -252,6 +257,21 @@ class FakeExecutionAdapter:
         self.shared["async_closed"] = True
 
 
+class ArtifactReviewPlanner:
+    def plan(self, *, trigger_id, profile, prompt):
+        return {
+            "plan": {"nodes": [{
+                "node_id": "work", "role": "work", "profile_id": profile.profile_id,
+                "instruction_ref": f"trigger:{trigger_id}", "instruction_hash": _hash(prompt),
+                "dependencies": [],
+            }]},
+            "acceptance": {
+                "kind": "artifact_review",
+                "criteria": [{"id": "files", "kind": "inspection"}],
+            },
+        }
+
+
 class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -285,6 +305,1056 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.shared["async_closed"])
         self.assertTrue(self.adapter.closed)
 
+
+    async def test_artifact_plan_materializes_host_integrator_and_independent_reviewer(self):
+        self._reopen_with_system_profiles(ArtifactReviewPlanner())
+        received, accepted, _ = self.accept_event(
+            actions=("read", "reply"),
+            tools=("write_file", "read_file"),
+        )
+        started = await self.host.execution.route_trigger(accepted["ticket_id"], received["trigger_id"])
+        self.assertEqual(started["state"], "running")
+        mission_id = started["mission_id"]
+        with self.host._store.transaction() as db:
+            jobs = db.execute(
+                "SELECT node_id,role,profile_id FROM jobs WHERE mission_id=? ORDER BY node_id",
+                (mission_id,),
+            ).fetchall()
+            plan = db.execute(
+                "SELECT plan_json,acceptance_json FROM mission_plans WHERE mission_id=? AND plan_revision=1",
+                (mission_id,),
+            ).fetchone()
+            dependencies = db.execute(
+                "SELECT child.node_id AS node_id,parent.node_id AS depends_on_node_id,dependency.requires_delivery "
+                "FROM job_dependencies AS dependency "
+                "JOIN jobs AS child ON child.job_id=dependency.job_id "
+                "JOIN jobs AS parent ON parent.job_id=dependency.depends_on_job_id "
+                "WHERE dependency.mission_id=?",
+                (mission_id,),
+            ).fetchall()
+        self.assertEqual(
+            {(row["node_id"], row["role"], row["profile_id"]) for row in jobs},
+            {("work", "work", "local-worker"),
+             ("__system__integrate", "integrate", "local-integrator"),
+             ("__system__review", "review", "local-reviewer")},
+        )
+        self.assertEqual(
+            {(row["node_id"], row["depends_on_node_id"], row["requires_delivery"]) for row in dependencies},
+            {("__system__integrate", "work", 1),
+             ("__system__review", "__system__integrate", 1)},
+        )
+
+        frozen_plan = json.loads(plan["plan_json"])
+        acceptance = json.loads(plan["acceptance_json"])
+        self.assertEqual([node["role"] for node in frozen_plan["nodes"]], ["work", "integrate", "review"])
+        self.assertEqual(acceptance["kind"], "artifact_review")
+        self.assertEqual(acceptance["schema_version"], 1)
+        self.assertEqual(acceptance["criteria"], [{"id": "files", "kind": "inspection"}])
+
+    async def _start_work_for_artifact_boundary_race(self):
+        """建立真实 Host Work Run，等待原生执行完成但不提前捕获 Artifact。"""
+        self._reopen_with_system_profiles(ArtifactReviewPlanner())
+        received, accepted, _ = self.accept_event(
+            actions=("read", "reply"), tools=("write_file", "read_file"), max_turns=12,
+        )
+        started = await self.host.execution.route_trigger(
+            accepted["ticket_id"], received["trigger_id"],
+        )
+        self.adapter.finish(started["assignment_id"], {
+            "status": "completed", "summary": "Files ready", "reply": "",
+        })
+        return started["mission_id"], started["assignment_id"]
+
+    async def _start_integrator_for_import_boundary_race(self):
+        """完成 Work 与 Artifact 冻结，让真实 Scheduler 准备 Integrator 导入。"""
+        mission_id, work_id = await self._start_work_for_artifact_boundary_race()
+        result = await self.host.execution.reconcile(work_id)
+        self.assertEqual(result["state"], "succeeded")
+        self.assertEqual(self.mission_state(mission_id), "integrating")
+        return mission_id, work_id
+
+    async def test_capture_rechecks_control_after_effect_lease_before_git_write(self):
+        """租约已认领但原生 Git 捕获尚未开始时暂停，必须留下确定的无副作用回执。"""
+        mission_id, assignment_id = await self._start_work_for_artifact_boundary_race()
+        artifacts = self.host._artifacts_service
+        original_begin = artifacts._begin
+        paused = [False]
+
+        def lease_then_pause(kind, key, payload):
+            effect, fresh = original_begin(kind, key, payload)
+            if kind == "artifact.capture" and fresh and not paused[0]:
+                paused[0] = True
+                receipt = self.host.execution.control_mission(
+                    mission_id, "pause", request_id="phase44-capture-lease-pause",
+                    actor={"kind": "human"},
+                )
+                self.assertEqual(receipt["state"], "applied")
+            return effect, fresh
+
+        artifacts._begin = lease_then_pause
+        try:
+            first = await self.host.execution.reconcile(assignment_id)
+        finally:
+            artifacts._begin = original_begin
+        self.assertEqual(first["state"], "capturing")
+        self.assertEqual(self.shared["artifact_capture_calls"], [])
+        with self.host._store.transaction() as db:
+            effect = db.execute(
+                "SELECT * FROM effects WHERE kind='artifact.capture' AND aggregate_id=?",
+                (assignment_id,),
+            ).fetchone()
+            self.assertEqual(effect["state"], "failed")
+            proof = json.loads(effect["receipt_json"])
+            self.assertEqual(proof["outcome"], "not_started")
+            self.assertEqual(proof["reason"], "superagent/mission-paused")
+            self.assertTrue(db.execute(
+                "SELECT 1 FROM audit_events WHERE aggregate_type='effect' AND aggregate_id=? "
+                "AND event_type='effect.failed' AND json_extract(payload_json,'$.not_started')=1",
+                (effect["effect_id"],),
+            ).fetchone())
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0], 0)
+        resumed = self.host.execution.control_mission(
+            mission_id, "resume", request_id="phase44-capture-lease-resume",
+            actor={"kind": "human"},
+        )
+        self.assertEqual(resumed["state"], "applied")
+        recovered = await self.host.execution.reconcile(assignment_id)
+        self.assertEqual(recovered["state"], "succeeded")
+        self.assertEqual(
+            self.shared["artifact_capture_calls"],
+            [self.host._execution_service._assignment(assignment_id)["worker_id"]],
+        )
+        with self.host._store.transaction() as db:
+            effects = db.execute(
+                "SELECT state,idempotency_key FROM effects WHERE kind='artifact.capture' "
+                "AND aggregate_id=? ORDER BY rowid",
+                (assignment_id,),
+            ).fetchall()
+        self.assertEqual([row["state"] for row in effects], ["failed", "completed"])
+        self.assertNotEqual(effects[0]["idempotency_key"], effects[1]["idempotency_key"])
+        self.assertEqual(self.shared["submit_calls"], [assignment_id])
+
+    async def test_capture_rechecks_mandate_after_effect_lease_before_git_write(self):
+        """租约后来源撤权须形成无副作用失败证明，不能调用原生 Git 捕获。"""
+        mission_id, assignment_id = await self._start_work_for_artifact_boundary_race()
+        artifacts = self.host._artifacts_service
+        original_begin = artifacts._begin
+        revoked = [False]
+
+        def lease_then_revoke(kind, key, payload):
+            effect, fresh = original_begin(kind, key, payload)
+            if kind == "artifact.capture" and fresh and not revoked[0]:
+                revoked[0] = True
+                self.host.sources.update_instance(
+                    "local-source", expected_revision=1, enabled=False,
+                )
+            return effect, fresh
+
+        artifacts._begin = lease_then_revoke
+        try:
+            result = await self.host.execution.reconcile(assignment_id)
+        finally:
+            artifacts._begin = original_begin
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(self.shared["artifact_capture_calls"], [])
+        self.assertEqual(self.mission_state(mission_id), "blocked")
+        with self.host._store.transaction() as db:
+            effect = db.execute(
+                "SELECT state,receipt_json FROM effects WHERE kind='artifact.capture' AND aggregate_id=?",
+                (assignment_id,),
+            ).fetchone()
+            self.assertEqual(effect["state"], "failed")
+            self.assertEqual(json.loads(effect["receipt_json"])["reason"], "superagent/mandate-unavailable")
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0], 0)
+
+    async def test_import_rechecks_control_after_effect_lease_before_workspace_write(self):
+        """Artifact 导入租约后暂停，必须保留 pending Delivery 并且不触碰目标工作树。"""
+        mission_id, work_id = await self._start_integrator_for_import_boundary_race()
+        artifacts = self.host._artifacts_service
+        original_begin = artifacts._begin
+        paused = [False]
+
+        def lease_then_pause(kind, key, payload):
+            effect, fresh = original_begin(kind, key, payload)
+            if kind == "artifact.import" and fresh and not paused[0]:
+                paused[0] = True
+                receipt = self.host.execution.control_mission(
+                    mission_id, "pause", request_id="phase44-import-lease-pause",
+                    actor={"kind": "human"},
+                )
+                self.assertEqual(receipt["state"], "applied")
+            return effect, fresh
+
+        artifacts._begin = lease_then_pause
+        try:
+            first = await self.host.execution.schedule_dag_missions()
+        finally:
+            artifacts._begin = original_begin
+        self.assertFalse(self.shared["artifact_import_calls"])
+        self.assertEqual(self.mission_state(mission_id), "integrating")
+        with self.host._store.transaction() as db:
+            effect = db.execute(
+                "SELECT * FROM effects WHERE kind='artifact.import' AND aggregate_id<>?",
+                (work_id,),
+            ).fetchone()
+            self.assertIsNotNone(effect)
+            self.assertEqual(effect["state"], "failed")
+            self.assertEqual(json.loads(effect["receipt_json"])["outcome"], "not_started")
+            self.assertEqual(db.execute(
+                "SELECT state FROM deliveries WHERE target_assignment_id=?",
+                (effect["aggregate_id"],),
+            ).fetchone()[0], "pending")
+            self.assertEqual(db.execute(
+                "SELECT state FROM assignments WHERE assignment_id=?",
+                (effect["aggregate_id"],),
+            ).fetchone()[0], "pending")
+        resumed = self.host.execution.control_mission(
+            mission_id, "resume", request_id="phase44-import-lease-resume",
+            actor={"kind": "human"},
+        )
+        self.assertEqual(resumed["state"], "applied")
+        recovered = await self.host.execution.schedule_dag_missions()
+        self.assertEqual(len(self.shared["artifact_import_calls"]), 1)
+        self.assertFalse(recovered["errors"])
+        with self.host._store.transaction() as db:
+            effects = db.execute(
+                "SELECT state,idempotency_key FROM effects WHERE kind='artifact.import' "
+                "ORDER BY rowid",
+            ).fetchall()
+            delivery = db.execute("SELECT state FROM deliveries").fetchone()
+        self.assertEqual([row["state"] for row in effects], ["failed", "completed"])
+        self.assertNotEqual(effects[0]["idempotency_key"], effects[1]["idempotency_key"])
+        self.assertEqual(delivery["state"], "applied")
+
+    async def test_import_rechecks_mandate_after_effect_lease_before_workspace_write(self):
+        """Artifact 导入租约后来源撤权，阻断 Job 与 Mission，不写入 Integrator 工作树。"""
+        mission_id, work_id = await self._start_integrator_for_import_boundary_race()
+        artifacts = self.host._artifacts_service
+        original_begin = artifacts._begin
+        revoked = [False]
+
+        def lease_then_revoke(kind, key, payload):
+            effect, fresh = original_begin(kind, key, payload)
+            if kind == "artifact.import" and fresh and not revoked[0]:
+                revoked[0] = True
+                self.host.sources.update_instance(
+                    "local-source", expected_revision=1, enabled=False,
+                )
+            return effect, fresh
+
+        artifacts._begin = lease_then_revoke
+        try:
+            result = await self.host.execution.schedule_dag_missions()
+        finally:
+            artifacts._begin = original_begin
+        self.assertFalse(self.shared["artifact_import_calls"])
+        self.assertEqual(self.mission_state(mission_id), "blocked")
+        with self.host._store.transaction() as db:
+            effect = db.execute(
+                "SELECT state,receipt_json FROM effects WHERE kind='artifact.import'",
+            ).fetchone()
+            self.assertEqual(effect["state"], "failed")
+            self.assertEqual(json.loads(effect["receipt_json"])["reason"], "superagent/mandate-unavailable")
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM deliveries WHERE state='applied'").fetchone()[0], 0)
+
+
+    async def test_capture_watchdog_blocked_after_effect_lease_requires_fresh_progress(self):
+        """原生捕获租约后持久 Watchdog blocked 必须在写入前阻止，真实进度后仅执行一次。"""
+        from harness.app.superagent_watchdog import CoordinatorWatchdog
+
+        mission_id, assignment_id = await self._start_work_for_artifact_boundary_race()
+        scheduler = self.host._execution_service._dag_scheduler
+        watchdog = CoordinatorWatchdog(
+            self.host._store,
+            limits={"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"},
+        )
+        scheduler._watchdog = watchdog
+        artifacts = self.host._artifacts_service
+        original_begin = artifacts._begin
+        blocked_once = [False]
+
+        def block_after_lease(kind, key, payload):
+            effect, fresh = original_begin(kind, key, payload)
+            if kind == "artifact.capture" and fresh and not blocked_once[0]:
+                blocked_once[0] = True
+                healthy = watchdog.observe(
+                    mission_id, activity={"run_status": "completed", "event_seq": 1},
+                    now="2026-11-07T00:00:00Z",
+                )
+                self.assertEqual(healthy["state"], "healthy")
+                blocked = watchdog.observe(
+                    mission_id, activity={"run_status": "completed", "event_seq": 1},
+                    now="2026-11-07T00:00:02Z",
+                )
+                self.assertEqual(blocked["state"], "blocked")
+            return effect, fresh
+
+        artifacts._begin = block_after_lease
+        try:
+            suspended = await self.host.execution.reconcile(assignment_id)
+        finally:
+            artifacts._begin = original_begin
+
+        self.assertEqual(suspended["state"], "capturing")
+        self.assertEqual(self.shared["artifact_capture_calls"], [])
+        with self.host._store.transaction() as db:
+            effect = db.execute(
+                "SELECT state,receipt_json FROM effects WHERE kind='artifact.capture' "
+                "AND aggregate_id=?", (assignment_id,),
+            ).fetchone()
+            self.assertEqual(effect["state"], "failed")
+            self.assertEqual(json.loads(effect["receipt_json"])["outcome"], "not_started")
+
+        # 仅重启 Watchdog 实例不应清除 blocked，必须观察到真正的新进度。
+        scheduler._watchdog = CoordinatorWatchdog(
+            self.host._store,
+            limits={"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"},
+        )
+        self.assertEqual(scheduler._watchdog.get(mission_id)["state"], "blocked")
+        still_paused = await self.host.execution.reconcile(assignment_id)
+        self.assertEqual(still_paused["state"], "capturing")
+        self.assertEqual(self.shared["artifact_capture_calls"], [])
+        progressed = scheduler._watchdog.observe(
+            mission_id, activity={"run_status": "completed", "event_seq": 2},
+            now="2026-11-07T00:00:03Z",
+        )
+        self.assertEqual(progressed["state"], "healthy")
+        recovered = await self.host.execution.reconcile(assignment_id)
+        self.assertEqual(recovered["state"], "succeeded")
+        self.assertEqual(len(self.shared["artifact_capture_calls"]), 1)
+        self.assertEqual(self.shared["submit_calls"], [assignment_id])
+        with self.host._store.transaction() as db:
+            states = [
+                row["state"] for row in db.execute(
+                    "SELECT state FROM effects WHERE kind='artifact.capture' "
+                    "AND aggregate_id=? ORDER BY rowid", (assignment_id,),
+                ).fetchall()
+            ]
+        self.assertEqual(states, ["failed", "completed"])
+
+    async def test_import_watchdog_blocked_after_effect_lease_preserves_pending_delivery(self):
+        """Integrator 导入租约后被持久 Watchdog 阻断，不得产生未知写入或重复原生 Run。"""
+        from harness.app.superagent_watchdog import CoordinatorWatchdog
+
+        mission_id, work_id = await self._start_integrator_for_import_boundary_race()
+        scheduler = self.host._execution_service._dag_scheduler
+        watchdog = CoordinatorWatchdog(
+            self.host._store,
+            limits={"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"},
+        )
+        scheduler._watchdog = watchdog
+        artifacts = self.host._artifacts_service
+        original_begin = artifacts._begin
+        blocked_once = [False]
+
+        def block_after_lease(kind, key, payload):
+            effect, fresh = original_begin(kind, key, payload)
+            if kind == "artifact.import" and fresh and not blocked_once[0]:
+                blocked_once[0] = True
+                watchdog.observe(
+                    mission_id, activity={"run_status": "waiting", "event_seq": 1},
+                    now="2026-11-07T00:00:00Z",
+                )
+                blocked = watchdog.observe(
+                    mission_id, activity={"run_status": "waiting", "event_seq": 1},
+                    now="2026-11-07T00:00:02Z",
+                )
+                self.assertEqual(blocked["state"], "blocked")
+            return effect, fresh
+
+        artifacts._begin = block_after_lease
+        try:
+            tick = await self.host.execution.schedule_dag_missions()
+        finally:
+            artifacts._begin = original_begin
+        self.assertFalse(tick["errors"])
+        self.assertEqual(self.mission_state(mission_id), "integrating")
+        self.assertEqual(self.shared["artifact_import_calls"], [])
+        with self.host._store.transaction() as db:
+            effect = db.execute(
+                "SELECT * FROM effects WHERE kind='artifact.import'",
+            ).fetchone()
+            self.assertIsNotNone(effect)
+            self.assertEqual(effect["state"], "failed")
+            self.assertEqual(json.loads(effect["receipt_json"])["outcome"], "not_started")
+            self.assertEqual(db.execute(
+                "SELECT state FROM deliveries WHERE target_assignment_id=?",
+                (effect["aggregate_id"],),
+            ).fetchone()[0], "pending")
+        blocked_again = await self.host.execution.schedule_dag_missions()
+        self.assertFalse(blocked_again["errors"])
+        self.assertEqual(self.shared["artifact_import_calls"], [])
+        progressed = watchdog.observe(
+            mission_id, activity={"run_status": "ready", "event_seq": 2},
+            now="2026-11-07T00:00:03Z",
+        )
+        self.assertEqual(progressed["state"], "healthy")
+        resumed = await self.host.execution.schedule_dag_missions()
+        self.assertFalse(resumed["errors"])
+        self.assertEqual(len(self.shared["artifact_import_calls"]), 1)
+        self.assertEqual(self.shared["submit_calls"].count(work_id), 1)
+        with self.host._store.transaction() as db:
+            states = [
+                row["state"] for row in db.execute(
+                    "SELECT state FROM effects WHERE kind='artifact.import' ORDER BY rowid",
+                ).fetchall()
+            ]
+        self.assertEqual(states, ["failed", "completed"])
+
+    async def test_capture_stale_plan_snapshot_after_effect_lease_requires_new_admission(self):
+        """过期 PlanRevision 快照不得创建原生 Git 写入；新快照只在无副作用回执后恢复。"""
+        mission_id, assignment_id = await self._start_work_for_artifact_boundary_race()
+        artifacts = self.host._artifacts_service
+        original_admit = artifacts._authorize_and_mark_started
+        stale_once = [False]
+
+        def stale_snapshot_on_admission(effect, assignment, operation):
+            if operation == "artifact.capture" and not stale_once[0]:
+                stale_once[0] = True
+                assignment = {**assignment, "plan_revision": assignment["plan_revision"] + 1}
+            return original_admit(effect, assignment, operation)
+
+        artifacts._authorize_and_mark_started = stale_snapshot_on_admission
+        try:
+            first = await self.host.execution.reconcile(assignment_id)
+        finally:
+            artifacts._authorize_and_mark_started = original_admit
+        self.assertEqual(first["state"], "unknown")
+        self.assertEqual(self.shared["artifact_capture_calls"], [])
+        self.assertNotEqual(self.mission_state(mission_id), "completed")
+        with self.host._store.transaction() as db:
+            effect = db.execute(
+                "SELECT state,receipt_json FROM effects WHERE kind='artifact.capture' "
+                "AND aggregate_id=?", (assignment_id,),
+            ).fetchone()
+            self.assertEqual(effect["state"], "failed")
+            self.assertEqual(json.loads(effect["receipt_json"])["reason"], "superagent/mission-corrupt")
+        recovered = await self.host.execution.reconcile(assignment_id)
+        self.assertEqual(recovered["state"], "succeeded")
+        self.assertEqual(len(self.shared["artifact_capture_calls"]), 1)
+        self.assertEqual(self.shared["submit_calls"], [assignment_id])
+        with self.host._store.transaction() as db:
+            states = [
+                row["state"] for row in db.execute(
+                    "SELECT state FROM effects WHERE kind='artifact.capture' "
+                    "AND aggregate_id=? ORDER BY rowid", (assignment_id,),
+                )
+            ]
+        self.assertEqual(states, ["failed", "completed"])
+
+    async def test_import_stale_plan_snapshot_after_effect_lease_cannot_write_workspace(self):
+        """Integrator 导入在 Effect 认领后遇过期计划快照，必须留下可核对的无副作用失败。"""
+        mission_id, work_id = await self._start_integrator_for_import_boundary_race()
+        artifacts = self.host._artifacts_service
+        original_admit = artifacts._authorize_and_mark_started
+        stale_once = [False]
+
+        def stale_snapshot_on_admission(effect, assignment, operation):
+            if operation == "artifact.import" and not stale_once[0]:
+                stale_once[0] = True
+                assignment = {**assignment, "plan_revision": assignment["plan_revision"] + 1}
+            return original_admit(effect, assignment, operation)
+
+        artifacts._authorize_and_mark_started = stale_snapshot_on_admission
+        try:
+            first = await self.host.execution.schedule_dag_missions()
+        finally:
+            artifacts._authorize_and_mark_started = original_admit
+        self.assertFalse(self.shared["artifact_import_calls"])
+        self.assertNotEqual(self.mission_state(mission_id), "completed")
+        with self.host._store.transaction() as db:
+            effect = db.execute(
+                "SELECT state,receipt_json FROM effects WHERE kind='artifact.import'",
+            ).fetchone()
+            self.assertEqual(effect["state"], "failed")
+            self.assertEqual(json.loads(effect["receipt_json"])["reason"], "superagent/mission-corrupt")
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM deliveries WHERE state='applied'",
+            ).fetchone()[0], 0)
+        restored = await self.host.execution.schedule_dag_missions()
+        self.assertFalse(restored["errors"])
+        self.assertEqual(len(self.shared["artifact_import_calls"]), 1)
+        self.assertEqual(self.shared["submit_calls"].count(work_id), 1)
+        with self.host._store.transaction() as db:
+            states = [
+                row["state"] for row in db.execute(
+                    "SELECT state FROM effects WHERE kind='artifact.import' ORDER BY rowid",
+                )
+            ]
+        self.assertEqual(states, ["failed", "completed"])
+
+    async def test_unknown_capture_reconciles_original_worktree_receipt_without_second_write(self):
+        """首次捕获已写入但 ACK 丢失后，原生 Run 回查不得重复执行 Git 捕获。"""
+        self._reopen_with_system_profiles(ArtifactReviewPlanner())
+        received, accepted, _ = self.accept_event(
+            actions=("read", "reply"),
+            tools=("write_file", "read_file"), max_turns=12,
+        )
+        started = await self.host.execution.route_trigger(
+            accepted["ticket_id"], received["trigger_id"],
+        )
+        self.assertEqual(started["state"], "running")
+        assignment_id = started["assignment_id"]
+        self.adapter.finish(assignment_id, {
+            "status": "completed", "summary": "Files ready", "reply": "",
+        })
+        original = self.adapter.capture_workspace
+
+        async def lost_capture_receipt(worker):
+            await original(worker)
+            raise RuntimeError("original capture receipt was lost")
+
+        self.adapter.capture_workspace = lost_capture_receipt
+        first = await self.host.execution.reconcile(assignment_id)
+        self.assertEqual(first["state"], "unknown")
+        self.assertEqual(self.mission_state(started["mission_id"]), "unknown")
+        self.assertEqual(len(self.shared["artifact_capture_calls"]), 1)
+
+        self.adapter.capture_workspace = original
+        recovered = await self.host.execution.reconcile(assignment_id)
+        self.assertEqual(recovered["state"], "succeeded")
+        self.assertEqual(len(self.shared["artifact_capture_calls"]), 1)
+        self.assertEqual(self.shared["submit_calls"], [assignment_id])
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute(
+                    "SELECT state FROM effects WHERE kind='artifact.capture'",
+                ).fetchone()[0], "completed",
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT state FROM assignments WHERE assignment_id=?",
+                    (assignment_id,),
+                ).fetchone()[0], "succeeded",
+            )
+
+
+    async def test_unknown_capture_without_original_receipt_never_replays_git_write(self):
+        """原捕获回执仍不可确认时，不再执行第二次 Git 捕获或推进质量门。"""
+        self._reopen_with_system_profiles(ArtifactReviewPlanner())
+        received, accepted, _ = self.accept_event(
+            actions=("read", "reply"),
+            tools=("write_file", "read_file"), max_turns=12,
+        )
+        started = await self.host.execution.route_trigger(
+            accepted["ticket_id"], received["trigger_id"],
+        )
+        assignment_id = started["assignment_id"]
+        self.adapter.finish(assignment_id, {
+            "status": "completed", "summary": "Files ready", "reply": "",
+        })
+
+        async def no_original_receipt(worker):
+            self.shared["artifact_capture_calls"].append(worker["worker_id"])
+            raise RuntimeError("capture outcome cannot be determined")
+
+        self.adapter.capture_workspace = no_original_receipt
+        first = await self.host.execution.reconcile(assignment_id)
+        second = await self.host.execution.reconcile(assignment_id)
+        self.assertEqual((first["state"], second["state"]), ("unknown", "unknown"))
+        self.assertEqual(self.mission_state(started["mission_id"]), "unknown")
+        self.assertEqual(len(self.shared["artifact_capture_calls"]), 1)
+        self.assertEqual(self.shared["submit_calls"], [assignment_id])
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute(
+                    "SELECT state FROM effects WHERE kind='artifact.capture'",
+                ).fetchone()[0], "unknown",
+            )
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0], 0)
+
+
+    async def test_interrupted_integrator_must_settle_before_blocking_without_reviewer(self):
+        """Integrator 原 Run 先报告未结算 interrupted，不得替换 Run 或提前派发 Reviewer。"""
+        self._reopen_with_system_profiles(ArtifactReviewPlanner())
+        received, accepted, _ = self.accept_event(
+            actions=("read", "reply"),
+            tools=("write_file", "read_file"), max_turns=12,
+        )
+        started = await self.host.execution.route_trigger(
+            accepted["ticket_id"], received["trigger_id"],
+        )
+        mission_id = started["mission_id"]
+        work_id = started["assignment_id"]
+        self.adapter.finish(work_id, {
+            "status": "completed", "summary": "Files ready", "reply": "",
+        })
+        work_result = await self.host.execution.reconcile(work_id)
+        self.assertEqual(work_result["state"], "succeeded")
+        await self.host.execution.schedule_dag_missions()
+        with self.host._store.transaction() as db:
+            integrator = db.execute(
+                "SELECT assignment.* FROM assignments AS assignment "
+                "JOIN jobs AS job ON job.job_id=assignment.job_id "
+                "WHERE job.mission_id=? AND job.role='integrate' ORDER BY attempt_no DESC LIMIT 1",
+                (mission_id,),
+            ).fetchone()
+        self.assertIsNotNone(integrator)
+        integrator_id = integrator["assignment_id"]
+        native = self.shared["runs"][integrator_id]
+        self.shared["runs"][integrator_id] = self.adapter._snapshot(
+            native["run_id"], native["run_reference"]["session_id"], native["input_ids"],
+            status="interrupted", settled=False,
+        )
+        uncertain = await self.host.execution.reconcile(integrator_id)
+        self.assertNotIn(uncertain["state"], {"failed", "interrupted", "succeeded"})
+        await self.host.execution.schedule_dag_missions()
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM assignments JOIN jobs ON jobs.job_id=assignments.job_id "
+                    "WHERE jobs.mission_id=? AND jobs.role='review'", (mission_id,),
+                ).fetchone()[0], 0,
+            )
+
+        self.shared["runs"][integrator_id]["settled"] = True
+        terminal = await self.host.execution.reconcile(integrator_id)
+        self.assertEqual(terminal["state"], "interrupted")
+        await self.host.execution.schedule_dag_missions()
+        await self.host.execution.schedule_dag_missions()
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute(
+                    "SELECT state FROM missions WHERE mission_id=?", (mission_id,),
+                ).fetchone()[0], "blocked",
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT state FROM jobs WHERE mission_id=? AND role='integrate'",
+                    (mission_id,),
+                ).fetchone()[0], "blocked",
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM assignments JOIN jobs ON jobs.job_id=assignments.job_id "
+                    "WHERE jobs.mission_id=? AND jobs.role='review'", (mission_id,),
+                ).fetchone()[0], 0,
+            )
+        self.assertEqual(self.shared["submit_calls"].count(integrator_id), 1)
+
+
+    async def test_unknown_reviewer_original_run_can_freeze_invalid_review_without_replay(self):
+        """Review 的原生检查短暂失败后，恢复原 Run 时冻结 invalid 结论而不生成新 Review Run。"""
+        self._reopen_with_system_profiles(ArtifactReviewPlanner())
+        received, accepted, _ = self.accept_event(
+            actions=("read", "reply"), tools=("write_file", "read_file"), max_turns=12,
+        )
+        started = await self.host.execution.route_trigger(
+            accepted["ticket_id"], received["trigger_id"],
+        )
+        mission_id = started["mission_id"]
+        self.adapter.finish(started["assignment_id"], {
+            "status": "completed", "summary": "Files ready", "reply": "",
+        })
+        self.assertEqual(
+            (await self.host.execution.reconcile(started["assignment_id"]))["state"],
+            "succeeded",
+        )
+        await self.host.execution.schedule_dag_missions()
+        with self.host._store.transaction() as db:
+            integ = db.execute(
+                "SELECT assignment.assignment_id FROM assignments AS assignment "
+                "JOIN jobs AS job ON job.job_id=assignment.job_id "
+                "WHERE job.mission_id=? AND job.role='integrate'",
+                (mission_id,),
+            ).fetchone()
+        self.assertIsNotNone(integ)
+        integrator_id = integ["assignment_id"]
+        self.adapter.finish(integrator_id, {
+            "status": "completed", "summary": "Integrated files", "reply": "",
+        })
+        self.assertEqual((await self.host.execution.reconcile(integrator_id))["state"], "succeeded")
+        await self.host.execution.schedule_dag_missions()
+        with self.host._store.transaction() as db:
+            reviewer = db.execute(
+                "SELECT assignment.assignment_id FROM assignments AS assignment "
+                "JOIN jobs AS job ON job.job_id=assignment.job_id "
+                "WHERE job.mission_id=? AND job.role='review'",
+                (mission_id,),
+            ).fetchone()
+        self.assertIsNotNone(reviewer)
+        reviewer_id = reviewer["assignment_id"]
+        self.shared["fail_inspect"] = True
+        uncertain = await self.host.execution.reconcile(reviewer_id)
+        self.assertEqual(uncertain["state"], "unknown")
+        self.assertEqual(self.mission_state(mission_id), "unknown")
+        with self.host._store.unit_of_work(actor={"kind": "system"}) as uow:
+            app = CoordinatorApplicationService(uow)
+            mission = uow.missions.get(mission_id)
+            candidate = app._latest_integration_candidate(mission_id, mission["plan_revision"])
+            evidence = self.host._execution_service._dag_scheduler._frozen_integration_resume_evidence(
+                uow.db, mission, candidate,
+            )
+            self.assertIsNotNone(evidence)
+            evidence["reconciliation_ref"] = f"mission:{mission_id}:frozen-integration"
+            app._validate_mission_integration_evidence(mission_id, mission, evidence)
+            # 即使其余证据真实，伪造 Run、产物、已应用交付或 PlanRevision 均不得恢复。
+            for mutation in ("original_run", "artifact", "delivery", "plan_revision"):
+                with self.subTest(forgery=mutation):
+                    forged = copy.deepcopy(evidence)
+                    if mutation == "original_run":
+                        forged["original_integration"]["run_id"] = "run-forged"
+                        forged["integration_artifact"]["run_id"] = "run-forged"
+                    elif mutation == "artifact":
+                        forged["integration_artifact"]["artifact_ref"] = "artifact:forged"
+                    elif mutation == "delivery":
+                        self.assertTrue(forged["deliveries"])
+                        forged["deliveries"][0]["applied_tree_hash"] = "f" * 40
+                    else:
+                        forged["plan_revision"] = mission["plan_revision"] + 1
+                    with self.assertRaises(PermissionError):
+                        app._validate_mission_integration_evidence(mission_id, mission, forged)
+        self.adapter.finish(reviewer_id, {
+            "status": "completed", "summary": "Malformed Reviewer response", "reply": "",
+        })
+        recovered = await self.host.execution.reconcile(reviewer_id)
+        self.assertEqual(recovered["state"], "succeeded")
+        await self.host.execution.schedule_dag_missions()
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute(
+                    "SELECT state FROM reviews WHERE mission_id=?", (mission_id,),
+                ).fetchone()[0], "invalid",
+            )
+            self.assertNotEqual(
+                db.execute(
+                    "SELECT state FROM missions WHERE mission_id=?", (mission_id,),
+                ).fetchone()[0], "completed",
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM assignments JOIN jobs ON jobs.job_id=assignments.job_id "
+                    "WHERE jobs.mission_id=? AND jobs.role='review'",
+                    (mission_id,),
+                ).fetchone()[0], 1,
+            )
+        self.assertEqual(self.shared["submit_calls"].count(reviewer_id), 1)
+
+
+    async def _start_reviewer_for_freeze_race(self):
+        """用真实 Host 路由工作、集成、审查三段，停在 Reviewer 原 Run 尚未结算处。"""
+        self._reopen_with_system_profiles(ArtifactReviewPlanner())
+        received, accepted, _ = self.accept_event(
+            actions=("read", "reply"), tools=("write_file", "read_file"), max_turns=12,
+        )
+        started = await self.host.execution.route_trigger(
+            accepted["ticket_id"], received["trigger_id"],
+        )
+        mission_id = started["mission_id"]
+        self.adapter.finish(started["assignment_id"], {
+            "status": "completed", "summary": "Work complete", "reply": "",
+        })
+        self.assertEqual(
+            (await self.host.execution.reconcile(started["assignment_id"]))["state"],
+            "succeeded",
+        )
+        await self.host.execution.schedule_dag_missions()
+        with self.host._store.transaction() as db:
+            integrator = db.execute(
+                "SELECT assignment.assignment_id FROM assignments AS assignment "
+                "JOIN jobs ON jobs.job_id=assignment.job_id "
+                "WHERE jobs.mission_id=? AND jobs.role='integrate'",
+                (mission_id,),
+            ).fetchone()
+        self.assertIsNotNone(integrator)
+        self.adapter.finish(integrator["assignment_id"], {
+            "status": "completed", "summary": "Integrated files", "reply": "",
+        })
+        self.assertEqual(
+            (await self.host.execution.reconcile(integrator["assignment_id"]))["state"],
+            "succeeded",
+        )
+        await self.host.execution.schedule_dag_missions()
+        with self.host._store.transaction() as db:
+            reviewer = db.execute(
+                "SELECT assignment.assignment_id FROM assignments AS assignment "
+                "JOIN jobs ON jobs.job_id=assignment.job_id "
+                "WHERE jobs.mission_id=? AND jobs.role='review'",
+                (mission_id,),
+            ).fetchone()
+        self.assertIsNotNone(reviewer)
+        self.assertEqual(self.mission_state(mission_id), "reviewing")
+        return mission_id, reviewer["assignment_id"]
+
+    async def test_reviewer_freeze_rechecks_pause_inside_write_transaction(self):
+        """预检之后、Review 落盘之前暂停，不得冻结 Verdict；resume 只结算原 Run。"""
+        mission_id, reviewer_id = await self._start_reviewer_for_freeze_race()
+        self.adapter.finish(reviewer_id, {
+            "status": "completed", "summary": "Malformed Reviewer output", "reply": "",
+        })
+        scheduler = self.host._execution_service._dag_scheduler
+        original = scheduler._prepare_review
+        paused_once = [False]
+
+        def pause_after_preflight(*args):
+            prepared = original(*args)
+            if not paused_once[0]:
+                paused_once[0] = True
+                receipt = self.host.execution.control_mission(
+                    mission_id, "pause", request_id="phase44-review-freeze-pause",
+                    actor={"kind": "human"},
+                )
+                self.assertEqual(receipt["state"], "applied")
+            return prepared
+
+        scheduler._prepare_review = pause_after_preflight
+        suspended = await self.host.execution.reconcile(reviewer_id)
+        self.assertEqual(suspended["state"], "capturing")
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM reviews WHERE mission_id=?", (mission_id,)).fetchone()[0], 0,
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT state FROM assignments WHERE assignment_id=?", (reviewer_id,),
+                ).fetchone()[0], "capturing",
+            )
+        receipt = self.host.execution.control_mission(
+            mission_id, "resume", request_id="phase44-review-freeze-resume",
+            actor={"kind": "human"},
+        )
+        self.assertEqual(receipt["state"], "applied")
+        recovered = await self.host.execution.reconcile(reviewer_id)
+        self.assertEqual(recovered["state"], "succeeded")
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute(
+                    "SELECT state FROM reviews WHERE mission_id=?", (mission_id,),
+                ).fetchone()[0], "invalid",
+            )
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM reviews WHERE mission_id=?", (mission_id,)).fetchone()[0], 1,
+            )
+        self.assertEqual(self.shared["submit_calls"].count(reviewer_id), 1)
+
+    async def test_reviewer_freeze_rechecks_source_revocation_inside_write_transaction(self):
+        """解析原 Reviewer Run 后发生来源撤权，不得冻结新的 Review 或误发修正。"""
+        mission_id, reviewer_id = await self._start_reviewer_for_freeze_race()
+        self.adapter.finish(reviewer_id, {
+            "status": "completed", "summary": "Malformed Reviewer output", "reply": "",
+        })
+        scheduler = self.host._execution_service._dag_scheduler
+        original = scheduler._prepare_review
+
+        def revoke_after_preflight(*args):
+            prepared = original(*args)
+            self.host.sources.update_instance(
+                "local-source", expected_revision=1, enabled=False,
+            )
+            return prepared
+
+        scheduler._prepare_review = revoke_after_preflight
+        suspended = await self.host.execution.reconcile(reviewer_id)
+        self.assertEqual(suspended["state"], "capturing")
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM reviews WHERE mission_id=?", (mission_id,)).fetchone()[0], 0,
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT state FROM assignments WHERE assignment_id=?", (reviewer_id,),
+                ).fetchone()[0], "capturing",
+            )
+            self.assertNotEqual(
+                db.execute(
+                    "SELECT state FROM missions WHERE mission_id=?", (mission_id,),
+                ).fetchone()[0], "completed",
+            )
+        self.assertEqual(self.shared["submit_calls"].count(reviewer_id), 1)
+
+
+    async def test_unsettled_interrupted_reviewer_never_freezes_review_or_repairs(self):
+        """Reviewer 原 Run 的 interrupted 未确认 settled 前不能冻结结论或重复派工。"""
+        mission_id, reviewer_id = await self._start_reviewer_for_freeze_race()
+        native = self.shared["runs"][reviewer_id]
+        self.shared["runs"][reviewer_id] = self.adapter._snapshot(
+            native["run_id"], native["run_reference"]["session_id"], native["input_ids"],
+            status="interrupted", settled=False,
+        )
+        interim = await self.host.execution.reconcile(reviewer_id)
+        self.assertNotIn(interim["state"], {"interrupted", "failed", "succeeded"})
+        await self.host.execution.schedule_dag_missions()
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM reviews WHERE mission_id=?", (mission_id,)).fetchone()[0], 0,
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM assignments JOIN jobs ON jobs.job_id=assignments.job_id "
+                    "WHERE jobs.mission_id=? AND jobs.role='review'",
+                    (mission_id,),
+                ).fetchone()[0], 1,
+            )
+        self.shared["runs"][reviewer_id]["settled"] = True
+        result = await self.host.execution.reconcile(reviewer_id)
+        self.assertEqual(result["state"], "interrupted")
+        await self.host.execution.schedule_dag_missions()
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM reviews WHERE mission_id=?", (mission_id,)).fetchone()[0], 0,
+            )
+            self.assertEqual(
+                db.execute("SELECT state FROM missions WHERE mission_id=?", (mission_id,)).fetchone()[0], "blocked",
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM assignments JOIN jobs ON jobs.job_id=assignments.job_id "
+                    "WHERE jobs.mission_id=? AND jobs.role='review'",
+                    (mission_id,),
+                ).fetchone()[0], 1,
+            )
+        self.assertEqual(self.shared["submit_calls"].count(reviewer_id), 1)
+
+    async def test_watchdog_blocks_reviewer_freeze_after_preflight_until_fresh_progress(self):
+        """Watchdog 在 Reviewer 解析后升到 blocked 时，当前事务也须拒绝冻结。"""
+        from harness.app.superagent_watchdog import CoordinatorWatchdog
+
+        mission_id, reviewer_id = await self._start_reviewer_for_freeze_race()
+        self.adapter.finish(reviewer_id, {
+            "status": "completed", "summary": "Malformed Reviewer output", "reply": "",
+        })
+        scheduler = self.host._execution_service._dag_scheduler
+        watchdog = CoordinatorWatchdog(
+            self.host._store,
+            limits={"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"},
+        )
+        scheduler._watchdog = watchdog
+        original = scheduler._prepare_review
+        blocked_once = [False]
+
+        def watchdog_after_preflight(*args):
+            prepared = original(*args)
+            if not blocked_once[0]:
+                blocked_once[0] = True
+                healthy = watchdog.observe(
+                    mission_id, activity={"run_status": "running", "event_seq": 1},
+                    now="2026-11-07T00:00:00Z",
+                )
+                self.assertEqual(healthy["state"], "healthy")
+                blocked = watchdog.observe(
+                    mission_id, activity={"run_status": "running", "event_seq": 1},
+                    now="2026-11-07T00:00:02Z",
+                )
+                self.assertEqual(blocked["state"], "blocked")
+            return prepared
+
+        scheduler._prepare_review = watchdog_after_preflight
+        suspended = await self.host.execution.reconcile(reviewer_id)
+        self.assertEqual(suspended["state"], "capturing")
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM reviews WHERE mission_id=?", (mission_id,)).fetchone()[0], 0,
+            )
+        progressed = watchdog.observe(
+            mission_id, activity={"run_status": "completed", "event_seq": 2},
+            now="2026-11-07T00:00:03Z",
+        )
+        self.assertEqual(progressed["state"], "healthy")
+        recovered = await self.host.execution.reconcile(reviewer_id)
+        self.assertEqual(recovered["state"], "succeeded")
+        self.assertEqual(self.shared["submit_calls"].count(reviewer_id), 1)
+
+
+    async def test_artifact_plan_without_host_quality_profiles_fails_closed(self):
+        self.host.close()
+        self.adapter = FakeExecutionAdapter(self.instance_id, self.profile, self.shared)
+        self.host = self._open_host(self.adapter, planner=ArtifactReviewPlanner())
+        received, accepted, _ = self.accept_event()
+        with self.assertRaises(HarnessError) as raised:
+            await self.host.execution.route_trigger(accepted["ticket_id"], received["trigger_id"])
+        self.assertEqual(raised.exception.code, "superagent/quality-gate-unavailable")
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM missions WHERE ticket_id=?", (accepted["ticket_id"],)).fetchone()[0],
+                0,
+            )
+
+    async def test_writable_worker_cannot_downgrade_acceptance_to_single_report(self):
+        class DowngradePlanner:
+            def plan(self, *, trigger_id, profile, prompt):
+                return {
+                    "plan": {"nodes": [{
+                        "node_id": "work", "role": "work", "profile_id": "local-integrator",
+                        "dependencies": [],
+                    }]},
+                    "acceptance": {"kind": "single_worker_report", "schema_version": 1},
+                }
+
+        self._reopen_with_system_profiles(DowngradePlanner())
+        received, accepted, _ = self.accept_event(
+            actions=("read", "reply"),
+            tools=("write_file", "read_file"),
+        )
+        with self.assertRaises(HarnessError) as raised:
+            await self.host.execution.route_trigger(accepted["ticket_id"], received["trigger_id"])
+        self.assertEqual(raised.exception.code, "superagent/acceptance-invalid")
+
+    async def test_reviewer_profile_rejects_workspace_write_tools(self):
+        self.host.close()
+        self.shared["tool_effects"] = {"write_file": "workspace_write"}
+        adapter = FakeExecutionAdapter(self.instance_id, self.profile, self.shared)
+        adapter.profiles["local-integrator"] = WorkerProfile(
+            profile_id="local-integrator", repo=str(self.root), description="Host Integrator",
+            source_instance_ids=("local-source",),
+            actions=("read", "reply"), tools=("write_file",),
+            max_turns=4, max_seconds=60,
+        )
+        adapter.profiles["local-reviewer"] = WorkerProfile(
+            profile_id="local-reviewer", repo=str(self.root), description="Invalid Reviewer",
+            source_instance_ids=("local-source",), actions=("read",), tools=("write_file",),
+            max_turns=4, max_seconds=60,
+        )
+        with self.assertRaisesRegex(ValueError, "read effect"):
+            self._open_host(
+                adapter, planner=ArtifactReviewPlanner(),
+                system_profiles={"integrate": "local-integrator", "review": "local-reviewer"},
+            )
+
+    async def test_integrator_profile_requires_workspace_write_tools(self):
+        self.host.close()
+        self.shared["tool_effects"] = {"read_file": "read"}
+        adapter = FakeExecutionAdapter(self.instance_id, self.profile, self.shared)
+        adapter.profiles["local-integrator"] = WorkerProfile(
+            profile_id="local-integrator", repo=str(self.root), description="Read-only Integrator",
+            source_instance_ids=("local-source",), actions=("read", "reply"), tools=("read_file",),
+            max_turns=4, max_seconds=60,
+        )
+        adapter.profiles["local-reviewer"] = WorkerProfile(
+            profile_id="local-reviewer", repo=str(self.root), description="Independent Reviewer",
+            source_instance_ids=("local-source",), actions=("read",), tools=("read_file",),
+            max_turns=4, max_seconds=60,
+        )
+        with self.assertRaisesRegex(ValueError, "workspace-write tools"):
+            self._open_host(
+                adapter, planner=ArtifactReviewPlanner(),
+                system_profiles={"integrate": "local-integrator", "review": "local-reviewer"},
+            )
+
+    async def test_readonly_single_report_allows_readonly_tools_without_quality_profiles(self):
+        self.host.close()
+        self.shared["tool_effects"] = {"read_file": "read"}
+        self.adapter = FakeExecutionAdapter(self.instance_id, self.profile, self.shared)
+        self.adapter.profiles["local-worker"] = WorkerProfile(
+            profile_id="local-worker", repo=str(self.root), description="Read-only Local Worker",
+            source_instance_ids=("local-source",), actions=("read", "reply"), tools=("read_file",),
+            max_turns=4, max_seconds=60,
+        )
+        self.host = self._open_host(self.adapter)
+        received, accepted, _ = self.accept_event(tools=("read_file",))
+        started = await self.host.execution.route_trigger(accepted["ticket_id"], received["trigger_id"])
+        self.assertEqual(started["state"], "running")
+        with self.host._store.transaction() as db:
+            plan = db.execute(
+                "SELECT acceptance_json FROM mission_plans WHERE mission_id=? AND plan_revision=1",
+                (started["mission_id"],),
+            ).fetchone()
+            jobs = db.execute(
+                "SELECT role FROM jobs WHERE mission_id=? AND plan_revision=1",
+                (started["mission_id"],),
+            ).fetchall()
+        self.assertEqual(json.loads(plan["acceptance_json"])["kind"], "single_worker_report")
+        self.assertEqual([row["role"] for row in jobs], ["work"])
+
     @staticmethod
     def _local_identity(event):
         metadata = event.get("metadata", {})
@@ -294,13 +1364,35 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
             "addressed": metadata.get("addressed", "direct"),
         }
 
-    def _open_host(self, adapter, planner=None):
+    def _open_host(self, adapter, planner=None, system_profiles=None):
         return CoordinatorHost.open(
             self.root / "v2", instance_id=self.instance_id,
             identity={"project": "harness", "suite": "phase3"},
             legacy_state_dir=self.root / "v1",
             local_identity_verifier=self._local_identity,
-            executor_adapter=adapter, planner=planner,
+            executor_adapter=adapter, planner=planner, system_profiles=system_profiles,
+        )
+
+    def _reopen_with_system_profiles(self, planner):
+        self.host.close()
+        self.shared["tool_effects"] = {
+            "write_file": "workspace_write", "read_file": "read",
+        }
+        self.adapter = FakeExecutionAdapter(self.instance_id, self.profile, self.shared)
+        self.adapter.profiles["local-integrator"] = WorkerProfile(
+            profile_id="local-integrator", repo=str(self.root), description="Host Integrator",
+            source_instance_ids=("local-source",),
+            actions=("read", "reply"), tools=("write_file",),
+            max_turns=4, max_seconds=60,
+        )
+        self.adapter.profiles["local-reviewer"] = WorkerProfile(
+            profile_id="local-reviewer", repo=str(self.root), description="Independent Reviewer",
+            source_instance_ids=("local-source",), actions=("read",), tools=("read_file",),
+            max_turns=4, max_seconds=60,
+        )
+        self.host = self._open_host(
+            self.adapter, planner=planner,
+            system_profiles={"integrate": "local-integrator", "review": "local-reviewer"},
         )
 
     @staticmethod
@@ -325,11 +1417,12 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         }
 
     def accept_event(self, *, event_id="origin", thread_key="work-thread",
-                     text="Fix the existing typo.", max_turns=3):
+                     text="Fix the existing typo.", max_turns=3,
+                     actions=("read", "reply"), tools=()):
         thread_id = self._thread_id(thread_key)
         scope = {
             "source_instance_ids": ["local-source"], "thread_ids": [thread_id],
-            "actions": ["read", "reply"], "tools": [],
+            "actions": list(actions), "tools": list(tools),
             "budget": {"max_turns": max_turns, "max_seconds": 60},
         }
         policy = {
@@ -353,6 +1446,24 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         if accepted["kind"] != "accept":
             raise AssertionError(f"Ticket acceptance failed: {accepted}")
         return received, accepted, thread_id
+
+    async def test_mission_budget_uses_mandate_scope_and_worker_profile_limits_separately(self):
+        origin, accepted, _ = self.accept_event(max_turns=12)
+        service = self.host._execution_service
+        ticket = service._authorization.ticket(accepted["ticket_id"])
+        trigger = service._sources.get_trigger(origin["trigger_id"])
+        input_row = service._input(accepted["ticket_id"], origin["trigger_id"])
+
+        _, default_profile, mission_budget = service._mandate_context(
+            ticket, trigger, input_row, require_work=False,
+        )
+        _, _, work_budget = service._mandate_context(
+            ticket, trigger, input_row, require_work=True,
+        )
+
+        self.assertEqual(default_profile.max_turns, 4)
+        self.assertEqual(mission_budget["max_turns"], 12)
+        self.assertEqual(work_budget["max_turns"], 4)
 
     def receive_followup(self, event_id, thread_key="work-thread", text="Please also check the related test."):
         return self.host.sources.receive_local("local-source", {

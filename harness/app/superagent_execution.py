@@ -49,7 +49,8 @@ class CoordinatorExecutionService:
     """Explicit V2 execution surface; it never changes the production V1 Router."""
 
     def __init__(self, store, authorization, sources, executor: ExecutionAdapter, *,
-                 instance_id: str, planner=None, system_profiles: Mapping[str, str] | None = None):
+                 instance_id: str, planner=None, system_profiles: Mapping[str, str] | None = None,
+                 watchdog=None):
         if executor.instance_id != instance_id:
             raise ValueError("ExecutorAdapter instance_id must match CoordinatorHost")
         self._store = store
@@ -73,9 +74,18 @@ class CoordinatorExecutionService:
             for role, profile_id in selected.items():
                 if not isinstance(self._profiles.get(profile_id), WorkerProfile):
                     raise ValueError(f"{role} profile must be owned by this ExecutorAdapter")
+            integrator = self._profiles[selected["integrate"]]
             reviewer = self._profiles[selected["review"]]
-            if reviewer.tools or not set(reviewer.actions) <= {"read", "reply"}:
-                raise ValueError("Reviewer profile must be read-only and have no external tools")
+            integrator_effects = self._profile_tool_effects(integrator)
+            if ("workspace_write" not in integrator_effects.values()
+                    or any(effect not in {"read", "workspace_write", "execute"}
+                           for effect in integrator_effects.values())):
+                raise ValueError("Integrator profile requires workspace-write tools and cannot use external or unknown effects")
+            if not reviewer.tools:
+                raise ValueError("Reviewer profile must expose read-only inspection tools")
+            reviewer_effects = self._profile_tool_effects(reviewer)
+            if any(effect != "read" for effect in reviewer_effects.values()):
+                raise ValueError("Reviewer tools must all declare the read effect")
             self._system_profiles = selected
         self._planner = planner if planner is not None else SingleNodePlanner()
         if not callable(getattr(self._planner, "plan", None)):
@@ -87,12 +97,24 @@ class CoordinatorExecutionService:
             max_active_assignments=min(4, max(1, max_workers)),
             max_active_per_mission=2,
         )
-        self._dag_scheduler = CoordinatorDagScheduler(self, policy)
+        self._dag_scheduler = CoordinatorDagScheduler(self, policy, watchdog=watchdog)
         self._locks: dict[str, asyncio.Lock] = {}
         self._closed = False
         self._control = CoordinatorControl(store)
         self._input_deliveries = CoordinatorInputDelivery(store)
         executor.set_worker_lookup(self._worker_row)
+
+    def _profile_tool_effects(self, profile: WorkerProfile) -> dict[str, str]:
+        if not profile.tools:
+            return {}
+        resolver = getattr(self._executor, "tool_effects", None)
+        if not callable(resolver):
+            raise ValueError("ExecutorAdapter must expose trusted tool effects for non-empty Profiles")
+        effects = resolver(profile)
+        if (not isinstance(effects, Mapping) or set(effects) != set(profile.tools)
+                or any(not isinstance(effect, str) for effect in effects.values())):
+            raise ValueError("ExecutorAdapter returned incomplete or invalid tool effect metadata")
+        return dict(effects)
 
     def close(self) -> None:
         if self._closed:
@@ -388,9 +410,11 @@ class CoordinatorExecutionService:
         max_seconds = budget.get("max_seconds", profile.max_seconds)
         if type(max_turns) is not int or type(max_seconds) is not int:
             raise PermissionError("Ticket Mandate execution budget is invalid")
+        # Mission 的全局执行预算取自 Ticket Mandate；各角色的 WorkerProfile
+        # 上限由 _profile_for_job 分别执行，不能让默认来源 Profile 限制整个 DAG。
         effective = {
-            "max_turns": min(profile.max_turns, max_turns),
-            "max_seconds": min(profile.max_seconds, max_seconds),
+            "max_turns": min(profile.max_turns, max_turns) if require_work else max_turns,
+            "max_seconds": min(profile.max_seconds, max_seconds) if require_work else max_seconds,
         }
         if effective["max_turns"] < 1 or effective["max_seconds"] < 1:
             raise PermissionError("Ticket Mandate has no remaining execution budget")
@@ -682,7 +706,9 @@ class CoordinatorExecutionService:
         with self._store.unit_of_work(actor=_ACTOR, correlation_id=f"ticket:{ticket_id}") as uow:
             mission = uow.missions.get(mission_id)
             if mission is None:
-                sequence = uow.db.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM missions WHERE ticket_id=?", (ticket_id,)).fetchone()[0]
+                sequence = uow.db.execute(
+                    "SELECT COALESCE(MAX(sequence),0)+1 FROM missions WHERE ticket_id=?", (ticket_id,),
+                ).fetchone()[0]
                 mission = uow.missions.create({
                     "mission_id": mission_id, "ticket_id": ticket_id, "sequence": sequence,
                     "goal_ref": trigger_id, "policy_version_at_start": mandate.get("policy_version"),
@@ -692,35 +718,80 @@ class CoordinatorExecutionService:
                 frozen_plan = self._planner.plan(
                     trigger_id=trigger_id, profile=profile, prompt=prompt,
                 )
-                planned_nodes = frozen_plan.get("plan", {}).get("nodes", [])
+                if not isinstance(frozen_plan, dict):
+                    raise HarnessError("Planner must return a structured frozen plan", code="superagent/plan-invalid")
+                plan_value = frozen_plan.get("plan")
+                planned_nodes = plan_value.get("nodes") if isinstance(plan_value, dict) else None
                 acceptance = frozen_plan.get("acceptance")
+                if not isinstance(planned_nodes, list) or not planned_nodes:
+                    raise HarnessError("Planner must return a non-empty Work DAG", code="superagent/plan-invalid")
+                scope = mandate.get("scope") or {}
+                source_id = trigger.get("source_instance_id")
+                node_profiles = []
+                for node in planned_nodes:
+                    if not isinstance(node, dict) or node.get("role") != "work":
+                        raise HarnessError("Planner may propose Work nodes only", code="superagent/plan-invalid")
+                    profile_id = node.get("profile_id")
+                    if (not isinstance(profile_id, str) or not profile_id.strip()
+                            or profile_id != profile_id.strip() or len(profile_id) > 128):
+                        raise HarnessError("Planner Work node has an invalid Profile identity", code="superagent/plan-invalid")
+                    selected_profile = self._profiles.get(profile_id)
+                    if not isinstance(selected_profile, WorkerProfile):
+                        raise PermissionError("Planner selected a WorkerProfile not owned by this Host")
+                    if (selected_profile.repo != profile.repo or source_id not in selected_profile.source_instance_ids
+                            or not set(selected_profile.actions) <= set(scope.get("actions", []))
+                            or not set(selected_profile.tools) <= set(scope.get("tools", []))):
+                        raise PermissionError("Planner Work profile exceeds the frozen Mission repository or Mandate scope")
+                    node_profiles.append(selected_profile)
                 report_only = (
-                    isinstance(acceptance, dict)
-                    and acceptance.get("kind") == "single_worker_report"
-                    and len(planned_nodes) == 1
-                    and not profile.tools
-                    and set(profile.actions) <= {"read", "reply"}
+                    isinstance(acceptance, dict) and acceptance.get("kind") == "single_worker_report"
+                    and type(acceptance.get("schema_version")) is int
+                    and acceptance.get("schema_version") == 1 and len(planned_nodes) == 1
+                    and all(effect == "read" for effect in self._profile_tool_effects(node_profiles[0]).values())
                 )
+
                 system_profiles = None
                 if not report_only:
+                    if isinstance(acceptance, dict) and acceptance.get("kind") == "single_worker_report":
+                        raise HarnessError("single_worker_report requires exactly one read-only Work node",
+                                           code="superagent/acceptance-invalid")
                     if self._system_profiles is None:
-                        raise HarnessError(
-                            "Artifact-producing Mission requires host-owned Integrator and Reviewer profiles",
-                            code="superagent/quality-gate-unavailable",
-                        )
-                    scope = mandate.get("scope") or {}
+                        raise HarnessError("Artifact-producing Mission requires host-owned Integrator and Reviewer profiles",
+                                           code="superagent/quality-gate-unavailable")
+                    if (not isinstance(acceptance, dict) or acceptance.get("kind") != "artifact_review"
+                            or type(acceptance.get("schema_version", 1)) is not int
+                            or acceptance.get("schema_version", 1) != 1):
+                        raise HarnessError("Artifact-producing Mission requires versioned artifact_review acceptance",
+                                           code="superagent/acceptance-invalid")
+                    criteria = acceptance.get("criteria")
+                    if not isinstance(criteria, list) or not criteria or any(
+                        not isinstance(item, dict) or not isinstance(item.get("id"), str)
+                        or not item["id"].strip() or item["id"] != item["id"].strip() or len(item["id"]) > 128
+                        or not isinstance(item.get("kind"), str) or not item["kind"].strip()
+                        or item["kind"] != item["kind"].strip() or len(item["kind"]) > 64
+                        for item in criteria
+                    ):
+                        raise HarnessError("Artifact review acceptance requires explicit criteria",
+                                           code="superagent/acceptance-invalid")
+                    ids = [item["id"] for item in criteria]
+                    if len(ids) != len(set(ids)):
+                        raise HarnessError("Artifact review criteria ids must be unique",
+                                           code="superagent/acceptance-invalid")
+                    # 修复轮次由宿主设定上限，避免 Planner 将质量门禁扩展为无界重试。
+                    max_repair_rounds = acceptance.get("max_repair_rounds", 1)
+                    if type(max_repair_rounds) is not int or not 0 <= max_repair_rounds <= 3:
+                        raise HarnessError("Artifact review max_repair_rounds must be between 0 and 3",
+                                           code="superagent/acceptance-invalid")
+                    acceptance = {
+                        **acceptance, "schema_version": 1,
+                        "max_repair_rounds": max_repair_rounds,
+                    }
                     for role, profile_id in self._system_profiles.items():
                         system_profile = self._profiles[profile_id]
-                        if (system_profile.repo != profile.repo
-                                or trigger.get("source_instance_id") not in system_profile.source_instance_ids
+                        if (system_profile.repo != profile.repo or source_id not in system_profile.source_instance_ids
                                 or not set(system_profile.actions) <= set(scope.get("actions", []))
                                 or not set(system_profile.tools) <= set(scope.get("tools", []))):
-                            raise PermissionError(
-                                f"Host-owned {role} profile exceeds the frozen Mission repository or Mandate scope"
-                            )
-                    if isinstance(acceptance, dict) and acceptance.get("kind") == "single_worker_report":
-                        acceptance = {**acceptance, "planner_kind": "single_worker_report",
-                                      "kind": "artifact_review", "schema_version": 1}
+                            raise PermissionError(f"Host-owned {role} profile exceeds the frozen Mission repository or Mandate scope")
                     system_profiles = self._system_profiles
                 plan = uow.plans.create(
                     mission_id, expected_mission_revision=mission["aggregate_revision"],
@@ -1116,6 +1187,12 @@ class CoordinatorExecutionService:
             job = self._read_one("SELECT * FROM jobs WHERE job_id=?", (assignment["job_id"],))
             if job and job["state"] == "ready":
                 self._transition("job", job["job_id"], "running", facts={"assignment_accepted": True, "control_allows": True})
+            elif job and job["state"] == "checkpointed":
+                self._transition(
+                    "job", job["job_id"], "running",
+                    facts={"new_assignment_created": True, "checkpoint_and_capture_imported": True,
+                           "control_allows": True},
+                )
             elif job and job["state"] == "unknown":
                 self._transition(
                     "job", job["job_id"], "running",
@@ -1272,7 +1349,7 @@ class CoordinatorExecutionService:
             self._transition("job", job["job_id"], "unknown", facts={"operation_outcome_uncertain": True})
         mission_id = job.get("mission_id") if job else None
         mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,)) if mission_id else None
-        if (mission and mission["state"] == "running"
+        if (mission and mission["state"] in {"running", "integrating", "reviewing"}
                 and self._control.mode(mission_id)["mode"] != "cancelled"):
             self._transition("mission", mission_id, "unknown", facts={"operation_outcome_uncertain": True})
 

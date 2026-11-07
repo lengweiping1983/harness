@@ -20,7 +20,6 @@ class CoordinatorSchedulerTests(unittest.TestCase):
             {"node_id": "join", "depends_on_node_id": "source-a", "requires_delivery": True},
             {"node_id": "join", "depends_on_node_id": "source-b", "requires_delivery": False},
         ]
-
         self.assertEqual(
             [job["node_id"] for job in self.scheduler.select_ready_jobs(jobs, dependencies)],
             ["other"],
@@ -30,6 +29,24 @@ class CoordinatorSchedulerTests(unittest.TestCase):
             [job["node_id"] for job in self.scheduler.select_ready_jobs(jobs, dependencies)],
             ["join", "other"],
         )
+
+    def test_stage_filter_selects_only_allowed_role_and_resumes_checkpointed_jobs(self):
+        jobs = [
+            {"node_id": "work", "role": "work", "state": "done"},
+            {"node_id": "integrate", "role": "integrate", "state": "done"},
+            {"node_id": "review", "role": "review", "state": "checkpointed"},
+        ]
+        dependencies = [
+            {"node_id": "integrate", "depends_on_node_id": "work", "requires_delivery": True},
+            {"node_id": "review", "depends_on_node_id": "integrate", "requires_delivery": True},
+        ]
+        self.assertEqual(
+            [job["node_id"] for job in self.scheduler.select_ready_jobs(
+                jobs, dependencies, allowed_roles={"review"},
+            )],
+            ["review"],
+        )
+        self.assertEqual(self.scheduler.select_ready_jobs(jobs, dependencies), [])
 
     def test_dispatchable_filter_excludes_jobs_with_unsettled_assignments(self):
         jobs = [
@@ -62,19 +79,19 @@ class CoordinatorSchedulerTests(unittest.TestCase):
             0,
         )
 
-    def test_mission_order_rotates_between_ticks(self):
+    def test_mission_order_rotates_between_work_integration_and_review(self):
         missions = [
             {"mission_id": "a", "state": "running"},
-            {"mission_id": "b", "state": "running"},
+            {"mission_id": "b", "state": "reviewing"},
             {"mission_id": "c", "state": "integrating"},
         ]
         self.assertEqual(
             [item["mission_id"] for item in self.scheduler.order_missions(missions)],
-            ["a", "b"],
+            ["a", "b", "c"],
         )
         self.assertEqual(
             [item["mission_id"] for item in self.scheduler.order_missions(missions)],
-            ["b", "a"],
+            ["b", "c", "a"],
         )
 
 

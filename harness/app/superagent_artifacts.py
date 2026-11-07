@@ -14,8 +14,9 @@ from .superagent_coordinator_store import _hash, _json, _now, _time
 class CoordinatorArtifacts:
     """原生 Git 操作发生在事务外，未知操作只核对所属原工作树回执。"""
 
-    def __init__(self, store, executor, admit):
+    def __init__(self, store, executor, admit, *, admit_effect=None):
         self.store, self.executor, self.admit = store, executor, admit
+        self.admit_effect = admit_effect
         self._locks = {}
 
     def get(self, assignment_id):
@@ -95,6 +96,112 @@ class CoordinatorArtifacts:
             row = db.execute("SELECT * FROM effects WHERE kind=? AND idempotency_key=?", (kind, key)).fetchone()
             return dict(row) if row else None
 
+    def _latest_effect(self, kind, assignment_id):
+        with self.store.transaction() as db:
+            row = db.execute(
+                "SELECT * FROM effects WHERE kind=? AND aggregate_id=? ORDER BY rowid DESC LIMIT 1",
+                (kind, assignment_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def _proves_no_effect(self, effect):
+        """只有授权闸门在原生调用前写入的失败回执才允许创建新尝试。"""
+        if effect is None or effect["state"] != "failed" or not effect.get("receipt_json"):
+            return False
+        try:
+            proof = strict_loads(effect["receipt_json"])
+        except (TypeError, ValueError):
+            return False
+        if (not isinstance(proof, dict) or proof.get("outcome") != "not_started"
+                or proof.get("generation") != effect["generation"]
+                or not isinstance(proof.get("reason"), str) or not proof["reason"]):
+            return False
+        with self.store.transaction() as db:
+            row = db.execute(
+                "SELECT payload_json FROM audit_events WHERE aggregate_type='effect' AND aggregate_id=? "
+                "AND event_type='effect.failed' ORDER BY seq DESC LIMIT 1",
+                (effect["effect_id"],),
+            ).fetchone()
+        if row is None:
+            return False
+        try:
+            event = strict_loads(row["payload_json"])
+        except (TypeError, ValueError):
+            return False
+        return (
+            isinstance(event, dict) and event.get("not_started") is True
+            and event.get("generation") == effect["generation"]
+            and event.get("reason") == proof["reason"]
+        )
+
+    @staticmethod
+    def _attempt_key(root, attempt_no):
+        return root if attempt_no == 1 else f"{root}:attempt:{attempt_no}"
+
+    def _next_attempt_no(self, effect):
+        payload = strict_loads(effect["payload_json"])
+        current = payload.get("attempt_no", 1)
+        if type(current) is not int or current < 1:
+            raise HarnessError(tr("superagent.conflict"), code="superagent/effect-conflict")
+        return current + 1
+
+    def _authorize_and_mark_started(self, effect, assignment, operation):
+        """在外部写入前用同一事务复核授权，并持久标记不可重放的开始边界。"""
+        denied = None
+        with self.store.transaction(write=True) as db:
+            current = db.execute(
+                "SELECT * FROM effects WHERE effect_id=?", (effect["effect_id"],),
+            ).fetchone()
+            if (current is None or current["state"] != "leased"
+                    or current["lease_owner"] != effect["lease_owner"]
+                    or current["generation"] != effect["generation"]):
+                raise HarnessError(tr("superagent.conflict"), code="superagent/effect-fenced")
+            try:
+                if self.admit_effect is None:
+                    self.admit(assignment["mission_id"])
+                else:
+                    self.admit_effect(db, assignment, operation)
+            except BaseException as original:
+                reason = getattr(original, "code", None) or type(original).__name__
+                proof = {
+                    "outcome": "not_started", "reason": str(reason),
+                    "generation": current["generation"],
+                }
+                changed = db.execute(
+                    "UPDATE effects SET state='failed',receipt_json=?,last_error=?,"
+                    "lease_owner=NULL,lease_until=NULL "
+                    "WHERE effect_id=? AND state='leased' AND lease_owner=? AND generation=?",
+                    (_json(proof), str(reason), effect["effect_id"],
+                     current["lease_owner"], current["generation"]),
+                ).rowcount
+                if changed != 1:
+                    raise HarnessError(tr("superagent.conflict"), code="superagent/effect-fenced")
+                failed = db.execute(
+                    "SELECT * FROM effects WHERE effect_id=?", (effect["effect_id"],),
+                ).fetchone()
+                self.store._append_effect_event(
+                    db, failed, event_type="effect.failed",
+                    payload={"generation": current["generation"], "not_started": True,
+                             "reason": str(reason)},
+                    actor={"kind": "host", "component": "artifact-admission"},
+                )
+                denied = original
+            else:
+                self.store._append_effect_event(
+                    db, current, event_type="effect.started",
+                    payload={"generation": current["generation"], "operation": operation},
+                    actor={"kind": "host", "component": "artifact-admission"},
+                )
+        if denied is not None:
+            raise denied
+
+    def _has_reconcilable_capture(self, assignment_id):
+        """原操作已经持久认领时只读回查；不能因此授予新的 Git 捕获权限。"""
+        if self.get(assignment_id) is not None:
+            return True
+        effect = self._latest_effect("artifact.capture", assignment_id)
+        return effect is not None and effect["state"] in {"leased", "unknown", "completed"}
+
     async def capture(self, assignment, worker):
         async with self._locks.setdefault(assignment["assignment_id"], asyncio.Lock()):
             return await self._capture(assignment, worker)
@@ -104,17 +211,29 @@ class CoordinatorArtifacts:
         original = self.get(assignment["assignment_id"])
         if original is not None:
             return original
-        key = "superagent:capture:" + assignment["assignment_id"]
-        previous = self._existing_effect("artifact.capture", key)
-        if previous:
+        root_key = "superagent:capture:" + assignment["assignment_id"]
+        previous = self._latest_effect("artifact.capture", assignment["assignment_id"])
+        retrying_no_effect = self._proves_no_effect(previous)
+        if previous is not None and not retrying_no_effect:
+            if previous["state"] not in {"pending", "leased", "unknown", "completed"}:
+                raise HarnessError(tr("superagent.conflict"), code="superagent/effect-conflict")
+            key = previous["idempotency_key"]
             payload = strict_loads(previous["payload_json"])
         else:
+            self.admit(assignment["mission_id"])
+            attempt_no = 1 if previous is None else self._next_attempt_no(previous)
             view = self.executor.snapshot_workspace(worker)
-            payload = {"assignment_id": assignment["assignment_id"], "workspace_id": worker["workspace_id"],
-                "expected_tree": view["tree"], "previous_ref": (view["workspace"].get("delivery") or {}).get("ref")}
-        self.admit(assignment["mission_id"])
+            payload = {
+                "assignment_id": assignment["assignment_id"], "workspace_id": worker["workspace_id"],
+                "expected_tree": view["tree"],
+                "previous_ref": (view["workspace"].get("delivery") or {}).get("ref"),
+                "attempt_no": attempt_no,
+            }
+            key = self._attempt_key(root_key, attempt_no)
+        # leased / unknown / completed 只读取原工作树回执；只有新租约进入事务内授权闸门。
         effect, fresh = self._begin("artifact.capture", key, payload)
         if fresh:
+            self._authorize_and_mark_started(effect, assignment, "artifact.capture")
             try:
                 await self.executor.capture_workspace(worker)
             except BaseException as original:
@@ -161,24 +280,43 @@ class CoordinatorArtifacts:
                     raise HarnessError(tr("superagent.delivery.scope"), code="superagent/delivery-scope")
         if any(a["repo"] != worker["repo"] or a["base_commit"] != worker["base_commit"] for a in artifacts):
             raise HarnessError(tr("superagent.delivery.scope"), code="superagent/delivery-scope")
-        key = "superagent:delivery:" + assignment["assignment_id"]
-        effect = self._existing_effect("artifact.import", key)
-        if effect:
-            payload = strict_loads(effect["payload_json"])
-            plan = payload["plan"]
-            if effect["state"] == "completed":
-                if payload["artifact_ids"] != [a["artifact_id"] for a in artifacts]:
-                    raise HarnessError(tr("superagent.delivery.conflict"), code="superagent/delivery-conflict")
-                receipt = strict_loads(effect["receipt_json"])
-                self._record_applied(assignment, artifacts, plan, receipt)
+        root_key = "superagent:delivery:" + assignment["assignment_id"]
+        previous = self._latest_effect("artifact.import", assignment["assignment_id"])
+        artifact_ids = [a["artifact_id"] for a in artifacts]
+        retrying_no_effect = self._proves_no_effect(previous)
+        if previous is not None:
+            old_payload = strict_loads(previous["payload_json"])
+            if old_payload.get("artifact_ids") != artifact_ids:
+                raise HarnessError(tr("superagent.delivery.conflict"), code="superagent/delivery-conflict")
+            if previous["state"] == "completed":
+                receipt = strict_loads(previous["receipt_json"])
+                self._record_applied(assignment, artifacts, old_payload["plan"], receipt)
                 return True
+            if retrying_no_effect:
+                self.admit(assignment["mission_id"])
+                self._verify_assignment(assignment, worker, capture=False)
+                plan = await self.executor.plan_artifact_delivery(worker, artifacts)
+                if plan != old_payload.get("plan"):
+                    raise HarnessError(tr("superagent.delivery.conflict"), code="superagent/delivery-conflict")
+                attempt_no = self._next_attempt_no(previous)
+                key = self._attempt_key(root_key, attempt_no)
+                payload = {**old_payload, "attempt_no": attempt_no}
+            else:
+                if previous["state"] not in {"pending", "leased", "unknown"}:
+                    raise HarnessError(tr("superagent.conflict"), code="superagent/effect-conflict")
+                key = previous["idempotency_key"]
+                payload = old_payload
+                plan = payload["plan"]
         else:
             plan = await self.executor.plan_artifact_delivery(worker, artifacts)
             self.admit(assignment["mission_id"])
             self._verify_assignment(assignment, worker, capture=False)
-            payload = {"assignment_id": assignment["assignment_id"], "workspace_id": worker["workspace_id"],
-                       "artifact_ids": [a["artifact_id"] for a in artifacts], "plan": plan}
-        if payload["artifact_ids"] != [a["artifact_id"] for a in artifacts]:
+            key = root_key
+            payload = {
+                "assignment_id": assignment["assignment_id"], "workspace_id": worker["workspace_id"],
+                "artifact_ids": artifact_ids, "plan": plan, "attempt_no": 1,
+            }
+        if payload["artifact_ids"] != artifact_ids:
             raise HarnessError(tr("superagent.delivery.conflict"), code="superagent/delivery-conflict")
         now = _now()
         with self.store.transaction(write=True) as db:
@@ -190,16 +328,22 @@ class CoordinatorArtifacts:
                         "state,import_plan_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
                         (identity, artifact["artifact_id"], assignment["assignment_id"], worker["workspace_id"], identity,
                          "pending" if plan["clean"] else "conflict", _json(plan), now, now))
+                elif existing["import_plan_json"] != _json(plan):
+                    raise HarnessError(tr("superagent.delivery.conflict"), code="superagent/delivery-conflict")
         if not plan["clean"]:
             return False
         effect, fresh = self._begin("artifact.import", key, payload)
         if fresh:
-            # 只有新的外部导入需要准入；leased/unknown 仅核对原工作树回执，
-            # 不能因为 Mission 已进入 unknown 而阻断只读恢复，也绝不重新写入。
-            self.admit(assignment["mission_id"])
+            # 授权、控制代次与 PlanRevision 在同一事务复核后，才允许开始原生导入。
+            self._authorize_and_mark_started(effect, assignment, "artifact.import")
             with self.store.transaction(write=True) as db:
-                db.execute("UPDATE deliveries SET state='applying',aggregate_revision=aggregate_revision+1,updated_at=? "
-                    "WHERE target_assignment_id=? AND state='pending'", (_now(), assignment["assignment_id"]))
+                changed = db.execute(
+                    "UPDATE deliveries SET state='applying',aggregate_revision=aggregate_revision+1,updated_at=? "
+                    "WHERE target_assignment_id=? AND state='pending'",
+                    (_now(), assignment["assignment_id"]),
+                ).rowcount
+                if changed != len(artifacts):
+                    raise HarnessError(tr("superagent.delivery.conflict"), code="superagent/delivery-conflict")
             try:
                 await self.executor.apply_artifact_delivery(worker, artifacts, plan)
             except BaseException as original:

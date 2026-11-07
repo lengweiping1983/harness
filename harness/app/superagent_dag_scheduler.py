@@ -46,9 +46,10 @@ def _run_started_at(snapshot):
 class CoordinatorDagScheduler:
     """Execute immutable Work DAGs through one bounded Scheduler policy."""
 
-    def __init__(self, execution, policy):
+    def __init__(self, execution, policy, *, watchdog=None):
         self._execution = execution
         self._policy = policy
+        self._watchdog = watchdog
         self._artifacts = None
         self._capacity_lock = asyncio.Lock()
         self._reserved_global = 0
@@ -143,7 +144,7 @@ class CoordinatorDagScheduler:
         mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
         if mission is None:
             raise LookupError("Mission not found")
-        if mission["state"] not in {"planning", "running", "unknown"}:
+        if mission["state"] not in {"planning", "running", "integrating", "reviewing", "unknown"}:
             return []
 
         self._finalize_terminal_assignments(mission_id)
@@ -154,11 +155,10 @@ class CoordinatorDagScheduler:
                 return [{"state": "unknown", "mission_id": mission_id}]
             self._advance_mission_state(mission_id)
             mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
-            if mission["state"] == "integrating" or mission["state"] in {"blocked", "cancelled", "suppressed"}:
-                return []
-            if not self._resume_unknown_mission(mission_id):
-                return [{"state": "unknown", "mission_id": mission_id}]
-            mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
+            if mission["state"] == "unknown":
+                if not self._resume_unknown_mission(mission_id):
+                    return [{"state": "unknown", "mission_id": mission_id}]
+                mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
         elif mission["state"] == "planning":
             e._admit_mission(mission_id)
             e._transition(
@@ -170,13 +170,15 @@ class CoordinatorDagScheduler:
             )
             mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
 
-        if mission["state"] != "running":
+        if mission["state"] not in {"running", "integrating", "reviewing"}:
             return []
         ticket, trigger, mandate, default_profile, budget = self._mission_context(mission)
         self._advance_mission_state(mission_id)
         mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
-        if mission["state"] != "running":
+        if mission["state"] not in {"running", "integrating", "reviewing"}:
             return []
+        stage_state = mission["state"]
+        allowed_roles = {"running": {"work"}, "integrating": {"integrate"}, "reviewing": {"review"}}[stage_state]
 
         jobs = self._load_jobs(mission_id, mission["plan_revision"])
         dependencies = self._load_dependencies(mission_id, mission["plan_revision"])
@@ -189,7 +191,9 @@ class CoordinatorDagScheduler:
             if not active_by_job.get(job["job_id"])
             or all(item["state"] == "pending" for item in active_by_job[job["job_id"]])
         }
-        ready = self._policy.select_ready_jobs(jobs, dependencies, dispatchable_node_ids=dispatchable)
+        ready = self._policy.select_ready_jobs(
+            jobs, dependencies, dispatchable_node_ids=dispatchable, allowed_roles=allowed_roles,
+        )
         reserved = [
             job for job in ready
             if any(item["state"] == "pending" for item in active_by_job.get(job["job_id"], []))
@@ -206,10 +210,11 @@ class CoordinatorDagScheduler:
         try:
             for candidate in candidates:
                 mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
-                if mission is None or mission["state"] != "running":
+                if mission is None or mission["state"] != stage_state:
                     break
                 assignment = self._assignment_for_job(candidate["job_id"])
-                if assignment is None:
+                retrying_checkpoint = candidate["state"] == "checkpointed" and assignment is not None and assignment["state"] == "succeeded"
+                if assignment is None or retrying_checkpoint:
                     used = self._count_mission_assignments(mission_id)
                     if used >= budget["max_turns"]:
                         self._block_job(candidate, "mission-turn-budget-exhausted")
@@ -250,16 +255,20 @@ class CoordinatorDagScheduler:
     def _load_plan(self, mission):
         e = self._execution
         row = e._read_one(
-            "SELECT plan_json,acceptance_json FROM mission_plans WHERE mission_id=? AND plan_revision=?",
+            "SELECT plan_json,acceptance_json,acceptance_hash FROM mission_plans WHERE mission_id=? AND plan_revision=?",
             (mission["mission_id"], mission["plan_revision"]),
         )
         if row is None:
             raise HarnessError("Mission PlanRevision is missing", code="superagent/mission-corrupt")
         plan = _object(row.get("plan_json"))
-        acceptance = _object(row.get("acceptance_json"))
+        acceptance_json = row.get("acceptance_json")
+        acceptance = _object(acceptance_json)
+        acceptance_hash = row.get("acceptance_hash")
+        if not isinstance(acceptance_hash, str) or _hash(acceptance_json or "") != acceptance_hash:
+            raise HarnessError("Mission PlanRevision Acceptance hash is missing or invalid", code="superagent/mission-corrupt")
         if not isinstance(plan.get("nodes"), list) or not plan["nodes"]:
             raise HarnessError("Mission PlanRevision has no nodes", code="superagent/mission-corrupt")
-        return {**plan, "acceptance": acceptance}, {
+        return {**plan, "acceptance": acceptance, "acceptance_hash": acceptance_hash}, {
             node["node_id"]: node for node in plan["nodes"] if isinstance(node, dict)
         }, self._load_jobs(mission["mission_id"], mission["plan_revision"]), self._load_dependencies(
             mission["mission_id"], mission["plan_revision"],
@@ -336,6 +345,74 @@ class CoordinatorDagScheduler:
             raise HarnessError("Plan node instruction is invalid or does not match its hash", code="superagent/plan-invalid")
         return base_prompt + "\n\nWork unit instruction:\n" + instruction
 
+    def _role_prompt(self, base_prompt, mission, job, attempt_no):
+        if job["role"] == "work":
+            return base_prompt
+        plan, _, _, _ = self._load_plan(mission)
+        acceptance = plan["acceptance"]
+        if job["role"] == "integrate":
+            prompt = base_prompt + (
+                "\n\nHost-owned Integrator contract: integrate the delivered Work artifacts "
+                "inside this repository workspace, preserve the frozen base, resolve conflicts, "
+                "and run relevant bounded tests. Do not deploy, publish, push, or perform external writes. "
+                "The host will freeze this workspace as the candidate; do not claim that it passed review."
+            )
+            prompt += "\nAcceptance criteria: " + _json(acceptance["criteria"])
+            if attempt_no > 1:
+                prior = self._execution._read_one(
+                    "SELECT review.verdict_json FROM reviews AS review "
+                    "JOIN assignments AS assignment ON assignment.assignment_id=review.reviewer_assignment_id "
+                    "JOIN jobs AS reviewer ON reviewer.job_id=assignment.job_id "
+                    "WHERE review.mission_id=? AND review.plan_revision=? AND reviewer.role='review' "
+                    "ORDER BY assignment.attempt_no DESC LIMIT 1",
+                    (mission["mission_id"], mission["plan_revision"]),
+                )
+                if prior is None:
+                    raise HarnessError("Repair Integrator has no frozen failed Review", code="superagent/review-missing")
+                prompt += "\n\nRepair only the failed acceptance criteria using the imported prior candidate. "
+                prompt += "Preserve unrelated Work changes. Prior Review feedback: " + prior["verdict_json"]
+            return prompt
+
+        if job["role"] != "review":
+            raise HarnessError("Plan contains an unsupported system role", code="superagent/plan-invalid")
+        candidate = self._execution._read_one(
+            "SELECT artifact.artifact_id,artifact.manifest_hash,assignment.assignment_id "
+            "FROM jobs AS integrator "
+            "JOIN assignments AS assignment ON assignment.job_id=integrator.job_id "
+            "JOIN artifacts AS artifact ON artifact.assignment_id=assignment.assignment_id "
+            "WHERE integrator.mission_id=? AND integrator.plan_revision=? AND integrator.role='integrate' "
+            "AND assignment.state='succeeded' ORDER BY assignment.attempt_no DESC LIMIT 1",
+            (mission["mission_id"], mission["plan_revision"]),
+        )
+        if candidate is None:
+            raise HarnessError("Reviewer has no frozen Integrator candidate", code="superagent/artifact-missing")
+        evidence = self._execution._read_all(
+            "SELECT evidence.evidence_id,evidence.evidence_type,job.role,job.node_id "
+            "FROM evidence JOIN assignments ON assignments.assignment_id=evidence.assignment_id "
+            "JOIN jobs AS job ON job.job_id=assignments.job_id "
+            "WHERE job.mission_id=? AND job.plan_revision=? AND job.role IN ('work','integrate') "
+            "AND (job.role='work' OR assignments.assignment_id=?) "
+            "ORDER BY evidence.evidence_id LIMIT 500",
+            (mission["mission_id"], mission["plan_revision"], candidate["assignment_id"]),
+        )
+        contract = {
+            "schema_version": 1, "candidate_artifact_id": candidate["artifact_id"],
+            "acceptance_hash": plan["acceptance_hash"], "criteria": acceptance["criteria"],
+            "available_evidence": evidence,
+            "output_shape": {
+                "schema_version": 1, "candidate_artifact_id": candidate["artifact_id"],
+                "acceptance_hash": plan["acceptance_hash"], "verdict": "passed|failed",
+                "criteria": [{"id": "criterion-id", "status": "passed|failed",
+                              "reason": "specific finding", "evidence_ids": ["persisted-evidence-id"]}],
+            },
+        }
+        return base_prompt + (
+            "\n\nHost-owned independent Reviewer: inspect the delivered candidate read-only; "
+            "never edit files. Evaluate every Acceptance criterion exactly once. Cite only IDs from "
+            "available_evidence, at least one per criterion. Return only JSON matching output_shape; "
+            "verdict is passed only when every criterion passes.\n" + _json(contract)
+        )
+
     def _assignment_for_job(self, job_id):
         row = self._execution._read_one(
             "SELECT assignment_id FROM assignments WHERE job_id=? ORDER BY attempt_no DESC LIMIT 1",
@@ -403,13 +480,18 @@ class CoordinatorDagScheduler:
         profile, job_budget = self._profile_for_job(
             mission, job, trigger, mandate, default_profile, budget,
         )
+        assignment = self._assignment_for_job(job["job_id"])
+        attempt_no = 1 if assignment is None else assignment["attempt_no"]
+        if assignment is not None and assignment["state"] != "pending":
+            if job["state"] == "checkpointed" and assignment["state"] == "succeeded":
+                attempt_no = assignment["attempt_no"] + 1
+                assignment = None
+            else:
+                return None
         e._admit_mission(mission["mission_id"])
         worker = await e._ensure_worker(
-            ticket["ticket_id"], profile, True, mission=mission, job=job, stage=1,
+            ticket["ticket_id"], profile, True, mission=mission, job=job, stage=attempt_no,
         )
-        assignment = self._assignment_for_job(job["job_id"])
-        if assignment is not None and assignment["state"] != "pending":
-            return None
         if assignment is None:
             base_prompt, input_ids = e._build_prompt(ticket, trigger, mandate)
             # DAG 的每个 Assignment 都要保留独立输入身份，不能依赖首次消费的全局状态。
@@ -422,8 +504,12 @@ class CoordinatorDagScheduler:
             input_ids = list(dict.fromkeys([
                 *input_ids, *(item["input_id"] for item in selected_inputs),
             ]))
-            prompt = self._node_prompt(base_prompt, node)
-            assignment = self._create_pending_assignment(mission, job, worker, prompt, input_ids)
+            prompt = self._role_prompt(
+                self._node_prompt(base_prompt, node), mission, job, attempt_no,
+            )
+            assignment = self._create_pending_assignment(
+                mission, job, worker, prompt, input_ids, attempt_no=attempt_no,
+            )
             assignment = e._assignment(assignment["assignment_id"])
             if on_assignment_persisted is not None:
                 await on_assignment_persisted()
@@ -443,11 +529,23 @@ class CoordinatorDagScheduler:
         if required_artifacts:
             try:
                 applied = await self._artifacts.deliver(assignment, worker, required_artifacts)
+            except HarnessError as exc:
+                if exc.code == "superagent/mission-paused":
+                    raise
+                if exc.code == "superagent/mandate-unavailable":
+                    self._block_job(job, "mandate-unavailable", assignment=assignment)
+                    self._advance_mission_state(mission["mission_id"])
+                    return {
+                        "state": "blocked", "mission_id": mission["mission_id"],
+                        "job_id": job["job_id"], "assignment_id": assignment["assignment_id"],
+                    }
+                self._mark_mission_unknown(
+                    mission["mission_id"], assignment["assignment_id"], exc.code,
+                )
+                return {"state": "unknown", "mission_id": mission["mission_id"], "assignment_id": assignment["assignment_id"]}
             except Exception as exc:
                 self._mark_mission_unknown(
-                    mission["mission_id"], assignment["assignment_id"],
-                    getattr(exc, "code", type(exc).__name__),
-
+                    mission["mission_id"], assignment["assignment_id"], type(exc).__name__,
                 )
                 return {"state": "unknown", "mission_id": mission["mission_id"], "assignment_id": assignment["assignment_id"]}
             if not applied:
@@ -463,8 +561,9 @@ class CoordinatorDagScheduler:
             current_mission = uow.missions.get(mission["mission_id"])
             current_job = uow.jobs.get(job["job_id"])
             current_assignment = uow.assignments.get(assignment["assignment_id"])
-            if current_mission is None or current_mission["state"] != "running":
-                raise HarnessError("Mission is not admitted for dispatch", code="superagent/mission-paused")
+            expected_stage = {"work": "running", "integrate": "integrating", "review": "reviewing"}.get(current_job["role"])
+            if current_mission is None or expected_stage is None or current_mission["state"] != expected_stage:
+                raise HarnessError("Mission is not admitted for this Job role", code="superagent/mission-paused")
             if current_job["state"] == "pending":
                 facts = {
                     "authorized": True, "dependencies_satisfied": True,
@@ -495,9 +594,9 @@ class CoordinatorDagScheduler:
             pass
         return await e.reconcile(assignment["assignment_id"])
 
-    def _create_pending_assignment(self, mission, job, worker, prompt, input_ids):
+    def _create_pending_assignment(self, mission, job, worker, prompt, input_ids, *, attempt_no=1):
         e = self._execution
-        assignment_id = "assignment_" + _hash(f"{mission['mission_id']}\0{job['node_id']}\0{1}")[:32]
+        assignment_id = "assignment_" + _hash(f"{mission['mission_id']}\0{job['node_id']}\0{attempt_no}")[:32]
         with e._store.unit_of_work(
             actor=_ACTOR, correlation_id=f"mission:{mission['mission_id']}:job:{job['job_id']}",
         ) as uow:
@@ -506,10 +605,11 @@ class CoordinatorDagScheduler:
                 return old
             current_mission = uow.missions.get(mission["mission_id"])
             current_job = uow.jobs.get(job["job_id"])
-            if current_mission is None or current_mission["state"] != "running":
+            expected_stage = {"work": "running", "integrate": "integrating", "review": "reviewing"}.get(current_job["role"])
+            if current_mission is None or expected_stage is None or current_mission["state"] != expected_stage:
                 raise HarnessError("Mission is not admitted for Assignment creation", code="superagent/mission-paused")
             assignment = uow.assignments.create({
-                "assignment_id": assignment_id, "job_id": job["job_id"], "attempt_no": 1,
+                "assignment_id": assignment_id, "job_id": job["job_id"], "attempt_no": attempt_no,
                 "worker_id": worker["worker_id"], "session_id": worker["session_id"],
                 "workspace_id": worker["workspace_id"], "submission_key": f"superagent-v2:{assignment_id}",
                 "report_json": {"pending_prompt": prompt, "pending_input_ids": input_ids},
@@ -560,11 +660,23 @@ class CoordinatorDagScheduler:
             if artifact is None:
                 raise HarnessError("Completed dependency has no frozen Artifact", code="superagent/artifact-missing")
             artifacts.append(artifact)
+        if job["role"] == "integrate" and job["state"] == "checkpointed":
+            # 新轮次 pending Assignment 已可能落库，必须按成功状态查找冻结的旧候选。
+            previous = self._execution._read_one(
+                "SELECT assignment_id FROM assignments WHERE job_id=? AND state='succeeded' "
+                "ORDER BY attempt_no DESC LIMIT 1",
+                (job["job_id"],),
+            )
+            artifact = self._artifacts.get(previous["assignment_id"]) if previous else None
+            if artifact is None:
+                raise HarnessError("Checkpointed Integrator has no frozen prior candidate", code="superagent/artifact-missing")
+            if all(item["artifact_id"] != artifact["artifact_id"] for item in artifacts):
+                artifacts.append(artifact)
         return artifacts
 
     async def _reconcile_pending_deliveries(self, mission, jobs, dependencies):
         for job in jobs:
-            if job["state"] not in {"pending", "ready"}:
+            if job["state"] not in {"pending", "ready", "checkpointed"}:
                 continue
             assignment = self._assignment_for_job(job["job_id"])
             if assignment is None or assignment["state"] != "pending":
@@ -592,7 +704,7 @@ class CoordinatorDagScheduler:
     def _mark_mission_unknown(self, mission_id, assignment_id, reason):
         e = self._execution
         mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
-        if mission is not None and mission["state"] == "running":
+        if mission is not None and mission["state"] in {"running", "integrating", "reviewing"}:
             e._transition(
                 "mission", mission_id, "unknown",
                 facts={"operation_outcome_uncertain": True},
@@ -630,35 +742,467 @@ class CoordinatorDagScheduler:
             return True
         return False
 
+    def _has_inflight_assignments(self, mission_id, *, exclude_assignment_id=None):
+        e = self._execution
+        rows = e._read_all(
+            "SELECT assignment.assignment_id FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? AND assignment.state IN "
+            "('submitting','accepted','running','capturing','stopping','unknown')",
+            (mission_id,),
+        )
+        return any(row["assignment_id"] != exclude_assignment_id for row in rows)
+
+    def _mission_authorization(self, mission):
+        e = self._execution
+        ticket = e._authorization.ticket(mission["ticket_id"])
+        mandate = (ticket or {}).get("mandate") or {}
+        mandate_id = mandate.get("mandate_id")
+        status = (
+            e._authorization.revalidate_mandate(mandate_id, actor=_ACTOR)
+            if mandate_id else {}
+        )
+        control_allows = e._control.allows(mission["mission_id"])
+        if control_allows and self._watchdog is not None:
+            observed = self._watchdog.get(mission["mission_id"])
+            # 仅显式达到 Watchdog blocked 的安全升级阻止继续；stalled 只是关注。
+            if observed is not None and observed["state"] == "blocked":
+                control_allows = False
+        return status.get("status") in {"valid", "affected"}, control_allows
+
+    def _mission_authorization_in_transaction(self, mission, db):
+        """在同一协调写事务中复核来源授权、持久控制及安全 Watchdog 状态。"""
+        e = self._execution
+        ticket = db.execute(
+            "SELECT mandate_id FROM tickets WHERE ticket_id=?", (mission["ticket_id"],),
+        ).fetchone()
+        mandate = (
+            db.execute("SELECT * FROM mandates WHERE mandate_id=?", (ticket["mandate_id"],)).fetchone()
+            if ticket is not None else None
+        )
+        if mandate is None:
+            return False, False
+        # 在当前事务的 db 上复用授权引擎的原判定，不能嵌套发起写事务。
+        status = e._authorization._mandate_status(db, mandate, actor=_ACTOR, now=_now())
+        control_allows = e._control._mode(db, mission["mission_id"])["mode"] == "running"
+        if control_allows and self._watchdog is not None:
+            snapshot = db.execute(
+                "SELECT * FROM watchdog_snapshots WHERE mission_id=?", (mission["mission_id"],),
+            ).fetchone()
+            if (snapshot is not None
+                    and self._watchdog._decode(snapshot, self._watchdog.limits)["state"] == "blocked"):
+                control_allows = False
+        return status in {"valid", "affected"}, control_allows
+
+    def admit_artifact_effect(self, mission_id):
+        """新 Artifact Effect 前先核对持久 Watchdog，避免 blocked 期间反复认领无效租约。"""
+        mission = self._execution._admit_mission(mission_id)
+        if self._watchdog is not None:
+            observed = self._watchdog.get(mission_id)
+            if observed is not None and observed["state"] == "blocked":
+                raise HarnessError(
+                    "Watchdog blocks a new Artifact Effect",
+                    code="superagent/mission-paused",
+                )
+        return mission
+
+    def admit_artifact_effect_in_transaction(self, db, assignment, operation):
+        """在 Effect 租约后、原生 Git 调用前原子复核 Mission、Plan 与授权。"""
+        row = db.execute(
+            "SELECT assignment.*,job.mission_id AS mission_id,job.role AS job_role,job.plan_revision AS job_plan_revision,"
+            "mission.state AS mission_state,mission.plan_revision AS mission_plan_revision,"
+            "mission.ticket_id FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "JOIN missions AS mission ON mission.mission_id=job.mission_id "
+            "WHERE assignment.assignment_id=?",
+            (assignment["assignment_id"],),
+        ).fetchone()
+        if row is None or any(
+            row[field] != assignment.get(field)
+            for field in ("assignment_id", "job_id", "worker_id", "workspace_id", "session_id", "run_id")
+        ):
+            raise HarnessError("Artifact Effect no longer matches its Assignment", code="superagent/assignment-conflict")
+        if (row["mission_plan_revision"] != row["job_plan_revision"]
+                or assignment.get("plan_revision") != row["mission_plan_revision"]):
+            raise HarnessError("Artifact Effect PlanRevision is no longer current", code="superagent/mission-corrupt")
+        expected_stage = {"work": "running", "integrate": "integrating", "review": "reviewing"}.get(row["job_role"])
+        if expected_stage is None or row["mission_state"] != expected_stage:
+            raise HarnessError("Mission stage no longer admits this Artifact Effect", code="superagent/mission-paused")
+        if operation == "artifact.capture":
+            if row["job_role"] not in {"work", "integrate"} or row["state"] not in {"capturing", "unknown"} or not row["run_id"]:
+                raise HarnessError("Artifact capture requires the settled original Run", code="superagent/artifact-run-unsettled")
+        elif operation == "artifact.import":
+            if row["state"] != "pending" or row["run_id"] is not None:
+                raise HarnessError("Artifact import requires an unstarted Assignment", code="superagent/delivery-already-started")
+        else:
+            raise ValueError("unsupported Artifact Effect operation")
+        mandate_valid, control_allows = self._mission_authorization_in_transaction(row, db)
+        if not control_allows:
+            raise HarnessError("Mission control or Watchdog blocks this Artifact Effect", code="superagent/mission-paused")
+        if not mandate_valid:
+            raise HarnessError("Mission Mandate no longer authorizes this Artifact Effect", code="superagent/mandate-unavailable")
+
+    @staticmethod
+    def _frozen_integration_resume_evidence(db, mission, candidate):
+        """从当前 Mission 的真实 Run、Artifact 与 applied Delivery 构造只读恢复证据。"""
+        original_run = db.execute(
+            "SELECT evidence_id FROM evidence WHERE assignment_id=? AND evidence_type='run' "
+            "ORDER BY evidence_id LIMIT 1",
+            (candidate["assignment_id"],),
+        ).fetchone()
+        if original_run is None or not candidate.get("run_id"):
+            return None
+        dependencies = db.execute(
+            "SELECT job_id,depends_on_job_id FROM job_dependencies "
+            "WHERE mission_id=? AND plan_revision=? AND requires_delivery=1 "
+            "ORDER BY job_id,depends_on_job_id",
+            (mission["mission_id"], mission["plan_revision"]),
+        ).fetchall()
+        deliveries = []
+        for dep in dependencies:
+            source = db.execute(
+                "SELECT artifact.artifact_id FROM assignments AS assignment "
+                "JOIN artifacts AS artifact ON artifact.assignment_id=assignment.assignment_id "
+                "WHERE assignment.job_id=? AND assignment.state='succeeded' "
+                "ORDER BY assignment.attempt_no DESC LIMIT 1",
+                (dep["depends_on_job_id"],),
+            ).fetchone()
+            target = db.execute(
+                "SELECT assignment_id FROM assignments WHERE job_id=? "
+                "ORDER BY attempt_no DESC LIMIT 1",
+                (dep["job_id"],),
+            ).fetchone()
+            if source is None or target is None:
+                return None
+            delivery = db.execute(
+                "SELECT delivery_id,receipt_json FROM deliveries "
+                "WHERE artifact_id=? AND target_assignment_id=? AND state='applied'",
+                (source["artifact_id"], target["assignment_id"]),
+            ).fetchone()
+            if delivery is None:
+                return None
+            try:
+                receipt = json.loads(delivery["receipt_json"])
+            except (TypeError, ValueError):
+                return None
+            tree = receipt.get("tree") if isinstance(receipt, dict) else None
+            if (not isinstance(tree, str) or len(tree) not in {40, 64}
+                    or any(char not in "0123456789abcdef" for char in tree)):
+                return None
+            deliveries.append({
+                "job_id": dep["job_id"], "depends_on_job_id": dep["depends_on_job_id"],
+                "delivery_id": delivery["delivery_id"],
+                "evidence_ref": f"delivery:{delivery['delivery_id']}:applied",
+                "applied_tree_hash": tree,
+            })
+        return {
+            "mission_id": mission["mission_id"], "plan_revision": mission["plan_revision"],
+            "original_integration": {
+                "assignment_id": candidate["assignment_id"], "run_id": candidate["run_id"],
+                "outcome": "succeeded", "evidence_ref": original_run["evidence_id"],
+            },
+            "integration_artifact": {
+                "assignment_id": candidate["assignment_id"], "run_id": candidate["run_id"],
+                "artifact_ref": f"artifact:{candidate['artifact_id']}",
+                "tree_hash": candidate["tree_hash"],
+                "manifest_hash": candidate["manifest_hash"],
+                "evidence_ref": f"artifact:{candidate['artifact_id']}:{candidate['manifest_hash']}",
+            },
+            "deliveries": deliveries,
+        }
+
     def _resume_unknown_mission(self, mission_id, *, allow_capture_assignment_id=None):
         e = self._execution
         mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
         if mission is None or mission["state"] != "unknown":
-            return mission is not None and mission["state"] == "running"
-        if self._has_uncertain_assignments(mission_id, exclude_assignment_id=allow_capture_assignment_id):
+            return mission is not None and mission["state"] in {"running", "integrating", "reviewing"}
+        if self._has_inflight_assignments(
+            mission_id, exclude_assignment_id=allow_capture_assignment_id,
+        ):
             return False
-        if self._has_uncertain_effects(mission_id, allow_capture_assignment_id=allow_capture_assignment_id):
+        if self._has_uncertain_effects(
+            mission_id, allow_capture_assignment_id=allow_capture_assignment_id,
+        ):
             return False
-        ticket = e._authorization.ticket(mission["ticket_id"])
-        mandate = (ticket or {}).get("mandate") or {}
-        mandate_id = mandate.get("mandate_id")
 
-        if not mandate_id or e._authorization.revalidate_mandate(mandate_id, actor=_ACTOR).get("status") not in {"valid", "affected"}:
+        mandate_valid, control_allows = self._mission_authorization(mission)
+        if not mandate_valid or not control_allows:
             return False
-        if not e._control.allows(mission_id):
+
+        jobs = self._load_jobs(mission_id, mission["plan_revision"])
+        # Job 的原始结果尚未知时，只能回查原操作，不能提前恢复 Mission 阶段。
+        if any(job["state"] == "unknown" for job in jobs):
             return False
-        e._transition(
-            "mission", mission_id, "running",
-            facts={
+        work_jobs = [job for job in jobs if job["role"] == "work"]
+        integrators = [job for job in jobs if job["role"] == "integrate"]
+        reviewers = [job for job in jobs if job["role"] == "review"]
+        if not work_jobs:
+            return False
+
+        all_work_done = all(job["state"] == "done" for job in work_jobs)
+        integration_evidence = None
+        if not integrators and not reviewers:
+            if all_work_done:
+                return False
+            target = "running"
+            facts = {
                 "reconciliation_verified": True, "original_run_settled": True,
                 "mandate_valid": True, "control_allows": True, "next_step_safe": True,
-            },
-            audit_payload={
-                "reconciliation_ref": f"mission:{mission_id}:dag-next-step",
-                "plan_revision": mission["plan_revision"],
-            },
+            }
+        else:
+            if len(integrators) != 1 or len(reviewers) != 1:
+                return False
+            work_deliveries_applied = self._required_deliveries_applied(
+                mission_id, child_roles={"work"},
+            )
+            if not all_work_done:
+                target = "running"
+                facts = {
+                    "reconciliation_verified": True, "original_run_settled": True,
+                    "mandate_valid": True, "control_allows": True, "next_step_safe": True,
+                }
+            else:
+                if not work_deliveries_applied:
+                    return False
+                integrator = integrators[0]
+                if integrator["state"] == "done":
+                    with e._store.unit_of_work(
+                        actor=_ACTOR, correlation_id=f"mission:{mission_id}:unknown-resume-check",
+                    ) as uow:
+                        app = CoordinatorApplicationService(uow)
+                        candidate = app._latest_integration_candidate(
+                            mission_id, mission["plan_revision"],
+                        )
+                        if (candidate is None or not app._job_deliveries_applied(
+                            integrator["job_id"], candidate["assignment_id"],
+                        )):
+                            return False
+                        integration_evidence = self._frozen_integration_resume_evidence(
+                            uow.db, mission, candidate,
+                        )
+                        if integration_evidence is None:
+                            return False
+                    target = "reviewing"
+                    facts = {
+                        "reconciliation_verified": True, "original_integration_settled": True,
+                        "integration_artifact_frozen": True, "all_work_jobs_done": True,
+                        "required_deliveries_applied": True,
+                        "mandate_valid": True, "control_allows": True,
+                    }
+                else:
+                    target = "integrating"
+                    facts = {
+                        "reconciliation_verified": True, "all_work_jobs_done": True,
+                        "required_deliveries_applied": True, "original_delivery_applied": True,
+                        "mandate_valid": True, "control_allows": True,
+                    }
+
+        audit_payload = {
+            "reconciliation_ref": f"mission:{mission_id}:dag-resume-{target}",
+            "plan_revision": mission["plan_revision"],
+        }
+        if integration_evidence is not None:
+            audit_payload.update(integration_evidence)
+        e._transition(
+            "mission", mission_id, target, facts=facts,
+            audit_payload=audit_payload,
         )
         return True
+
+    def _prepare_review(self, mission, job, assignment, snapshot, evidence_ids):
+        e = self._execution
+        plan, _, _, _ = self._load_plan(mission)
+        acceptance = plan["acceptance"]
+        candidate = e._read_one(
+            "SELECT artifact.artifact_id,source.assignment_id FROM jobs AS integrator "
+            "JOIN assignments AS source ON source.job_id=integrator.job_id "
+            "JOIN artifacts AS artifact ON artifact.assignment_id=source.assignment_id "
+            "WHERE integrator.mission_id=? AND integrator.plan_revision=? AND integrator.role='integrate' "
+            "AND source.state='succeeded' ORDER BY source.attempt_no DESC LIMIT 1",
+            (mission["mission_id"], mission["plan_revision"]),
+        )
+        if candidate is None:
+            raise HarnessError("Review has no frozen Integrator candidate", code="superagent/artifact-missing")
+        reviewer_ids = sorted(set(evidence_ids))
+        reviewer_rows = e._read_all(
+            "SELECT evidence_id,assignment_id,evidence_type,reference_hash,payload_hash FROM evidence "
+            "WHERE assignment_id=? ORDER BY evidence_id", (assignment["assignment_id"],),
+        )
+        reviewer_rows = [row for row in reviewer_rows if row["evidence_id"] in reviewer_ids]
+        invalid_reason = None
+        if ({row["evidence_id"] for row in reviewer_rows} != set(reviewer_ids)
+                or not any(row["evidence_type"] == "run" for row in reviewer_rows)):
+            invalid_reason = "reviewer-run-evidence-missing"
+        source_rows, normalized = [], []
+        try:
+            if invalid_reason:
+                raise ValueError(invalid_reason)
+            output_text = snapshot.get("output_text")
+            if not isinstance(output_text, str) or len(output_text.encode("utf-8")) > 131072:
+                raise ValueError("review-output-missing-or-too-large")
+
+            output = json.loads(output_text)
+            if (not isinstance(output, dict) or type(output.get("schema_version")) is not int
+                    or output.get("schema_version") != 1
+                    or output.get("candidate_artifact_id") != candidate["artifact_id"]
+                    or output.get("acceptance_hash") != plan["acceptance_hash"]):
+                raise ValueError("review-output-contract-mismatch")
+            criteria = output.get("criteria")
+            expected = {item["id"] for item in acceptance["criteria"]}
+            if not isinstance(criteria, list) or len(criteria) != len(expected):
+                raise ValueError("review-criteria-set-mismatch")
+            seen, cited = set(), set()
+            for item in criteria:
+                if (not isinstance(item, dict) or not isinstance(item.get("id"), str)
+                        or item["id"] not in expected or item["id"] in seen
+                        or item.get("status") not in {"passed", "failed"}
+                        or not isinstance(item.get("reason"), str) or not item["reason"].strip()
+                        or len(item["reason"]) > 2048
+                        or not isinstance(item.get("evidence_ids"), list) or not item["evidence_ids"]
+                        or any(not isinstance(value, str) or not value.strip() for value in item["evidence_ids"])
+                        or len(item["evidence_ids"]) != len(set(item["evidence_ids"]))):
+                    raise ValueError("review-criterion-invalid")
+                seen.add(item["id"])
+                cited.update(item["evidence_ids"])
+                normalized.append({"id": item["id"], "status": item["status"],
+                                   "reason": item["reason"].strip(), "evidence_ids": item["evidence_ids"]})
+            source_rows = e._read_all(
+                "SELECT evidence.evidence_id,evidence.assignment_id,evidence.evidence_type,"
+                "evidence.reference_hash,evidence.payload_hash,job.role FROM evidence "
+                "JOIN assignments ON assignments.assignment_id=evidence.assignment_id "
+                "JOIN jobs AS job ON job.job_id=assignments.job_id "
+                "WHERE job.mission_id=? AND job.plan_revision=? AND job.role IN ('work','integrate') "
+                "AND (job.role='work' OR assignments.assignment_id=?) "
+                "ORDER BY evidence.evidence_id",
+                (mission["mission_id"], mission["plan_revision"], candidate["assignment_id"]),
+            )
+            source_rows = [row for row in source_rows if row["evidence_id"] in cited]
+            if ({row["evidence_id"] for row in source_rows} != cited
+                    or any(row["role"] not in {"work", "integrate"} for row in source_rows)):
+                raise ValueError("review-cites-unknown-evidence")
+            computed = "passed" if all(item["status"] == "passed" for item in normalized) else "failed"
+            if output.get("verdict") != computed:
+                raise ValueError("review-verdict-does-not-match-criteria")
+            state = computed
+            verdict = {"schema_version": 1, "candidate_artifact_id": candidate["artifact_id"],
+                       "acceptance_hash": plan["acceptance_hash"], "verdict": computed,
+                       "criteria": sorted(normalized, key=lambda item: item["id"])}
+
+        except (KeyError, TypeError, ValueError) as exc:
+            state = "invalid"
+            source_rows = []
+            verdict = {"schema_version": 1, "candidate_artifact_id": candidate["artifact_id"],
+                       "acceptance_hash": plan["acceptance_hash"], "verdict": "invalid",
+                       "reason": str(exc)[:512], "output_hash": snapshot.get("output_hash")}
+        records = sorted(
+            [{"evidence_id": row["evidence_id"], "assignment_id": row["assignment_id"],
+              "evidence_type": row["evidence_type"], "reference_hash": row["reference_hash"],
+              "payload_hash": row["payload_hash"]} for row in [*source_rows, *reviewer_rows]],
+            key=lambda item: item["evidence_id"],
+        )
+        return {"state": state, "candidate_artifact_id": candidate["artifact_id"],
+                "acceptance_hash": plan["acceptance_hash"], "verdict": verdict,
+                "evidence_set_hash": _hash(_json(records)),
+                "reviewer_evidence_ids": reviewer_ids, "output_hash": snapshot.get("output_hash")}
+
+    async def finish_review_success(self, assignment, snapshot, evidence_ids):
+        e = self._execution
+        current = e._assignment(assignment["assignment_id"])
+        if current is None:
+            raise LookupError("Reviewer Assignment not found")
+        job = e._read_one("SELECT * FROM jobs WHERE job_id=?", (current["job_id"],))
+        if job is None or job["role"] != "review":
+            raise HarnessError("Review completion is bound to a non-Reviewer Job", code="superagent/review-scope")
+        mission_id = job["mission_id"]
+        if current["state"] in {"accepted", "running"}:
+            changes = {"started_at": current.get("started_at") or _run_started_at(snapshot)}
+            current = e._transition(
+                "assignment", current["assignment_id"], "capturing",
+                facts={"original_run_settled": True}, changes=changes,
+            )
+        elif current["state"] == "stopping":
+            current = e._transition(
+                "assignment", current["assignment_id"], "unknown",
+                facts={"operation_outcome_uncertain": True},
+                changes={"error_ref": f"review-after-stop:{current['assignment_id']}"},
+                audit_payload={"reconciliation_ref": f"assignment:{current['assignment_id']}:review-after-stop"},
+            )
+        if current["state"] not in {"capturing", "unknown"}:
+            return {"state": current["state"], "assignment_id": current["assignment_id"]}
+        current = e._assignment(current["assignment_id"])
+        mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
+        if mission is None:
+            raise LookupError("Reviewer Mission not found")
+        if mission["state"] == "unknown":
+            if (self._has_uncertain_assignments(mission_id, exclude_assignment_id=current["assignment_id"])
+                    or self._has_uncertain_effects(mission_id)):
+                return {"state": "unknown", "assignment_id": current["assignment_id"]}
+            ticket = e._authorization.ticket(mission["ticket_id"])
+            mandate = (ticket or {}).get("mandate") or {}
+            mandate_id = mandate.get("mandate_id")
+            status = e._authorization.revalidate_mandate(mandate_id, actor=_ACTOR) if mandate_id else {}
+            if status.get("status") not in {"valid", "affected"} or not e._control.allows(mission_id):
+                return {"state": "unknown", "assignment_id": current["assignment_id"]}
+        else:
+            e._admit_mission(mission_id)
+        prepared = self._prepare_review(mission, job, current, snapshot, evidence_ids)
+
+        with e._store.unit_of_work(
+            actor=_ACTOR, correlation_id=f"mission:{mission_id}:review:{current['assignment_id']}",
+        ) as uow:
+            app = CoordinatorApplicationService(uow)
+            persisted = uow.assignments.get(current["assignment_id"])
+            if persisted is None or persisted["state"] not in {"capturing", "unknown"}:
+                raise HarnessError("Reviewer Assignment changed before Review freeze", code="superagent/assignment-conflict")
+            current_mission = uow.missions.get(mission_id)
+            if (current_mission is None or current_mission["state"] not in {"reviewing", "unknown"}
+                    or current_mission["plan_revision"] != job["plan_revision"]):
+                return {"state": persisted["state"], "assignment_id": current["assignment_id"]}
+            # 预检与冻结之间可能发生暂停、撤权或 Watchdog 阻断。
+            # 与 Review 持久化共用一笔写事务，拒绝迟到的结论和修正派工。
+            mandate_valid, control_allows = self._mission_authorization_in_transaction(
+                current_mission, uow.db,
+            )
+            if not mandate_valid or not control_allows:
+                return {"state": persisted["state"], "assignment_id": current["assignment_id"]}
+            review = uow.reviews.create(
+                mission_id=mission_id, reviewer_assignment_id=current["assignment_id"],
+                candidate_artifact_id=prepared["candidate_artifact_id"],
+                plan_revision=job["plan_revision"], acceptance_hash=prepared["acceptance_hash"],
+                verdict=prepared["verdict"], evidence_set_hash=prepared["evidence_set_hash"],
+                state=prepared["state"],
+            )
+            body = {
+                "kind": "review_verdict_report", "schema_version": 1,
+                "assignment_id": current["assignment_id"], "run_id": current["run_id"],
+                "review_id": review["review_id"], "candidate_artifact_id": prepared["candidate_artifact_id"],
+                "acceptance_hash": prepared["acceptance_hash"], "state": prepared["state"],
+                "verdict": prepared["verdict"], "evidence_set_hash": prepared["evidence_set_hash"],
+                "reviewer_evidence_ids": prepared["reviewer_evidence_ids"],
+                "output_ref": f"review:{review['review_id']}",
+                "output_hash": prepared["output_hash"],
+            }
+            report = {**body, "report_hash": _hash(_json(body))}
+            facts = {"authorized": True, "output_frozen_and_validated": True,
+                     "review_verdict_and_evidence_frozen": True}
+            audit = None
+            if persisted["state"] == "unknown":
+                facts.update({"reconciliation_verified": True, "original_run_completed": True})
+                audit = {
+                    "reconciliation_ref": f"assignment:{current['assignment_id']}:review-frozen",
+                    "run_id": current["run_id"], "run_evidence_ref": evidence_ids[0],
+                    "output_ref": report["output_ref"], "output_hash": report["output_hash"],
+                    "review_id": review["review_id"],
+                }
+            app.transition(
+                "assignment", current["assignment_id"],
+                expected_revision=persisted["aggregate_revision"], target_state="succeeded",
+                facts=facts, changes={"ended_at": _now(), "report_json": report},
+                audit_payload=audit,
+            )
+        self.finalize_succeeded_review_assignment(e._assignment(current["assignment_id"]), report)
+        return {"state": "succeeded", "assignment_id": current["assignment_id"],
+                "review_id": review["review_id"], "review_state": prepared["state"]}
 
     async def finish_work_success(self, assignment, snapshot, evidence_ids):
         e = self._execution
@@ -669,6 +1213,8 @@ class CoordinatorDagScheduler:
         if job is None:
             raise LookupError("Assignment Job not found")
         mission_id = job["mission_id"]
+        if job["role"] == "review":
+            return await self.finish_review_success(current, snapshot, evidence_ids)
         if current["state"] in {"accepted", "running"}:
             changes = {}
             if current["state"] == "accepted":
@@ -686,20 +1232,26 @@ class CoordinatorDagScheduler:
             )
         if current["state"] not in {"capturing", "unknown"}:
             return {"state": current["state"], "assignment_id": current["assignment_id"]}
-        # State transitions return the raw Assignment row; restore its trusted
-        # Mission context before crossing the Artifact service boundary.
+        # 状态转换返回原始 Assignment 行；跨 Artifact 边界前恢复可信的 Mission 上下文。
         current = e._assignment(current["assignment_id"])
         if current is None:
             raise LookupError("Assignment disappeared during artifact capture")
-        if not self._resume_unknown_mission(
+        resumed = self._resume_unknown_mission(
             mission_id,
             allow_capture_assignment_id=current["assignment_id"] if current["state"] in {"capturing", "unknown"} else None,
-        ):
-            mission = e._read_one("SELECT state FROM missions WHERE mission_id=?", (mission_id,))
-            if mission and mission["state"] == "unknown":
-                return {"state": "unknown", "assignment_id": current["assignment_id"]}
+        )
+        mission = e._read_one("SELECT state FROM missions WHERE mission_id=?", (mission_id,))
+        recovering_original_capture = (
+            not resumed and mission is not None and mission["state"] == "unknown"
+            and current["state"] in {"capturing", "unknown"}
+            and self._artifacts._has_reconcilable_capture(current["assignment_id"])
+        )
+        if not resumed and mission is not None and mission["state"] == "unknown" and not recovering_original_capture:
+            return {"state": "unknown", "assignment_id": current["assignment_id"]}
         try:
-            e._admit_mission(mission_id)
+            # Mission unknown 时不准创建新 Effect，只允许按原 Assignment 查已认领的捕获回执。
+            if not recovering_original_capture:
+                e._admit_mission(mission_id)
             artifact = await self._artifacts.capture(current, e._worker_row(current["worker_id"]))
         except HarnessError as exc:
             if exc.code == "superagent/mission-paused":
@@ -729,6 +1281,8 @@ class CoordinatorDagScheduler:
             assignment_facts.update({"reconciliation_verified": True, "original_run_completed": True})
             audit = {
                 "reconciliation_ref": f"assignment:{current['assignment_id']}:artifact-frozen",
+                "run_id": current["run_id"], "run_evidence_ref": evidence_ids[0],
+                "output_ref": report["output_ref"], "output_hash": report["output_hash"],
                 "artifact_id": artifact["artifact_id"], "manifest_hash": artifact["manifest_hash"],
             }
         e._transition(
@@ -741,22 +1295,94 @@ class CoordinatorDagScheduler:
         self._advance_mission_state(mission_id)
         return {"state": "succeeded", "assignment_id": current["assignment_id"], "artifact_id": artifact["artifact_id"]}
 
+    def finalize_succeeded_review_assignment(self, assignment, report):
+        e = self._execution
+        current = e._assignment(assignment["assignment_id"])
+        if current is None or current["state"] != "succeeded":
+            return
+        job = e._read_one("SELECT * FROM jobs WHERE job_id=?", (current["job_id"],))
+        if job is None or job["role"] != "review" or job["state"] in {"done", "blocked", "cancelled"}:
+            return
+        # 只有修正轮次的新 Assignment 才能推进已 checkpointed 的 Review Job。
+        latest = self._assignment_for_job(job["job_id"])
+        if latest is None or latest["assignment_id"] != current["assignment_id"]:
+            return
+        if job["state"] == "checkpointed":
+            mission = e._read_one("SELECT round_no FROM missions WHERE mission_id=?", (job["mission_id"],))
+            if mission is None or current["attempt_no"] <= mission["round_no"]:
+                return
+        with e._store.unit_of_work(
+            actor=_ACTOR, correlation_id=f"mission:{job['mission_id']}:review:{current['assignment_id']}",
+        ) as uow:
+            app = CoordinatorApplicationService(uow)
+            current_job = uow.jobs.get(job["job_id"])
+            current_assignment = uow.assignments.get(current["assignment_id"])
+            if (current_job is None or current_assignment is None or current_assignment["state"] != "succeeded"
+                    or not app._review_frozen_for_assignment(
+                        job["mission_id"], current_job, current["assignment_id"], report,
+                    )):
+                raise HarnessError("Succeeded Reviewer Assignment has no valid frozen Review", code="superagent/review-corrupt")
+            if current_job["state"] == "checkpointed":
+                # Run 已成功并冻结结论时，允许补记未观察到的 running 阶段。
+                current_job = app.transition(
+                    "job", job["job_id"], expected_revision=current_job["aggregate_revision"],
+                    target_state="running",
+                    facts={"authorized": True, "new_assignment_created": True,
+                           "checkpoint_and_capture_imported": True, "control_allows": True},
+                )
+            if current_job["state"] not in {"ready", "running", "unknown"}:
+                return
+            facts = {
+                "authorized": True, "role_result_validated": True,
+                "report_frozen": True, "review_verdict_and_evidence_frozen": True,
+            }
+            audit = None
+            if current_job["state"] == "unknown":
+                facts["reconciliation_verified"] = True
+                audit = {"reconciliation_ref": f"job:{job['job_id']}:review-frozen",
+                         "review_id": report["review_id"]}
+            app.transition(
+                "job", job["job_id"], expected_revision=current_job["aggregate_revision"],
+                target_state="done", facts=facts,
+                changes={"result_hash": report["report_hash"]}, audit_payload=audit,
+            )
+        self._advance_mission_state(job["mission_id"])
+
     def finalize_succeeded_assignment(self, assignment):
         e = self._execution
         current = e._assignment(assignment["assignment_id"])
         if current is None or current["state"] != "succeeded":
             return
         report = _object(current.get("report_json"))
+        if report.get("kind") == "review_verdict_report":
+            self.finalize_succeeded_review_assignment(current, report)
+            return
         if report.get("kind") != "work_artifact_report":
             return
+        job = e._read_one("SELECT * FROM jobs WHERE job_id=?", (current["job_id"],))
+        if job is None or job["state"] == "done":
+            return
+        # 同一 Job 的旧 Assignment 只保留历史证据，不得结算新的执行轮次。
+        latest = self._assignment_for_job(job["job_id"])
+        if latest is None or latest["assignment_id"] != current["assignment_id"]:
+            return
+        if job["state"] == "checkpointed":
+            mission = e._read_one("SELECT round_no FROM missions WHERE mission_id=?", (job["mission_id"],))
+            if mission is None or current["attempt_no"] <= mission["round_no"]:
+                return
         artifact = self._artifacts.get(current["assignment_id"])
         if (artifact is None or artifact["artifact_id"] != report.get("artifact_id")
                 or artifact["manifest_hash"] != report.get("manifest_hash")
                 or artifact["tree_hash"] != report.get("tree_hash")):
             raise HarnessError("Succeeded Work Assignment lost its frozen Artifact", code="superagent/artifact-corrupt")
-        job = e._read_one("SELECT * FROM jobs WHERE job_id=?", (current["job_id"],))
-        if job is None or job["state"] == "done":
-            return
+        if job["state"] == "checkpointed":
+            # 已成功的原 Run 无需重放；仅以冻结 Artifact 和导入回执推进状态。
+            e._transition(
+                "job", job["job_id"], "running",
+                facts={"new_assignment_created": True, "checkpoint_and_capture_imported": True,
+                       "control_allows": True},
+            )
+            job = e._read_one("SELECT * FROM jobs WHERE job_id=?", (job["job_id"],))
         if job["state"] not in {"ready", "running", "unknown"}:
             raise HarnessError("Succeeded Artifact Assignment has a non-completable Job", code="superagent/job-state-conflict")
         facts = {
@@ -868,12 +1494,21 @@ class CoordinatorDagScheduler:
             job = e._read_one("SELECT * FROM jobs WHERE job_id=?", (assignment["job_id"],))
             if job is None:
                 continue
+            # 已封存的旧尝试既不能完成新轮次，也不能用旧终态阻塞新轮次。
+            latest = self._assignment_for_job(job["job_id"])
+            if latest is None or latest["assignment_id"] != assignment["assignment_id"]:
+                continue
+            if job["state"] == "checkpointed":
+                mission = e._read_one("SELECT round_no FROM missions WHERE mission_id=?", (mission_id,))
+                if (mission is None or assignment["state"] != "succeeded"
+                        or assignment["attempt_no"] <= mission["round_no"]):
+                    continue
             if assignment["state"] == "succeeded":
                 if job["state"] in {"blocked", "cancelled"}:
                     continue
                 report = _object(assignment.get("report_json"))
                 if report.get("kind") == "single_worker_report":
-                    # The shared scheduler also recovers frozen single-node Report effects.
+                    # 共用 Scheduler 也恢复已冻结的单节点 Report 效果。
                     e._finalize_report_effects(assignment, report)
                 else:
                     self.finalize_succeeded_assignment(assignment)
@@ -894,61 +1529,339 @@ class CoordinatorDagScheduler:
                         facts["reconciliation_verified"] = True
                     e._transition("job", job["job_id"], "cancelled", facts=facts)
 
-    def _required_deliveries_applied(self, mission_id):
+    def _required_deliveries_applied(self, mission_id, *, child_roles=None):
         e = self._execution
-        row = e._read_one(
-            "SELECT COUNT(*) AS total FROM job_dependencies AS dependency "
+        params = [mission_id]
+        role_filter = ""
+        if child_roles is not None:
+            roles = sorted(set(child_roles))
+            if not roles:
+                return True
+            role_filter = " AND child.role IN (" + ",".join("?" for _ in roles) + ")"
+            params.extend(roles)
+        edges = e._read_all(
+            "SELECT child.job_id AS child_job_id,parent.job_id AS parent_job_id "
+            "FROM job_dependencies AS dependency "
             "JOIN jobs AS child ON child.job_id=dependency.job_id "
-            "WHERE child.mission_id=? AND dependency.requires_delivery=1 "
-            "AND NOT EXISTS (SELECT 1 FROM deliveries AS delivery "
-            "JOIN assignments AS target ON target.assignment_id=delivery.target_assignment_id "
-            "WHERE target.job_id=dependency.job_id AND delivery.artifact_id IN "
-            "(SELECT artifact.artifact_id FROM artifacts AS artifact "
-            "JOIN assignments AS source ON source.assignment_id=artifact.assignment_id "
-            "WHERE source.job_id=dependency.depends_on_job_id) AND delivery.state='applied')",
-            (mission_id,),
+            "JOIN jobs AS parent ON parent.job_id=dependency.depends_on_job_id "
+            "WHERE child.mission_id=? AND dependency.requires_delivery=1" + role_filter,
+            tuple(params),
         )
-        return row["total"] == 0
+        for edge in edges:
+            target = e._read_one(
+                "SELECT assignment_id FROM assignments WHERE job_id=? "
+                "ORDER BY attempt_no DESC LIMIT 1", (edge["child_job_id"],),
+            )
+            source = e._read_one(
+                "SELECT artifact.artifact_id FROM assignments AS assignment "
+                "JOIN artifacts AS artifact ON artifact.assignment_id=assignment.assignment_id "
+                "WHERE assignment.job_id=? AND assignment.state='succeeded' "
+                "ORDER BY assignment.attempt_no DESC LIMIT 1", (edge["parent_job_id"],),
+            )
+            if target is None or source is None:
+                return False
+            delivery = e._read_one(
+                "SELECT state FROM deliveries WHERE target_assignment_id=? AND artifact_id=?",
+                (target["assignment_id"], source["artifact_id"]),
+            )
+            if delivery is None or delivery["state"] != "applied":
+                return False
+        return True
+
+    def _block_mission(self, mission, reason):
+        if mission is None or mission["state"] not in {
+            "running", "integrating", "reviewing", "unknown",
+        }:
+            return
+        facts = {"known_failure_or_human_decision": True}
+        if mission["state"] == "unknown":
+            facts["reconciliation_verified"] = True
+        self._execution._transition(
+            "mission", mission["mission_id"], "blocked",
+            facts=facts,
+            changes={"outcome": str(reason)[:128]},
+            audit_payload={
+                "failure_ref": f"mission:{mission['mission_id']}:{reason}",
+                "plan_revision": mission["plan_revision"],
+            },
+        )
 
     def _advance_mission_state(self, mission_id):
         e = self._execution
         mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
-        if mission is None or mission["state"] not in {"running", "unknown"}:
+        if mission is None:
+            return
+        if mission["state"] == "unknown":
+            if not self._resume_unknown_mission(mission_id):
+                return
+            mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
+        if mission is None or mission["state"] not in {"running", "integrating", "reviewing"}:
             return
         if self._active_assignments(mission_id):
             return
+
         jobs = self._load_jobs(mission_id, mission["plan_revision"])
-        dependencies = self._load_dependencies(mission_id, mission["plan_revision"])
-        all_work_done = all(job["state"] == "done" for job in jobs if job["role"] == "work")
-        required_applied = self._required_deliveries_applied(mission_id)
-        if all_work_done and required_applied:
-            ticket = e._authorization.ticket(mission["ticket_id"])
-            mandate = (ticket or {}).get("mandate") or {}
-            status = e._authorization.revalidate_mandate(mandate.get("mandate_id"), actor=_ACTOR) if mandate.get("mandate_id") else {}
-            if status.get("status") not in {"valid", "affected"} or not e._control.allows(mission_id):
-                return
-            facts = {
-                "all_work_jobs_done": True, "required_deliveries_applied": True,
-                "mandate_valid": True, "control_allows": True,
-            }
-            audit = None
-            if mission["state"] == "unknown":
-                facts.update({"reconciliation_verified": True, "original_delivery_applied": True})
-                audit = {
-                    "reconciliation_ref": f"mission:{mission_id}:all-work-artifacts-delivered",
-                    "plan_revision": mission["plan_revision"],
-                }
-            e._transition("mission", mission_id, "integrating", facts=facts, audit_payload=audit)
+        if not jobs:
             return
         if any(job["state"] == "unknown" for job in jobs):
             return
-        ready = self._policy.select_ready_jobs(jobs, dependencies)
-        if ready:
-            return
         if any(job["state"] in {"blocked", "cancelled"} for job in jobs):
-            facts = {"known_failure_or_human_decision": True}
-            audit = None
-            if mission["state"] == "unknown":
-                facts["reconciliation_verified"] = True
-                audit = {"reconciliation_ref": f"mission:{mission_id}:work-dag-blocked"}
-            e._transition("mission", mission_id, "blocked", facts=facts, audit_payload=audit)
+            self._block_mission(mission, "job-failed")
+            return
+
+        work_jobs = [job for job in jobs if job["role"] == "work"]
+        integrators = [job for job in jobs if job["role"] == "integrate"]
+        reviewers = [job for job in jobs if job["role"] == "review"]
+        if not work_jobs:
+            return
+        all_work_done = all(job["state"] == "done" for job in work_jobs)
+        work_deliveries_applied = self._required_deliveries_applied(
+            mission_id, child_roles={"work"},
+        )
+
+        if mission["state"] == "running":
+            if not all_work_done or not work_deliveries_applied:
+                return
+            plan, _, _, _ = self._load_plan(mission)
+            if plan["acceptance"].get("kind") == "single_worker_report":
+                return
+            if len(integrators) != 1 or len(reviewers) != 1:
+                self._block_mission(mission, "quality-gate-plan-invalid")
+                return
+            mandate_valid, control_allows = self._mission_authorization(mission)
+            if not mandate_valid or not control_allows:
+                return
+            e._transition(
+                "mission", mission_id, "integrating",
+                facts={
+                    "all_work_jobs_done": True,
+                    "required_deliveries_applied": True,
+                    "mandate_valid": True, "control_allows": True,
+                },
+            )
+            return
+
+        if mission["state"] == "integrating":
+            if not all_work_done or not work_deliveries_applied:
+                return
+            if len(integrators) != 1 or len(reviewers) != 1:
+                self._block_mission(mission, "quality-gate-plan-invalid")
+                return
+            integrator = integrators[0]
+            if integrator["state"] != "done":
+                return
+            mandate_valid, control_allows = self._mission_authorization(mission)
+            if not mandate_valid or not control_allows:
+                return
+            with e._store.unit_of_work(
+                actor=_ACTOR, correlation_id=f"mission:{mission_id}:integrator-frozen",
+            ) as uow:
+                app = CoordinatorApplicationService(uow)
+                current_mission = uow.missions.get(mission_id)
+                if current_mission is None:
+                    return
+                # 防止工作区准备后授权变更导致迟到的质量门推进。
+                still_authorized, still_allowed = self._mission_authorization_in_transaction(
+                    current_mission, uow.db,
+                )
+                if not still_authorized or not still_allowed:
+                    return
+                current_integrator = uow.jobs.get(integrator["job_id"])
+                candidate = app._latest_integration_candidate(
+                    mission_id, mission["plan_revision"],
+                )
+                if (current_mission is None or current_integrator is None
+                        or current_integrator["state"] != "done" or candidate is None
+                        or not app._job_deliveries_applied(
+                            integrator["job_id"], candidate["assignment_id"],
+                        )):
+                    return
+                app.transition(
+                    "mission", mission_id,
+                    expected_revision=current_mission["aggregate_revision"],
+                    target_state="reviewing",
+                    facts={
+                        "authorized": True,
+                        "integration_artifact_frozen": True,
+                        "all_work_jobs_done": True,
+                        "required_deliveries_applied": True,
+                        "mandate_valid": True, "control_allows": True,
+                    },
+                    audit_payload={
+                        "integration_ref": f"assignment:{candidate['assignment_id']}",
+                        "candidate_artifact_id": candidate["artifact_id"],
+                    },
+                )
+            return
+
+        if mission["state"] == "reviewing":
+            if len(integrators) != 1 or len(reviewers) != 1:
+                self._block_mission(mission, "quality-gate-plan-invalid")
+                return
+            reviewer = reviewers[0]
+            if reviewer["state"] != "done":
+                return
+            mandate_valid, control_allows = self._mission_authorization(mission)
+            if not mandate_valid or not control_allows:
+                return
+
+            with e._store.unit_of_work(
+                actor=_ACTOR, correlation_id=f"mission:{mission_id}:review-settlement",
+            ) as uow:
+                app = CoordinatorApplicationService(uow)
+                current_mission = uow.missions.get(mission_id)
+                if current_mission is None:
+                    return
+                # Review 结算、修正轮次和完成前再次核对持久授权与控制状态。
+                still_authorized, still_allowed = self._mission_authorization_in_transaction(
+                    current_mission, uow.db,
+                )
+                if not still_authorized or not still_allowed:
+                    return
+                latest = app._latest_review(mission_id, current_mission["plan_revision"])
+                if (latest is None or latest["job_state"] != "done"
+                        or latest["assignment_state"] != "succeeded"):
+                    app.transition(
+                        "mission", mission_id,
+                        expected_revision=current_mission["aggregate_revision"],
+                        target_state="blocked",
+                        facts={"authorized": True, "known_failure_or_human_decision": True},
+                        changes={"outcome": "review-record-missing"},
+                        audit_payload={"failure_ref": f"mission:{mission_id}:review-record-missing"},
+                    )
+                    return
+                report = _object(latest.get("report_json"))
+                current_reviewer = uow.jobs.get(latest["job_id"])
+                if (current_reviewer is None or not app._review_frozen_for_assignment(
+                    mission_id, current_reviewer, latest["reviewer_assignment_id"], report,
+                ) or not app._job_deliveries_applied(
+                    latest["job_id"], latest["reviewer_assignment_id"],
+                )):
+                    app.transition(
+                        "mission", mission_id,
+                        expected_revision=current_mission["aggregate_revision"],
+                        target_state="blocked",
+                        facts={"authorized": True, "known_failure_or_human_decision": True},
+                        changes={"outcome": "review-record-invalid"},
+                        audit_payload={"failure_ref": f"mission:{mission_id}:review-record-invalid"},
+                    )
+                    return
+
+                if latest["state"] == "passed":
+                    if not app._review_passed(mission_id, current_mission):
+                        app.transition(
+                            "mission", mission_id,
+                            expected_revision=current_mission["aggregate_revision"],
+                            target_state="blocked",
+                            facts={"authorized": True, "known_failure_or_human_decision": True},
+                            changes={"outcome": "review-verification-failed"},
+                            audit_payload={"failure_ref": f"mission:{mission_id}:review-verification-failed"},
+                        )
+                        return
+                    app.transition(
+                        "mission", mission_id,
+                        expected_revision=current_mission["aggregate_revision"],
+                        target_state="completed",
+                        facts={
+                            "authorized": True,
+                            "acceptance_verified": True,
+                            "original_integration_settled": True,
+                            "integration_artifact_frozen": True,
+                            "all_work_jobs_done": True,
+                            "required_deliveries_applied": True,
+                            "mandate_valid": True, "control_allows": True,
+                        },
+                        audit_payload={
+                            "completion_ref": f"review:{latest['review_id']}",
+                            "candidate_artifact_id": latest["candidate_artifact_id"],
+                        },
+                    )
+                    return
+
+                if latest["state"] == "failed":
+                    plan = uow.plans.get(mission_id, current_mission["plan_revision"])
+                    acceptance = (plan or {}).get("acceptance_json") or {}
+                    maximum = acceptance.get("max_repair_rounds", 1)
+                    if type(maximum) is not int or not 0 <= maximum <= 3:
+                        app.transition(
+                            "mission", mission_id,
+                            expected_revision=current_mission["aggregate_revision"],
+                            target_state="blocked",
+                            facts={"authorized": True, "known_failure_or_human_decision": True},
+                            changes={"outcome": "repair-budget-invalid"},
+                            audit_payload={"failure_ref": f"mission:{mission_id}:repair-budget-invalid"},
+                        )
+                        return
+                    if current_mission["round_no"] >= maximum:
+                        app.transition(
+                            "mission", mission_id,
+                            expected_revision=current_mission["aggregate_revision"],
+                            target_state="blocked",
+                            facts={"authorized": True, "known_failure_or_human_decision": True},
+                            changes={"outcome": "review-repair-budget-exhausted"},
+                            audit_payload={
+                                "failure_ref": f"mission:{mission_id}:review-repair-budget-exhausted",
+                                "review_id": latest["review_id"],
+                            },
+                        )
+                        return
+
+                    system_jobs = uow.db.execute(
+                        "SELECT job_id,role,state,aggregate_revision FROM jobs "
+                        "WHERE mission_id=? AND plan_revision=? AND role IN ('integrate','review') "
+                        "ORDER BY role",
+                        (mission_id, current_mission["plan_revision"]),
+                    ).fetchall()
+                    if (len(system_jobs) != 2
+                            or any(row["state"] != "done" for row in system_jobs)):
+                        app.transition(
+                            "mission", mission_id,
+                            expected_revision=current_mission["aggregate_revision"],
+                            target_state="blocked",
+                            facts={"authorized": True, "known_failure_or_human_decision": True},
+                            changes={"outcome": "repair-checkpoint-invalid"},
+                            audit_payload={"failure_ref": f"mission:{mission_id}:repair-checkpoint-invalid"},
+                        )
+                        return
+                    repair_facts = {
+                        "authorized": True,
+                        "review_failed": True, "repair_budget_available": True,
+                        "mandate_valid": True, "control_allows": True,
+                    }
+                    for row in system_jobs:
+                        app.transition(
+                            "job", row["job_id"],
+                            expected_revision=row["aggregate_revision"],
+                            target_state="checkpointed",
+                            facts=repair_facts,
+                            audit_payload={
+                                "repair_ref": f"review:{latest['review_id']}",
+                                "repair_round": current_mission["round_no"] + 1,
+                            },
+                        )
+                    app.transition(
+                        "mission", mission_id,
+                        expected_revision=current_mission["aggregate_revision"],
+                        target_state="integrating",
+                        facts={
+                            "authorized": True,
+                            "repair_authorized": True, "repair_budget_available": True,
+                            "mandate_valid": True, "control_allows": True,
+                        },
+                        changes={"round_no": current_mission["round_no"] + 1},
+                        audit_payload={
+                            "repair_ref": f"review:{latest['review_id']}",
+                            "repair_round": current_mission["round_no"] + 1,
+                            "previous_candidate_artifact_id": latest["candidate_artifact_id"],
+                        },
+                    )
+                    return
+
+                app.transition(
+                    "mission", mission_id,
+                    expected_revision=current_mission["aggregate_revision"],
+                    target_state="blocked",
+                    facts={"authorized": True, "known_failure_or_human_decision": True},
+                    changes={"outcome": "review-invalid"},
+                    audit_payload={"failure_ref": f"mission:{mission_id}:review-invalid"},
+                )

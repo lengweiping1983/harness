@@ -448,7 +448,7 @@ class CoordinatorApplicationServiceTests(unittest.TestCase):
                     facts={"authorized": True, "operation_outcome_uncertain": True},
                 )
 
-    def test_job_checkpoint_waits_for_original_assignment_and_resumes_with_new_run(self):
+    def test_work_checkpoint_cannot_resume_without_a_frozen_integration_candidate(self):
         with self.store.unit_of_work(actor={"kind": "system"}) as uow:
             mission = self._create_mission(uow, "checkpoint")
             self._create_plan(uow, mission["mission_id"])
@@ -529,14 +529,16 @@ class CoordinatorApplicationServiceTests(unittest.TestCase):
                 facts={"authorized": True, "exact_original_run_active": True, "control_allows": True},
                 changes={"run_id": "run-checkpoint-2"},
             )
-            resumed = service.transition(
-                "job", job_id, expected_revision=4, target_state="running",
-                facts={"authorized": True, "new_assignment_created": True,
-                       "checkpoint_and_capture_imported": True, "control_allows": True},
-            )
-            self.assertEqual(resumed["state"], "running")
+            with self.assertRaises(PermissionError):
+                service.transition(
+                    "job", job_id, expected_revision=4, target_state="running",
+                    facts={"authorized": True, "new_assignment_created": True,
+                           "checkpoint_and_capture_imported": True, "control_allows": True},
+                )
+            self.assertEqual(uow.jobs.get(job_id)["state"], "checkpointed")
 
-    def test_unknown_mission_completion_requires_all_work_and_integration_receipts(self):
+
+    def test_unknown_mission_completion_requires_a_persisted_passing_review(self):
         with self.store.unit_of_work(actor={"kind": "system"}) as uow:
             mission = self._create_mission(uow, "complete")
             self._create_plan(uow, mission["mission_id"])
@@ -568,32 +570,34 @@ class CoordinatorApplicationServiceTests(unittest.TestCase):
                 changes={"state": "done", "result_hash": "d" * 64},
                 event_type="job.result_frozen",
             )
-            completed = service.transition(
-                "mission", mission["mission_id"], expected_revision=3,
-                target_state="completed",
-                facts=base_facts,
-                audit_payload={
-                    "mission_id": mission["mission_id"], "plan_revision": 1,
-                    "reconciliation_ref": "evidence://mission/acceptance-already-satisfied",
-                    "original_integration": {
-                        "assignment_id": "assignment-integrator-complete",
-                        "run_id": "run-integrator-complete",
-                        "outcome": "succeeded",
-                        "evidence_ref": "evidence://integrator/complete",
+            with self.assertRaises(PermissionError):
+                service.transition(
+                    "mission", mission["mission_id"], expected_revision=3,
+                    target_state="completed",
+                    facts=base_facts,
+                    audit_payload={
+                        "mission_id": mission["mission_id"], "plan_revision": 1,
+                        "reconciliation_ref": "evidence://mission/acceptance-already-satisfied",
+                        "original_integration": {
+                            "assignment_id": "assignment-integrator-complete",
+                            "run_id": "run-integrator-complete",
+                            "outcome": "succeeded",
+                            "evidence_ref": "evidence://integrator/complete",
+                        },
+                        "integration_artifact": {
+                            "assignment_id": "assignment-integrator-complete",
+                            "run_id": "run-integrator-complete",
+                            "artifact_ref": "artifact://integration/complete",
+                            "tree_hash": "a" * 64, "manifest_hash": "b" * 64,
+                            "evidence_ref": "evidence://integration/complete",
+                        },
+                        "deliveries": [],
                     },
-                    "integration_artifact": {
-                        "assignment_id": "assignment-integrator-complete",
-                        "run_id": "run-integrator-complete",
-                        "artifact_ref": "artifact://integration/complete",
-                        "tree_hash": "a" * 64, "manifest_hash": "b" * 64,
-                        "evidence_ref": "evidence://integration/complete",
-                    },
-                    "deliveries": [],
-                },
-            )
-            self.assertEqual(completed["state"], "completed")
+                )
+            self.assertEqual(uow.missions.get(mission["mission_id"])["state"], "unknown")
 
-    def test_unknown_mission_reconciles_to_reviewing_with_frozen_artifact_and_delivery_evidence(self):
+
+    def test_unknown_mission_cannot_enter_reviewing_from_audit_payload_alone(self):
         with self.store.unit_of_work(actor={"kind": "system"}) as uow:
             mission = self._create_mission(uow, "review-reconcile")
             uow.plans.create(
@@ -601,8 +605,6 @@ class CoordinatorApplicationServiceTests(unittest.TestCase):
                 plan={"nodes": [
                     {"node_id": "work-a", "role": "work", "profile_id": "coder"},
                     {"node_id": "work-b", "role": "work", "profile_id": "coder",
-                     "dependencies": [{"node_id": "work-a", "requires_delivery": True}]},
-                    {"node_id": "work-c", "role": "work", "profile_id": "coder",
                      "dependencies": [{"node_id": "work-a", "requires_delivery": True}]},
                 ]},
                 acceptance={"criteria": ["result verified"]},
@@ -615,147 +617,47 @@ class CoordinatorApplicationServiceTests(unittest.TestCase):
                     (mission["mission_id"],),
                 ).fetchall()
             }
-            CoordinatorApplicationService(uow).transition(
+            service = CoordinatorApplicationService(uow)
+            service.transition(
                 "mission", mission["mission_id"], expected_revision=2,
                 target_state="unknown",
                 facts={"authorized": True, "operation_outcome_uncertain": True},
             )
-            service = CoordinatorApplicationService(uow)
+            for index, job_id in enumerate(jobs.values(), start=1):
+                uow.jobs._transition(
+                    job_id, expected_revision=1,
+                    changes={"state": "done", "result_hash": str(index) * 64},
+                    event_type="job.result_frozen",
+                )
             facts = {
                 "authorized": True, "reconciliation_verified": True,
                 "original_integration_settled": True, "integration_artifact_frozen": True,
                 "all_work_jobs_done": True, "required_deliveries_applied": True,
+                "mandate_valid": True, "control_allows": True,
             }
-            evidence = {
+            audit_only_evidence = {
                 "mission_id": mission["mission_id"], "plan_revision": 1,
                 "reconciliation_ref": "evidence://mission/reconcile",
                 "original_integration": {
-                    "assignment_id": "assignment-integrator-original",
-                    "run_id": "run-integrator-original",
-                    "outcome": "succeeded",
-                    "evidence_ref": "evidence://integrator/original-run",
+                    "assignment_id": "assignment-not-persisted",
+                    "run_id": "run-not-persisted", "outcome": "succeeded",
+                    "evidence_ref": "evidence://integrator/not-persisted",
                 },
                 "integration_artifact": {
-                    "assignment_id": "assignment-integrator-original",
-                    "run_id": "run-integrator-original",
-                    "artifact_ref": "artifact://integration/final",
+                    "assignment_id": "assignment-not-persisted",
+                    "run_id": "run-not-persisted",
+                    "artifact_ref": "artifact://integration/not-persisted",
                     "tree_hash": "a" * 64, "manifest_hash": "b" * 64,
-                    "evidence_ref": "evidence://integration/frozen",
+                    "evidence_ref": "evidence://integration/not-persisted",
                 },
-                "deliveries": [
-                    {
-                        "job_id": jobs["work-b"], "depends_on_job_id": jobs["work-a"],
-                        "delivery_id": "delivery-work-a-to-b",
-                        "applied_tree_hash": "c" * 64,
-                        "evidence_ref": "evidence://delivery/applied-b",
-                    },
-                    {
-                        "job_id": jobs["work-c"], "depends_on_job_id": jobs["work-a"],
-                        "delivery_id": "delivery-work-a-to-c",
-                        "applied_tree_hash": "f" * 64,
-                        "evidence_ref": "evidence://delivery/applied-c",
-                    },
-                ],
+                "deliveries": [],
             }
             with self.assertRaises(PermissionError):
                 service.transition(
                     "mission", mission["mission_id"], expected_revision=3,
-                    target_state="reviewing", facts=facts, audit_payload=evidence,
-                )
-            uow.jobs._transition(
-                jobs["work-a"], expected_revision=1,
-                changes={"state": "done", "result_hash": "d" * 64},
-                event_type="job.result_frozen",
-            )
-            with self.assertRaises(PermissionError):
-                service.transition(
-                    "mission", mission["mission_id"], expected_revision=3,
                     target_state="reviewing", facts=facts,
-                    audit_payload={**evidence, "deliveries": []},
+                    audit_payload=audit_only_evidence,
                 )
-            uow.jobs._transition(
-                jobs["work-b"], expected_revision=1,
-                changes={"state": "done", "result_hash": "e" * 64},
-                event_type="job.result_frozen",
-            )
-            uow.jobs._transition(
-                jobs["work-c"], expected_revision=1,
-                changes={"state": "done", "result_hash": "2" * 64},
-                event_type="job.result_frozen",
-            )
-            with self.assertRaises(PermissionError):
-                service.transition(
-                    "mission", mission["mission_id"], expected_revision=3,
-                    target_state="reviewing", facts=facts,
-                    audit_payload={
-                        **evidence,
-                        "integration_artifact": {
-                            **evidence["integration_artifact"],
-                            "assignment_id": "assignment-other",
-                        },
-                    },
-                )
-            with self.assertRaises(PermissionError):
-                service.transition(
-                    "mission", mission["mission_id"], expected_revision=3,
-                    target_state="reviewing", facts=facts,
-                    audit_payload={
-                        **evidence,
-                        "integration_artifact": {
-                            **evidence["integration_artifact"],
-                            "run_id": "run-other",
-                        },
-                    },
-                )
-            duplicate_delivery = [dict(item) for item in evidence["deliveries"]]
-            duplicate_delivery[1]["delivery_id"] = duplicate_delivery[0]["delivery_id"]
-            with self.assertRaises(ValueError):
-                service.transition(
-                    "mission", mission["mission_id"], expected_revision=3,
-                    target_state="reviewing", facts=facts,
-                    audit_payload={**evidence, "deliveries": duplicate_delivery},
-                )
-            uow.assignments.create({
-                "assignment_id": "assignment-review-active", "job_id": jobs["work-a"],
-                "attempt_no": 1, "submission_key": "submission-review-active",
-                "state": "unknown", "run_id": "run-review-active",
-            })
-            with self.assertRaises(PermissionError):
-                service.transition(
-                    "mission", mission["mission_id"], expected_revision=3,
-                    target_state="reviewing", facts=facts, audit_payload=evidence,
-                )
-            service.transition(
-                "assignment", "assignment-review-active", expected_revision=1,
-                target_state="cancelled",
-                facts={
-                    "authorized": True, "reconciliation_verified": True,
-                    "original_run_cancelled": True, "owned_operations_settled": True,
-                },
-                audit_payload={
-                    "reconciliation_ref": "evidence://assignment/review-active",
-                    "run_id": "run-review-active",
-                    "run_evidence_ref": "evidence://run/review-active",
-                    "cancel_receipt_ref": "evidence://run/review-active-cancel",
-                    "ownership_evidence_ref": "evidence://run/review-active-owned",
-                },
-            )
-            reviewing = service.transition(
-                "mission", mission["mission_id"], expected_revision=3,
-                target_state="reviewing", facts=facts, audit_payload=evidence,
-                event_type="mission.operator_override",
-            )
-            self.assertEqual(reviewing["state"], "reviewing")
-            event = uow.db.execute(
-                "SELECT event_type,payload_json FROM audit_events "
-                "WHERE aggregate_type='mission' AND aggregate_id=? ORDER BY seq DESC LIMIT 1",
-                (mission["mission_id"],),
-            ).fetchone()
-            payload = json.loads(event["payload_json"])
-            self.assertEqual(event["event_type"], "mission.reconciled.reviewing")
-            self.assertTrue(payload["facts"]["original_integration_settled"])
-            self.assertEqual(payload["evidence"]["integration_artifact"]["tree_hash"], "a" * 64)
-            self.assertEqual(payload["evidence"]["deliveries"][0]["delivery_id"], "delivery-work-a-to-b")
 
     def test_unknown_job_cancellation_requires_exact_settled_assignment_inventory(self):
         with self.store.unit_of_work(actor={"kind": "system"}) as uow:

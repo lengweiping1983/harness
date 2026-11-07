@@ -553,6 +553,7 @@ class CoordinatorHost:
             self._execution_service = CoordinatorExecutionService(
                 store, self._authorization_service, self._source_service, executor_adapter,
                 instance_id=instance_id, planner=planner, system_profiles=system_profiles,
+                watchdog=self._watchdog_service,
             )
             self._input_delivery_service = CoordinatorAssignmentInputDelivery(
                 store, self._authorization_service, self._source_service, executor_adapter,
@@ -563,7 +564,8 @@ class CoordinatorHost:
                 admit_mission=self._execution_service._admit_mission,
             )
             self._artifacts_service = CoordinatorArtifacts(
-                store, executor_adapter, self._execution_service._admit_mission,
+                store, executor_adapter, self._execution_service._dag_scheduler.admit_artifact_effect,
+                admit_effect=self._execution_service._dag_scheduler.admit_artifact_effect_in_transaction,
             )
             self._execution_service._dag_scheduler.set_artifacts(self._artifacts_service)
             self._execution = _HostExecutionService(

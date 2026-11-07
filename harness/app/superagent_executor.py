@@ -92,6 +92,7 @@ class ExecutionAdapter(Protocol):
 
     def set_worker_lookup(self, lookup: Callable[[str], dict | None]) -> None: ...
     def profile_for_source(self, source_instance_id: str) -> WorkerProfile | None: ...
+    def tool_effects(self, profile: WorkerProfile) -> Mapping[str, str]: ...
     def base_commit(self, profile: WorkerProfile) -> str: ...
     def find_worker(self, worker: dict, profile: WorkerProfile) -> dict | None: ...
     async def create_workspace(self, worker: dict, profile: WorkerProfile) -> dict: ...
@@ -254,6 +255,11 @@ class HarnessExecutorAdapter:
     def profile_for_source(self, source_instance_id: str) -> WorkerProfile | None:
         profile_id = self._default_profiles.get(source_instance_id)
         return self.profiles.get(profile_id) if profile_id else None
+
+    def tool_effects(self, profile: WorkerProfile) -> dict[str, str]:
+        if not isinstance(profile, WorkerProfile) or self.profiles.get(profile.profile_id) != profile:
+            raise ValueError("tool effect lookup requires an exact host-owned WorkerProfile")
+        return {name: self.harness.tools.get(name).effect for name in profile.tools}
 
     def profiles_for_source(self, source_instance_id: str) -> tuple[WorkerProfile, ...]:
         """只提供宿主配置允许的模板；来源默认模板不限制多角色选择。"""

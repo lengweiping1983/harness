@@ -4,14 +4,15 @@ from __future__ import annotations
 
 
 class CoordinatorScheduler:
-    """Select ready Work jobs without crossing mission or runtime capacity limits.
+    """Select stage-ready DAG jobs without crossing mission or runtime limits.
 
-    Scheduling decisions are intentionally pure. Durable state, authorization,
-    native Run submission, and artifact effects remain owned by the coordinator.
+    Durable state, authorization, native Run submission, and artifact effects
+    remain owned by the coordinator.
     """
 
-    _SCHEDULABLE_MISSION_STATES = frozenset({"planning", "running"})
-    _SCHEDULABLE_JOB_STATES = frozenset({"pending", "ready"})
+    _SCHEDULABLE_MISSION_STATES = frozenset({"planning", "running", "integrating", "reviewing"})
+    _SCHEDULABLE_JOB_STATES = frozenset({"pending", "ready", "checkpointed"})
+    _ROLES = frozenset({"work", "integrate", "review"})
 
     def __init__(self, *, max_active_assignments: int = 4, max_active_per_mission: int = 2):
         if type(max_active_assignments) is not int or max_active_assignments < 1:
@@ -23,7 +24,7 @@ class CoordinatorScheduler:
         self._mission_cursor = 0
 
     def order_missions(self, missions: list[dict]) -> list[dict]:
-        """Rotate the first scheduling opportunity across eligible Missions."""
+        """Rotate scheduling opportunities across every active execution stage."""
         eligible = [
             mission for mission in missions
             if mission.get("state") in self._SCHEDULABLE_MISSION_STATES
@@ -65,13 +66,17 @@ class CoordinatorScheduler:
         dependencies: list[dict],
         *,
         dispatchable_node_ids: set[str] | None = None,
+        allowed_roles: set[str] | None = None,
     ) -> list[dict]:
-        """Return Work nodes whose complete dependency set is already done.
+        """Return stage-allowed jobs whose complete dependency set is done.
 
         Delivery dependencies are not inferred from parent completion: the
-        execution layer must confirm the frozen Artifact and applied Delivery
-        before it transitions the child Job to ready.
+        execution layer confirms the frozen Artifact and applied Delivery
+        before a child Job becomes ready.
         """
+        roles = {"work"} if allowed_roles is None else set(allowed_roles)
+        if not roles or not roles <= self._ROLES:
+            raise ValueError("allowed_roles must contain supported execution roles")
         by_node = {
             job.get("node_id"): job
             for job in jobs
@@ -88,7 +93,7 @@ class CoordinatorScheduler:
         ready = []
         for job in jobs:
             node_id = job.get("node_id")
-            if job.get("role") != "work" or job.get("state") not in self._SCHEDULABLE_JOB_STATES:
+            if job.get("role") not in roles or job.get("state") not in self._SCHEDULABLE_JOB_STATES:
                 continue
             if not isinstance(node_id, str):
                 continue
