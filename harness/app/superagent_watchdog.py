@@ -379,6 +379,12 @@ class CoordinatorWatchdog:
                 observed_at = max(observed_at, current["observed_at"])
                 if fingerprint == current["fingerprint"] and observed_at == current["observed_at"]:
                     return current
+                # 原生观察异常仅表示检查不可用，不能作为解除持久 blocked 的真实进度。
+                inspections = activity_value.get("assignments")
+                if (current["state"] == "blocked" and isinstance(inspections, list)
+                        and any(type(item) is not dict or item.get("inspection") != "confirmed"
+                                for item in inspections)):
+                    fingerprint = current["fingerprint"]
                 progressed = fingerprint != current["fingerprint"]
                 if progressed:
                     state = "healthy"

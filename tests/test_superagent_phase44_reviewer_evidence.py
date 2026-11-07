@@ -123,6 +123,28 @@ class Phase44ReviewerEvidenceTests(unittest.TestCase):
         self.assertNotEqual(stale["evidence_set_hash"], valid["evidence_set_hash"])
 
 
+    def test_review_recovery_selects_run_evidence_not_first_tool_evidence(self):
+        """回查审查时必须采用 Run 类型证据，不将同轮较早的工具 ID 当作运行凭据。"""
+        self.db.execute(
+            "INSERT INTO evidence VALUES(?,?,?,?,?)",
+            ("evidence-aaa-tool", "assignment-review", "tool", "9" * 64, "a" * 64),
+        )
+        output = {
+            "schema_version": 1, "candidate_artifact_id": "candidate-new",
+            "acceptance_hash": self.plan["acceptance_hash"],
+            "verdict": "passed", "criteria": [{
+                "id": "criterion", "status": "passed", "reason": "Checked",
+                "evidence_ids": ["evidence-new"],
+            }],
+        }
+        result = self.scheduler._prepare_review(
+            self.mission, self.job, self.assignment,
+            {"output_text": json.dumps(output), "output_hash": "b" * 64},
+            ["evidence-aaa-tool", "evidence-reviewer-run"],
+        )
+        self.assertEqual(result["state"], "passed")
+        self.assertEqual(result["reviewer_run_evidence_ref"], "evidence-reviewer-run")
+
     def test_completion_rejects_evidence_from_prior_integrator_attempt(self):
         """冻结记录即使哈希一致，旧候选证据也不能证明当前候选通过。"""
         accepted_plan = {

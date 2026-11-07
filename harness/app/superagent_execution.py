@@ -1085,6 +1085,28 @@ class CoordinatorExecutionService:
             reference = snapshot.get("run_reference")
             if not isinstance(reference, dict):
                 reference = {}
+            if snapshot.get("found") is False:
+                activity.append({
+                    "assignment_id": assignment["assignment_id"], "inspection": "not_found",
+                })
+                continue
+            # 观察只读，但错误归属的 Run 不得成为 Watchdog 恢复质量门的进度凭据。
+            if (snapshot.get("found") is not True
+                    or not isinstance(assignment.get("run_id"), str) or not assignment["run_id"]
+                    or not isinstance(worker.get("session_id"), str) or not worker["session_id"]
+                    or assignment.get("session_id") != worker["session_id"]
+                    or not isinstance(snapshot.get("status"), str) or not snapshot["status"]
+                    or snapshot.get("status") != reference.get("status")
+                    or type(snapshot.get("settled")) is not bool
+                    or snapshot.get("settled") is not reference.get("settled")
+                    or snapshot.get("run_id") != assignment["run_id"]
+                    or reference.get("run_id") != assignment["run_id"]
+                    or reference.get("session_id") != worker["session_id"]
+                    or snapshot.get("session_id", worker["session_id"]) != worker["session_id"]):
+                activity.append({
+                    "assignment_id": assignment["assignment_id"], "inspection": "invalid",
+                })
+                continue
             activity.append({
                 "assignment_id": assignment["assignment_id"],
                 "run_id": snapshot.get("run_id"),

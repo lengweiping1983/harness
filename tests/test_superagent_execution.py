@@ -365,6 +365,33 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         })
         return started["mission_id"], started["assignment_id"]
 
+    async def test_watchdog_activity_rejects_foreign_run_and_session_snapshots(self):
+        """Watchdog 仅接纳当前 Assignment 原 Run 与 Session 的活动。"""
+        mission_id, assignment_id = await self._start_work_for_artifact_boundary_race()
+        original = copy.deepcopy(self.shared["runs"][assignment_id])
+        self.assertEqual(
+            self.host.execution.watchdog_activity(mission_id)["assignments"][0]["inspection"],
+            "confirmed",
+        )
+        for mismatch in ("run_id", "session_id", "status", "settled", "found"):
+            with self.subTest(mismatch=mismatch):
+                changed = copy.deepcopy(original)
+                if mismatch == "run_id":
+                    changed["run_id"] = "run-from-other-assignment"
+                elif mismatch == "session_id":
+                    changed["run_reference"]["session_id"] = "session-from-other-worker"
+                elif mismatch == "status":
+                    changed["status"] = "running"
+                elif mismatch == "settled":
+                    changed["settled"] = "yes"
+                else:
+                    changed["found"] = "yes"
+                self.shared["runs"][assignment_id] = changed
+                activity = self.host.execution.watchdog_activity(mission_id)["assignments"][0]
+                self.assertEqual(activity["inspection"], "invalid")
+                self.assertNotIn("status", activity)
+        self.shared["runs"][assignment_id] = original
+
     async def _start_integrator_for_import_boundary_race(self):
         """完成 Work 与 Artifact 冻结，让真实 Scheduler 准备 Integrator 导入。"""
         mission_id, work_id = await self._start_work_for_artifact_boundary_race()
@@ -1030,6 +1057,38 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(self.shared["submit_calls"].count(reviewer_id), 1)
 
+
+    async def test_unknown_reviewer_requires_original_run_evidence_before_freeze(self):
+        """Reviewer 缺失原生 Run 证据时只能等待原操作回查。"""
+        mission_id, reviewer_id = await self._start_reviewer_for_freeze_race()
+        self.shared["fail_inspect"] = True
+        self.assertEqual((await self.host.execution.reconcile(reviewer_id))["state"], "unknown")
+        self.adapter.finish(reviewer_id, {
+            "status": "completed", "summary": "Malformed Reviewer response", "reply": "",
+        })
+        scheduler = self.host._execution_service._dag_scheduler
+        for references in ([], ["unrelated-evidence-id"]):
+            with self.subTest(references=references):
+                receipt = await scheduler.finish_review_success(
+                    scheduler._execution._assignment(reviewer_id),
+                    copy.deepcopy(self.shared["runs"][reviewer_id]), references,
+                )
+                self.assertEqual(receipt["state"], "unknown")
+                with self.host._store.transaction() as db:
+                    self.assertEqual(
+                        db.execute("SELECT COUNT(*) FROM reviews WHERE mission_id=?", (mission_id,)).fetchone()[0], 0,
+                    )
+                    self.assertEqual(
+                        db.execute("SELECT state FROM assignments WHERE assignment_id=?", (reviewer_id,)).fetchone()[0],
+                        "unknown",
+                    )
+        confirmed = await self.host.execution.reconcile(reviewer_id)
+        self.assertEqual(confirmed["state"], "succeeded")
+        with self.host._store.transaction() as db:
+            self.assertEqual(
+                db.execute("SELECT state FROM reviews WHERE mission_id=?", (mission_id,)).fetchone()[0], "invalid",
+            )
+        self.assertEqual(self.shared["submit_calls"].count(reviewer_id), 1)
 
     async def _start_reviewer_for_freeze_race(self):
         """用真实 Host 路由工作、集成、审查三段，停在 Reviewer 原 Run 尚未结算处。"""

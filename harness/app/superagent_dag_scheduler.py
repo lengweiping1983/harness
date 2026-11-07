@@ -1140,10 +1140,15 @@ class CoordinatorDagScheduler:
               "payload_hash": row["payload_hash"]} for row in [*source_rows, *reviewer_rows]],
             key=lambda item: item["evidence_id"],
         )
+        run_evidence_ref = next(
+            (row["evidence_id"] for row in reviewer_rows if row["evidence_type"] == "run"),
+            None,
+        )
         return {"state": state, "candidate_artifact_id": candidate["artifact_id"],
                 "acceptance_hash": plan["acceptance_hash"], "verdict": verdict,
                 "evidence_set_hash": _hash(_json(records)),
-                "reviewer_evidence_ids": reviewer_ids, "output_hash": snapshot.get("output_hash")}
+                "reviewer_evidence_ids": reviewer_ids, "reviewer_run_evidence_ref": run_evidence_ref,
+                "output_hash": snapshot.get("output_hash")}
 
     async def finish_review_success(self, assignment, snapshot, evidence_ids):
         e = self._execution
@@ -1186,6 +1191,9 @@ class CoordinatorDagScheduler:
         else:
             e._admit_mission(mission_id)
         prepared = self._prepare_review(mission, job, current, snapshot, evidence_ids)
+        # unknown 状态只能用当前 Reviewer 的真实 Run 证据确认原操作，不能借工具证据或伪造 ID 结算。
+        if current["state"] == "unknown" and prepared["reviewer_run_evidence_ref"] is None:
+            return {"state": "unknown", "assignment_id": current["assignment_id"]}
 
         with e._store.unit_of_work(
             actor=_ACTOR, correlation_id=f"mission:{mission_id}:review:{current['assignment_id']}",
@@ -1230,7 +1238,8 @@ class CoordinatorDagScheduler:
                 facts.update({"reconciliation_verified": True, "original_run_completed": True})
                 audit = {
                     "reconciliation_ref": f"assignment:{current['assignment_id']}:review-frozen",
-                    "run_id": current["run_id"], "run_evidence_ref": evidence_ids[0],
+                    "run_id": current["run_id"],
+                    "run_evidence_ref": prepared["reviewer_run_evidence_ref"],
                     "output_ref": report["output_ref"], "output_hash": report["output_hash"],
                     "review_id": review["review_id"],
                 }

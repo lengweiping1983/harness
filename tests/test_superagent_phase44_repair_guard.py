@@ -498,6 +498,34 @@ class Phase44RepairGuardTests(unittest.TestCase):
             }, {"integrate": "checkpointed", "review": "checkpointed"})
 
 
+    def test_watchdog_inspection_failure_does_not_clear_block_after_restart(self):
+        """原生 Run 检查失败或结果缺失不能解除持久 blocked。"""
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            mission = self._fixture(uow, "watchdog-observe")
+            self._complete_fixture_jobs(uow, mission["mission_id"])
+        identity = mission["mission_id"]
+        limits = {"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"}
+        watchdog = CoordinatorWatchdog(self.store, limits=limits)
+        original = {"assignments": [{"assignment_id": "reviewer-watchdog-observe",
+                    "inspection": "confirmed", "run_id": "run-original", "turn": 1}]}
+        watchdog.observe(identity, activity=original, now="2026-11-07T00:00:00Z")
+        blocked = watchdog.observe(identity, activity=original, now="2026-11-07T00:00:02Z")
+        self.assertEqual(blocked["state"], "blocked")
+        restarted = CoordinatorWatchdog(self.store, limits=limits)
+        for inspection, second in (("unknown", "03"), ("invalid", "04"), ("not_found", "05")):
+            with self.subTest(inspection=inspection):
+                failed = {"assignments": [{"assignment_id": "reviewer-watchdog-observe",
+                           "inspection": inspection, "error_type": "TimeoutError"}]}
+                state = restarted.observe(identity, activity=failed,
+                                          now=f"2026-11-07T00:00:{second}Z")
+                self.assertEqual(state["state"], "blocked")
+                self.assertEqual(state["last_progress_at"], blocked["last_progress_at"])
+        self.assertEqual(restarted.observe(identity, activity=original,
+                         now="2026-11-07T00:00:06Z")["state"], "blocked")
+        advanced = {"assignments": [{**original["assignments"][0], "turn": 2}]}
+        self.assertEqual(restarted.observe(identity, activity=advanced,
+                         now="2026-11-07T00:00:07Z")["state"], "healthy")
+
     def test_blocking_watchdog_prevents_review_settlement_until_true_progress(self):
         """Watchdog 已确认 blocked 时不推进质量门，新真实进度恢复后才解锁。"""
         with self.store.unit_of_work(actor={"kind": "system"}) as uow:
