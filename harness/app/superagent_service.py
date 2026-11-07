@@ -272,6 +272,7 @@ class SuperagentService:
         watchdog_limits: dict | None = None, effect_adapters: Mapping | None = None,
         interval: float = 0.5, once_timeout: float = 600,
         max_threads_per_tick: int = 16, planner: object | None = None,
+        system_profiles: Mapping[str, str] | None = None,
     ):
         """显式打开统一协调运行模式；不被旧 CLI 或生产默认路由自动选择。"""
         if (
@@ -292,6 +293,7 @@ class SuperagentService:
             local_identity_verifier=local_identity_verifier,
             source_kinds=tuple(source_kinds), executor_adapter=executor_adapter,
             watchdog_limits=watchdog_limits, planner=planner,
+            system_profiles=system_profiles,
         )
         try:
             service = cls()

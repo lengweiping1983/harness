@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from harness.i18n import tr
@@ -48,7 +49,7 @@ class CoordinatorExecutionService:
     """Explicit V2 execution surface; it never changes the production V1 Router."""
 
     def __init__(self, store, authorization, sources, executor: ExecutionAdapter, *,
-                 instance_id: str, planner=None):
+                 instance_id: str, planner=None, system_profiles: Mapping[str, str] | None = None):
         if executor.instance_id != instance_id:
             raise ValueError("ExecutorAdapter instance_id must match CoordinatorHost")
         self._store = store
@@ -57,6 +58,25 @@ class CoordinatorExecutionService:
         self._executor = executor
         self.instance_id = instance_id
         self._profiles = dict(executor.profiles)
+        if system_profiles is None:
+            self._system_profiles = None
+        else:
+            if (not isinstance(system_profiles, Mapping)
+                    or set(system_profiles) != {"integrate", "review"}):
+                raise ValueError("system_profiles must define exactly integrate and review")
+            selected = {
+                role: _text(system_profiles[role], role + " profile")
+                for role in ("integrate", "review")
+            }
+            if len(set(selected.values())) != 2:
+                raise ValueError("Integrator and Reviewer must use distinct host-owned profiles")
+            for role, profile_id in selected.items():
+                if not isinstance(self._profiles.get(profile_id), WorkerProfile):
+                    raise ValueError(f"{role} profile must be owned by this ExecutorAdapter")
+            reviewer = self._profiles[selected["review"]]
+            if reviewer.tools or not set(reviewer.actions) <= {"read", "reply"}:
+                raise ValueError("Reviewer profile must be read-only and have no external tools")
+            self._system_profiles = selected
         self._planner = planner if planner is not None else SingleNodePlanner()
         if not callable(getattr(self._planner, "plan", None)):
             raise TypeError("V2 planner must expose plan(trigger_id, profile, prompt)")
@@ -672,10 +692,41 @@ class CoordinatorExecutionService:
                 frozen_plan = self._planner.plan(
                     trigger_id=trigger_id, profile=profile, prompt=prompt,
                 )
+                planned_nodes = frozen_plan.get("plan", {}).get("nodes", [])
+                acceptance = frozen_plan.get("acceptance")
+                report_only = (
+                    isinstance(acceptance, dict)
+                    and acceptance.get("kind") == "single_worker_report"
+                    and len(planned_nodes) == 1
+                    and not profile.tools
+                    and set(profile.actions) <= {"read", "reply"}
+                )
+                system_profiles = None
+                if not report_only:
+                    if self._system_profiles is None:
+                        raise HarnessError(
+                            "Artifact-producing Mission requires host-owned Integrator and Reviewer profiles",
+                            code="superagent/quality-gate-unavailable",
+                        )
+                    scope = mandate.get("scope") or {}
+                    for role, profile_id in self._system_profiles.items():
+                        system_profile = self._profiles[profile_id]
+                        if (system_profile.repo != profile.repo
+                                or trigger.get("source_instance_id") not in system_profile.source_instance_ids
+                                or not set(system_profile.actions) <= set(scope.get("actions", []))
+                                or not set(system_profile.tools) <= set(scope.get("tools", []))):
+                            raise PermissionError(
+                                f"Host-owned {role} profile exceeds the frozen Mission repository or Mandate scope"
+                            )
+                    if isinstance(acceptance, dict) and acceptance.get("kind") == "single_worker_report":
+                        acceptance = {**acceptance, "planner_kind": "single_worker_report",
+                                      "kind": "artifact_review", "schema_version": 1}
+                    system_profiles = self._system_profiles
                 plan = uow.plans.create(
                     mission_id, expected_mission_revision=mission["aggregate_revision"],
-                    plan=frozen_plan["plan"], acceptance=frozen_plan["acceptance"],
+                    plan=frozen_plan["plan"], acceptance=acceptance,
                     created_by_kind="host", created_by_ref="host-planner",
+                    system_profiles=system_profiles,
                 )
                 if plan is None:
                     raise HarnessError(tr("superagent.conflict"), code="superagent/revision-conflict")

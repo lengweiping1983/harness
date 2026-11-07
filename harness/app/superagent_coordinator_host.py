@@ -507,6 +507,7 @@ class CoordinatorHost:
         local_identity_verifier: LocalIdentityVerifier | None = None,
         source_kinds: tuple[SourceKind, ...] = (), executor_adapter: object | None = None,
         watchdog_limits: dict | None = None, planner: object | None = None,
+        system_profiles: Mapping[str, str] | None = None,
     ):
         if executor_adapter is not None and getattr(executor_adapter, "instance_id", None) != instance_id:
             raise ValueError("ExecutorAdapter instance_id must match CoordinatorHost")
@@ -551,7 +552,7 @@ class CoordinatorHost:
             from .superagent_execution import CoordinatorExecutionService
             self._execution_service = CoordinatorExecutionService(
                 store, self._authorization_service, self._source_service, executor_adapter,
-                instance_id=instance_id, planner=planner,
+                instance_id=instance_id, planner=planner, system_profiles=system_profiles,
             )
             self._input_delivery_service = CoordinatorAssignmentInputDelivery(
                 store, self._authorization_service, self._source_service, executor_adapter,
@@ -580,6 +581,7 @@ class CoordinatorHost:
         local_identity_verifier: LocalIdentityVerifier | None = None,
         source_kinds: tuple[SourceKind, ...] = (), executor_adapter: object | None = None,
         watchdog_limits: dict | None = None, planner: object | None = None,
+        system_profiles: Mapping[str, str] | None = None,
     ) -> "CoordinatorHost":
         requested = Path(state_dir).expanduser()
         is_junction = getattr(requested, "is_junction", None)
@@ -615,6 +617,7 @@ class CoordinatorHost:
                 secret_resolver=secret_resolver, local_identity_verifier=local_identity_verifier,
                 source_kinds=source_kinds, executor_adapter=executor_adapter,
                 watchdog_limits=watchdog_limits, planner=planner,
+                system_profiles=system_profiles,
             )
         except BaseException:
             if executor_adapter is not None:
