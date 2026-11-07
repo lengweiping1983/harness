@@ -6,8 +6,10 @@ import {IconButton} from '@/components/ui/primitives'
 import type {TerminalTypes} from '@/lib/protocol.generated'
 
 import {preferredTerminalType, rememberTerminalType} from '@/lib/terminalTypePreference'
+import {noticeText} from '@/lib/noticeText'
+import type {ResourceText} from '@/types'
 
-type Catalog = {status: 'loading'} | {status: 'error'; message: string} | {status: 'ready'; data: TerminalTypes}
+type Catalog = {status: 'loading'} | {status: 'error'; message: ResourceText} | {status: 'ready'; data: TerminalTypes}
 
 export function TerminalTypeSelect({active}: {active: boolean}) {
   useLocale()
@@ -20,7 +22,7 @@ export function TerminalTypeSelect({active}: {active: boolean}) {
     const controller = new AbortController()
     void api.terminalTypes(controller.signal).then(result => {
       if (controller.signal.aborted) return
-      if (!result.ok) {setCatalog({status: 'error', message: result.message}); return}
+      if (!result.ok) {setCatalog({status: 'error', message: result.copy ?? result.message}); return}
       setCatalog({status: 'ready', data: result.data})
       setKind(current => {
         const preferred = preferredTerminalType() || current
@@ -30,10 +32,11 @@ export function TerminalTypeSelect({active}: {active: boolean}) {
     })
     return () => controller.abort()
   }, [active, retry])
+  if (!active) return null
   if (catalog.status === 'loading') return <span role="status" className="flex items-center gap-1.5 text-xs text-muted"><Loader2 aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin" />{t('ui.terminalTypes.loading')}</span>
   if (catalog.status === 'error' || !catalog.data.enabled || !catalog.data.backends.length) return <div className="flex max-w-64 items-center gap-1.5">
     {catalog.status === 'error'
-      ? <p role="alert" className="min-w-0 break-words text-xs text-danger">{t('ui.terminalTypes.failed', {error: catalog.message})}</p>
+      ? <p role="alert" className="min-w-0 break-words text-xs text-danger">{t('ui.terminalTypes.failed', {error: noticeText(catalog.message)})}</p>
       : <p role="status" className="min-w-0 text-xs text-muted">{t(catalog.data.enabled ? 'ui.terminalTypes.empty' : 'ui.components.inspector.TerminalWorkbench.9279dea372ba')}</p>}
     <IconButton size="sm" className="shrink-0" label={t('ui.terminalTypes.reload')} onClick={() => setRetry(value => value + 1)}><RefreshCw className="h-3.5 w-3.5" /></IconButton>
   </div>

@@ -42,6 +42,7 @@ class CollaborationErrorLanguageTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(caught.exception.code, 'access/stale-revision')
                 self.assertEqual(caught.exception.status, 409)
                 self.assertIn(phrase, caught.exception.message)
+                self.assertNotIn(caught.exception.code, caught.exception.message)
                 self.assertEqual(access.snapshot(session.id)['members'], state['members'])
         # 本地化拒绝不能消费申请，正确版本仍能正常批准。
         approved = await invitations.approve(session.id, invite['id'], actor='owner', expected_revision=state['revision'])
@@ -113,5 +114,6 @@ class CollaborationErrorLanguageTests(unittest.IsolatedAsyncioTestCase):
                     projected = frame({'type': 'error', 'code': code, 'message': 'Private 原文',
                                        'details': {'token': 'Private 原文'}})
                     self.assertEqual(projected, {'type': 'error', 'code': code, 'message': tr(key, code=code)})
+                    self.assertNotIn(code, projected['message'])
                 self.assertEqual(collaboration_error_message('unknown/code'),
                                  tr('ui.collaboration.operation_failed', code='unknown/code'))

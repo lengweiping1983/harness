@@ -9,6 +9,7 @@ afterEach(()=>{vi.unstubAllGlobals();setLocale('zh-CN')})
 it.each([
  ['attachment/empty','empty',{}],
  ['attachment/bad-payload','entryObject',{p0:'2'}],
+ ['attachment/bad-payload','invalidPayload',{}],
  ['attachment/bad-base64','base64Decode',{p0:'Original decoder 原文'}],
  ['attachment/too-large','fileTooLarge',{p0:'32',p1:'40000'}],
  ['attachment/type-denied','extensionDenied',{p0:'.exe'}],
@@ -41,6 +42,16 @@ it.each([
 it('unknown external codes never acquire product resources',()=>{
  expect(attachmentErrorCopy('fixture/external',{copy:{key:'ui.attachments.server.empty'}})).toBeUndefined()
  expect(attachmentErrorCopy('constructor',{})).toBeUndefined()
+})
+it('preserves written attachment references and an unavailable status without replaying upload',async()=>{
+ const details={copy:{key:'ui.attachments.server.statsFailed'},attachments:[{attachmentId:'a'.repeat(64)}]}
+ const fetch=vi.fn().mockResolvedValue(new Response(JSON.stringify({error:'Snapshot',code:'attachment/stats-unavailable',details}),{status:503}));vi.stubGlobal('fetch',fetch)
+ const result=await api.uploadAttachments([{name:'Original.txt',mediaType:'text/plain',data:'YQ=='}])
+ expect(result).toMatchObject({ok:false,status:503,code:'attachment/stats-unavailable',details})
+ if(result.ok)throw Error('Expected unavailable statistics')
+ const value=failureText(new ApiError(result))
+ for(const language of ['en','zh-CN','en'] as const){await setLocale(language);expect(noticeText(value)).toBe(t(details.copy.key))}
+ expect(fetch).toHaveBeenCalledTimes(1)
 })
 it('missing registered metadata is an invalid response, preserving diagnostic and status',async()=>{
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({error:'Original diagnostic',code:'attachment/empty'}),{status:400})))

@@ -39,7 +39,13 @@ export default defineConfig({
     },
     proxy: {
       // Preserve Host so the backend can compare it with the browser Origin.
-      '/api/v1': { target: backendUrl, changeOrigin: false },
+      '^/api(?:/|\\?|$)': {
+        target: backendUrl, changeOrigin: false,
+        configure(proxy) {
+          // 先转发声明头，让后端在客户端尚未发送正文时也能拒绝超限请求。
+          proxy.on('proxyReq', request => request.flushHeaders())
+        },
+      },
       '/ws': { target: backendUrl, ws: true, changeOrigin: false },
     },
   },

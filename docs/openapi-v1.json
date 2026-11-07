@@ -1167,6 +1167,49 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "files"
+                ],
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "name",
+                        "data"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 255
+                        },
+                        "mediaType": {
+                          "type": "string",
+                          "maxLength": 255
+                        },
+                        "data": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "X-Request-ID",
@@ -1290,6 +1333,25 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "X-Request-ID",
@@ -1325,6 +1387,29 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "current_account": {
+                    "type": "string"
+                  },
+                  "auto_rotate": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "current_account",
+                  "auto_rotate"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -1401,6 +1486,25 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -1577,6 +1681,25 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "account_id",
@@ -1711,6 +1834,25 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "hideWindow": {
+                    "type": "boolean"
+                  },
+                  "windowToken": {
+                    "type": "string"
+                  }
+                },
+                "required": []
               }
             }
           }
@@ -1906,6 +2048,19 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
               }
             }
           }
@@ -3329,6 +3484,16 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationPatch"
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "session_id",
@@ -3507,6 +3672,70 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "create",
+                      "edit",
+                      "pause",
+                      "resume",
+                      "clear"
+                    ]
+                  },
+                  "objective": {
+                    "type": "string"
+                  },
+                  "success_criteria": {
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "token_budget": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "max_goal_rounds": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "goal_id": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "source_seq": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "action"
+                ]
               }
             }
           }
@@ -3862,6 +4091,28 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "active"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "X-Request-ID",
@@ -3897,6 +4148,38 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "root": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "default",
+                      "terminal",
+                      "folder"
+                    ]
+                  }
+                },
+                "required": [
+                  "path"
+                ]
               }
             }
           }
@@ -4219,6 +4502,36 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "color": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "X-Request-ID",
@@ -4254,6 +4567,31 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "color": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": []
               }
             }
           }
@@ -4346,6 +4684,27 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "parent": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
               }
             }
           }
@@ -4617,6 +4976,25 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "task": {
+                    "$ref": "#/components/schemas/ProjectTask"
+                  }
+                },
+                "required": [
+                  "task"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "X-Request-ID",
@@ -4656,6 +5034,39 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "goal": {
+                    "type": "string"
+                  },
+                  "source_session_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "revision",
+                  "key",
+                  "goal"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "X-Request-ID",
@@ -4691,6 +5102,35 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "source_session_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "revision",
+                  "key"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -6025,6 +6465,34 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "project"
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "name",
@@ -6068,6 +6536,34 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "project"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
               }
             }
           }
@@ -6240,6 +6736,34 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "project"
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
               }
             }
           }
@@ -6518,6 +7042,25 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "markdown": {
+                    "type": "string",
+                    "maxLength": 256000
+                  }
+                },
+                "required": [
+                  "markdown"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "X-Request-ID",
@@ -6604,6 +7147,34 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "project"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "X-Request-ID",
@@ -6676,6 +7247,16 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetAgentSelection"
               }
             }
           }
@@ -6812,6 +7393,76 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "transport": {
+                    "type": "string",
+                    "enum": [
+                      "stdio",
+                      "streamable-http"
+                    ]
+                  },
+                  "command": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "cwd": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "bound": {
+                    "type": "boolean"
+                  },
+                  "metadata": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "X-Request-ID",
@@ -6937,6 +7588,74 @@
             }
           }
         },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "transport": {
+                    "type": "string",
+                    "enum": [
+                      "stdio",
+                      "streamable-http"
+                    ]
+                  },
+                  "command": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "cwd": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "bound": {
+                    "type": "boolean"
+                  },
+                  "metadata": {
+                    "type": "object"
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "name",
@@ -7025,6 +7744,24 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
               }
             }
           }
@@ -8502,6 +9239,25 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_cwd": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "expected_cwd"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "session_id",
@@ -8545,6 +9301,32 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "paths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "expected_revision": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "paths",
+                  "expected_revision"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -8596,6 +9378,32 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "paths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "expected_revision": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "paths",
+                  "expected_revision"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "session_id",
@@ -8639,6 +9447,29 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string"
+                  },
+                  "expected_revision": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "message",
+                  "expected_revision"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -8733,6 +9564,25 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_seq": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "expected_seq"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -8841,6 +9691,26 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_fingerprint": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "expected_fingerprint"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -9013,6 +9883,33 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "topic": {
+                    "type": "string"
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "evidence": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "session_id",
@@ -9127,6 +10024,38 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "topic": {
+                    "type": "string"
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "evidence": {
+                    "type": "string"
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "content",
+                  "expected_revision"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "session_id",
@@ -9189,6 +10118,25 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "expected_revision"
+                ]
               }
             }
           }
@@ -9317,6 +10265,64 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "harness-project-memory-v1",
+                      "harness-user-memory-v1",
+                      "harness-session-memory-v1"
+                    ]
+                  },
+                  "memories": {
+                    "type": "array",
+                    "maxItems": 1000,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "content": {
+                          "type": "string"
+                        },
+                        "topic": {
+                          "type": "string"
+                        },
+                        "pinned": {
+                          "type": "boolean"
+                        },
+                        "evidence": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "source": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "content"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "format",
+                  "memories"
+                ]
               }
             }
           }
@@ -10637,6 +11643,32 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rating": {
+                    "enum": [
+                      "positive",
+                      "negative",
+                      null
+                    ]
+                  },
+                  "end_seq": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "rating",
+                  "end_seq"
+                ]
               }
             }
           }
@@ -13354,6 +14386,27 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "expected_version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "run_id",
@@ -13953,6 +15006,25 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_turn": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": []
               }
             }
           }
@@ -14851,6 +15923,22 @@
             }
           }
         },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "archived": {
+                    "type": "boolean"
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "session_id",
@@ -14933,6 +16021,16 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitAnswers"
               }
             }
           }
@@ -15148,6 +16246,68 @@
                               "type": "integer",
                               "minimum": 0,
                               "maximum": 6
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "time",
+                          "monthdays"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "monthly"
+                          },
+                          "time": {
+                            "type": "string",
+                            "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                          },
+                          "monthdays": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 31
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "time",
+                          "months",
+                          "monthdays"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "yearly"
+                          },
+                          "time": {
+                            "type": "string",
+                            "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                          },
+                          "months": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 12
+                            }
+                          },
+                          "monthdays": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 31
                             }
                           }
                         }
@@ -15416,6 +16576,68 @@
                             }
                           }
                         }
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "time",
+                          "monthdays"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "monthly"
+                          },
+                          "time": {
+                            "type": "string",
+                            "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                          },
+                          "monthdays": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 31
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "time",
+                          "months",
+                          "monthdays"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "yearly"
+                          },
+                          "time": {
+                            "type": "string",
+                            "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                          },
+                          "months": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 12
+                            }
+                          },
+                          "monthdays": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 31
+                            }
+                          }
+                        }
                       }
                     ]
                   },
@@ -15659,6 +16881,25 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repo": {
+                    "type": "string"
+                  },
+                  "ref": {
+                    "type": "string"
+                  }
+                },
+                "required": []
               }
             }
           }
@@ -16499,6 +17740,25 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "connection_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "connection_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "X-Request-ID",
@@ -16560,6 +17820,29 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string"
+                  },
+                  "connection": {
+                    "$ref": "#/components/schemas/ProviderConnectionDraft"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "connection"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "X-Request-ID",
@@ -16602,6 +17885,31 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider_id": {
+                    "type": "string"
+                  },
+                  "connection_id": {
+                    "type": "string"
+                  },
+                  "draft": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "provider_id",
+                  "connection_id"
+                ]
               }
             }
           }
@@ -16758,6 +18066,24 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "operation_id",
@@ -16889,6 +18215,126 @@
             }
           }
         },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "navigate",
+                      "observe",
+                      "options",
+                      "screenshot",
+                      "click",
+                      "fill",
+                      "select",
+                      "check",
+                      "press",
+                      "scroll",
+                      "diagnostics",
+                      "dialog",
+                      "resize",
+                      "move",
+                      "stop_loading",
+                      "type",
+                      "back",
+                      "forward",
+                      "reload",
+                      "tabs",
+                      "new_tab",
+                      "select_tab",
+                      "close_tab"
+                    ],
+                    "default": "observe"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "screenshot_id": {
+                    "type": "string"
+                  },
+                  "selector": {
+                    "type": "string"
+                  },
+                  "ref": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "tab_id": {
+                    "type": "string"
+                  },
+                  "query": {
+                    "type": "string"
+                  },
+                  "dialog_id": {
+                    "type": "string"
+                  },
+                  "prompt_text": {
+                    "type": "string"
+                  },
+                  "page_id": {
+                    "type": "string"
+                  },
+                  "full_page": {
+                    "type": "boolean"
+                  },
+                  "checked": {
+                    "type": "boolean"
+                  },
+                  "accept": {
+                    "type": "boolean"
+                  },
+                  "width": {
+                    "type": "integer"
+                  },
+                  "height": {
+                    "type": "integer"
+                  },
+                  "duration_ms": {
+                    "type": "integer"
+                  },
+                  "offset": {
+                    "type": "integer"
+                  },
+                  "limit": {
+                    "type": "integer"
+                  },
+                  "control_revision": {
+                    "type": "integer"
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "delta_x": {
+                    "type": "number"
+                  },
+                  "delta_y": {
+                    "type": "number"
+                  },
+                  "values": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "session_id",
@@ -16930,6 +18376,24 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "control_revision": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "control_revision"
+                ]
               }
             }
           }
@@ -17028,6 +18492,31 @@
             }
           }
         },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "owner": {
+                    "enum": [
+                      "user",
+                      "agent"
+                    ]
+                  },
+                  "expected_revision": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "owner",
+                  "expected_revision"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "name": "session_id",
@@ -17116,6 +18605,28 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tab_id": {
+                    "type": "string"
+                  },
+                  "expected_revision": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "tab_id",
+                  "expected_revision"
+                ]
               }
             }
           }
@@ -19406,6 +20917,7 @@
       },
       "NewConversationRequest": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "cwd": {
             "type": [
@@ -19417,7 +20929,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "maxLength": 512
           },
           "model": {
             "type": [
@@ -19431,6 +20944,34 @@
           },
           "project": {
             "$ref": "#/components/schemas/ConversationProject"
+          }
+        }
+      },
+      "ConversationPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reasoning_effort": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reasoning_effort_inherit": {
+            "type": "boolean"
           }
         }
       },
@@ -29317,6 +30858,147 @@
           },
           "error": {
             "type": "string"
+          }
+        }
+      },
+      "ProviderKeyDraft": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "mask": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "in_use": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "string",
+            "writeOnly": true
+          }
+        }
+      },
+      "ProviderModelDraft": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "input": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image",
+                "video"
+              ]
+            }
+          },
+          "context_window": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_output_tokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reasoning_efforts": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "compat": {
+            "type": "object"
+          }
+        }
+      },
+      "ProviderConnectionDraft": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/ProviderAuth"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderKeyDraft"
+            }
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderModelDraft"
+            }
+          },
+          "model_catalog": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "headers": {
+            "type": "object"
+          },
+          "compat": {
+            "type": "object"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_retries": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       }

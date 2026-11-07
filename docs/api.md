@@ -4,13 +4,13 @@ Harness 提供 HTTP API、WebSocket 实时通道和独立 MCP 执行服务。HTT
 
 ## Web API
 
-HTTP API 使用 `/api/v1`。本机管理入口具有添加任意已有目录为项目、在所选绝对目录下创建文件夹及编辑本地插件源的能力；项目注册约束文件浏览的选择范围，不是隔离本机管理调用方的文件系统沙箱。浏览器请求携带 Origin 时，来源中的主机和端口必须匹配请求 Host，不再特例放行其他开发端口；Vite 代理保留 Host 并禁用自身 CORS 预处理，API OPTIONS 与响应许可头由后端统一决定，仍可使用同源开发入口。无 Origin 的原生客户端继续可用，但浏览器明确声明跨站或同站跨来源的 Fetch Metadata 时拒绝；`Sec-Fetch-Site` 比较前统一大小写并移除首尾空白。OPTIONS 使用同一策略，拒绝的来源不获得 CORS 许可头；这些检查不认证本机进程。路由注册位于 `harness/web/api`，当前完整方法、参数和响应见 [生成的 OpenAPI](openapi-v1.json)。运行 `python scripts/generate_protocol.py` 重建契约，使用 `--check` 做同步校验。
+HTTP API 使用 `/api/v1`。本机管理入口具有添加任意已有目录为项目、在所选绝对目录下创建文件夹及编辑本地插件源的能力；项目注册约束文件浏览的选择范围，不是隔离本机管理调用方的文件系统沙箱。浏览器请求携带 Origin 时，来源中的主机和端口必须匹配请求 Host，不再特例放行其他开发端口；Vite 代理保留 Host 并禁用自身 CORS 预处理，API OPTIONS 与响应许可头由后端统一决定，仍可使用同源开发入口。无 Origin 的原生客户端继续可用，但浏览器明确声明跨站或同站跨来源的 Fetch Metadata 时拒绝；本机管理入口检查全部 `Sec-Fetch-Site` 头及逗号分隔值，比较前统一大小写并移除首尾空白；即使同时提供同源 Origin，也拒绝其中的跨站／同站跨来源声明。OPTIONS 使用同一策略，拒绝的来源不获得 CORS 许可头；这些检查不认证本机进程。路由注册位于 `harness/web/api`，当前完整方法、参数和响应见 [生成的 OpenAPI](openapi-v1.json)。运行 `python scripts/generate_protocol.py` 重建契约，使用 `--check` 做同步校验。
 
 插件 API 的通用文件 I/O 失败仍返回 `400 plugin-package/io-error`，用户提示使用服务端与浏览器共用的双语资源；响应 `details.copy` 保留资源身份、`details.errno` 保留机器原因，不回显原始路径。原异常及完整堆栈进入服务端日志，原 HTTP 状态和失败语义不因文案处理变化。
 
-未实现的 HTTP 方法访问 `/api/` 路径时仍经统一请求解析、来源检查和路由错误出口处理，返回 JSON 错误；已匹配路径的方法不支持时为 `405 method-not-allowed`，路径不存在时为 `404 route/not-found`。裸 `/api` 和 `/api/` 前缀的未知 GET／HEAD 路径同样返回 JSON 404，不回退到 SPA 首页。它们不使用 HTTP 服务基类的 HTML 501 错误页。
+未实现的 HTTP 方法访问 `/api/` 路径时仍经统一请求解析、来源检查和路由错误出口处理，返回 JSON 错误；已匹配路径的方法不支持时为 `405 method-not-allowed`，路径不存在时为 `404 route/not-found`。裸 `/api` 和 `/api/` 前缀的未知 GET／HEAD 路径同样返回 JSON 404，不回退到 SPA 首页。它们不使用 HTTP 服务基类的 HTML 501 错误页。HEAD 按 GET 路由读取相同资源并保留响应头，仅省略正文；不执行仅注册 POST 的处理器。开发入口将裸 `/api` 和 `/api/` 命名空间整体代理到后端，不依赖 Accept 选择 SPA。Vite 的 Node HTTP 解析器仍先于产品路由工作，解析器拒绝的未知方法 token 或畸形报文可能直接返回无产品 JSON 的 400。`/ws/` 的未知子路径在握手前返回 JSON 404，拒绝来源仍为 403，不回退到首页。
 
-创建对话时，`cwd`、`title` 和 `model` 若提供非空值，必须为字符串；非字符串且非 `null` 的值在创建任何持久对话前返回 `400 session/invalid-field`，`details.field` 标识具体字段。省略字段或空请求体仍允许按当前配置创建默认对话。显式非空 `cwd` 还会展开用户目录并严格解析，必须是已存在目录；不存在、不是目录或无法解析时，在创建持久记录前返回 `400 session/invalid-cwd`，`details.field` 为 `cwd`。省略 `cwd`、`null` 和空字符串使用默认工作目录，不自动创建目录；创建后目录被移除仍由实际操作报告错误。
+创建对话只接受契约列出的字段，未知字段在持久化前拒绝。显式创建和 PATCH 改名的标题最多 512 个 Unicode 码点，超限返回 `400 session/invalid-field`；不截断或改写已有标题。PATCH 同样拒绝未知字段及非法的标题、模型、思考强度类型。创建对话时，`cwd`、`title` 和 `model` 若提供非空值，必须为字符串；非字符串且非 `null` 的值在创建任何持久对话前返回 `400 session/invalid-field`，`details.field` 标识具体字段。省略字段或空请求体仍允许按当前配置创建默认对话。显式非空 `cwd` 还会展开用户目录并严格解析，必须是已存在目录；不存在、不是目录或无法解析时，在创建持久记录前返回 `400 session/invalid-cwd`，`details.field` 为 `cwd`。省略 `cwd`、`null` 和空字符串使用默认工作目录，不自动创建目录；创建后目录被移除仍由实际操作报告错误。
 
 网页新建对话未指定标题时，头信息登记 `metadata.auto_title=awaiting`。首次人工任务提交后先保存不超过 50 个 Unicode 码点的临时标题，再在独立后台请求中使用当前对话的模型连接生成不超过 50 个码点的任务标题；输入只取用户原文的前 12000 个码点，不发送对话历史、系统上下文或附件正文，不提供工具。命名请求的超时预算为 30 秒，取消后仍等待底层清理，失败、无凭据或非法输出保留临时标题，不阻塞执行轮次。纯附件消息使用原附件文件名，不额外请求模型。
 
@@ -54,7 +54,9 @@ HTTP API 使用 `/api/v1`。本机管理入口具有添加任意已有目录为�
 
 ### 请求大小与传输
 
-HTTP 请求体在读取前按 `Content-Length` 校验：普通请求最多 4 MiB；仅 `POST /api/v1/attachments` 最多 129 MiB，容纳 96 MiB 原始附件的 base64 内容及 1 MiB JSON 元数据。超限返回 `413 request/body-too-large` 并关闭连接，不读取请求体。附件仍执行领域层的文件数、类型和原始字节限额。
+HTTP 请求体在读取前按 `Content-Length` 校验：普通请求最多 4 MiB；仅 `POST /api/v1/attachments` 最多 129 MiB，容纳 96 MiB 原始附件的 base64 内容及 1 MiB JSON 元数据。超限返回 `413 request/body-too-large` 并关闭连接，不读取请求体。附件仍执行领域层的文件数、类型和原始字节限额。开发代理在收到请求头后立即转发，使后端可以在正文上传前拒绝超限声明；后端关闭响应显式携带 `Connection: close`。客户端若同步发送完整正文，可能在发送阶段收到连接关闭，仍须按其 HTTP 传输能力读取响应，不能据此重放写入。
+
+OpenAPI 请求体覆盖实际读取 JSON 的管理接口；无参动作不要求请求体。协议源复用 `input_schemas.py` 的写入边界，并由 `request_contracts.py` 补充管理字段声明。OpenAPI 与提供商目录响应按 Accept-Encoding 协商 gzip，解压后的 JSON 及 no-store 策略保持一致。
 
 主要路由分组包括对话及对话正文、运行与队列、引导与停止、目标与计划、权限、模型设置、项目及工作树、文件与终端、浏览器、技能与智能体、插件与连接器、记忆、钩子及自动化。新增公共字段必须同时更新协议源、调用方和测试。
 
@@ -117,7 +119,7 @@ Python SDK 的 `Harness.steer(..., before_accept=check)` 允许可信宿主在�
 
 对话 WebSocket `/ws?session=...&since=N` 发送 `ready` 快照和按 `seq` 排序的事件；`resume` 使用同一游标，缓冲区无法覆盖缺口时返回需要重置的快照。前端检测事件序号缺口后请求 `force_snapshot`，不会继续应用残缺流。`GET /api/v1/sessions/{session_id}/live-events?since=N` 是按相同序号增量读取的 HTTP 通道，返回 `since`、`last_seq` 和事件列表；共享访问可能过滤不可见事件，因此列表数量不等于序号差值。
 
-首次连接、`resume` 和增量 HTTP 的 `since` 必须为 0 至 JavaScript 安全整数上限的整数，省略为 0。空值、非法格式、负数和越界值返回 `request/invalid-query`，不回退为全量补发。HTTP 和 WebSocket URL 的重复 `since` 也会被拒绝。HTTP 拒绝为 400，WebSocket 首次请求在升级前拒绝；已经连接的 `resume` 返回错误帧，保留连接。跨来源的 WebSocket 请求仍为 403，升级前使用 JSON 错误响应。
+首次连接、`resume` 和增量 HTTP 的 `since` 必须为 0 至 JavaScript 安全整数上限的整数，省略为 0。空值、非法格式、负数和越界值返回 `request/invalid-query`，不回退为全量补发。HTTP 和 WebSocket URL 的重复 `since` 也会被拒绝。HTTP 在查询会话存在性之前校验游标，拒绝为 400；WebSocket 首次请求在升级前拒绝；已经连接的 `resume` 返回错误帧，保留连接。跨来源的 WebSocket 请求仍为 403，升级前使用 JSON 错误响应。
 
 终端 `/stream` 使用终端输出的 `cursor` 和 `wait_ms` 长轮询，与对话事件序号互不通用；重连沿用该终端的输出游标，不用对话 `seq` 替代。
 
@@ -343,13 +345,15 @@ MCP服务状态的组合失败通过`error_details`提供按顺序的资源错�
 
 ### 附件拒绝的资源身份
 
+上传请求只接受 `files`，每项只接受 `name`、`mediaType` 和 `data`；文件名及声明类型最多 255 个码点，批次最多 20 个文件，结构和长度在解码、准入与落盘前校验。展示名仍由领域层清洗并限制长度。统计读取失败不返回部分结果；上传落盘后统计失败返回 `503 attachment/stats-unavailable`，`details.attachments` 保留已写入引用，不能当作上传未发生或自动重放。无单项删除接口，内容寻址附件可能被多个对话引用，不通过清理单个测试对象引入隐式删除。
+
 附件准入、请求校验和不存在错误在原有 `error`、`code`、HTTP状态基础上，通过 `details.copy` 携带 `key` 及平面 `params`。例如拒绝 `.exe` 的错误码仍为 `attachment/type-denied`，资源为 `ui.attachments.server.extensionDenied`，参数为 `{"p0":".exe"}`。已有数值细节（如 `bytes`、`maxBytes`）保留；`error` 仍是产生时的诊断文本。
 
 上传客户端只接受错误码对应的已登记资源键、完整参数名及有限数值/字符串值；已登记错误缺少或损坏资源信息时按无效响应呈现，不按正文反推，不重发上传。未登记错误保留原始诊断，不把“未登记”等同于“第三方”；附件存储异常及其他公共错误另按各自协议处理。
 
 ## 错误提示的语言
 
-HTTP 错误保留原有 `code`、状态码与 `details`。当消息仅为已登记的机器错误码时，响应出口按当前语言显示操作提示；业务已提供的具体消息与未知错误码保持原样。共享 WebSocket 的只读拒绝使用同一文案。该投影不改变鉴权、请求重试或执行状态。
+HTTP 语言沿用实例当前设置，不通过 Accept-Language 或 X-Language 覆盖。HTTP 错误保留原有 `code`、状态码与 `details`。畸形 UTF-8／JSON 使用完整双语提示，解析位置保存在结构化 details，不将解析器英文原句拼入提示；路由不存在错误只回显路径的前 200 个码点。当消息仅为已登记的机器错误码时，响应出口按当前语言显示操作提示；业务已提供的具体消息与未知错误码保持原样。共享 WebSocket 的只读拒绝使用同一文案。共享 HTTP 传输按错误码与资源键核对 JSON 格式、标题超限、未知字段及语音准备的自有诊断；保存资源身份后，英中英切换仅重新呈现，未知资源或非法参数保留原诊断，不自动重发请求。该投影不改变鉴权、请求重试或执行状态。
 
 ## 恢复指令与回执
 

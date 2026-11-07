@@ -4,6 +4,7 @@ import {mkdtemp, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {fileURLToPath} from 'node:url'
+import {connect} from 'node:net'
 import test from 'node:test'
 import {createServer, loadConfigFromFile} from 'vite'
 
@@ -53,8 +54,8 @@ test('Vite delegates API preflights and response CORS to the backend without add
   })
   await vite.listen()
   const origin = 'http://127.0.0.1:' + vite.httpServer.address().port
-  for (const method of ['OPTIONS', 'GET']) {
-    const response = await fetch(origin + '/api/v1/status', {method, headers: {Origin: 'http://localhost:5173',
+  for (const [method, path] of [['OPTIONS', '/api/v1/status'], ['GET', '/api/v1/status'], ['GET', '/api'], ['OPTIONS', '/api/foo']]) {
+    const response = await fetch(origin + path, {method, headers: {Origin: 'http://localhost:5173',
       ...(method === 'OPTIONS' ? {'Access-Control-Request-Method': 'POST'} : {})}})
     assert.equal(response.status, 403)
     assert.equal(response.headers.get('access-control-allow-origin'), null)
@@ -69,6 +70,76 @@ test('Vite delegates API preflights and response CORS to the backend without add
   const native = await fetch(origin + '/api/v1/status')
   assert.equal(native.status, 200)
   assert.deepEqual(await native.json(), {ok: true})
-  assert.equal(requests.length, 4)
+  assert.equal(requests.length, 6)
   assert.ok(requests.every(request => request.host === new URL(origin).host))
+})
+
+test('Vite forwards the API namespace and sends headers before awaiting oversized bodies', {timeout: 20000}, async t => {
+  const root = fileURLToPath(new URL('../', import.meta.url))
+  const cache = await mkdtemp(join(tmpdir(), 'harness-dev-http-'))
+  const requests = []
+  const backend = createHttpServer((request, response) => {
+    requests.push(request.url)
+    const oversized = Number(request.headers['content-length'] ?? 0) > 4194304
+    response.writeHead(oversized ? 413 : 404, {
+      'Content-Type': 'application/json', 'Cache-Control': 'no-store',
+      'X-Request-ID': 'fixture-request', 'Connection': 'close',
+    })
+    response.end(JSON.stringify({code: oversized ? 'request/body-too-large' : 'route/not-found'}))
+  })
+  let vite
+  t.after(async () => {
+    try {await vite?.close()}
+    finally {
+      backend.closeAllConnections()
+      await new Promise((resolve, reject) => backend.close(error => error ? reject(error) : resolve()))
+      await rm(cache, {recursive: true, force: true})
+    }
+  })
+  await new Promise(resolve => backend.listen(0, '127.0.0.1', resolve))
+  const previousBackend = process.env.HARNESS_BACKEND_URL
+  let config
+  try {
+    process.env.HARNESS_BACKEND_URL = 'http://127.0.0.1:' + backend.address().port
+    config = await loadConfigFromFile({command: 'serve', mode: 'test'}, join(root, 'vite.config.ts'), root)
+  } finally {
+    if (previousBackend === undefined) delete process.env.HARNESS_BACKEND_URL
+    else process.env.HARNESS_BACKEND_URL = previousBackend
+  }
+  vite = await createServer({
+    configFile: false, root, cacheDir: cache, logLevel: 'error',
+    server: {...config.config.server, host: '127.0.0.1', port: 0, hmr: false, watch: null},
+    optimizeDeps: {noDiscovery: true, include: []},
+  })
+  await vite.listen()
+  const port = vite.httpServer.address().port
+  const base = 'http://127.0.0.1:' + port
+  for (const path of ['/api', '/api/', '/api/foo', '/api?query=1', '/api/v1/missing']) {
+    for (const accept of ['text/html', 'application/json']) {
+      const response = await fetch(base + path, {headers: {Accept: accept}})
+      assert.equal(response.status, 404, path + ' must reach the backend')
+      assert.equal(response.headers.get('x-request-id'), 'fixture-request')
+      assert.deepEqual(await response.json(), {code: 'route/not-found'})
+    }
+  }
+  const head = await fetch(base + '/api/missing', {method: 'HEAD'})
+  assert.equal(head.status, 404)
+  assert.equal(await head.text(), '')
+  const count = requests.length
+  await fetch(base + '/apiculture', {headers: {Accept: 'application/json'}}).then(response => response.arrayBuffer())
+  assert.equal(requests.length, count, 'Similar SPA paths must not be treated as API paths')
+
+  const raw = await new Promise((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1')
+    const chunks = []
+    socket.setTimeout(3000, () => socket.destroy(new Error('No early 413 response')))
+    socket.on('error', reject)
+    socket.on('data', chunk => chunks.push(chunk))
+    socket.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    socket.on('connect', () => socket.write('POST /api/v1/sessions HTTP/1.1\r\nHost: 127.0.0.1:' + port
+      + '\r\nContent-Type: application/json\r\nContent-Length: 5242880\r\n\r\n'))
+  })
+  assert.match(raw, /^HTTP\/1\.1 413 /)
+  assert.match(raw, /x-request-id: fixture-request/i)
+  assert.match(raw, /request\/body-too-large/)
 })

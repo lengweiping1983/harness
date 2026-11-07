@@ -48,7 +48,7 @@ from ..core.jsonutil import to_jsonable
 from ..interaction.questions import QuestionError
 from .attachments import MAX_BATCH_BYTES
 from .context import WebContext
-from .errors import ApiError, BadRequest, PayloadTooLarge
+from .errors import ApiError, BadRequest, NotFound, PayloadTooLarge
 from .hub import ConnectionHub
 from .error_messages import public_error_message
 from .responses import bytes_response, error_response, json_response, text_response
@@ -334,6 +334,8 @@ class Handler(BaseHTTPRequestHandler):
             # 传输层统一计算实际长度，避免文件/静态资源响应重复发送该头。
             if name.lower() != "content-length":
                 self.send_header(name, value)
+        if self.close_connection and not any(name.lower() == 'connection' for name in response.headers):
+            self.send_header('Connection', 'close')
         self.send_header("Content-Length", str(len(response.body)))
         self.end_headers()
         if response.status not in (204, 304) and self.command != "HEAD":
@@ -456,10 +458,14 @@ class Handler(BaseHTTPRequestHandler):
         bound = getattr(getattr(self, "server", None), "server_address", (None,))[0]
         if hostname and hostname not in {"localhost", "127.0.0.1", "::1", bound}:
             return False
+        sites = {site.strip().lower() for value in self.headers.get_all('Sec-Fetch-Site', [])
+                 for site in value.split(',')}
+        if sites & {'cross-site', 'same-site'}:
+            return False
         origin = self.headers.get("Origin", "")
         if not origin:
             # 无浏览器来源的本机客户端继续可用；浏览器跨站请求不能借省略来源放行。
-            return self.headers.get('Sec-Fetch-Site', '').strip().lower() not in {'cross-site', 'same-site'}
+            return True
         try:
             parsed = urllib.parse.urlparse(origin)
         except ValueError:
@@ -476,7 +482,7 @@ class Handler(BaseHTTPRequestHandler):
             if 'origin' not in {part.strip().lower() for part in vary.split(',')}:
                 response.headers["Vary"] = f"{vary}, Origin" if vary else "Origin"
             response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type,Idempotency-Key,X-Request-ID")
-            response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
+            response.headers.setdefault("Access-Control-Allow-Methods", "GET,HEAD,POST,PATCH,DELETE,OPTIONS")
         return response
 
     # -- HTTP 动词 -------------------------------------------------------
@@ -545,6 +551,8 @@ class Handler(BaseHTTPRequestHandler):
     def _dispatch(self, request: Request) -> Response:
         if not self._origin_allowed():
             raise BadRequest(tr('python.server.7ff293468b64'), code="request/origin", status=403)
+        if request.method == 'HEAD':
+            request = replace(request, method='GET')
         handler, params = self.router.resolve(request.method, request.path)
         if self.ctx.shared_access is not None and self.ctx.shared_access.browser_endpoint(request):
             return handler(replace(request, params=params), **params)
@@ -617,6 +625,12 @@ class Handler(BaseHTTPRequestHandler):
         actual = preference if preference in ('zh-CN', 'en') else resolve_language(preference).effective_language
         current_language.set(actual)
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith('/ws/'):
+            error = (NotFound(tr('python.router.f94ec39b7259', p0=parsed.path[:200]), code='route/not-found')
+                     if self._origin_allowed() else BadRequest(tr('python.server.7ff293468b64'), code='request/origin', status=403))
+            self._error(error)
+            self.close_connection = True
+            return False
         if parsed.path == "/ws":
             if not self._origin_allowed():
                 self._error(BadRequest(tr('python.server.7ff293468b64'), code='request/origin', status=403))

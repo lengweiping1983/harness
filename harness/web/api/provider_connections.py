@@ -183,7 +183,7 @@ def build_router(ctx):
 
     @router.get('/api/v1/connection/providers')
     def providers(request):
-        return json_response({'providers': directory()})
+        return json_response({'providers': directory()}, accept_encoding=request.header('Accept-Encoding'))
 
     @router.get('/api/v1/connection')
     def status(request):

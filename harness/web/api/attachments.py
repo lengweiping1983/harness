@@ -21,10 +21,12 @@ import binascii
 from typing import Any
 
 from ..attachments import AttachmentRejected, admit_batch
-from ..attachment_store import AttachmentStore, default_store_root, is_attachment_id
-from ..errors import ApiError, BadRequest, NotFound, PayloadTooLarge
+from ..attachment_store import AttachmentStore, AttachmentStorageError, default_store_root, is_attachment_id
+from ..errors import ApiError, BadRequest, NotFound, PayloadTooLarge, ServiceUnavailable
 from ..responses import bytes_response, json_response, strong_etag, content_disposition as _content_disposition
 from ..router import Router
+from ...tools.schema import validate
+from ..input_schemas import UPLOAD_SCHEMA
 
 #: 声明长度就能拒掉的上限。base64 会把大小放大 4/3，所以线上的门槛
 #: 比领域层的批量限额更宽一点，否则合法的最大批次会在解码前被误杀。
@@ -89,14 +91,19 @@ def build_router(ctx: Any) -> Router:
         if not isinstance(raw_files, list) or not raw_files:
             raise _failure(BadRequest, 'ui.attachments.server.filesRequired', code='attachment/no-files')
 
-        items: list[tuple[bytes, str, str]] = []
-        declared_total = 0
         for index, entry in enumerate(raw_files):
             if not isinstance(entry, dict):
                 raise _failure(BadRequest, 'ui.attachments.server.entryObject', code='attachment/bad-payload', p0=f'{index + 1}')
             name = entry.get("name")
             if not isinstance(name, str) or not name.strip():
                 raise _failure(BadRequest, 'ui.attachments.server.nameRequired', code='attachment/missing-name', p0=f'{index + 1}')
+        if validate(payload, UPLOAD_SCHEMA):
+            raise _failure(BadRequest, 'ui.attachments.server.invalidPayload', code='attachment/bad-payload')
+
+        items: list[tuple[bytes, str, str]] = []
+        declared_total = 0
+        for entry in raw_files:
+            name = entry['name']
             data = decode_canonical_base64(entry.get("data"))
             declared = entry.get("mediaType")
             items.append((data, name, declared if isinstance(declared, str) else ""))
@@ -112,12 +119,18 @@ def build_router(ctx: Any) -> Router:
 
         store = _store(ctx)
         stored = [store.put(data, meta) for (data, _, _), meta in zip(items, admitted)]
+        try:
+            stats = store.stats()
+        except AttachmentStorageError as exc:
+            # 附件已经写入，统计失败不能作为执行前拒绝；保留引用供核对，不重放上传。
+            raise _failure(ServiceUnavailable, 'ui.attachments.server.statsFailed', code='attachment/stats-unavailable',
+                           details={'attachments': [entry.attachment.to_json() for entry in stored]}) from exc
 
         return json_response(
             {
                 "attachments": [entry.attachment.to_json() for entry in stored],
                 # 顺带回一份仓库统计：前端可以显示"本地已缓存 N 个附件"。
-                "stats": store.stats(),
+                "stats": stats,
             },
             accept_encoding=request.header("Accept-Encoding"),
         )

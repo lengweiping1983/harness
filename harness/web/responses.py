@@ -115,12 +115,13 @@ def bytes_response(
     status: int = 200,
     content_type: str = "application/octet-stream",
     headers: Mapping[str, str] | None = None,
+    accept_encoding: str = "",
 ) -> Response:
     response = Response(status=status, body=raw)
     response.headers["Content-Type"] = content_type
     if headers:
         response.headers.update(headers)
-    return response
+    return _maybe_gzip(response, accept_encoding)
 
 
 def error_response(

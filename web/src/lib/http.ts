@@ -26,6 +26,24 @@ export class ApiError extends Error {
   get details(): unknown { return this.failure.details }
 }
 
+/** 按错误码与资源键验证自有诊断身份，用户字段只作为原文参数呈现。 */
+function requestErrorCopy(code: string, details: unknown): ResourceCopy | undefined {
+  const rules: Record<string, Record<string, Record<string, 'string' | 'number'>>> = {
+    'bad-json': {'ui.http.invalidJsonRequest': {}},
+    'session/invalid-field': {'ui.session.titleTooLong': {limit: 'number'}, 'ui.session.unknownField': {field: 'string'}},
+    'voice/invalid': {'ui.voice.invalidPreparation': {}},
+  }
+  if (!Object.hasOwn(rules, code) || !details || typeof details !== 'object') return
+  const copy = (details as Record<string, unknown>).copy
+  if (!copy || typeof copy !== 'object') return
+  const {key, params = {}} = copy as Record<string, unknown>
+  if (typeof key !== 'string' || !Object.hasOwn(rules[code], key) || !params || typeof params !== 'object' || Array.isArray(params)) return
+  const expected = rules[code][key], entries = Object.entries(params)
+  if (entries.length !== Object.keys(expected).length || entries.some(([name, value]) => !Object.hasOwn(expected, name)
+    || typeof value !== expected[name] || typeof value === 'number' && !Number.isFinite(value))) return
+  return {key, params: params as Record<string, string | number>}
+}
+
 /** One transport owns cancellation, response parsing and timeout cleanup. */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<ApiResult<T>> {
   const { timeout = 20_000, signal, ...init } = options
@@ -57,7 +75,8 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       const body = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
       const code = typeof body.code === 'string' ? body.code : 'http/' + response.status
       const original = typeof body.message === 'string' && body.message || typeof body.error === 'string' && body.error || ''
-      const copy = collaborationErrorCopy(code) ?? (!original ? { key: 'ui.http.failure', params: { status: response.status } } : undefined)
+      const copy = collaborationErrorCopy(code) ?? requestErrorCopy(code, body.details)
+        ?? (!original ? { key: 'ui.http.failure', params: { status: response.status } } : undefined)
       return { ok: false, status: response.status, code, message: copy ? t(copy.key, copy.params) : original, details: body.details, ...(copy ? { copy } : {}) }
     }
     const issue = responseIssue(path, init.method ?? 'GET', response.status, payload)

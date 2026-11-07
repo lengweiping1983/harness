@@ -14,6 +14,8 @@ from ..agents.personality import STYLE_AXES, STYLE_CODES
 from ..project.contracts import TASK_SCHEMA, STATES, TRANSITIONS
 from ..interaction.permission_operation import APPROVAL_SCHEMA, OPERATION_SCHEMA
 from .query import QUERY_SCHEMAS, query_parameters
+from .input_schemas import SESSION_PATCH, TITLE
+from .request_contracts import request_body
 from ..academy.protocol import SCHEMAS as ACADEMY_SCHEMAS, ENDPOINTS as ACADEMY_ENDPOINTS
 
 PERSONALITY_CODE = {'anyOf': [{'type': 'string', 'enum': list(STYLE_CODES)}, {'type': 'null'}]}
@@ -44,9 +46,10 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         'workspace_id': {'type': 'string', 'minLength': 1}, 'mode': {'type': 'string', 'enum': ['local', 'worktree']},
         'ref': {'type': 'string', 'minLength': 1}, 'expected_head': {'type': ['string', 'null']},
         'expected_branch': {'type': ['string', 'null']}}},
-    'NewConversationRequest': {'type': 'object', 'properties': {
-        'cwd': {'type': ['string', 'null']}, 'title': {'type': ['string', 'null']}, 'model': {'type': ['string', 'null']},
+    'NewConversationRequest': {'type': 'object', 'additionalProperties': False, 'properties': {
+        'cwd': {'type': ['string', 'null']}, 'title': TITLE, 'model': {'type': ['string', 'null']},
         'agent_selection': {'type': 'string', 'minLength': 1}, 'project': {'$ref': '#/components/schemas/ConversationProject'}}},
+    'ConversationPatch': SESSION_PATCH,
     'WorkspaceOptions': {'type': 'object', 'required': ['cwd', 'is_git', 'root', 'branch', 'head', 'refs', 'local_branches', 'dirty'], 'properties': {
         'cwd': {'type': 'string'}, 'is_git': {'type': ['boolean', 'null']}, 'root': {'type': ['string', 'null']},
         'branch': {'type': ['string', 'null']}, 'head': {'type': ['string', 'null']}, 'dirty': {'type': ['boolean', 'null']},
@@ -976,6 +979,12 @@ SCHEMAS['SetConnection'] = {'type': 'object', 'additionalProperties': False, 're
 SCHEMAS['SetConnectionKeyStatus'] = {'type': 'object', 'additionalProperties': False, 'required': ['connection_id', 'key_id', 'enabled'], 'properties': {
     'connection_id': {'type': 'string'}, 'key_id': {'type': 'string'}, 'enabled': {'type': 'boolean'}}}
 
+# 输入草稿允许由运行时填充默认值，不能套用要求完整状态的响应字段集。
+for name, required in (('ProviderKey', ['id']), ('ProviderModel', ['id']), ('ProviderConnection', ['id'])):
+    SCHEMAS[name + 'Draft'] = {**deepcopy(SCHEMAS[name]), 'required': required}
+SCHEMAS['ProviderConnectionDraft']['properties']['keys']['items'] = {'$ref': '#/components/schemas/ProviderKeyDraft'}
+SCHEMAS['ProviderConnectionDraft']['properties']['models']['items'] = {'$ref': '#/components/schemas/ProviderModelDraft'}
+
 
 def openapi(templates: list[str]) -> dict[str, Any]:
     paths: dict[str, Any] = {}
@@ -1482,6 +1491,8 @@ def openapi(templates: list[str]) -> dict[str, Any]:
                     {'type': 'object', 'required': ['kind', 'seconds'], 'properties': {'kind': {'const': 'interval'}, 'seconds': {'type': 'number', 'minimum': 60, 'maximum': 31536000}}},
                     {'type': 'object', 'required': ['kind', 'time'], 'properties': {'kind': {'const': 'daily'}, 'time': {'type': 'string', 'pattern': '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}}},
                     {'type': 'object', 'required': ['kind', 'time', 'days'], 'properties': {'kind': {'const': 'weekly'}, 'time': {'type': 'string', 'pattern': '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}, 'days': {'type': 'array', 'minItems': 1, 'items': {'type': 'integer', 'minimum': 0, 'maximum': 6}}}},
+                    {'type': 'object', 'required': ['kind', 'time', 'monthdays'], 'properties': {'kind': {'const': 'monthly'}, 'time': {'type': 'string', 'pattern': '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}, 'monthdays': {'type': 'array', 'minItems': 1, 'items': {'type': 'integer', 'minimum': 1, 'maximum': 31}}}},
+                    {'type': 'object', 'required': ['kind', 'time', 'months', 'monthdays'], 'properties': {'kind': {'const': 'yearly'}, 'time': {'type': 'string', 'pattern': '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}, 'months': {'type': 'array', 'minItems': 1, 'items': {'type': 'integer', 'minimum': 1, 'maximum': 12}}, 'monthdays': {'type': 'array', 'minItems': 1, 'items': {'type': 'integer', 'minimum': 1, 'maximum': 31}}}},
                 ]}
                 properties = {'schedule': schedule, 'timezone': {'type': 'string', 'default': 'Asia/Shanghai'}}
                 required = ['schedule']
@@ -1518,6 +1529,9 @@ def openapi(templates: list[str]) -> dict[str, Any]:
                 parameters.append({'name': 'path', 'in': 'query', 'required': True, 'schema': {'type': 'string'}})
             if method == 'GET' and path.endswith('/restore'):
                 parameters.append({'name': 'checkpoint_id', 'in': 'query', 'required': True, 'schema': {'type': 'string'}})
+        body = request_body(method, path)
+        if body is not None and 'requestBody' not in operation:
+            operation['requestBody'] = body
         operation["parameters"] = parameters
         paths.setdefault(path, {})[method.lower()] = operation
     return {"openapi": "3.1.0", "info": {"title": tr("protocol.title"), "version": "1"}, "paths": paths, "components": {"schemas": _localized_schemas()}}

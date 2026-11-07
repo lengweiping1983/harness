@@ -1,7 +1,8 @@
 import type {ResourceCopy} from '@/types'
 
 const rules: Record<string, Record<string, readonly string[]>> = {
-  'attachment/bad-payload': {'ui.attachments.server.dataRequired': [], 'ui.attachments.server.entryObject': ['p0']},
+  'attachment/bad-payload': {'ui.attachments.server.dataRequired': [], 'ui.attachments.server.entryObject': ['p0'], 'ui.attachments.server.invalidPayload': []},
+  'attachment/stats-unavailable': {'ui.attachments.server.statsFailed': []},
   'attachment/bad-base64': {'ui.attachments.server.base64Length': [], 'ui.attachments.server.base64Decode': ['p0']},
   'attachment/non-canonical-base64': {'ui.attachments.server.base64Canonical': []},
   'attachment/no-files': {'ui.attachments.server.filesRequired': []},

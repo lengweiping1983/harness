@@ -26,9 +26,56 @@
 
 ## 本机来源策略的收紧
 
-`Handler._origin_allowed` 原先特例放行任意 localhost 的 5173 来源；`do_OPTIONS` 未执行实际请求的来源拒绝流程。当前移除该例外，预检与请求共用来源检查，拒绝来源不附加 CORS 许可头，损坏的来源也明确拒绝。无 Origin 的原生本机客户端继续可用；`Sec-Fetch-Site` 先去除首尾空白并统一大小写，跨站／同站跨来源值不能以缺少 Origin 放行。`test_mcp_discovery_cors.py:WebCorsTests` 核对开发代理保留 Host、其他端口、恶意及损坏来源、预检、错误响应、大小写／空白变体和原生客户端。Vite 开发配置禁用自身 CORS 预处理，将 API OPTIONS 及响应头交给代理后端；`dev-api-cors.test.mjs` 用实际 Vite 服务和隔离 HTTP 后端验证拒绝预检不再提前返回 204、拒绝响应不被追加许可头、允许预检沿用后端方法列表及 Host 保留。这处理了热部署 P3-13 与复测 N3／N4 的入口一致性问题，属于受控 HTTP 验证，未代替真实跨站浏览器验收。
+`Handler._origin_allowed` 原先特例放行任意 localhost 的 5173 来源；`do_OPTIONS` 未执行实际请求的来源拒绝流程。当前移除该例外，预检与请求共用来源检查，拒绝来源不附加 CORS 许可头，损坏的来源也明确拒绝。无 Origin 的原生本机客户端继续可用；`Sec-Fetch-Site` 收集所有重复头及逗号分隔值，先去除首尾空白并统一大小写；跨站／同站跨来源值既不能以缺少 Origin 放行，也不能用同源 Origin 覆盖。`test_mcp_discovery_cors.py:WebCorsTests` 核对开发代理保留 Host、其他端口、恶意及损坏来源、预检、错误响应、大小写／空白变体和原生客户端。Vite 开发配置禁用自身 CORS 预处理，将 API OPTIONS 及响应头交给代理后端；`dev-api-cors.test.mjs` 用实际 Vite 服务和隔离 HTTP 后端验证拒绝预检不再提前返回 204、拒绝响应不被追加许可头、允许预检沿用后端方法列表及 Host 保留。这处理了热部署 P3-13 与复测 N3／N4 的入口一致性问题，属于受控 HTTP 验证，未代替真实跨站浏览器验收。
 
 这对应热部署 P2-04 与 P3-13 中有价值的收紧部分，不等于证实了报告中的跨站写入链。报告使用的无 Origin 原生 HTTP 请求不能代表浏览器跨站表单；任意本机进程仍拥有完整管理能力。本轮没有引入 CSRF Token、远程管理认证或新的可信根白名单，也未实测不同浏览器的 Fetch Metadata 行为。
+
+## 全接口 QA 的问题裁决
+
+现场的 Q01–Q59 不是 59 个独立、已证实且同等级的缺陷：其中含重复根因、正常管理能力、加固建议与未证实风险。以下按当前路由、协议源、最终消费者和隔离回归裁决；没有向用户的常驻实例写入测试数据，也未清理现场遗留附件。报告中的请求数、生产表现及安全严重程度不作为本轮验收依据。
+
+| 来源 | 判定、价值与当前处理 | 源码／回归依据 |
+|---|---|---|
+| Q01、Q19、Q48 | 同一代理遗漏，有修复价值；整个 API 命名空间交给后端，Accept 不影响未知 API 的 JSON 404，类似 `/apiculture` 不被误代理 | `vite.config.ts`；`dev-api-cors.test.mjs` |
+| Q02 | 部分成立：代理等待首段正文导致超限声明不能及时到达后端；已提前发送代理请求头，并明确关闭响应的 Connection。同步发送完整超大正文时出现 BrokenPipe 不能单独证明后端未发送 413 | `Handler._send`；隔离 Vite 的原始 socket 用例与 `test_oversized_headers_receive_complete_413_without_upload` |
+| Q03、Q20 | 现场差异存在，但 FOO 与畸形长度在 Node HTTP 解析器阶段被拒，产品中间件无法接收这类报文；为统一 JSON 自行替换 HTTP 解析器代价与风险过高。文档明确开发入口边界 | `vite.config.ts` 使用 Vite 原生 HTTP；后端 `send_error` 与 `_build_request` 保留原统一拒绝路径 |
+| Q04、Q44 | “无长度上限”不成立：普通 HTTP 正文已有 4 MiB 上限。50 万字符被正常受理和 10 万字符草稿可保存不证明故障；没有固定输入的卡顿、配额失败或存储增长预算证据，不新增正文截断及草稿压缩 | `server.MAX_REQUEST_BODY_BYTES`、`test_http_body_limits.py`；现场草稿测试仍可响应 |
+| Q05、Q43 | 显式标题确无单独预算，有约束价值；创建和 PATCH 最多 512 个 Unicode 码点，写入前拒绝，原有数据不改写。完整标题进入 DOM 本身不是缺陷，也不截断用户已有文本 | `input_schemas.py`、`sessions.py`；`test_session_rejections_happen_before_creation_or_update`、`test_valid_title_boundary_preserves_original_unicode_and_creates_once` |
+| Q06 | 成立：未知 `/ws/` 子路径曾进入静态首页回退；现于握手前返回 JSON 404，来源拒绝仍为 403 | `Handler.parse_request`；`test_unknown_ws_paths_cannot_serve_spa_or_upgrade` |
+| Q07 | 部分成立且有价值：缺请求体的操作包含本就无参的动作，不能要求所有 POST 都有 requestBody。已为实际读取 JSON 的管理入口补字段、版本及引用，保留无参动作；新增协议检查追踪真实处理器，不按数量制造通过 | `request_contracts.py`、`protocol.py`、生成器及 `test_json_consumers_publish_request_fields_and_bodyless_actions_remain_bodyless` |
+| Q08 | 成立：monthly/yearly 实现与公开分支不同步；创建和预览均补齐六类日程及日期边界 | `protocol.py`、`app/schedules.py`；`test_calendar_schedule_contract_accepts_all_current_kinds` 同时核对真实日程准入 |
+| Q09、Q29、Q36、Q52 | 所选目录、规范化路径与设置中的本机目录属于已声明的管理能力；插件 I/O 的路径隐藏策略不能外推为所有管理 API 均禁止展示路径。没有共享入口越权证据，不增加任意目录禁用或自动遮罩 | `docs/api.md` 本机管理边界、`workspaces.workspace_options`、设置投影 |
+| Q10、Q59 | 判断逻辑确有缺口，收紧有价值；检查所有 Fetch Metadata 值，Origin 不能覆盖拒绝。本机原始客户端伪造头不等于已证明浏览器跨站利用或请求走私 | `Handler._origin_allowed`；`test_fetch_metadata_checks_every_header_and_origin_before_dispatch` |
+| Q11、Q21 | 开发服务读取 Web 源码及调试依赖是正常功能；越界请求返回首页不能证明读到了凭据。`cors: false` 不授予跨源脚本读取权限，原生工具伪造 Origin 得到 200 不证明浏览器可读取正文；不关闭开发调试能力 | `vite.config.ts`、开发与生产入口边界；现场记录明确越界响应为 SPA HTML |
+| Q12、Q37、Q50 | 有限响应放大值得收紧，但“无限”及 XSS 定性过强。路由回显限制为前 200 码点，超长附件名在解码落盘前拒绝；并未承诺所有业务诊断统一截断，也不改写已有错误原文 | `Router.resolve`、`UPLOAD_SCHEMA`；`test_route_error_echo_is_bounded_without_changing_route_identity`、附件准入回归 |
+| Q13、Q55 | 尚未证实注入链：JSON 中的 HTML 字符合法；存在 dangerouslySetInnerHTML 不证明其消费了错误正文。没有来自错误字段到 HTML sink 的调用链，不进行全局 HTML 转义，以免用户原文被双重编码 | `Request`／响应 JSON 边界；现场净化样本通过只能证明那些样本，不能保证全部 XSS 安全 |
+| Q14 | 校验先后可稳定统一；无效游标先于会话读取拒绝，不触发重放 | `sessions.session_events`；`test_live_events_invalid_query_precedes_missing_session` |
+| Q15 | HEAD 未映射 GET 的事实成立；现共用 GET 的路由、授权与响应头，仅省略正文，不进入 POST 处理器 | `Handler._dispatch`、`_send`；`test_head_matches_get_headers_without_body_or_write_execution` |
+| Q16、Q22、Q56 | 非严格查询入口忽略额外字段的事实存在，但并非所有路由承诺 additionalProperties=false；全局拒绝会改变现有调用协议。未证明错误业务行为或固定性能损失，不把所有入口强制改成严格查询 | `query.QUERY_SCHEMAS` 仅声明具体入口；其他入口仍由各自处理器消费参数 |
+| Q17 | 缺少单项 DELETE 是功能缺口，不能直接当作高危缺陷。内容寻址附件可被多个对话引用，未经引用生命周期设计增加删除会破坏历史；本轮不新增自动回收、不操作用户附件 | `AttachmentStore` 内容寻址、`api/attachments.py` 回读入口 |
+| Q18、Q27 | 写入前识别拼错字段有价值；附件顶层与每项、会话创建及 PATCH 均拒绝未知字段，附件类型与数量预算同步公开契约 | `input_schemas.py`、`sessions.py`、`attachments.py`；准入回归核对不初始化仓库、不创建会话 |
+| Q23 | 成立：非法 title 类型会退化成空更新诊断；现以 session/invalid-field 明确拒绝，模型与思考强度的非法类型同样先拒绝 | `sessions.update_session`；会话准入测试 |
+| Q24 | 英文解析原句混入产品提示成立，已改为双语资源；解析位置保留结构化字段，非法 UTF-8 同样明确拒绝 | `Request.json`；`test_bad_json_is_bilingual_and_diagnostics_are_structured` 与 `http.test.ts` 的同实例语言切换、资源校验及零重放回归 |
+| Q25 | 已登记共享错误资源确实重复拼入机器码，与文档不符；去除资源中的后缀，code 字段及未知码兜底仍保留 | 双语资源、`collaboration_error_message`；`test_http_conflict_retains_status_and_code_with_translated_message` 及全部公开错误的投影回归 |
+| Q26 | 非缺陷：语言由实例设置决定，Accept-Language/X-Language 未定义为覆盖入口；已在接口文档说明 | `Handler.parse_request`、`test_http_request_language.py` 的长连接实际资源消费 |
+| Q28 | 未声明 Content-Type 仍按 JSON 解析是现有协议，不会绕过正文、来源和业务准入；没有必须拒绝的产品契约，不增加媒体类型限制 | `Request.json`、`Handler._build_request` |
+| Q30、Q31 | 非法追踪号替换、空格与点的允许集是当前选择；合法 header 字符本身不证明注入。浏览器生成合法 UUID，恢复身份与幂等键另有合同，不因建议更换关联协议 | `Handler._build_request`、`api.ts:createSession`、创建回查合同 |
+| Q32、Q33、Q34 | OPTIONS 统一预检、尾斜杠归一化及前导零是可接受的协议选择，不自动构成错误；尤其 `[0-9]+` 同样接受前导零，原报告建议不能解决其所称问题 | `do_OPTIONS`、`Router.resolve` 路径分段、`read_query` 数字转换 |
+| Q35 | Server 版本头属低价值加固建议，当前本机管理威胁边界下未发现功能故障或利用链，不为隐藏指纹替换传输行为 | `BaseHTTPRequestHandler` 及回环部署边界 |
+| Q38、Q39 | 大响应的实测大小成立，但不等于性能故障；优先接入已有 gzip 协商，保留 JSON 内容及 no-store，不引入分页或不可靠缓存 | `provider_connections.providers`、`v1.schema`、`bytes_response`；`test_large_catalogs_negotiate_gzip_without_changing_payload_or_cache_policy` |
+| Q40 | 目录有不同消费者与视图投影；没有固定输入的耗时与网络测量，不按响应大小直接重构成分页。已有目录使用 Accept-Encoding | `catalog.py`、插件目录及其调用方；不宣称本轮已优化全部目录 |
+| Q41 | 准备接口忽略畸形 JSON 的事实成立；现先校验空对象或空正文，再启动引擎，非法输入不触发准备。合法准备耗时仍属于实际引擎工作，不承诺固定响应时间 | `voice.prepare`；`test_voice_preparation_rejects_bad_json_before_engine` |
+| Q42 | 现场只用 textContent 检测，未证明提示可见；源码确认未激活组件会保留 loading 文本。移除隐藏状态的无请求提示，继续保持隐藏不读取；错误保存资源身份，语言切换不重发请求 | `TerminalTypeSelect`、现场 `qa_ui_final.mjs`；`TerminalTypeSelect.test.tsx` 核对隐藏、恢复、迟到结果和同实例英中英 |
+| Q45 | 成立：统计吞 OSError 可返回不完整数字；现明确失败，合法未初始化仓库仍为零。若附件已写入后统计失败，以 503 和已写入引用报告，不能伪装成写入前拒绝 | `AttachmentStore.stats`、上传出口；统计失败与写入后回执回归，前端核对资源及零重放 |
+| Q46 | 不同领域的非法标识不必共用错误码；附件有意用 404 隐藏探测细节，未证明越权或错误状态，不机械统一 | `attachments.fetch` 的非法 ID 拒绝说明、会话不变量错误 |
+| Q47 | 当前同源流程不需要跨源凭据许可；没有需支持跨端口 Cookie 的合同，不添加 Access-Control-Allow-Credentials 扩大来源能力 | 来源与共享入口既有边界 |
+| Q49 | URL 路径大小写、编码和异常分隔不应未经契约就自动纠正。规范 API 命名空间已修复；未证明这些路径应与正常路由等价，不新增宽松 URL 解码代理 | `vite.config.ts` 命名空间匹配与 `Router.resolve` |
+| Q51 | 缺路径与相对路径均要求重新选择项目，现有诊断可操作；细分错误不是已证实故障，不额外扩展错误协议 | `workspace_options` 字段检查 |
+| Q53、Q54 | 中文／English 为语言自称；代码和图表排版已有明文例外，报告引用的旧 AGENTS 行号不能替代当前约束，不改成普通正文排版 | `SettingsDialog`、`project-contract.md` 的内容排版例外 |
+| Q57 | 只读取 voice.html 源码不能代表运行时 lang；i18n 初始化写 documentElement.lang，VoiceCapture 接收语言存储事件，无已证实的常驻错误 | `i18n/index.ts`、`voice-bootstrap.ts`、`VoiceCapture.tsx` |
+| Q58 | 主题由 head 中同步脚本应用，报告自身未观察到闪烁；没有首帧错误证据，不新增服务端主题状态 | `index.html` 启动脚本 |
+
+本轮验证为定向 Python、Vitest 与隔离 Vite HTTP 用例，不代表完整业务回归、安全审计、在线模型、生产构建或浏览器／桌面实机验收。新协议回归对 JSON 消费处理器核对 requestBody，引用检查覆盖生成文档；这不等于对每个写入口执行真实副作用验收。压缩回归只证明固定 JSON 字节可无损协商和缩小传输，不承诺现场延迟改善。
 
 ## 不成立或不宜按报告建议改动的结论
 

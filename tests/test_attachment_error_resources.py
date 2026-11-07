@@ -48,6 +48,7 @@ class AttachmentErrorResourceTests(unittest.TestCase):
             (lambda: upload(Request('POST', '/', {}, {}, b'{"files":[]}')), 'filesRequired'),
             (lambda: upload(Request('POST', '/', {}, {}, b'{"files":[null]}')), 'entryObject'),
             (lambda: upload(Request('POST', '/', {}, {}, b'{"files":[{}]}')), 'nameRequired'),
+            (lambda: upload(Request('POST', '/', {}, {}, b'{"files":[{"name":"a.txt","data":"YQ==","extra":1}]}')), 'invalidPayload'),
             (lambda: upload(Request('POST', '/', {}, {}, b'{"files":[{"name":"a.txt","data":""}]}')), 'empty'),
         ]
         for language in ('en', 'zh-CN', 'en'):

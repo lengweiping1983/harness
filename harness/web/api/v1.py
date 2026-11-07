@@ -99,7 +99,7 @@ def build_router(ctx: Any) -> Router:
     def schema(request):
         body = schema_body(current_language.get(), tuple(ctx.router().templates()))
         return bytes_response(body, content_type="application/json; charset=utf-8",
-                              headers={"Cache-Control": "no-store"})
+                              headers={"Cache-Control": "no-store"}, accept_encoding=request.header('Accept-Encoding'))
 
     @router.get("/api/v1/sessions/{session_id}/permissions")
     def session_permissions(request, session_id):

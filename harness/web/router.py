@@ -67,7 +67,9 @@ class Request:
         try:
             payload = _json.loads(self.body.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:
-            raise NotFound(tr('python.router.c28457f0c56a', p0=f'{exc}'), code="bad-json", status=400) from exc
+            details = {name: getattr(exc, name) for name in ('lineno', 'colno', 'pos', 'start', 'end') if hasattr(exc, name)}
+            raise NotFound(tr('ui.http.invalidJsonRequest'), code="bad-json", status=400,
+                           details={**details, 'copy': {'key': 'ui.http.invalidJsonRequest'}}) from exc
         if not isinstance(payload, dict):
             raise NotFound(tr('python.router.37840a0a4194'), code="bad-json", status=400)
         return payload
@@ -173,7 +175,7 @@ class Router:
             raise NotFound(
                 tr('python.router.76a986e2bcbc', p0=f'{method}'), code="method-not-allowed", status=405
             )
-        raise NotFound(tr('python.router.f94ec39b7259', p0=f'{path}'), code="route/not-found")
+        raise NotFound(tr('python.router.f94ec39b7259', p0=path[:200]), code="route/not-found")
 
     def templates(self) -> list[str]:
         return [f"{route.method} {route.template}" for route in self._routes]

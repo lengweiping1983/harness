@@ -41,6 +41,7 @@ from ..core.fsatomic import atomic_write
 
 import json
 import re
+import stat
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -210,19 +211,22 @@ class AttachmentStore:
         files = 0
         total = 0
         try:
-            for bucket in self.root.iterdir():
-                if not bucket.is_dir():
+            buckets = list(self.root.iterdir())
+        except FileNotFoundError:
+            return {"count": 0, "totalBytes": 0, "root": str(self.root)}
+        except OSError:
+            raise _invalid() from None
+        try:
+            for bucket in buckets:
+                if not stat.S_ISDIR(bucket.stat().st_mode):
                     continue
                 for entry in bucket.iterdir():
                     if entry.name.endswith(META_SUFFIX) or entry.name.startswith(".tmp-"):
                         continue
+                    total += entry.stat().st_size
                     files += 1
-                    try:
-                        total += entry.stat().st_size
-                    except OSError:
-                        continue
         except OSError:
-            pass
+            raise _invalid() from None
         return {"count": files, "totalBytes": total, "root": str(self.root)}
 
     def clear(self) -> None:

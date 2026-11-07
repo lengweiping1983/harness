@@ -1,5 +1,7 @@
 """当前路由、人格代号与双语协议快照保持一致，不声明旧格式。"""
 import asyncio
+import ast
+import gzip
 import itertools
 import json
 import tempfile
@@ -7,6 +9,7 @@ import unittest
 from dataclasses import fields
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from harness import Harness, HarnessConfig
 from harness.agents.personality import STYLE_AXES, STYLE_CODES
@@ -107,6 +110,90 @@ class ProtocolCurrentBoundariesTests(unittest.TestCase):
         self.assertEqual(shared['properties']['expected_revision']['pattern'], '^[0-9a-f]{64}$')
         local = paths['/api/v1/questions/answer']['post']['requestBody']['content']['application/json']['schema']
         self.assertEqual(local['$ref'], '#/components/schemas/SubmitAnswers')
+
+    def test_json_consumers_publish_request_fields_and_bodyless_actions_remain_bodyless(self):
+        paths = openapi(self.templates)['paths']
+        root = Path(__file__).resolve().parents[1]
+        checked = []
+        for source in (root / 'harness/web/api').glob('*.py'):
+            module = ast.parse(source.read_text(encoding='utf-8'))
+            for function in ast.walk(module):
+                if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                consumes_json = any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name) and node.func.value.id == 'request'
+                    and node.func.attr == 'json' for node in ast.walk(function))
+                if not consumes_json:
+                    continue
+                for decorator in function.decorator_list:
+                    if (isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute)
+                            and decorator.func.attr in ('post', 'put', 'patch', 'delete')
+                            and decorator.args and isinstance(decorator.args[0], ast.Constant)):
+                        path, method = decorator.args[0].value, decorator.func.attr
+                        if path not in paths:
+                            continue
+                        with self.subTest(path=path, method=method):
+                            body = paths[path][method].get('requestBody')
+                            self.assertIsNotNone(body, f'{source.name}:{function.lineno}')
+                            self.assertIn('schema', body['content']['application/json'])
+                            checked.append((method, path))
+        self.assertGreater(len(checked), 50)
+        for path in ('/api/v1/mcp-service/stop', '/api/v1/chatgpt/login'):
+            self.assertNotIn('requestBody', paths[path]['post'])
+        for path in ('/api/v1/screenshot', '/api/v1/voice/preparations', '/api/v1/sessions/{session_id}/browser'):
+            self.assertFalse(paths[path]['post']['requestBody']['required'])
+        self.assertTrue(paths['/api/v1/sessions/{session_id}']['patch']['requestBody']['required'])
+
+    def test_calendar_schedule_contract_accepts_all_current_kinds(self):
+        document = openapi(self.templates)
+        schedules = [{'kind': 'once', 'at': 1800000000}, {'kind': 'interval', 'seconds': 60},
+            {'kind': 'daily', 'time': '09:00'}, {'kind': 'weekly', 'time': '09:00', 'days': [0, 4]},
+            {'kind': 'monthly', 'time': '09:00', 'monthdays': [31]},
+            {'kind': 'yearly', 'time': '09:00', 'months': [2], 'monthdays': [29]}]
+        from harness.app.schedules import validate_schedule
+        for path in ('/api/v1/automations', '/api/v1/automations/preview'):
+            schema = document['paths'][path]['post']['requestBody']['content']['application/json']['schema']['properties']['schedule']
+            for schedule in schedules:
+                self.assertEqual(sum(not validate(schedule, branch) for branch in schema['oneOf']), 1, schedule)
+                self.assertEqual(validate_schedule({'schedule': schedule})[0], schedule)
+            for schedule in ({'kind': 'monthly', 'time': '09:00'},
+                    {'kind': 'yearly', 'time': '09:00', 'months': [13], 'monthdays': [1]}):
+                self.assertFalse(any(not validate(schedule, branch) for branch in schema['oneOf']))
+
+    def test_new_request_schema_refs_resolve_and_snapshots_are_independent(self):
+        document = openapi(self.templates)
+        def check(value):
+            if isinstance(value, dict):
+                if '$ref' in value:
+                    self.assertIn(value['$ref'].rsplit('/', 1)[-1], document['components']['schemas'])
+                for child in value.values():
+                    check(child)
+            elif isinstance(value, list):
+                for child in value:
+                    check(child)
+        check(document)
+        body = document['paths']['/api/v1/attachments']['post']['requestBody']['content']['application/json']['schema']
+        body['properties'].clear()
+        self.assertIn('files', openapi(self.templates)['paths']['/api/v1/attachments']['post']['requestBody']['content']['application/json']['schema']['properties'])
+
+    def test_large_catalogs_negotiate_gzip_without_changing_payload_or_cache_policy(self):
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+        router = WebContext(self.host, loop).router()
+        fixture = [{'id': 'fixture', 'models': [{'id': 'Original 原文'}] * 300}]
+        with patch('harness.web.api.provider_connections.directory', return_value=fixture):
+            for path in ('/api/v1/connection/providers', '/api/v1/openapi.json'):
+                handler, params = router.resolve('GET', path)
+                plain = handler(Request('GET', path, {}, {}, b''), **params)
+                compressed = handler(Request('GET', path, {}, {'Accept-Encoding': 'gzip;q=0.5'}, b''), **params)
+                refused = handler(Request('GET', path, {}, {'Accept-Encoding': 'gzip;q=0,*;q=1'}, b''), **params)
+                self.assertEqual(compressed.headers['Content-Encoding'], 'gzip')
+                self.assertEqual(compressed.headers['Vary'], 'Accept-Encoding')
+                self.assertEqual(gzip.decompress(compressed.body), plain.body)
+                self.assertEqual(refused.body, plain.body)
+                self.assertNotIn('Content-Encoding', refused.headers)
+                self.assertEqual(compressed.headers['Cache-Control'], 'no-store')
+                self.assertLess(len(compressed.body), len(plain.body))
 
     def test_queue_edit_declares_both_text_and_expected_version(self):
         document = openapi(self.templates)

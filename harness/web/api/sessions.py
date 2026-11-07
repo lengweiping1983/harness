@@ -21,6 +21,7 @@ from ..models import REASONING_EFFORTS, model_catalog
 from ..responses import json_response, text_response
 from ..router import Router
 from ..query import LIVE_EVENTS_QUERY, SESSION_LIST_QUERY, SESSION_ACTIVITY_QUERY, read_query
+from ..input_schemas import SESSION_PATCH, TITLE_MAX_LENGTH
 from .. import shared_projection
 from ..views import session_detail, session_listing, session_header_view
 
@@ -56,11 +57,20 @@ def build_router(ctx: Any) -> Router:
     @router.post("/api/v1/sessions")
     def create_session(request: Any) -> Any:
         payload = request.json()
+        unknown = sorted(set(payload) - {'cwd', 'title', 'model', 'agent_selection', 'project'})
+        if unknown:
+            raise BadRequest(tr('ui.session.unknownField', field=unknown[0][:200]),
+                             code='session/invalid-field', details={'field': unknown[0][:200],
+                                 'copy': {'key': 'ui.session.unknownField', 'params': {'field': unknown[0][:200]}}})
         # 先拒绝结构错误，避免字符串化对象后创建无法使用的持久对话。
         for field in ('cwd', 'title', 'model'):
             if payload.get(field) is not None and not isinstance(payload[field], str):
                 raise BadRequest(tr('python.sessions.invalid_field', field=field),
                                  code='session/invalid-field', details={'field': field})
+        if isinstance(payload.get('title'), str) and len(payload['title']) > TITLE_MAX_LENGTH:
+            raise BadRequest(tr('ui.session.titleTooLong', limit=TITLE_MAX_LENGTH), code='session/invalid-field',
+                             details={'field': 'title', 'maxLength': TITLE_MAX_LENGTH,
+                                      'copy': {'key': 'ui.session.titleTooLong', 'params': {'limit': TITLE_MAX_LENGTH}}})
         cwd = payload.get('cwd')
         if cwd:
             # 显式目录先解析并确认存在，再创建任何持久对话记录。
@@ -326,6 +336,19 @@ def build_router(ctx: Any) -> Router:
         两个项目同时跑、模型不同时，全局开关必然打架。
         """
         payload = request.json()
+        unknown = sorted(set(payload) - set(SESSION_PATCH['properties']))
+        if unknown:
+            raise BadRequest(tr('ui.session.unknownField', field=unknown[0][:200]),
+                             code='session/invalid-field', details={'field': unknown[0][:200],
+                                 'copy': {'key': 'ui.session.unknownField', 'params': {'field': unknown[0][:200]}}})
+        for field in ('title', 'model', 'reasoning_effort'):
+            if field in payload and payload[field] is not None and not isinstance(payload[field], str):
+                raise BadRequest(tr('python.sessions.invalid_field', field=field),
+                                 code='session/invalid-field', details={'field': field})
+        if isinstance(payload.get('title'), str) and len(payload['title']) > TITLE_MAX_LENGTH:
+            raise BadRequest(tr('ui.session.titleTooLong', limit=TITLE_MAX_LENGTH), code='session/invalid-field',
+                             details={'field': 'title', 'maxLength': TITLE_MAX_LENGTH,
+                                      'copy': {'key': 'ui.session.titleTooLong', 'params': {'limit': TITLE_MAX_LENGTH}}})
         ctx.harness.get_session(session_id)  # 校验存在性
 
         metadata: dict[str, Any] = {}
@@ -428,8 +451,8 @@ def build_router(ctx: Any) -> Router:
     @router.get("/api/v1/sessions/{session_id}/live-events")
     def session_events(request: Any, session_id: str) -> Any:
         """按 ``seq`` 增量拉取事件（WebSocket 不可用时的降级通道）。"""
-        ctx.harness.get_session(session_id)  # 校验存在性
         since = read_query(request, LIVE_EVENTS_QUERY)['since']
+        ctx.harness.get_session(session_id)  # 校验存在性
         events = ctx.hub.replay(session_id, since)
         return json_response(
             {

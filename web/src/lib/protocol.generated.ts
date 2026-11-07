@@ -45,6 +45,12 @@ export interface NewConversationRequest {
   agent_selection?: string
   project?: ConversationProject
 }
+export interface ConversationPatch {
+  title?: string | null
+  model?: string | null
+  reasoning_effort?: string | null
+  reasoning_effort_inherit?: boolean
+}
 export interface WorkspaceOptions {
   cwd: string
   is_git: boolean | null
@@ -2107,6 +2113,41 @@ export interface ProviderAuthorization {
   events: Array<Record<string, unknown>>
   prompt: Record<string, unknown> | null
   error: string
+}
+export interface ProviderKeyDraft {
+  id: string
+  enabled?: boolean
+  mask?: string
+  available?: boolean
+  current?: boolean
+  in_use?: boolean
+  value?: string
+}
+export interface ProviderModelDraft {
+  id: string
+  model?: string
+  name?: string
+  enabled?: boolean
+  input?: Array<'text' | 'image' | 'video'>
+  context_window?: number
+  max_output_tokens?: number
+  reasoning_efforts?: Record<string, unknown> | boolean
+  compat?: Record<string, unknown>
+}
+export interface ProviderConnectionDraft {
+  id: string
+  name?: string
+  protocol?: string
+  base_url?: string
+  enabled?: boolean
+  auth?: ProviderAuth
+  keys?: Array<ProviderKeyDraft>
+  models?: Array<ProviderModelDraft>
+  model_catalog?: Array<Record<string, unknown>>
+  headers?: Record<string, unknown>
+  compat?: Record<string, unknown>
+  timeout_ms?: number
+  max_retries?: number
 }
 export const projectTaskStates = ["BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE"] as const
 export const projectTaskTransitions: Record<ProjectTask['status'], ProjectTask['status'][]> = {"BACKLOG": ["READY"], "READY": ["BACKLOG", "IN_PROGRESS"], "IN_PROGRESS": ["REVIEW", "BLOCKED"], "REVIEW": ["IN_PROGRESS", "BLOCKED", "DONE"], "BLOCKED": ["READY", "IN_PROGRESS", "REVIEW"], "DONE": []}

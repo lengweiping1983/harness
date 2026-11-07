@@ -85,6 +85,9 @@ def build_router(ctx: Any) -> Router:
     @router.post('/api/v1/voice/preparations')
     def prepare(request):
         require_local(request)
+        if request.json():
+            raise BadRequest(tr('ui.voice.invalidPreparation'), code='voice/invalid',
+                             details={'copy': {'key': 'ui.voice.invalidPreparation'}})
 
         async def run():
             await run_hex_owned(ctx.harness.hex_service.prepare_transcription)

@@ -1,9 +1,40 @@
 import {api} from '../api'
-import {setLocale} from '@/i18n'
+import {setLocale, t} from '@/i18n'
+import {failureText} from '../resourceError'
+import {noticeText} from '../noticeText'
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 import {ApiError, pluginRequest, request, runtimeRequest, unwrap} from '../http'
 
 const fetchMock = vi.fn<typeof fetch>()
+
+it.each([
+  ['bad-json', 'ui.http.invalidJsonRequest', {}],
+  ['session/invalid-field', 'ui.session.titleTooLong', {limit: 512}],
+  ['session/invalid-field', 'ui.session.unknownField', {field: 'Original 原文'}],
+  ['voice/invalid', 'ui.voice.invalidPreparation', {}],
+] as const)('keeps request rejection %s/%s translatable without replay', async (code, key, params) => {
+  fetchMock.mockResolvedValue(Response.json({error: 'Original server snapshot', code, details: {copy: {key, params}}}, {status: 400}))
+  const result = await api.createSession({title: 'Original'})
+  expect(result.ok).toBe(false)
+  if (result.ok) throw Error('Expected rejection')
+  expect(result.copy).toEqual({key, params})
+  const value = failureText(new ApiError(result))
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(language)
+    expect(noticeText(value)).toBe(t(key, params))
+  }
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+})
+
+it('does not trust unrelated or malformed request error resources', async () => {
+  for (const copy of [{key: 'ui.session.titleTooLong', params: {limit: '512'}},
+      {key: 'ui.session.unknownField', params: {field: 'x', extra: 'y'}},
+      {key: 'ui.voice.invalidPreparation'}, {key: 'constructor'}]) {
+    fetchMock.mockResolvedValueOnce(Response.json({error: 'Original snapshot', code: 'session/invalid-field', details: {copy}}, {status: 400}))
+    expect(await api.createSession()).toMatchObject({ok: false, code: 'session/invalid-field', message: 'Original snapshot'})
+  }
+  expect(fetchMock).toHaveBeenCalledTimes(4)
+})
 
 beforeEach(() => {
   vi.useFakeTimers()
