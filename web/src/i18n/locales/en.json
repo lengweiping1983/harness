@@ -5001,5 +5001,6 @@
   "ui.session.titleTooLong": "Conversation titles may contain at most {limit} Unicode code points.",
   "ui.session.unknownField": "Unknown conversation field: {field}.",
   "ui.http.invalidJsonRequest": "The request body must be valid UTF-8 JSON.",
-  "ui.attachments.server.statsFailed": "Attachments were stored, but cache statistics could not be read. Verify the returned references before uploading again."
+  "ui.attachments.server.statsFailed": "Attachments were stored, but cache statistics could not be read. Verify the returned references before uploading again.",
+  "ui.collaboration.error.session/not-found": "The conversation does not exist or is no longer available."
 }

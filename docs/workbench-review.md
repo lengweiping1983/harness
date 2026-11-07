@@ -32,14 +32,14 @@
 
 ## 全接口 QA 的问题裁决
 
-现场的 Q01–Q59 不是 59 个独立、已证实且同等级的缺陷：其中含重复根因、正常管理能力、加固建议与未证实风险。以下按当前路由、协议源、最终消费者和隔离回归裁决；没有向用户的常驻实例写入测试数据，也未清理现场遗留附件。报告中的请求数、生产表现及安全严重程度不作为本轮验收依据。
+现场的 Q01–Q59 不是 59 个独立、已证实且同等级的缺陷：其中含重复根因、正常管理能力、加固建议与未证实风险。以下按当前路由、协议源、最终消费者和隔离回归裁决；没有向用户的常驻实例写入测试数据，也未清理现场遗留附件。报告中的请求数、生产表现及安全严重程度不作为本轮验收依据。复验按“行为仍与首轮一致”统计的未修复项，仍须核对该行为是否违反现行合同，不能直接沿用首轮的严重程度；无正文动作缺少 requestBody 也不是契约缺口。
 
 | 来源 | 判定、价值与当前处理 | 源码／回归依据 |
 |---|---|---|
 | Q01、Q19、Q48 | 同一代理遗漏，有修复价值；整个 API 命名空间交给后端，Accept 不影响未知 API 的 JSON 404，类似 `/apiculture` 不被误代理 | `vite.config.ts`；`dev-api-cors.test.mjs` |
 | Q02 | 部分成立：代理等待首段正文导致超限声明不能及时到达后端；已提前发送代理请求头，并明确关闭响应的 Connection。同步发送完整超大正文时出现 BrokenPipe 不能单独证明后端未发送 413 | `Handler._send`；隔离 Vite 的原始 socket 用例与 `test_oversized_headers_receive_complete_413_without_upload` |
 | Q03、Q20 | 现场差异存在，但 FOO 与畸形长度在 Node HTTP 解析器阶段被拒，产品中间件无法接收这类报文；为统一 JSON 自行替换 HTTP 解析器代价与风险过高。文档明确开发入口边界 | `vite.config.ts` 使用 Vite 原生 HTTP；后端 `send_error` 与 `_build_request` 保留原统一拒绝路径 |
-| Q04、Q44 | “无长度上限”不成立：普通 HTTP 正文已有 4 MiB 上限。50 万字符被正常受理和 10 万字符草稿可保存不证明故障；没有固定输入的卡顿、配额失败或存储增长预算证据，不新增正文截断及草稿压缩 | `server.MAX_REQUEST_BODY_BYTES`、`test_http_body_limits.py`；现场草稿测试仍可响应 |
+| Q04、Q44 | “无长度上限”不成立：普通 HTTP 正文已有 4 MiB 上限。50 万字符被正常受理和 10 万字符草稿可保存不证明故障；没有固定输入的卡顿、配额失败或存储增长预算证据，不新增正文截断及草稿压缩 | `server.MAX_REQUEST_BODY_BYTES`；`test_http_body_limits.py` 将真实运行路由接到受控提交替身，核对 50 万 ASCII／补充平面字符的有限正文保留原文，超出 4 MiB 在读取和提交前拒绝，不触发真实模型；现场草稿测试仍可响应 |
 | Q05、Q43 | 显式标题确无单独预算，有约束价值；创建和 PATCH 最多 512 个 Unicode 码点，写入前拒绝，原有数据不改写。完整标题进入 DOM 本身不是缺陷，也不截断用户已有文本 | `input_schemas.py`、`sessions.py`；`test_session_rejections_happen_before_creation_or_update`、`test_valid_title_boundary_preserves_original_unicode_and_creates_once` |
 | Q06 | 成立：未知 `/ws/` 子路径曾进入静态首页回退；现于握手前返回 JSON 404，来源拒绝仍为 403 | `Handler.parse_request`；`test_unknown_ws_paths_cannot_serve_spa_or_upgrade` |
 | Q07 | 部分成立且有价值：缺请求体的操作包含本就无参的动作，不能要求所有 POST 都有 requestBody。已为实际读取 JSON 的管理入口补字段、版本及引用，保留无参动作；新增协议检查追踪真实处理器，不按数量制造通过 | `request_contracts.py`、`protocol.py`、生成器及 `test_json_consumers_publish_request_fields_and_bodyless_actions_remain_bodyless` |
@@ -56,7 +56,7 @@
 | Q18、Q27 | 写入前识别拼错字段有价值；附件顶层与每项、会话创建及 PATCH 均拒绝未知字段，附件类型与数量预算同步公开契约 | `input_schemas.py`、`sessions.py`、`attachments.py`；准入回归核对不初始化仓库、不创建会话 |
 | Q23 | 成立：非法 title 类型会退化成空更新诊断；现以 session/invalid-field 明确拒绝，模型与思考强度的非法类型同样先拒绝 | `sessions.update_session`；会话准入测试 |
 | Q24 | 英文解析原句混入产品提示成立，已改为双语资源；解析位置保留结构化字段，非法 UTF-8 同样明确拒绝 | `Request.json`；`test_bad_json_is_bilingual_and_diagnostics_are_structured` 与 `http.test.ts` 的同实例语言切换、资源校验及零重放回归 |
-| Q25 | 已登记共享错误资源确实重复拼入机器码，与文档不符；去除资源中的后缀，code 字段及未知码兜底仍保留 | 双语资源、`collaboration_error_message`；`test_http_conflict_retains_status_and_code_with_translated_message` 及全部公开错误的投影回归 |
+| Q25 | 已登记共享错误资源的重复机器码后缀已去除。复验改用不存在会话，`actor → SessionAccess.snapshot → SessionStore.get` 产生未登记的 session/not-found，因而落到未知码兜底；已为该已知码登记双语资源，保留原 403 和未启用共享的 409。真正未知的码仍保留诊断身份，不通过全局剥离丢失证据 | 双语资源、`error_messages.py`、`collaboration_error_message`；`test_missing_session_and_disabled_sharing_use_registered_messages_without_mutation` 验证真实授权读取及原件不变，`collaborationError.test.tsx` 经实际问题读取入口核对同回执英中英、机器码独立及零重读 |
 | Q26 | 非缺陷：语言由实例设置决定，Accept-Language/X-Language 未定义为覆盖入口；已在接口文档说明 | `Handler.parse_request`、`test_http_request_language.py` 的长连接实际资源消费 |
 | Q28 | 未声明 Content-Type 仍按 JSON 解析是现有协议，不会绕过正文、来源和业务准入；没有必须拒绝的产品契约，不增加媒体类型限制 | `Request.json`、`Handler._build_request` |
 | Q30、Q31 | 非法追踪号替换、空格与点的允许集是当前选择；合法 header 字符本身不证明注入。浏览器生成合法 UUID，恢复身份与幂等键另有合同，不因建议更换关联协议 | `Handler._build_request`、`api.ts:createSession`、创建回查合同 |
@@ -72,7 +72,7 @@
 | Q49 | URL 路径大小写、编码和异常分隔不应未经契约就自动纠正。规范 API 命名空间已修复；未证明这些路径应与正常路由等价，不新增宽松 URL 解码代理 | `vite.config.ts` 命名空间匹配与 `Router.resolve` |
 | Q51 | 缺路径与相对路径均要求重新选择项目，现有诊断可操作；细分错误不是已证实故障，不额外扩展错误协议 | `workspace_options` 字段检查 |
 | Q53、Q54 | 中文／English 为语言自称；代码和图表排版已有明文例外，报告引用的旧 AGENTS 行号不能替代当前约束，不改成普通正文排版 | `SettingsDialog`、`project-contract.md` 的内容排版例外 |
-| Q57 | 只读取 voice.html 源码不能代表运行时 lang；i18n 初始化写 documentElement.lang，VoiceCapture 接收语言存储事件，无已证实的常驻错误 | `i18n/index.ts`、`voice-bootstrap.ts`、`VoiceCapture.tsx` |
+| Q57 | 复验在 DOMContentLoaded 立即读取，而语音正文和 i18n 为异步模块，确有启动占位语言与 HTML lang 暂时不一致的窗口；此前仅以最终 i18n 消费推断启动期无误，证据不足。语音 bootstrap 现与主入口一样，在显示占位前按同一 initialLocale 写 lang，不等待正文模块或完整语言包；后续语言事件仍由原组件处理 | `voice-bootstrap.ts`、`i18n/index.ts`、`VoiceCapture.tsx`；`voiceBootstrap.test.ts` 挂起真实入口的动态依赖，核对英中英启动选择、超时失败文案及对应 lang；未运行真实浏览器复验 |
 | Q58 | 主题由 head 中同步脚本应用，报告自身未观察到闪烁；没有首帧错误证据，不新增服务端主题状态 | `index.html` 启动脚本 |
 
 本轮验证为定向 Python、Vitest 与隔离 Vite HTTP 用例，不代表完整业务回归、安全审计、在线模型、生产构建或浏览器／桌面实机验收。新协议回归对 JSON 消费处理器核对 requestBody，引用检查覆盖生成文档；这不等于对每个写入口执行真实副作用验收。压缩回归只证明固定 JSON 字节可无损协商和缩小传输，不承诺现场延迟改善。

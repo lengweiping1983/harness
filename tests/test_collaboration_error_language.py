@@ -6,6 +6,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from harness.app.collaboration_errors import collaboration_error_message
 from harness.app.session_access import SessionAccess
@@ -22,6 +23,32 @@ from harness.web.shared_projection import frame
 
 
 class CollaborationErrorLanguageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_session_and_disabled_sharing_use_registered_messages_without_mutation(self):
+        store = SessionStore()
+        session = store.create()
+        original = tuple(session.events)
+        decisions = Mock()
+        loop = asyncio.get_running_loop()
+        ctx = SimpleNamespace(shared_access=None,
+            harness=SimpleNamespace(session_access=SessionAccess(store), session_decisions=decisions),
+            call=lambda coro: asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=5))
+        router = build_router(ctx)
+        for language in ('en', 'zh-CN', 'en'):
+            with current_language.set(language):
+                for identity, code, status in (('ses_' + 'f' * 32, 'session/not-found', 403),
+                                                (session.id, 'access/not-enabled', 409)):
+                    path = f'/api/v1/sessions/{identity}/questions'
+                    handler, params = router.resolve('GET', path)
+                    with self.assertRaises(ApiError) as caught:
+                        await asyncio.to_thread(handler, Request('GET', path, {}, {}, b''), **params)
+                    self.assertEqual(caught.exception.code, code)
+                    self.assertEqual(caught.exception.status, status)
+                    self.assertEqual(caught.exception.message, collaboration_error_message(code))
+                    self.assertNotIn(code, caught.exception.message)
+        decisions.pending.assert_not_called()
+        self.assertEqual(tuple(session.events), original)
+        self.assertEqual([header.id for header in store.list_sessions()], [session.id])
+
     async def test_http_conflict_retains_status_and_code_with_translated_message(self):
         store = SessionStore()
         session = store.create()

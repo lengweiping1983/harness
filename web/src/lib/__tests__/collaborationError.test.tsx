@@ -8,6 +8,24 @@ import {ErrorBlock} from '@/components/chat/blocks/MessageBlocks'
 
 afterEach(() => {setLocale('zh-CN'); vi.unstubAllGlobals(); vi.useRealTimers()})
 
+it('renders missing conversation questions in English Chinese English without repeating the read', async () => {
+  const code = 'session/not-found'
+  const fetch = vi.fn().mockResolvedValue(Response.json({code, error: 'Original server snapshot'}, {status: 403}))
+  vi.stubGlobal('fetch', fetch)
+  const result = await collaboration.questions('missing')
+  if (result.ok) throw Error('Expected missing conversation')
+  expect(result.code).toBe(code)
+  expect(result.status).toBe(403)
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(language)
+    const message = collaborationFeedbackMessage(result)
+    expect(message).toBe(t('ui.collaboration.error.session/not-found'))
+    expect(message).not.toContain(code)
+    expect(message).not.toContain('Original server snapshot')
+  }
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/v1/sessions/missing/questions', expect.anything())
+})
+
 it('resolves saved product feedback in the reading language and preserves third-party text', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({code: 'access/denied', error: '宿主固定语言'}), {status: 403})))
   setLocale('en')

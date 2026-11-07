@@ -4,7 +4,9 @@ import './styles.css'
 
 const root = document.getElementById('root')
 if (!root) throw Error('Missing voice capture root')
-const text = copy[initialLocale()]
+const locale = initialLocale()
+document.documentElement.lang = locale
+const text = copy[locale]
 function show(failed: boolean) {
   const frame = document.createElement('div')
   frame.className = 'flex min-h-dvh flex-col items-center justify-center gap-3 bg-surface p-4 text-xs text-muted'

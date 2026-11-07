@@ -8592,5 +8592,6 @@
   "ui.session.titleTooLong": "对话标题最多包含 {limit} 个 Unicode 码点。",
   "ui.session.unknownField": "未知的对话字段：{field}。",
   "ui.http.invalidJsonRequest": "请求正文必须为有效的 UTF-8 JSON。",
-  "ui.attachments.server.statsFailed": "附件已保存，但无法读取缓存统计。再次上传前请先核对返回的附件引用。"
+  "ui.attachments.server.statsFailed": "附件已保存，但无法读取缓存统计。再次上传前请先核对返回的附件引用。",
+  "ui.collaboration.error.session/not-found": "对话不存在或已不可用。"
 }
