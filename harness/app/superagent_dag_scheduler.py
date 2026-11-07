@@ -911,7 +911,9 @@ class CoordinatorDagScheduler:
             "deliveries": deliveries,
         }
 
-    def _resume_unknown_mission(self, mission_id, *, allow_capture_assignment_id=None):
+    def _resume_unknown_mission(
+        self, mission_id, *, allow_capture_assignment_id=None, capture_run_evidence_ref=None,
+    ):
         e = self._execution
         mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
         if mission is None or mission["state"] != "unknown":
@@ -930,8 +932,44 @@ class CoordinatorDagScheduler:
             return False
 
         jobs = self._load_jobs(mission_id, mission["plan_revision"])
-        # Job 的原始结果尚未知时，只能回查原操作，不能提前恢复 Mission 阶段。
-        if any(job["state"] == "unknown" for job in jobs):
+        # 唯一例外：本轮原生 Run 已明确完成、同一个 Artifact Effect 被持久证明
+        # 从未进入外部 Git 调用，才允许把它对应的 unknown Job 恢复到原阶段。
+        proven_capture = None
+        recovery_job_id = None
+        if (allow_capture_assignment_id and capture_run_evidence_ref
+                and self._artifacts is not None):
+            original_assignment = e._assignment(allow_capture_assignment_id)
+            effect = self._artifacts._latest_effect(
+                "artifact.capture", allow_capture_assignment_id,
+            )
+            original_evidence = e._read_one(
+                "SELECT 1 FROM evidence WHERE evidence_id=? AND assignment_id=? "
+                "AND run_id=? AND evidence_type='run'",
+                (
+                    capture_run_evidence_ref, allow_capture_assignment_id,
+                    original_assignment["run_id"] if original_assignment else None,
+                ),
+            )
+            if (original_assignment is not None and original_evidence is not None
+                    and original_assignment["mission_id"] == mission_id
+                    and original_assignment["plan_revision"] == mission["plan_revision"]
+                    and original_assignment["state"] == "unknown"
+                    and self._artifacts._proves_no_effect(effect)):
+                matching = [
+                    job for job in jobs if job["job_id"] == original_assignment["job_id"]
+                    and job["role"] in {"work", "integrate"} and job["state"] == "unknown"
+                ]
+                if len(matching) == 1:
+                    recovery_job_id = matching[0]["job_id"]
+                    proven_capture = {
+                        "assignment_id": allow_capture_assignment_id,
+                        "run_id": original_assignment["run_id"],
+                        "run_evidence_ref": capture_run_evidence_ref,
+                        "capture_effect_id": effect["effect_id"],
+                        "capture_effect_generation": effect["generation"],
+                        "original_capture_not_started": True,
+                    }
+        if any(job["state"] == "unknown" and job["job_id"] != recovery_job_id for job in jobs):
             return False
         work_jobs = [job for job in jobs if job["role"] == "work"]
         integrators = [job for job in jobs if job["role"] == "integrate"]
@@ -1003,6 +1041,8 @@ class CoordinatorDagScheduler:
         }
         if integration_evidence is not None:
             audit_payload.update(integration_evidence)
+        if proven_capture is not None:
+            audit_payload.update(proven_capture)
         e._transition(
             "mission", mission_id, target, facts=facts,
             audit_payload=audit_payload,
@@ -1239,6 +1279,7 @@ class CoordinatorDagScheduler:
         resumed = self._resume_unknown_mission(
             mission_id,
             allow_capture_assignment_id=current["assignment_id"] if current["state"] in {"capturing", "unknown"} else None,
+            capture_run_evidence_ref=evidence_ids[0] if evidence_ids else None,
         )
         mission = e._read_one("SELECT state FROM missions WHERE mission_id=?", (mission_id,))
         recovering_original_capture = (
