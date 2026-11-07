@@ -80,6 +80,6 @@ SDK／源码未携带引擎时仍可显式复用已有 Hex 安装。Windows 指�
 
 `tests/test_voice_cpu.py` 使用 Win32 API 替身核对 AVX2 标志、系统调用失败与原异常、其他平台准入，以及能力读取、准备、转写、原生打开和 CLI 拒绝后的无启动及数据保持。`useVoiceInputSupported.test.ts` 经过共享 HTTP 验证 CPU 回执、缺失引擎、失败及隐藏后的迟到响应；`conversationSuggestions.test.tsx` 与 `voiceVisibility.test.tsx` 核对真实输入区、设置导航／搜索／定向页面和命令面板的英中英可见性。`desktop/tests/voice-cpu.test.mjs` 保留全局听写恢复、能力读取失败、快捷键与配置原件的针对性回归，属于显式桌面专项；这些替身与组件回归不代替 Windows 实机验收。
 
-`tests/test_hex_tools.py`、`tests/test_voice_api.py` 与 `tests/test_voice_windows.py` 保留本机边界、音频准入、认证、SSE、取消及失败收尾，并验证随包引擎不被损坏的外部安装覆盖。模型准备回归核对 `auto` 在准备和转写中的一致性、并发复用、认证端点替换、失败失效及不重放；API 回归经过实际应用装配检查语音路由，并核对准备准入及阶段计时。`VoiceButton.test.tsx`、`VoiceCapture.test.tsx` 验证录音期间准备、停止等待、失败不上传与取消隔离；`VoiceInputPage.test.tsx`、`desktopVoice.test.ts` 验证实际按键捕获与只读字段；`voiceApi.test.ts` 保留准备回执校验和缺失路由的资源反馈。桌面目录保留安装包完整性与更新状态回归；全局听写主进程、系统快捷键及原生输入链路仍需显式桌面专项和实机验收，不能以组件单测代替。
+`tests/test_hex_tools.py`、`tests/test_voice_api.py` 与 `tests/test_voice_windows.py` 保留本机边界、音频准入、认证、SSE、取消及失败收尾，并验证随包引擎不被损坏的外部安装覆盖。模型准备回归核对 `auto` 在准备和转写中的一致性、并发复用、认证端点替换、失败失效及不重放；API 回归经过实际应用装配检查语音路由，并核对准备准入及阶段计时。预热失败用例使用合法空对象请求到达引擎失败分支，保留单次调用、原始原因和资源身份；WAV 误投预热入口另行核对 bad-json 及准备／转写均未执行，不与合法音频转写夹具混用。`VoiceButton.test.tsx`、`VoiceCapture.test.tsx` 验证录音期间准备、停止等待、失败不上传与取消隔离；`VoiceInputPage.test.tsx`、`desktopVoice.test.ts` 验证实际按键捕获与只读字段；`voiceApi.test.ts` 保留准备回执校验和缺失路由的资源反馈。桌面目录保留安装包完整性与更新状态回归；全局听写主进程、系统快捷键及原生输入链路仍需显式桌面专项和实机验收，不能以组件单测代替。
 
 常规验证不启动桌面或浏览器专项，也不证明麦克风硬件、前台应用粘贴、辅助功能授权、真实模型质量或跨平台实机布局通过。Windows 原生分支仍须在 Windows 实机核验；macOS 本地无签名包不能被描述为已签名或公证发行。
