@@ -415,6 +415,10 @@ class Handler(BaseHTTPRequestHandler):
                 code="request/body-too-large",
                 details={"bytes": length, "maxBytes": limit},
             )
+        if getattr(self, '_expect_continue', False):
+            # 长度准入成功后才允许上传；超限请求直接返回最终拒绝，不读取正文。
+            self.send_response_only(100)
+            self.end_headers()
         prior_timeout = self.connection.gettimeout()
         try:
             deadline = time.monotonic() + 30.0
@@ -618,6 +622,7 @@ class Handler(BaseHTTPRequestHandler):
         ``self.path`` 还没赋值，直接访问会抛 ``AttributeError``，
         连带让 socketserver 的线程整个崩掉。
         """
+        self._expect_continue = False
         if not super().parse_request():
             return False
         from ..core.language import current_language, resolve_language
@@ -669,6 +674,11 @@ class Handler(BaseHTTPRequestHandler):
                 logger.debug(tr('log.c00b9ac2ce42'), exc_info=True)
             self.close_connection = True
             return False
+        return True
+
+    def handle_expect_100(self) -> bool:
+        """将继续上传的临时回执延后到请求头长度校验之后。"""
+        self._expect_continue = True
         return True
 
     def _validate_ws_handshake(self) -> None:

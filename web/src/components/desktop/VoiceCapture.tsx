@@ -102,16 +102,19 @@ export function VoiceCapture() {
   const stopRef = useRef(stop)
   stopRef.current = stop
   useEffect(() => {
-    if (!bridge) {setError({key:'ui.voice.global.desktopRequired'}); return}
-    let live = true
-    const unsubscribe = bridge.onAction(value => action.current(value))
-    void bridge.ready().then(reply => {if (live) {if (reply.ok && reply.data) action.current(reply.data); else if (!reply.ok) setError(reply.copy)}}).catch(failure => {if (live) {setError({key:'ui.voice.global.failed'}); setDiagnostic(String(failure))}})
     const language = (event: StorageEvent) => {
       if (event.key === 'harness.language.effective.v1' && (event.newValue === 'en' || event.newValue === 'zh-CN') && event.newValue !== getLocale()) void setLocale(event.newValue)
       if (event.key === 'harness.ui-theme') document.documentElement.classList.toggle('dark', event.newValue === 'dark' || event.newValue !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
     }
     window.addEventListener('storage', language)
-    return () => {live = false; unsubscribe(); window.removeEventListener('storage', language); const current = active.current; active.current = null; if (current) {current.disposed = true; current.dispose()}}
+    return () => window.removeEventListener('storage', language)
+  }, [])
+  useEffect(() => {
+    if (!bridge) {setError({key:'ui.voice.global.desktopRequired'}); return}
+    let live = true
+    const unsubscribe = bridge.onAction(value => action.current(value))
+    void bridge.ready().then(reply => {if (live) {if (reply.ok && reply.data) action.current(reply.data); else if (!reply.ok) setError(reply.copy)}}).catch(failure => {if (live) {setError({key:'ui.voice.global.failed'}); setDiagnostic(String(failure))}})
+    return () => {live = false; unsubscribe(); const current = active.current; active.current = null; if (current) {current.disposed = true; current.dispose()}}
   }, [])
   return <main className="flex min-h-dvh flex-col justify-center gap-3 bg-surface p-4 text-ink">
     <div className="flex items-center gap-3">

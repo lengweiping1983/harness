@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp, rm, writeFile} from 'node:fs/promises'
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises'
+import {createWriteStream, open as openFile} from 'node:fs'
+import * as fs from 'node:fs'
 import {tmpdir} from 'node:os'
 import path from 'node:path'
 import {execFileSync} from 'node:child_process'
@@ -105,7 +107,7 @@ test('real worker protocol preserves probe evidence and process identity through
           stdout: 'original raw sandbox receipt', stderr: ''}};
         process.send({type:'result',name:message.name,durationMs:1,stats:stats(),
           ...(academySandboxProbe.receipt.code ? {error: {message: 'controlled sandbox probe rejection', infrastructure: true}} : {})});
-      } else {process.send({type:'closed',stats:stats()});process.disconnect()}
+      } else {console.log('worker-close-confirmed');process.send({type:'closed',stats:stats()});process.disconnect()}
     });process.send({type:'ready',version:'fixture',stats:stats()});`)
     worker = await startWorker(0, {workerFile: file, executablePath: 'fixture', timeoutMs: 1000, logs: directory})
     assert.equal(worker.summary().academySandboxProbe, null)
@@ -121,10 +123,64 @@ test('real worker protocol preserves probe evidence and process identity through
     assert.ok(isInfrastructureError(rejection.error))
     const rejected = worker.summary()
     assert.equal(rejected.academySandboxProbe.receipt.code, 1)
-    await worker.close()
+    const closing = worker.close()
+    assert.equal(worker.close(), closing, 'Concurrent waiters share the same process and log cleanup')
+    await closing
+    assert.match(await readFile(path.join(directory, 'worker-1.log'), 'utf8'), /worker-close-confirmed/)
     assert.deepEqual(worker.summary(), rejected, 'Shutdown must retain the actual probe receipt and original worker identity')
     worker = undefined
   } finally {await worker?.close(); await rm(directory, {recursive: true, force: true})}
+})
+
+test('worker run and close await delayed log opens before temporary files can be removed', {timeout: 10000}, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'harness-worker-log-open-'))
+  const releases = []
+  let worker, reachedEnd
+  const ending = new Promise(resolve => {reachedEnd = resolve})
+  try {
+    const file = path.join(directory, 'worker.mjs')
+    await writeFile(file, `process.on('message', message => {
+      if(message.type==='run') process.send({type:'result',name:message.name,durationMs:1});
+      else {process.send({type:'closed'});process.disconnect()}
+    });process.send({type:'ready',version:'fixture'});`)
+    worker = await startWorker(0, {workerFile: file, executablePath: 'fixture', timeoutMs: 1000, logs: directory,
+      createLogStream: file => {
+        const output = createWriteStream(file, {fs: {...fs, open: (...args) => {releases.push(() => openFile(...args))}}})
+        const end = output.end.bind(output)
+        output.end = (...args) => {if (file.endsWith('delayed-smoke.mjs.log')) reachedEnd(); return end(...args)}
+        return output
+      }})
+    let completed = false
+    const running = worker.run('delayed-smoke.mjs').then(value => {completed = true; return value})
+    await ending
+    assert.equal(completed, false, 'A result must wait for its owned log to finish')
+    for (const release of releases.splice(0)) release()
+    await running
+    assert.equal(await readFile(path.join(directory, 'delayed-smoke.mjs.log'), 'utf8'), '')
+    await worker.close()
+    assert.equal(await readFile(path.join(directory, 'worker-1.log'), 'utf8'), '')
+    worker = undefined
+  } finally {
+    for (const release of releases.splice(0)) release()
+    try {await worker?.close()} finally {await rm(directory, {recursive: true, force: true})}
+  }
+})
+
+test('worker close propagates asynchronous log open errors after reaping its process', {timeout: 10000}, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'harness-worker-log-error-'))
+  let worker
+  try {
+    const file = path.join(directory, 'worker.mjs')
+    await writeFile(file, `process.on('message', message => {
+      if(message.type==='run') process.send({type:'result',name:message.name,durationMs:1});
+      else {process.send({type:'closed'});process.disconnect()}
+    });process.send({type:'ready',version:'fixture'});`)
+    worker = await startWorker(0, {workerFile: file, executablePath: 'fixture', timeoutMs: 1000, logs: directory,
+      createLogStream: file => createWriteStream(file.endsWith('worker-1.log') ? path.join(directory, 'absent', 'log') : file)})
+    await worker.run('original-smoke.mjs')
+    await assert.rejects(worker.close(), error => error.code === 'ENOENT')
+    worker = undefined
+  } finally {try {await worker?.close()} finally {await rm(directory, {recursive: true, force: true})}}
 })
 
 test('a hung worker is bounded and forcibly reaped rather than replayed', async () => {
@@ -135,6 +191,10 @@ test('a hung worker is bounded and forcibly reaped rather than replayed', async 
     await writeFile(file, "process.on('message',()=>{});process.send({type:'ready',version:'fixture'});")
     worker = await startWorker(0, {workerFile: file, executablePath: 'fixture', timeoutMs: 10, logs: directory})
     await assert.rejects(worker.run('hung-smoke.mjs'), /timed out/)
-    await worker.close(); worker = undefined
+    const closing = worker.close()
+    assert.equal(worker.close(), closing)
+    await closing
+    assert.equal(await readFile(path.join(directory, 'worker-1.log'), 'utf8'), '')
+    worker = undefined
   } finally {await worker?.close(); await rm(directory, {recursive: true, force: true})}
 })

@@ -37,7 +37,7 @@
 | 来源 | 判定、价值与当前处理 | 源码／回归依据 |
 |---|---|---|
 | Q01、Q19、Q48 | 同一代理遗漏，有修复价值；整个 API 命名空间交给后端，Accept 不影响未知 API 的 JSON 404，类似 `/apiculture` 不被误代理 | `vite.config.ts`；`dev-api-cors.test.mjs` |
-| Q02 | 部分成立：代理等待首段正文导致超限声明不能及时到达后端；已提前发送代理请求头，并明确关闭响应的 Connection。同步发送完整超大正文时出现 BrokenPipe 不能单独证明后端未发送 413 | `Handler._send`；隔离 Vite 的原始 socket 用例与 `test_oversized_headers_receive_complete_413_without_upload` |
+| Q02 | 代理原先等待首段正文才发送请求头，已改为立即发送。完整上传另有早期拒绝竞态：上游已返回 413，代理仍发送正文可先触发 EPIPE，破坏客户端回执。代理现向后端协商 100-continue，通过长度准入才继续正文；后端超限直接发送最终拒绝，不先确认继续上传 | `Handler.handle_expect_100`、`_build_request` 与 Vite 代理；原始 socket、完整超大正文、Expect 客户端、正常正文及持久连接下一请求的定向回归 |
 | Q03、Q20 | 现场差异存在，但 FOO 与畸形长度在 Node HTTP 解析器阶段被拒，产品中间件无法接收这类报文；为统一 JSON 自行替换 HTTP 解析器代价与风险过高。文档明确开发入口边界 | `vite.config.ts` 使用 Vite 原生 HTTP；后端 `send_error` 与 `_build_request` 保留原统一拒绝路径 |
 | Q04、Q44 | “无长度上限”不成立：普通 HTTP 正文已有 4 MiB 上限。50 万字符被正常受理和 10 万字符草稿可保存不证明故障；没有固定输入的卡顿、配额失败或存储增长预算证据，不新增正文截断及草稿压缩 | `server.MAX_REQUEST_BODY_BYTES`；`test_http_body_limits.py` 将真实运行路由接到受控提交替身，核对 50 万 ASCII／补充平面字符的有限正文保留原文，超出 4 MiB 在读取和提交前拒绝，不触发真实模型；现场草稿测试仍可响应 |
 | Q05、Q43 | 显式标题确无单独预算，有约束价值；创建和 PATCH 最多 512 个 Unicode 码点，写入前拒绝，原有数据不改写。完整标题进入 DOM 本身不是缺陷，也不截断用户已有文本 | `input_schemas.py`、`sessions.py`；`test_session_rejections_happen_before_creation_or_update`、`test_valid_title_boundary_preserves_original_unicode_and_creates_once` |
@@ -72,10 +72,24 @@
 | Q49 | URL 路径大小写、编码和异常分隔不应未经契约就自动纠正。规范 API 命名空间已修复；未证明这些路径应与正常路由等价，不新增宽松 URL 解码代理 | `vite.config.ts` 命名空间匹配与 `Router.resolve` |
 | Q51 | 缺路径与相对路径均要求重新选择项目，现有诊断可操作；细分错误不是已证实故障，不额外扩展错误协议 | `workspace_options` 字段检查 |
 | Q53、Q54 | 中文／English 为语言自称；代码和图表排版已有明文例外，报告引用的旧 AGENTS 行号不能替代当前约束，不改成普通正文排版 | `SettingsDialog`、`project-contract.md` 的内容排版例外 |
-| Q57 | 复验在 DOMContentLoaded 立即读取，而语音正文和 i18n 为异步模块，确有启动占位语言与 HTML lang 暂时不一致的窗口；此前仅以最终 i18n 消费推断启动期无误，证据不足。语音 bootstrap 现与主入口一样，在显示占位前按同一 initialLocale 写 lang，不等待正文模块或完整语言包；后续语言事件仍由原组件处理 | `voice-bootstrap.ts`、`i18n/index.ts`、`VoiceCapture.tsx`；`voiceBootstrap.test.ts` 挂起真实入口的动态依赖，核对英中英启动选择、超时失败文案及对应 lang；未运行真实浏览器复验 |
+| Q57 | 复验在 DOMContentLoaded 立即读取，而语音正文和 i18n 为异步模块，确有启动占位语言与 HTML lang 暂时不一致的窗口；此前仅以最终 i18n 消费推断启动期无误，证据不足。语音 bootstrap 现与主入口一样，在显示占位前按同一 initialLocale 写 lang，不等待正文模块或完整语言包；原组件的语言监听独立于桌面 bridge，无桥接时也同步提示与 lang | `voice-bootstrap.ts`、`i18n/index.ts`、`VoiceCapture.tsx`；`voiceBootstrap.test.ts` 挂起真实入口的动态依赖，核对英中英启动选择、超时失败文案及对应 lang；未运行真实浏览器复验 |
 | Q58 | 主题由 head 中同步脚本应用，报告自身未观察到闪烁；没有首帧错误证据，不新增服务端主题状态 | `index.html` 启动脚本 |
 
 本轮验证为定向 Python、Vitest 与隔离 Vite HTTP 用例，不代表完整业务回归、安全审计、在线模型、生产构建或浏览器／桌面实机验收。新协议回归对 JSON 消费处理器核对 requestBody，引用检查覆盖生成文档；这不等于对每个写入口执行真实副作用验收。压缩回归只证明固定 JSON 字节可无损协商和缩小传输，不承诺现场延迟改善。
+
+## 开放清单 P-01–P-07 的裁决
+
+该清单再次使用首轮期望筛选行为。以下分别核对探针是否真正观察了结果、操作本身的用途、验证环境和现有管理边界；不把测试入口失败自动归因于产品代码，也不通过吞掉日志错误或绕过预检制造通过。
+
+| 来源 | 当前结论与依据 | 处理与针对性验证 |
+|---|---|---|
+| P-01 | 原探针写异常后将 resp 直接设空，证据不足；但补充真实 Vite＋正常 fetch 的完整上传用例确实复现代理上游 EPIPE，客户端没有取得 413，因此此前仅按探针问题关闭的证据也不完整 | 代理通过 100-continue 等待后端长度准入再转发正文；后端延后临时回执，超限直接拒绝。实际 Handler 核对写失败后读取 413、超限／畸形长度不发送 100、合法正文单次执行及长连接标记复位；真实 Vite＋受控后端核对完整超大正文的 fetch／Expect 客户端都取得 413，并保留正常正文。未读取、缓存或 drain 后端超限正文，未重放用户常驻实例写入 |
+| P-02 | 不是 Q41 的实现落差：空正文／空对象正是显式预热请求，合法请求必须进入模型准备，不能直接伪造 ready。首次可能下载并加载模型；15 秒探针超时不足以证明挂死 | `voice.prepare` 和客户端均使用 630 秒等待预算；Hex 启动等待为 15 秒、模型准备 HTTP I/O 超时为 600 秒，已确认的同端点同选择由管理器复用。`test_empty_body_and_object_prepare_the_engine_with_the_declared_wait_budget` 验证真实路由的两种合法正文与预算；`voiceApi.test.ts` 核对 15 秒后仍等待真实回执且不重发。等待预算不保证底层任务撤销或绝对完成时限，冷启动及下载延迟未做性能验收 |
+| P-03 | 成立：VoiceCapture 将存储监听放在桌面 bridge 准入之后，无桥接普通浏览器会提前返回，缺少后续语言同步 | 语言／主题监听独立于桥接效果，卸载撤销原监听；无桥接仍只显示桌面能力提示，不录音、不预热、不转写。`VoiceCapture.test.tsx` 经真实组件核对同实例存储事件的英中英、HTML lang、提示文案及监听收尾；未运行浏览器专项 |
+| P-04 | 成立：startWorker 的场景日志和生命周期日志仅调用 end 而未等待异步打开及关闭；子进程 exit 也不代表输出管道已排空，调用者随后删除临时目录会触发 ENOENT | 场景回执等待所属日志完成；关闭共享同一 Promise，等待进程 close 与全部日志流完成。立即观察日志异步异常，在所属操作中原样抛出；真实 ENOENT 仍判失败，不做忽略。`browser-runner.test.mjs` 以实际受控子进程验证最后输出、并发关闭、延迟日志打开、打开失败传播及超时回收。未运行完整前端聚合入口，不能据此宣称全部阶段通过；一个阶段失败后 && 不启动后续阶段本身不是缺陷 |
+| P-05 | 现有日志明确显示 WorkBuddy 注入的 sitecustomize 在已存在目录上破坏 mkdir(exist_ok=True)；拒绝发现是预检的既定目的，不应在仓库中按 shim 名称绕过。discover 运行 25 分钟无汇总也不能单独证明挂死或全部失败 | 保留预检与原始异常。本次相同仓库解释器的独立预检未加载 sitecustomize、支持 dir_fd 且通过；这不证明原 WorkBuddy 上下文已恢复。`test_broken_exist_ok_stops_before_discovery_with_original_diagnostic` 确认异常环境不进入课程探针或测试发现。未执行全量 Python／课程沙箱验收；原宿主环境限制仍未解决 |
+| P-06 | 不是可由所列请求证明的故障：未提供服务端实体标签，却发送任意 If-None-Match 得到 200，不构成“应返回 304”的依据。未声明 gzip 时返回完整表示也是当前协商选择 | 接口文档明确 OpenAPI、提供商及工具目录保留 no-store，不提供 ETag／304 契约；不引入新的客户端缓存，不改动已有内容寻址附件和静态文件的 ETag 行为 |
+| P-07 | 本机管理信任边界包括配置、登录与服务启停，不限于目录读取。MCP 服务管理还核对回环 IP、Host 与 Origin；原生本机管理调用方不靠浏览器凭据认证。没有声明所有管理动作均有统一幂等键或审计账本，不能仅凭 200 或无 requestBody 证明越权 | 在接口文档明确管理动作范围及无统一审计／幂等保证；共享身份继续按各自权限准入，结果未知不得自动重放。未操作真实账号或服务状态，不将统一审计、远程管理认证作为隐式新增功能 |
 
 ## 不成立或不宜按报告建议改动的结论
 

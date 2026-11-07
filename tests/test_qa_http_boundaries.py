@@ -94,6 +94,62 @@ class QaHttpBoundaryTests(unittest.TestCase):
             self.assertEqual(json.loads(response.read())['code'], 'request/body-too-large')
         self.write.assert_not_called()
 
+    def test_oversized_upload_still_reads_413_after_a_write_failure(self):
+        payload = b'x' * (MAX_REQUEST_BODY_BYTES + 512)
+        with socket.create_connection(self.server.server_address, timeout=3) as stream:
+            stream.sendall((f'POST /api/v1/write-only HTTP/1.1\r\nHost: 127.0.0.1\r\n'
+                            f'Content-Length: {len(payload)}\r\n\r\n').encode())
+            try:
+                for offset in range(0, len(payload), 65536):
+                    stream.sendall(payload[offset:offset + 65536])
+            except (BrokenPipeError, ConnectionResetError):
+                # 写方向被关闭不能当作读方向为空，仍须实际读取响应。
+                pass
+            response = http.client.HTTPResponse(stream)
+            response.begin()
+            self.assertEqual(response.status, 413)
+            self.assertEqual(json.loads(response.read())['code'], 'request/body-too-large')
+        self.write.assert_not_called()
+
+    def test_expect_continue_rejects_bad_lengths_without_authorizing_upload(self):
+        for length, status in ((str(MAX_REQUEST_BODY_BYTES + 512), 413), ('-1', 400)):
+            with self.subTest(length=length), socket.create_connection(self.server.server_address, timeout=3) as stream:
+                stream.sendall((f'POST /api/v1/write-only HTTP/1.1\r\nHost: 127.0.0.1\r\n'
+                    f'Expect: 100-continue\r\nContent-Length: {length}\r\n\r\n').encode())
+                chunks = []
+                while chunk := stream.recv(4096):
+                    chunks.append(chunk)
+                raw = b''.join(chunks)
+                self.assertTrue(raw.startswith(f'HTTP/1.1 {status} '.encode()), raw)
+                self.assertNotIn(b'100 Continue', raw)
+        self.write.assert_not_called()
+
+    def test_expect_continue_sends_valid_body_once_and_resets_on_the_next_request(self):
+        payload = b'{"original":"text"}'
+        with socket.create_connection(self.server.server_address, timeout=3) as stream:
+            stream.sendall((f'POST /api/v1/write-only HTTP/1.1\r\nHost: 127.0.0.1\r\n'
+                f'Expect: 100-continue\r\nContent-Length: {len(payload)}\r\n\r\n').encode())
+            interim = b''
+            while not interim.endswith(b'\r\n\r\n'):
+                chunk = stream.recv(4096)
+                self.assertTrue(chunk)
+                interim += chunk
+            self.assertEqual(interim, b'HTTP/1.1 100 Continue\r\n\r\n')
+            stream.sendall(payload)
+            response = http.client.HTTPResponse(stream)
+            response.begin()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read()), {'written': True})
+            self.write.assert_called_once()
+            self.assertEqual(self.write.call_args.args[0].body, payload)
+            stream.sendall(b'GET /api/v1/status HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n')
+            chunks = []
+            while chunk := stream.recv(4096):
+                chunks.append(chunk)
+            raw = b''.join(chunks)
+            self.assertTrue(raw.startswith(b'HTTP/1.1 200 '), raw)
+            self.assertNotIn(b'100 Continue', raw)
+
 
 class QaAdmissionBoundaryTests(unittest.TestCase):
     def test_fetch_metadata_checks_every_header_and_origin_before_dispatch(self):

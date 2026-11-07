@@ -1,7 +1,23 @@
 import {afterEach, expect, it, vi} from 'vitest'
 import {prepareVoiceInput, voiceRequest} from '../voiceApi'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {vi.unstubAllGlobals(); vi.useRealTimers()})
+
+it('keeps cold preparation pending beyond a probe timeout until the actual ready reply without replay',async()=>{
+  vi.useFakeTimers()
+  let ready!:(response:Response)=>void
+  const fetch=vi.fn().mockImplementation(()=>new Promise<Response>(resolve=>{ready=resolve}))
+  vi.stubGlobal('fetch',fetch)
+  let completed=false
+  const preparation=prepareVoiceInput().then(result=>{completed=true;return result})
+  await vi.advanceTimersByTimeAsync(15001)
+  expect(completed).toBe(false)
+  expect(fetch.mock.calls[0][1].signal.aborted).toBe(false)
+  ready(Response.json({ready:true}))
+  expect(await preparation).toEqual({ok:true,data:{ready:true}})
+  expect(fetch).toHaveBeenCalledOnce()
+  expect(vi.getTimerCount()).toBe(0)
+})
 
 it('validates preparation confirmation and never retries a failed or uncertain request',async () => {
   const fetch=vi.fn()

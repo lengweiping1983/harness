@@ -115,10 +115,12 @@ class DiscoveryTests(unittest.TestCase):
 
         error = io.StringIO()
         with (patch('sys.argv', ['run_python_tests.py']), patch.object(Path, 'mkdir', broken),
-              patch('scripts.run_python_tests.academy_sandbox_preflight', return_value=None),
+              patch('scripts.run_python_tests.academy_sandbox_preflight', return_value=None) as sandbox,
               patch('unittest.defaultTestLoader.discover') as discover, contextlib.redirect_stderr(error)):
             self.assertEqual(main(), 1)
         discover.assert_not_called()
+        sandbox.assert_not_called()
+        self.assertIn('测试尚未发现或执行', error.getvalue())
         self.assertIn('FileExistsError: fixture broker EEXIST', error.getvalue())
 
     def test_mac_memory_probe_rejects_denial_and_invalid_values(self):

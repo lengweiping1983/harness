@@ -41,6 +41,25 @@ beforeEach(()=>{
 })
 afterEach(async()=>{hooks.cleanups.reverse().forEach(cleanup=>cleanup());vi.unstubAllGlobals();await setLocale('en')})
 
+it('keeps browser-only voice feedback and lang synchronized with storage events and removes its listener',async()=>{
+  const addEventListener=vi.fn(),removeEventListener=vi.fn()
+  vi.stubGlobal('window',{addEventListener,removeEventListener})
+  render()
+  expect(text(render())).toContain(t('ui.voice.global.desktopRequired'))
+  const listener=addEventListener.mock.calls.find(([name])=>name==='storage')![1]
+  for(const language of ['en','zh-CN','en'] as const){
+    listener({key:'harness.language.effective.v1',newValue:language})
+    await vi.waitFor(()=>expect(document.documentElement.lang).toBe(language))
+    expect(text(render())).toContain(t('ui.voice.global.desktopRequired'))
+  }
+  expect(capture.create).not.toHaveBeenCalled()
+  expect(capture.prepare).not.toHaveBeenCalled()
+  expect(capture.request).not.toHaveBeenCalled()
+  expect(bridge.ready).not.toHaveBeenCalled()
+  hooks.cleanups.splice(0).reverse().forEach(cleanup=>cleanup())
+  expect(removeEventListener).toHaveBeenCalledExactlyOnceWith('storage',listener)
+})
+
 it('owns one recorder across ready and duplicate start, then submits and inserts its result only once',async()=>{
   render()
   await vi.waitFor(()=>expect(bridge.phase).toHaveBeenCalledWith('first','recording'))

@@ -97,6 +97,22 @@ class VoiceApiTests(unittest.TestCase):
         self.assertEqual(self.service.prepare_transcription.call_count, 3)
         self.service.transcribe_prepared.assert_not_called()
 
+    def test_empty_body_and_object_prepare_the_engine_with_the_declared_wait_budget(self):
+        """无参预热不能伪造就绪，保留冷启动等待预算且不执行转写。"""
+        waits = []
+        def call(coro, *, timeout):
+            waits.append(timeout)
+            return asyncio.run(coro)
+        self.ctx.call = call
+        action, _ = build_router(self.ctx).resolve('POST', '/api/v1/voice/preparations')
+        for body in (b'', b'{}'):
+            response = action(Request('POST', '/api/v1/voice/preparations', {}, {'Host': 'localhost'},
+                                      body, client_ip='127.0.0.1'))
+            self.assertEqual(json.loads(response.body), {'ready': True})
+        self.assertEqual(waits, [630, 630])
+        self.assertEqual(self.service.prepare_transcription.call_count, 2)
+        self.service.transcribe_prepared.assert_not_called()
+
     def test_assembled_application_registers_all_current_voice_routes(self):
         """核对实际应用装配入口，不能只验证语音子路由。"""
         from harness import Harness, HarnessConfig

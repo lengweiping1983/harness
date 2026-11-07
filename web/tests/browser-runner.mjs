@@ -2,6 +2,7 @@ import {fork, execFile, execFileSync} from 'node:child_process'
 import {createHash} from 'node:crypto'
 import {createWriteStream, lstatSync, readFileSync, readdirSync} from 'node:fs'
 import {mkdir, writeFile} from 'node:fs/promises'
+import {finished} from 'node:stream/promises'
 import path from 'node:path'
 import {selectBrowserScenarios} from '../../scripts/browser_selection.mjs'
 
@@ -117,13 +118,25 @@ async function terminateTree(child) {
 }
 
 export async function startWorker(index, {executablePath, timeoutMs, logs,
+  createLogStream = createWriteStream,
   workerFile = path.join(import.meta.dirname, 'browser-worker.mjs')}) {
   await mkdir(logs, {recursive: true})
   const child = fork(workerFile, [], {cwd: path.join(root, 'web'),
     detached: process.platform !== 'win32', env: {...process.env, HARNESS_TEST_BROWSER: executablePath},
     stdio: ['ignore', 'pipe', 'pipe', 'ipc']})
   let pending, current, stream, lastStats, version, unhealthy = false
-  const lifecycleLog = createWriteStream(path.join(logs, `worker-${index + 1}.log`))
+  const openLog = file => {
+    const output = createLogStream(file)
+    // 立即观察异步打开／写入失败，所属收尾仍须重新抛出，不能遗落为未处理事件。
+    const completion = finished(output).then(() => null, error => error)
+    let ending
+    return {write: data => output.write(data), finish: () => ending ??= (async () => {
+      output.end()
+      const error = await completion
+      if (error) throw error
+    })()}
+  }
+  const lifecycleLog = openLog(path.join(logs, `worker-${index + 1}.log`))
   const log = (data, target) => {lifecycleLog.write(data); stream?.write(data); target.write(data)}
   child.stdout.on('data', data => log(data, process.stdout))
   child.stderr.on('data', data => log(data, process.stderr))
@@ -140,35 +153,50 @@ export async function startWorker(index, {executablePath, timeoutMs, logs,
   })
   let exit
   const exited = new Promise(resolve => {exit = resolve})
+  const closed = new Promise(resolve => child.once('close', resolve))
   child.on('error', error => pending?.reject(error))
   child.on('exit', (code, signal) => {pending?.reject(Error(`Browser worker exited (${code ?? signal}) during ${current ?? 'preflight'}`)); exit({code, signal})})
-  let disposed = false
-  const dispose = async () => {
-    if (disposed) return
-    disposed = true
-    try {
-      await terminateTree(child)
-      let timer
-      try {await Promise.race([exited, new Promise((_, reject) => {timer = setTimeout(() => reject(Error('Browser worker did not exit')), 10000)})])}
-      finally {clearTimeout(timer)}
-    } finally {stream?.end(); lifecycleLog.end()}
-  }
+  let disposing, closing
+  const dispose = () => disposing ??= (async () => {
+    const errors = []
+    try {await terminateTree(child)} catch (error) {errors.push(error)}
+    let timer
+    try {await Promise.race([closed, new Promise((_, reject) => {timer = setTimeout(() => reject(Error('Browser worker did not close')), 10000)})])}
+    catch (error) {errors.push(error)}
+    finally {clearTimeout(timer)}
+    const outputs = [stream, lifecycleLog].filter(Boolean)
+    stream = undefined
+    for (const result of await Promise.allSettled(outputs.map(output => output.finish()))) {
+      if (result.status === 'rejected') errors.push(result.reason)
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Browser worker and log cleanup failed')
+  })()
   try {version = (await request('ready', null, 150000)).version}
   catch (error) {try {await dispose()} catch (cleanup) {throw new AggregateError([error, cleanup], 'Browser worker preflight and cleanup failed')}; throw error}
   return {
     async run(name) {
       current = name
-      stream = createWriteStream(path.join(logs, name + '.log'))
+      stream = openLog(path.join(logs, name + '.log'))
       console.log(`\nCore browser [${index + 1}]: ${name}`)
+      let result, failure
       try {
         const outcome = await request('result', {type: 'run', name}, timeoutMs)
         if (outcome.name !== name) throw Error('Browser worker returned another scenario')
         if (outcome.error) {const message = JSON.stringify(outcome.error, null, 2); stream.write(message); console.error(message)}
-        return {durationMs: outcome.durationMs, ...(outcome.error ? {error: outcome.error} : {})}
-      } catch (error) {unhealthy = true; throw error}
-      finally {stream.end(); stream = undefined; current = undefined}
+        result = {durationMs: outcome.durationMs, ...(outcome.error ? {error: outcome.error} : {})}
+      } catch (error) {unhealthy = true; failure = error}
+      const output = stream
+      stream = undefined; current = undefined
+      try {await output.finish()} catch (error) {
+        if (failure) throw new AggregateError([failure, error], 'Browser scenario and log cleanup failed')
+        throw error
+      }
+      if (failure) throw failure
+      return result
     },
-    async close() {
+    close() {return closing ??= (async () => {
+      let failure
       try {
         if (unhealthy) {await dispose(); return}
         if (child.exitCode !== null || child.signalCode !== null) throw Error('Browser worker exited before cleanup')
@@ -179,8 +207,13 @@ export async function startWorker(index, {executablePath, timeoutMs, logs,
           const status = await Promise.race([exited, new Promise((_, reject) => {timer = setTimeout(() => reject(Error('Browser worker retained resources after cleanup')), 10000)})])
           if (status.code !== 0) throw Error('Browser worker cleanup exit failed: ' + JSON.stringify(status))
         } finally {clearTimeout(timer)}
-      } finally {await dispose()}
-    },
+      } catch (error) {failure = error}
+      try {await dispose()} catch (error) {
+        if (failure && failure !== error) throw new AggregateError([failure, error], 'Browser worker shutdown and cleanup failed')
+        throw error
+      }
+      if (failure) throw failure
+    })()},
     summary: () => ({index: index + 1, version, ...structuredClone(lastStats)}),
   }
 }

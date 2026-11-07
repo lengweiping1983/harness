@@ -2,14 +2,29 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
+import type {IncomingMessage} from 'node:http'
 import postcssConfig from './postcss.config.js'
 
 const backendUrl = process.env.HARNESS_BACKEND_URL || 'http://127.0.0.1:8765'
+const apiPrefix = '^/api(?:/|\\?|$)'
+const expectContinue = new WeakSet<IncomingMessage>()
 
 // 前端与 Python 后端完全解耦：开发期代理到 HARNESS_BACKEND_URL，默认本地 8765，
 // 生产期由 harness.web.static_assets 直接托管 dist/。
 export default defineConfig({
   plugins: [react(), {
+    name: 'harness-api-continue',
+    configureServer(server) {
+      const http = server.httpServer
+      if (!http) return
+      http.on('checkContinue', (request, response) => {
+        // 浏览器入口也须等后端准入，不能由 Node 先自动确认可上传。
+        if (new RegExp(apiPrefix).test(request.url ?? '')) expectContinue.add(request)
+        else response.writeContinue()
+        http.emit('request', request, response)
+      })
+    },
+  }, {
     name: 'harness-web-watch-boundary',
     config(config) {
       const root = resolve(config.root ?? '.')
@@ -39,11 +54,28 @@ export default defineConfig({
     },
     proxy: {
       // Preserve Host so the backend can compare it with the browser Origin.
-      '^/api(?:/|\\?|$)': {
+      [apiPrefix]: {
         target: backendUrl, changeOrigin: false,
+        bypass(incoming) {
+          // Vite 已消费的临时回执由代理与后端重新协商，仍须经过正文准入。
+          if (incoming.headers.expect?.toLowerCase() === '100-continue') delete incoming.headers.expect
+        },
         configure(proxy) {
           // 先转发声明头，让后端在客户端尚未发送正文时也能拒绝超限请求。
-          proxy.on('proxyReq', request => request.flushHeaders())
+          proxy.on('proxyReq', (request, incoming, response) => {
+            if (Number(incoming.headers['content-length'] ?? 0) > 0) {
+              // 后端确认长度后再上传，避免早期 413 与仍在写入的代理请求竞争。
+              incoming.unpipe(request)
+              incoming.pause()
+              request.setHeader('Expect', '100-continue')
+              request.once('continue', () => {
+                if (incoming.destroyed || response.destroyed) return
+                if (expectContinue.delete(incoming)) response.writeContinue()
+                incoming.pipe(request)
+              })
+            }
+            request.flushHeaders()
+          })
         },
       },
       '/ws': { target: backendUrl, ws: true, changeOrigin: false },

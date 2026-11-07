@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import {createServer as createHttpServer} from 'node:http'
+import {createServer as createHttpServer, request as httpRequest} from 'node:http'
 import {mkdtemp, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
@@ -49,6 +49,7 @@ test('Vite delegates API preflights and response CORS to the backend without add
   assert.ok(config)
   vite = await createServer({
     configFile: false, root, cacheDir: cache, logLevel: 'error',
+    plugins: config.config.plugins.filter(plugin => plugin?.name === 'harness-api-continue'),
     server: {...config.config.server, host: '127.0.0.1', port: 0, hmr: false, watch: null},
     optimizeDeps: {noDiscovery: true, include: []},
   })
@@ -78,14 +79,26 @@ test('Vite forwards the API namespace and sends headers before awaiting oversize
   const root = fileURLToPath(new URL('../', import.meta.url))
   const cache = await mkdtemp(join(tmpdir(), 'harness-dev-http-'))
   const requests = []
+  let rejectedBytes = 0
   const backend = createHttpServer((request, response) => {
     requests.push(request.url)
     const oversized = Number(request.headers['content-length'] ?? 0) > 4194304
+    if (oversized) request.on('data', chunk => {rejectedBytes += chunk.length})
+    if (request.url === '/api/v1/echo' && !oversized) {
+      const chunks = []
+      request.on('data', chunk => chunks.push(chunk))
+      request.on('end', () => response.end(Buffer.concat(chunks)))
+      return
+    }
     response.writeHead(oversized ? 413 : 404, {
       'Content-Type': 'application/json', 'Cache-Control': 'no-store',
       'X-Request-ID': 'fixture-request', 'Connection': 'close',
     })
     response.end(JSON.stringify({code: oversized ? 'request/body-too-large' : 'route/not-found'}))
+  })
+  backend.on('checkContinue', (request, response) => {
+    if (Number(request.headers['content-length'] ?? 0) <= 4194304) response.writeContinue()
+    backend.emit('request', request, response)
   })
   let vite
   t.after(async () => {
@@ -108,6 +121,7 @@ test('Vite forwards the API namespace and sends headers before awaiting oversize
   }
   vite = await createServer({
     configFile: false, root, cacheDir: cache, logLevel: 'error',
+    plugins: config.config.plugins.filter(plugin => plugin?.name === 'harness-api-continue'),
     server: {...config.config.server, host: '127.0.0.1', port: 0, hmr: false, watch: null},
     optimizeDeps: {noDiscovery: true, include: []},
   })
@@ -142,4 +156,36 @@ test('Vite forwards the API namespace and sends headers before awaiting oversize
   assert.match(raw, /^HTTP\/1\.1 413 /)
   assert.match(raw, /x-request-id: fixture-request/i)
   assert.match(raw, /request\/body-too-large/)
+  const uploaded = await fetch(base + '/api/v1/sessions', {method: 'POST', body: 'x'.repeat(4194304 + 512)})
+  assert.equal(uploaded.status, 413, 'A client sending a real body must still receive the early rejection')
+  assert.deepEqual(await uploaded.json(), {code: 'request/body-too-large'})
+  const original = JSON.stringify({text: 'Original 原文'})
+  for (const [path, body, status] of [['/api/v1/sessions', 'x'.repeat(4194304 + 512), 413],
+                                    ['/api/v1/echo', original, 200]]) await new Promise((resolve, reject) => {
+    let continued = 0
+    const request = httpRequest(base + path, {method: 'POST', headers: {
+      Expect: '100-continue', 'Content-Length': String(Buffer.byteLength(body)),
+    }}, response => {
+      const chunks = []
+      response.on('data', chunk => chunks.push(chunk))
+      response.on('error', reject)
+      response.on('end', () => {
+        try {
+          assert.equal(response.statusCode, status)
+          assert.equal(continued, status === 200 ? 1 : 0)
+          const text = Buffer.concat(chunks).toString('utf8')
+          if (status === 413) assert.deepEqual(JSON.parse(text), {code: 'request/body-too-large'})
+          else assert.equal(text, original)
+          resolve()
+        } catch (error) {reject(error)}
+      })
+    })
+    request.on('error', reject)
+    request.once('continue', () => {continued++; request.end(body)})
+    request.flushHeaders()
+  })
+  const echo = await fetch(base + '/api/v1/echo', {method: 'POST', body: original})
+  assert.equal(echo.status, 200)
+  assert.equal(await echo.text(), original, 'Accepted request bodies must be sent once and preserved exactly')
+  assert.equal(rejectedBytes, 0, 'Rejected uploads must not be forwarded to the backend')
 })
