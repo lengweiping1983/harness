@@ -5,6 +5,7 @@ from harness.i18n import tr
 
 import atexit
 from contextvars import copy_context
+import errno
 import importlib.util
 import json
 import os
@@ -279,14 +280,18 @@ class McpService:
             ProjectConfig(root=root, writable=True, commands=True, commits=True, verification=verification)
             python = self._python()
             self._private_home()
-            cloudflared = self._cloudflared()
             settings = getattr(self, '_launch_tunnel', dict(DEFAULT_TUNNEL))
             named = settings['mode'] == 'named'
             with socket.socket() as sock, socket.socket() as local_sock, socket.socket() as metrics_sock:
                 try:
+                    # POSIX 与实际服务器保持地址复用语义，避免已关闭连接导致重启误报。
+                    # Windows 保留独占检测，不能通过地址复用与其他服务重叠监听。
+                    if sys.platform != 'win32':
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     sock.bind(('127.0.0.1', settings['origin_port'] if named else 0))
+                    sock.listen()
                 except OSError as exc:
-                    if named:
+                    if named and exc.errno == errno.EADDRINUSE:
                         raise McpServiceError('ui.mcpService.error.originPortBusy', port=settings['origin_port']) from exc
                     raise
                 port = sock.getsockname()[1]
@@ -294,6 +299,7 @@ class McpService:
                 local_port = local_sock.getsockname()[1]
                 metrics_sock.bind(('127.0.0.1', 0))
                 metrics_port = metrics_sock.getsockname()[1]
+            cloudflared = self._cloudflared()
             upstream = f'http://127.0.0.1:{port}'
             local = f'http://127.0.0.1:{local_port}'
             isolated = self.home / 'cloudflared.yml'

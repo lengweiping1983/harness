@@ -4777,7 +4777,7 @@
   "ui.mcpService.error.tunnelConfigFile": "已保存的隧道配置无法读取或格式无效，原文件已保留。",
   "ui.mcpService.error.rateLimited": "Cloudflare 限制了临时域名申请（429/1015）。请稍后再试，或配置固定隧道用于长期连接。",
   "ui.mcpService.diagnostic": "隧道诊断",
-  "ui.mcpService.error.originPortBusy": "本机端口 {port} 不可用，请选择空闲端口，并同步修改 Cloudflare 的源站服务地址。",
+  "ui.mcpService.error.originPortBusy": "本机端口 {port} 已被占用。MCP 与 Codex 桌面网关须使用不同端口。请选择空闲的 MCP 端口，并同步修改 Cloudflare 的源站服务地址。",
   "ui.mcpService.lifecycleHint": "关闭 Harness 会停止本次 MCP 服务及隧道。登记项目允许文件修改、命令执行和本地提交。",
   "ui.mcpService.setupGuide": "Cloudflare 配置指南",
   "ui.mcpService.title": "Harness MCP 服务",

@@ -31,7 +31,7 @@ export function McpServicePanel() {
   const edited = useRef(false)
   const [mode, setMode] = useState<'quick' | 'named'>('quick')
   const [publicUrl, setPublicUrl] = useState('')
-  const [originPort, setOriginPort] = useState('18765')
+  const [originPort, setOriginPort] = useState('12345')
   const [token, setToken] = useState('')
   function hydrate(result: McpServiceState) {
     if (!edited.current && result.tunnel) {

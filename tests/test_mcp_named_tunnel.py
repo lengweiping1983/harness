@@ -1,8 +1,10 @@
 """固定隧道、限流保护与双平台启动的隔离回归。"""
 import io
+import errno
 import json
 from pathlib import Path
 import socket
+import sys
 import tempfile
 import time
 import unittest
@@ -10,13 +12,100 @@ from unittest.mock import MagicMock, Mock, patch
 
 from harness.app.mcp_errors import McpServiceError
 from harness.app.mcp_service import McpService, _TunnelOutput, _tunnel_environment
-from harness.app.mcp_tunnel import public_tunnel, read_tunnel, validate_tunnel
+from harness.app.mcp_tunnel import DEFAULT_TUNNEL, public_tunnel, read_tunnel, validate_tunnel
 from harness.core.language import current_language
 
 
 class NamedTunnelTests(unittest.TestCase):
     def settings(self, port=18765):
         return {'mode': 'named', 'public_url': 'https://mcp.example.test', 'origin_port': port, 'token': 'private-fixture-token'}
+
+    def test_new_configuration_defaults_to_12345_and_saved_ports_are_preserved(self):
+        self.assertEqual(DEFAULT_TUNNEL['origin_port'], 12345)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'tunnel.json'
+            settings, raw = read_tunnel(path)
+            self.assertEqual(settings['origin_port'], 12345)
+            self.assertIsNone(raw)
+            self.assertFalse(path.exists())
+            original = json.dumps(self.settings(18765)).encode('utf-8')
+            path.write_bytes(original)
+            settings, raw = read_tunnel(path)
+            self.assertEqual(settings['origin_port'], 18765)
+            self.assertEqual(raw, original)
+            self.assertEqual(path.read_bytes(), original)
+
+    @unittest.skipIf(sys.platform == 'win32', 'POSIX 地址复用语义')
+    def test_closed_origin_connection_does_not_block_named_restart(self):
+        with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(('127.0.0.1', 0))
+            port = listener.getsockname()[1]
+            listener.listen()
+            listener.settimeout(2)
+            with socket.create_connection(('127.0.0.1', port), timeout=2) as client:
+                connection, _ = listener.accept()
+                connection.close()
+                self.assertEqual(client.recv(1), b'')
+        # 服务端主动关闭留下 TIME_WAIT，原探测确实会拒绝这个可复用端口。
+        with socket.socket() as probe, self.assertRaises(OSError) as caught:
+            probe.bind(('127.0.0.1', port))
+        self.assertEqual(caught.exception.errno, errno.EADDRINUSE)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / 'project'
+            project.mkdir()
+            service = McpService(root / 'private')
+            service._launch_tunnel = self.settings(port)
+            try:
+                with patch.object(service, '_python', return_value='fixture-python'), \
+                     patch.object(service, '_cloudflared', side_effect=RuntimeError('fixture after port check')) as prepare, \
+                     patch.object(service, '_spawn') as spawn:
+                    service._launch(project, 'project', None)
+                    prepare.assert_called_once()
+                    spawn.assert_not_called()
+                self.assertEqual(service.snapshot()['error'], 'fixture after port check')
+            finally:
+                service.stop()
+
+    def test_origin_probe_reuses_addresses_only_on_posix_and_preserves_other_errors(self):
+        for platform in ('darwin', 'win32'):
+            for failure in (None, PermissionError(errno.EACCES, 'fixture denied')):
+                with self.subTest(platform=platform, failure=failure), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    project = root / 'project'
+                    project.mkdir()
+                    service = McpService(root / 'private')
+                    service._launch_tunnel = self.settings(12345)
+                    sockets = [MagicMock() for _ in range(3)]
+                    for sock in sockets:
+                        sock.__enter__.return_value = sock
+                        sock.getsockname.return_value = ('127.0.0.1', 12345)
+                    origin = sockets[0]
+                    origin.bind.side_effect = failure
+                    try:
+                        with patch('harness.app.mcp_service.sys.platform', platform), \
+                             patch('harness.app.mcp_service.socket.socket', side_effect=sockets), \
+                             patch.object(service, '_private_home'), \
+                             patch.object(service, '_python', return_value='fixture-python'), \
+                             patch.object(service, '_cloudflared', side_effect=RuntimeError('fixture after port check')) as prepare:
+                            service._launch(project, 'project', None)
+                        if platform == 'darwin':
+                            origin.setsockopt.assert_called_once_with(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        else:
+                            origin.setsockopt.assert_not_called()
+                        origin.bind.assert_called_once_with(('127.0.0.1', 12345))
+                        if failure is None:
+                            origin.listen.assert_called_once()
+                            prepare.assert_called_once()
+                        else:
+                            prepare.assert_not_called()
+                            origin.listen.assert_not_called()
+                            snapshot = service.snapshot()
+                            self.assertIsNone(snapshot['error_copy'])
+                            self.assertEqual(snapshot['error'], str(failure))
+                    finally:
+                        service.stop()
 
     def test_saved_settings_survive_recreation_and_start_without_reentering_secrets(self):
         for mode in ('quick', 'named'):
@@ -201,14 +290,20 @@ class NamedTunnelTests(unittest.TestCase):
         self.assertNotIn('secret-fixture', output.failure(1).values['detail'])
         with tempfile.TemporaryDirectory() as directory, socket.socket() as occupied:
             occupied.bind(('127.0.0.1', 0))
+            occupied.listen()
             root = Path(directory)
             project = root / 'project'
             project.mkdir()
             service = McpService(root / 'private')
             service._launch_tunnel = self.settings(occupied.getsockname()[1])
-            with patch.object(service, '_cloudflared', return_value='fixture-cloudflared'), patch.object(service, '_python', return_value='fixture-python'), patch.object(service, '_spawn') as spawn:
+            with patch.object(service, '_cloudflared', return_value='fixture-cloudflared') as prepare, patch.object(service, '_python', return_value='fixture-python'), patch.object(service, '_spawn') as spawn:
                 service._launch(project, 'project', None)
-                self.assertEqual(service.snapshot()['error_copy']['key'], 'ui.mcpService.error.originPortBusy')
+                for language in ('en', 'zh-CN', 'en'):
+                    with current_language.set(language):
+                        snapshot = service.snapshot()
+                        self.assertEqual(snapshot['error_copy'], {'key': 'ui.mcpService.error.originPortBusy', 'params': {'port': occupied.getsockname()[1]}})
+                        self.assertEqual(any('\u4e00' <= char <= '\u9fff' for char in snapshot['error']), language == 'zh-CN')
+                prepare.assert_not_called()
                 spawn.assert_not_called()
             service.stop()
 

@@ -20,6 +20,7 @@
 | 热部署 P2-05 | `packages.py:_snapshot` 使用 `sorted(source.rglob('*'))`，在文件数量检查前已遍历完整目录 | `_snapshot_paths` 增量枚举，文件及子目录分别有界，超限即关闭枚举句柄；限额内保留原全路径顺序，避免改变审核摘要。`test_plugin_preview_bounds.py` 核对提前停止、原件保留、摘要及复制字节；不以该测试宣称固定毫秒级性能 |
 | 热部署 P2-06 | 全部启动资源均不可用时，HTTP 失败返回值不抛异常，`app.ts:boot` 原先仍发布空工作台 | 全部失败且无状态快照时进入已有全局失败／重试页面；重试期间保持连接界面，确认数据和草稿不清除。单项目录失败仍局部降级。`creationCatalogOwnership.test.ts` 覆盖完全失败、重试及恢复；`http.test.ts` 验证网络主提示资源化，原浏览器诊断保留为 `details.cause` |
 | 热部署 P2-07 | 隧道启动通过按钮调用，HTML 输入约束未参与提交；`McpServicePanel.change` 原先直接转换端口 | 启动前检查整数端口、HTTPS 根地址、令牌及复用状态；非法值不写入，停止不受草稿错误阻挡。`McpServicePanel.test.tsx` 通过实际 HTTP 传输替身核对无启动请求、输入保留及同实例英中英，原后端拒绝测试保留 |
+| macOS 固定隧道端口冲突与重启误报 | `mcp_tunnel.DEFAULT_TUNNEL` 与 `codex_gateway.desktop.DesktopIntegration` 原默认端口均为 18765；本机只读核对确认该端口由 `harness.codex_gateway` 监听。`McpService._launch` 原使用无地址复用的 bind 探测，隔离回环连接的服务端主动关闭后可复现 TIME_WAIT 导致的 EADDRINUSE | macOS／Windows 新配置默认 MCP 端口统一为 12345，面板与后端同步；已保存配置不迁移。端口探测先于隧道准备，POSIX 启用地址复用并核对可监听，Windows 保留默认绑定；仅 EADDRINUSE 使用占用提示，其他原始错误继续报告。`test_mcp_named_tunnel.py` 的定向用例覆盖新默认值与原配置字节、真实 TIME_WAIT、双平台探测策略、权限错误及真实占用；`McpServicePanel.test.tsx` 覆盖默认与回填、占用提示英中英及无重放。Windows 分支使用替身，未进行 Windows 实机或真实 Cloudflare 连接验收 |
 | 热部署 P2-08 | `CapabilitiesPanel.NumberField` 在失焦时直接提交负数、小数或将必填空值转零 | 失焦前置正整数与安全范围校验；可选预算空值仍为 null，必填超时空值拒绝，组合输入不提交。`CapabilitiesPanel.test.tsx` 经实际父组件、字段及 HTTP 替身核对三个设置的无非法 PATCH、草稿及空值语义 |
 | 热部署复测 N1（插件 I/O 错误） | 增量扫描对不存在目录直接抛出 `OSError`，插件 API 的 `plugin-package/io-error` 分支原先将 `str(exc)` 作为用户提示，回显英文 errno 与绝对路径 | 该分支改用共享双语资源，保留原 HTTP 状态和错误码；响应 details 仅提供资源身份与 errno，原异常链和完整诊断进入服务端日志。`test_plugin_io_error_hides_paths_preserves_diagnostics_and_uses_shared_resources` 经实际缺失目录扫描及受控权限错误核对路径不进入响应、日志仍保留原因、英中英与无文件写入；`httpErrorLanguage.test.ts` 的对应错误码用例核对实际传输到页面资源消费 |
 | 热部署 P2-09 的重复错误前缀 | 插件 API 对 `HarnessError` 使用 `str(exc)`，把日志用的 `[code]` 再次放入用户正文 | API 使用 `exc.message` 并保留状态、错误码和 details；`test_plugin_validation_language.py` 核对冲突、普通错误与英中英。解析位置与请求路由仍保留用于诊断；通用插件文件 I/O 错误另按资源提示与服务端日志分层处理 |
@@ -90,6 +91,13 @@
 | P-05 | 现有日志明确显示 WorkBuddy 注入的 sitecustomize 在已存在目录上破坏 mkdir(exist_ok=True)；拒绝发现是预检的既定目的，不应在仓库中按 shim 名称绕过。discover 运行 25 分钟无汇总也不能单独证明挂死或全部失败 | 保留预检与原始异常。本次相同仓库解释器的独立预检未加载 sitecustomize、支持 dir_fd 且通过；这不证明原 WorkBuddy 上下文已恢复。`test_broken_exist_ok_stops_before_discovery_with_original_diagnostic` 确认异常环境不进入课程探针或测试发现。未执行全量 Python／课程沙箱验收；原宿主环境限制仍未解决 |
 | P-06 | 不是可由所列请求证明的故障：未提供服务端实体标签，却发送任意 If-None-Match 得到 200，不构成“应返回 304”的依据。未声明 gzip 时返回完整表示也是当前协商选择 | 接口文档明确 OpenAPI、提供商及工具目录保留 no-store，不提供 ETag／304 契约；不引入新的客户端缓存，不改动已有内容寻址附件和静态文件的 ETag 行为 |
 | P-07 | 本机管理信任边界包括配置、登录与服务启停，不限于目录读取。MCP 服务管理还核对回环 IP、Host 与 Origin；原生本机管理调用方不靠浏览器凭据认证。没有声明所有管理动作均有统一幂等键或审计账本，不能仅凭 200 或无 requestBody 证明越权 | 在接口文档明确管理动作范围及无统一审计／幂等保证；共享身份继续按各自权限准入，结果未知不得自动重放。未操作真实账号或服务状态，不将统一审计、远程管理认证作为隐式新增功能 |
+
+## 后端回归清单 R-01／R-02 的裁决
+
+| 来源 | 触发条件与源码／现场依据 | 当前处理与验证边界 |
+|---|---|---|
+| R-01 | 默认环境日志保留 WorkBuddy sitecustomize 在 mkdir(exist_ok=True) 上抛 EEXIST 的原始栈；无 shim 的定向日志仅剩 R-02，不能据此推断全量通过。报告指定的无 shim 聚合预检日志实际只有 env: timeout: No such file or directory，命令未执行，不能作为 sandbox_apply 拒绝的证据 | 原宿主限制继续保留；seatbelt 失败结论待有效原始回执核对。本轮不运行全量或重新启动课程沙箱，不按 shim 名称绕过目录语义检查，也不增加无隔离降级以制造聚合通过。发现前明确失败符合当前验证合同 |
+| R-02 | 预热失败回归使用仅供转写的 request() 默认 WAV，请求在 Request.json 阶段即被拒绝，未到达模拟的 prepare_transcription 引擎失败，因而无法覆盖其原有断言 | 原用例改为正确的预热路径、JSON 类型和空对象正文，保留原始失败原因、503、资源身份及单次准备断言，并确认不转写；新增 test_preparation_rejects_wav_before_starting_engine 验证音频误投返回 400 bad-json，准备与转写均不执行。仅执行这两个针对性用例，不改变生产准入行为 |
 
 ## 不成立或不宜按报告建议改动的结论
 

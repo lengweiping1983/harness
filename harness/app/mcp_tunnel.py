@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from .mcp_errors import McpServiceError
 from ..llm.routes import mask_api_key
 
-DEFAULT_TUNNEL = {'mode': 'quick', 'public_url': '', 'origin_port': 18765, 'token': ''}
+DEFAULT_TUNNEL = {'mode': 'quick', 'public_url': '', 'origin_port': 12345, 'token': ''}
 
 
 def _unique(pairs):

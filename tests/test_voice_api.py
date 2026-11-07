@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 from harness.core.language import current_language
 from harness.web.api.voice import build_router
-from harness.web.errors import BadRequest, ServiceUnavailable
+from harness.web.errors import ApiError, BadRequest, ServiceUnavailable
 from harness.web.router import Request
 from harness.tools.builtin.hex_tools import HexToolError
 from harness import voice
@@ -141,13 +141,33 @@ class VoiceApiTests(unittest.TestCase):
         self.assertEqual(response.headers['Server-Timing'], 'voice_queue;dur=12.35, voice_prepare;dur=0.23, voice_inference;dur=1234.57')
 
     def test_preparation_failure_is_not_replayed_or_reported_as_ready(self):
-        """准备失败保持资源身份及诊断，只执行一次。"""
+        """合法准备请求触发引擎失败时保留资源身份及诊断，只执行一次。"""
         self.service.prepare_transcription.side_effect = HexToolError('raw preparation failure')
-        handler, _ = build_router(self.ctx).resolve('POST', '/api/v1/voice/preparations')
+        path = '/api/v1/voice/preparations'
+        handler, _ = build_router(self.ctx).resolve('POST', path)
+        request = Request('POST', path, {}, {'Host': 'localhost', 'Content-Type': 'application/json'},
+                          b'{}', client_ip='127.0.0.1')
         with self.assertRaises(ServiceUnavailable) as caught:
-            handler(self.request())
+            handler(request)
+        self.assertEqual(caught.exception.status, 503)
+        self.assertEqual(caught.exception.code, 'voice/unavailable')
         self.assertEqual(caught.exception.details['reason'], 'raw preparation failure')
+        self.assertEqual(caught.exception.details['copy'], {'key': 'ui.voice.engineFailed'})
         self.service.prepare_transcription.assert_called_once()
+        self.service.transcribe_prepared.assert_not_called()
+
+    def test_preparation_rejects_wav_before_starting_engine(self):
+        """音频正文不能冒充无参预热请求，拒绝发生在准备与转写之前。"""
+        path = '/api/v1/voice/preparations'
+        handler, _ = build_router(self.ctx).resolve('POST', path)
+        request = Request('POST', path, {}, {'Host': 'localhost', 'Content-Type': 'audio/wav'},
+                          wav_bytes(), client_ip='127.0.0.1')
+        with self.assertRaises(ApiError) as caught:
+            handler(request)
+        self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(caught.exception.code, 'bad-json')
+        self.service.prepare_transcription.assert_not_called()
+        self.service.transcribe_prepared.assert_not_called()
 
 
 class VoiceCommandTests(unittest.TestCase):

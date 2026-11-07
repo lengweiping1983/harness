@@ -2734,7 +2734,7 @@
   "ui.mcpService.error.tunnelConfigFile": "The saved tunnel configuration cannot be read or is invalid. The original file was preserved.",
   "ui.mcpService.error.rateLimited": "Cloudflare rate limited temporary address creation (429/1015). Wait before retrying, or configure a named tunnel for long-term use.",
   "ui.mcpService.diagnostic": "Tunnel diagnostics",
-  "ui.mcpService.error.originPortBusy": "Local port {port} is unavailable. Choose a free port and update the Cloudflare origin service to match.",
+  "ui.mcpService.error.originPortBusy": "Local port {port} is already in use. MCP and the Codex desktop gateway must use separate ports. Choose a free MCP port and update the Cloudflare origin service to match.",
   "ui.mcpService.lifecycleHint": "Closing Harness stops its MCP server and tunnel. Registered projects allow edits, commands, and local commits.",
   "ui.mcpService.setupGuide": "Cloudflare setup guide",
   "ui.mcpService.title": "Harness MCP",
