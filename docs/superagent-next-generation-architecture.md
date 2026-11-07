@@ -602,7 +602,7 @@ Phase 0–3 是已经形成的领域和基础能力背景，不再作为待执�
 - 将已有 CoordinatorArtifacts 接入调度消费：原 Run、工具结果和所属后台写入均确认收尾后才冻结产物，逐条所需 Delivery 确认 applied 后才放行下游。
 - Capture / Import / Submit 使用持久稳定身份；丢回执时仅回查原操作。冲突保留原件，容量耗尽明确等待或关注，不隐式清理历史资源。
 
-**出口：** 通过同一调度器验证真实未提交文件交接、冻结基线、慢任务公平性、冲突、后台收尾及未知操作不重放；独立文件适配器用例不足以替代调度闭环。
+**出口状态（2026-11-07）：已完成。** 同一 CoordinatorDagScheduler 已通过真实 Harness Worktree 端到端回归：Mission 冻结基线后源 HEAD 前进，两个独立节点分别生成二进制与删除文件，Join 仅在两份 Delivery applied 后启动；注入 Import 写入成功但回执丢失，后续 Tick 只核对原 Worktree 回执，不再次导入；另有慢任务并发、公平背压、冲突、后台收尾、Submit ACK 丢失、事务回滚与 unknown 不重放回归。对应证据见 `docs/superagent-review.md` Phase 4.3 表。Phase 4.3 完成不代表 Phase 4.4 质量门、生产 CLI、生产 Sender 或生产默认路由切换完成。
 
 #### Phase 4.4：质量门、阶段接续与有限修正
 

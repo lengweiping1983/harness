@@ -1125,6 +1125,29 @@ class CoordinatorExecutionService:
             elif state in {"unapplied", "not-applied"}:
                 self._mark_input(row["input_id"], "waiting")
 
+        # 初始 DAG Run 的输入快照为每个 Assignment 提供独立的消费证明。
+        # 只在原运行确认已启动且确实包含该 Input 时标记 applied；其余状态保留待回查。
+        if snapshot.get("started"):
+            deliveries = self._read_all(
+                "SELECT input_id FROM input_deliveries WHERE assignment_id=? "
+                "AND state IN ('submitting','accepted','unknown')",
+                (assignment["assignment_id"],),
+            )
+            for row in deliveries:
+                input_id = row["input_id"]
+                if input_id not in prompt_ids:
+                    continue
+                delivery = self._input_deliveries.get(input_id, assignment["assignment_id"])
+                if delivery is None or delivery["state"] not in {"submitting", "accepted", "unknown"}:
+                    continue
+                self._input_deliveries.transition(
+                    input_id, assignment["assignment_id"], "applied",
+                    expected_revision=delivery["aggregate_revision"],
+                    receipt=self._input_deliveries.make_receipt(
+                        delivery, "applied", native_receipt={"source": "original_run_input_receipt"},
+                    ), actor=_ACTOR,
+                )
+
     def _persist_evidence(self, assignment: dict, snapshot: dict) -> list[str]:
         records = [{
             "evidence_type": "run", "reference": snapshot["run_reference"],
@@ -1216,6 +1239,23 @@ class CoordinatorExecutionService:
         )
         if self._control.mode(assignment["mission_id"])["mode"] != "cancelled":
             self._requeue_inputs(assignment["assignment_id"])
+        # 原提交键已被原生运行存储确认不存在，才能拒绝该 Assignment 尚未消费的输入。
+        pending_inputs = self._read_all(
+            "SELECT input_id FROM input_deliveries WHERE assignment_id=? AND state='submitting'",
+            (assignment["assignment_id"],),
+        )
+        for row in pending_inputs:
+            input_id = row["input_id"]
+            delivery = self._input_deliveries.get(input_id, assignment["assignment_id"])
+            if delivery is None or delivery["state"] != "submitting":
+                continue
+            self._input_deliveries.transition(
+                input_id, assignment["assignment_id"], "rejected",
+                expected_revision=delivery["aggregate_revision"],
+                receipt=self._input_deliveries.make_receipt(
+                    delivery, "rejected", reason_code="original-run-not-started",
+                ), actor=_ACTOR,
+            )
         job = self._read_one("SELECT * FROM jobs WHERE job_id=?", (assignment["job_id"],))
         if job and job["state"] in {"ready", "unknown"}:
             facts = {"known_failure_or_human_decision": True}

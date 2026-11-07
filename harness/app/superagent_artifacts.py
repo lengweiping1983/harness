@@ -192,9 +192,11 @@ class CoordinatorArtifacts:
                          "pending" if plan["clean"] else "conflict", _json(plan), now, now))
         if not plan["clean"]:
             return False
-        self.admit(assignment["mission_id"])
         effect, fresh = self._begin("artifact.import", key, payload)
         if fresh:
+            # 只有新的外部导入需要准入；leased/unknown 仅核对原工作树回执，
+            # 不能因为 Mission 已进入 unknown 而阻断只读恢复，也绝不重新写入。
+            self.admit(assignment["mission_id"])
             with self.store.transaction(write=True) as db:
                 db.execute("UPDATE deliveries SET state='applying',aggregate_revision=aggregate_revision+1,updated_at=? "
                     "WHERE target_assignment_id=? AND state='pending'", (_now(), assignment["assignment_id"]))

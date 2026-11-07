@@ -1272,6 +1272,208 @@ class DagSchedulerExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(assignments), 2)
         return accepted, mission, assignments
 
+    def _create_pending_dag(self, ticket_id, trigger_id):
+        f = self.fixture
+        service = f.host._execution_service
+        ticket = service._authorization.ticket(ticket_id)
+        trigger = service._sources.get_trigger(trigger_id)
+        input_row = service._input(ticket_id, trigger_id)
+        mandate, profile, budget = service._mandate_context(ticket, trigger, input_row, require_work=False)
+        prompt, _ = service._build_prompt(ticket, trigger, mandate)
+        mission, _ = service._create_mission_plan(ticket, trigger, mandate, profile, budget, prompt)
+        return mission
+
+    async def test_dag_initial_input_is_confirmed_for_each_independent_assignment(self):
+        accepted, mission, roots = await self._start_dag()
+        inputs = self._rows(
+            "SELECT input_id,state FROM ticket_inputs WHERE ticket_id=?",
+            (accepted["ticket_id"],),
+        )
+        self.assertEqual(len(inputs), 1)
+        input_id = inputs[0]["input_id"]
+        deliveries = self._rows(
+            "SELECT input_id,assignment_id,state,delivery_key FROM input_deliveries "
+            "WHERE input_id=? ORDER BY assignment_id", (input_id,),
+        )
+        self.assertEqual(len(deliveries), 2)
+        self.assertEqual(
+            {delivery["assignment_id"]: delivery["state"] for delivery in deliveries},
+            {assignment["assignment_id"]: "applied" for assignment in roots},
+        )
+        self.assertEqual(
+            {delivery["delivery_key"] for delivery in deliveries},
+            {f"superagent-v2:input:{input_id}:{assignment['assignment_id']}" for assignment in roots},
+        )
+        self.assertEqual(inputs[0]["state"], "read")
+        for assignment in roots:
+            self.assertIn(input_id, self.fixture.shared["runs"][assignment["assignment_id"]]["input_ids"])
+
+    async def test_dag_absent_original_run_rejects_only_its_own_input_delivery(self):
+        f = self.fixture
+        origin, accepted, _ = f.accept_event(
+            event_id="dag-input-absent-run", thread_key="dag-input-absent-run", max_turns=4,
+        )
+        mission = self._create_pending_dag(accepted["ticket_id"], origin["trigger_id"])
+        original_submit = f.adapter.submit
+        submit_count = 0
+
+        async def submit_with_absent_second_run(worker, assignment, prompt, input_ids):
+            nonlocal submit_count
+            submit_count += 1
+            if submit_count == 2:
+                raise RuntimeError("native Run never accepted the second submission")
+            return await original_submit(worker, assignment, prompt, input_ids)
+
+        f.adapter.submit = submit_with_absent_second_run
+        await f.host._execution_service._dag_scheduler.schedule_mission(mission["mission_id"])
+        assignments = self._rows(
+            "SELECT assignment.assignment_id,assignment.state FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? ORDER BY job.node_id",
+            (mission["mission_id"],),
+        )
+        self.assertEqual([row["state"] for row in assignments], ["running", "rejected"])
+        input_id = self._rows(
+            "SELECT input_id FROM ticket_inputs WHERE ticket_id=?", (accepted["ticket_id"],),
+        )[0]["input_id"]
+        deliveries = self._rows(
+            "SELECT assignment_id,state FROM input_deliveries WHERE input_id=?", (input_id,),
+        )
+        self.assertEqual(
+            {row["assignment_id"]: row["state"] for row in deliveries},
+            {assignments[0]["assignment_id"]: "applied", assignments[1]["assignment_id"]: "rejected"},
+        )
+        self.assertEqual(len(f.shared["submit_calls"]), 1)
+
+    async def test_schedule_pending_runs_missions_concurrently_with_bounded_global_capacity(self):
+        f = self.fixture
+        first, first_accepted, _ = f.accept_event(
+            event_id="dag-parallel-first", thread_key="dag-parallel-first", max_turns=4,
+        )
+        second, second_accepted, _ = f.accept_event(
+            event_id="dag-parallel-second", thread_key="dag-parallel-second", max_turns=4,
+        )
+        third, third_accepted, _ = f.accept_event(
+            event_id="dag-parallel-third", thread_key="dag-parallel-third", max_turns=4,
+        )
+        policy = f.host.authorization.current_policy()["policy"]
+        policy["sources"]["local-source"]["scope"]["thread_ids"] = [
+            f._thread_id("dag-parallel-first"),
+            f._thread_id("dag-parallel-second"),
+            f._thread_id("dag-parallel-third"),
+        ]
+        f.host.authorization.publish_policy(
+            policy, actor={"kind": "human", "id": "policy-admin"},
+        )
+        missions = [
+            self._create_pending_dag(first_accepted["ticket_id"], first["trigger_id"]),
+            self._create_pending_dag(second_accepted["ticket_id"], second["trigger_id"]),
+            self._create_pending_dag(third_accepted["ticket_id"], third["trigger_id"]),
+        ]
+        scheduler = f.host._execution_service._dag_scheduler
+        original_start = scheduler._start_job
+        original_submit = f.adapter.submit
+        first_entered = asyncio.Event()
+        release_first = asyncio.Event()
+        other_started = asyncio.Event()
+        first_mission_id = None
+        other_mission_id = None
+        other_start_count = 0
+        first_submission_gated = False
+
+        async def gate_first_submit(worker, assignment, prompt, input_ids):
+            nonlocal first_submission_gated
+            if worker["mission_id"] == first_mission_id and not first_submission_gated:
+                first_submission_gated = True
+                first_entered.set()
+                await release_first.wait()
+            return await original_submit(worker, assignment, prompt, input_ids)
+
+        async def mark_first_mission(mission, *args, **kwargs):
+            nonlocal first_mission_id, other_mission_id, other_start_count
+            mission_id = mission["mission_id"]
+            if first_mission_id is None:
+                first_mission_id = mission_id
+            result = await original_start(mission, *args, **kwargs)
+            if mission_id != first_mission_id:
+                other_mission_id = mission_id
+                other_start_count += 1
+                if other_start_count == 2:
+                    other_started.set()
+            return result
+
+        scheduler._start_job = mark_first_mission
+        f.adapter.submit = gate_first_submit
+        pending = asyncio.create_task(scheduler.schedule_pending(limit=20))
+        try:
+            await asyncio.wait_for(first_entered.wait(), timeout=10)
+            await asyncio.wait_for(other_started.wait(), timeout=20)
+            first_count = self._rows(
+                "SELECT COUNT(*) AS total FROM assignments AS assignment "
+                "JOIN jobs AS job ON job.job_id=assignment.job_id WHERE job.mission_id=?",
+                (first_mission_id,),
+            )[0]["total"]
+            other_count = self._rows(
+                "SELECT COUNT(*) AS total FROM assignments AS assignment "
+                "JOIN jobs AS job ON job.job_id=assignment.job_id WHERE job.mission_id=?",
+                (other_mission_id,),
+            )[0]["total"]
+            third_mission_id = next(
+                mission["mission_id"] for mission in missions
+                if mission["mission_id"] not in {first_mission_id, other_mission_id}
+            )
+            third_count = self._rows(
+                "SELECT COUNT(*) AS total FROM assignments AS assignment "
+                "JOIN jobs AS job ON job.job_id=assignment.job_id WHERE job.mission_id=?",
+                (third_mission_id,),
+            )[0]["total"]
+            self.assertEqual(first_count, 1)
+            self.assertEqual(other_count, 2)
+            self.assertEqual(third_count, 0)
+            self.assertEqual(scheduler._count_active_assignments(), 3)
+            self.assertEqual(scheduler._reserved_global, 1)
+            self.assertEqual(scheduler._reserved_by_mission, {first_mission_id: 1})
+        except BaseException:
+            release_first.set()
+            await pending
+            raise
+        release_first.set()
+        result = await asyncio.wait_for(pending, timeout=30)
+
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["scheduled"], 4)
+        counts = {
+            row["mission_id"]: row["total"] for row in self._rows(
+                "SELECT job.mission_id,COUNT(*) AS total FROM assignments AS assignment "
+                "JOIN jobs AS job ON job.job_id=assignment.job_id GROUP BY job.mission_id",
+            )
+        }
+        self.assertEqual(counts, {first_mission_id: 2, other_mission_id: 2})
+        self.assertEqual(counts.get(third_mission_id, 0), 0)
+        self.assertEqual(scheduler._count_active_assignments(), 4)
+        self.assertEqual(scheduler._reserved_global, 0)
+        self.assertEqual(scheduler._reserved_by_mission, {})
+
+        completed_assignment = self._rows(
+            "SELECT assignment.assignment_id FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? AND assignment.state='running' ORDER BY job.node_id LIMIT 1",
+            (first_mission_id,),
+        )[0]["assignment_id"]
+        f.adapter.finish(completed_assignment, {"summary": "First workstream completed"})
+        settled = await f.host.execution.reconcile(completed_assignment)
+        self.assertEqual(settled["state"], "succeeded")
+        await scheduler.schedule_pending(limit=20)
+        third_count = self._rows(
+            "SELECT COUNT(*) AS total FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id WHERE job.mission_id=?",
+            (third_mission_id,),
+        )[0]["total"]
+        self.assertEqual(third_count, 1)
+        self.assertEqual(scheduler._count_active_assignments(), 4)
+        self.assertEqual(scheduler._reserved_global, 0)
+        self.assertEqual(scheduler._reserved_by_mission, {})
+
     async def test_dag_uses_shared_scheduler_freezes_base_and_applies_every_required_delivery(self):
         f = self.fixture
         accepted, mission, roots = await self._start_dag()
@@ -1326,6 +1528,111 @@ class DagSchedulerExecutionTests(unittest.IsolatedAsyncioTestCase):
             "(SELECT job_id FROM jobs WHERE mission_id=?))", (mission["mission_id"],),
         ).__len__(), 3)
 
+    async def test_dag_capture_waits_for_confirmed_tools_and_settled_background_writes(self):
+        f = self.fixture
+        _, mission, roots = await self._start_dag()
+        assignment_id = roots[0]["assignment_id"]
+        f.adapter.finish(assignment_id, {"summary": "Work completed"})
+        snapshot = f.shared["runs"][assignment_id]
+        snapshot["unconfirmed_tools"] = 1
+        snapshot["unsettled_background"] = 1
+        f.shared["runs"][assignment_id] = snapshot
+
+        uncertain = await f.host.execution.reconcile(assignment_id)
+        self.assertEqual(uncertain["state"], "unknown")
+        self.assertEqual(f.shared["artifact_capture_calls"], [])
+        self.assertEqual(
+            self._rows("SELECT state FROM missions WHERE mission_id=?", (mission["mission_id"],))[0]["state"],
+            "unknown",
+        )
+
+        snapshot["unconfirmed_tools"] = 0
+        capturing = await f.host.execution.reconcile(assignment_id)
+        self.assertEqual(capturing["state"], "capturing")
+        self.assertEqual(f.shared["artifact_capture_calls"], [])
+
+        snapshot["unsettled_background"] = 0
+        completed = await f.host.execution.reconcile(assignment_id)
+        self.assertEqual(completed["state"], "succeeded")
+        self.assertEqual(f.shared["artifact_capture_calls"], [
+            self._rows(
+                "SELECT worker.worker_id FROM assignments AS assignment "
+                "JOIN workers AS worker ON worker.worker_id=assignment.worker_id "
+                "WHERE assignment.assignment_id=?", (assignment_id,),
+            )[0]["worker_id"],
+        ])
+        self.assertIsNotNone(f.host.artifacts.get(assignment_id))
+
+    async def test_dag_lost_submit_ack_recovers_original_runs_without_replay(self):
+        f = self.fixture
+        origin, accepted, _ = f.accept_event(
+            event_id="dag-lost-submit-ack", thread_key="dag-lost-submit-ack", max_turns=4,
+        )
+        mission = self._create_pending_dag(accepted["ticket_id"], origin["trigger_id"])
+        f.shared["fail_submit_ack"] = True
+        scheduled = await f.host._execution_service._dag_scheduler.schedule_mission(mission["mission_id"])
+        self.assertEqual([row["state"] for row in scheduled], ["running", "running"])
+        self.assertEqual(len(f.shared["submit_calls"]), 2)
+        assignments = self._rows(
+            "SELECT assignment_id,run_id,state FROM assignments WHERE job_id IN "
+            "(SELECT job_id FROM jobs WHERE mission_id=?)", (mission["mission_id"],),
+        )
+        self.assertEqual({row["state"] for row in assignments}, {"running"})
+        self.assertEqual(len({row["run_id"] for row in assignments}), 2)
+        await f.host.execution.schedule_dag_missions(limit=20)
+        for assignment in assignments:
+            await f.host.execution.reconcile(assignment["assignment_id"])
+        self.assertEqual(len(f.shared["submit_calls"]), 2)
+
+    async def test_dag_blocking_rolls_back_assignment_and_job_if_input_rejection_fails(self):
+        f = self.fixture
+        _, mission, roots = await self._start_dag()
+        for assignment in roots:
+            f.adapter.finish(assignment["assignment_id"], {"summary": assignment["node_id"]})
+            await f.host.execution.reconcile(assignment["assignment_id"])
+        f.shared["artifact_conflict"] = True
+        execution = f.host._execution_service
+        scheduler = execution._dag_scheduler
+        original = execution._input_deliveries.transition_in_transaction
+
+        def fail_rejection(db, input_id, assignment_id, target, **kwargs):
+            if target == "rejected":
+                raise RuntimeError("injected input rejection failure")
+            return original(db, input_id, assignment_id, target, **kwargs)
+
+        execution._input_deliveries.transition_in_transaction = fail_rejection
+        try:
+            with self.assertRaisesRegex(RuntimeError, "injected input rejection failure"):
+                await scheduler.schedule_mission(mission["mission_id"])
+        finally:
+            execution._input_deliveries.transition_in_transaction = original
+
+        job = self._rows(
+            "SELECT job_id,state FROM jobs WHERE mission_id=? AND node_id='join'",
+            (mission["mission_id"],),
+        )[0]
+        assignment = self._rows(
+            "SELECT assignment_id,state FROM assignments WHERE job_id=?", (job["job_id"],),
+        )[0]
+        self.assertEqual((job["state"], assignment["state"]), ("pending", "pending"))
+        self.assertEqual(
+            self._rows(
+                "SELECT state FROM input_deliveries WHERE assignment_id=?",
+                (assignment["assignment_id"],),
+            )[0]["state"], "submitting",
+        )
+        await scheduler.schedule_mission(mission["mission_id"])
+        self.assertEqual(
+            self._rows("SELECT state FROM jobs WHERE job_id=?", (job["job_id"],))[0]["state"],
+            "blocked",
+        )
+        self.assertEqual(
+            self._rows(
+                "SELECT state FROM input_deliveries WHERE assignment_id=?",
+                (assignment["assignment_id"],),
+            )[0]["state"], "rejected",
+        )
+
     async def test_artifact_delivery_conflict_blocks_join_without_overwriting_original_artifacts(self):
         f = self.fixture
         accepted, mission, roots = await self._start_dag()
@@ -1357,4 +1664,23 @@ class DagSchedulerExecutionTests(unittest.IsolatedAsyncioTestCase):
             "(SELECT job_id FROM jobs WHERE mission_id=?))", (mission["mission_id"],),
         ).__len__(), 2)
         self.assertEqual(f.shared["artifact_import_calls"], [])
-
+        # 导入冲突发生在原 Run 之前，取消的节点不能遗留 submitting 输入。
+        join_assignment = self._rows(
+            "SELECT assignment_id,state,run_id FROM assignments WHERE job_id=?",
+            (join_job["job_id"],),
+        )[0]
+        self.assertEqual(join_assignment["state"], "cancelled")
+        self.assertIsNone(join_assignment["run_id"])
+        input_row = self._rows(
+            "SELECT input_id,state FROM ticket_inputs WHERE ticket_id=?", (accepted["ticket_id"],),
+        )[0]
+        self.assertEqual(input_row["state"], "read")
+        receipts = self._rows(
+            "SELECT assignment_id,state FROM input_deliveries WHERE input_id=?",
+            (input_row["input_id"],),
+        )
+        self.assertEqual(
+            {row["assignment_id"]: row["state"] for row in receipts},
+            {**{assignment["assignment_id"]: "applied" for assignment in roots},
+             join_assignment["assignment_id"]: "rejected"},
+        )

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 
 from ..core.errors import HarnessError
 from .superagent_coordinator_service import CoordinatorApplicationService
@@ -29,6 +30,17 @@ def _object(value):
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+def _run_started_at(snapshot):
+    """优先使用原生 Run 的开始时间；缺失时记录首次确认完成的时间。"""
+    reference = snapshot.get("run_reference")
+    value = reference.get("started_at") if isinstance(reference, dict) else None
+    if type(value) in {int, float} and value > 0:
+        try:
+            return datetime.fromtimestamp(value, timezone.utc).isoformat()
+        except (OverflowError, OSError, ValueError):
+            pass
+    return _now()
 
 
 class CoordinatorDagScheduler:
@@ -85,10 +97,15 @@ class CoordinatorDagScheduler:
         missions = missions[:limit]
         results, errors = [], []
 
-        # Unknown Missions are reconciled first, but each Mission advances independently.
-        ordered = [
+        # 先回查未知 Mission；各 Mission 独立推进，避免未知结果阻塞正常派工。
+        unknown = [
             mission for mission in missions if mission.get("state") == "unknown"
-        ] + self._policy.order_missions(missions)
+        ]
+        unknown_ids = {mission["mission_id"] for mission in unknown}
+        ordered = unknown + [
+            mission for mission in self._policy.order_missions(missions)
+            if mission["mission_id"] not in unknown_ids
+        ]
 
         async def process(mission):
             try:
@@ -99,7 +116,7 @@ class CoordinatorDagScheduler:
                     "code": getattr(exc, "code", type(exc).__name__),
                 })
 
-        # A slow Workspace/Session creation in one Mission must not block other Missions.
+        # 单个 Mission 的 Workspace / Session 创建较慢时，不阻塞其他 Mission。
         outcomes = await asyncio.gather(*(process(mission) for mission in ordered))
         for kind, value in outcomes:
             if kind == "error":
@@ -198,10 +215,20 @@ class CoordinatorDagScheduler:
                         self._block_job(candidate, "mission-turn-budget-exhausted")
                         continue
                 reserved_candidate = candidate["job_id"] in reserved_job_ids
+                reservation_held = reserved_candidate
+
+                async def release_reservation():
+                    nonlocal reservation_held, reservations_remaining
+                    if reservation_held:
+                        await self._release_slots(mission_id, 1)
+                        reservations_remaining -= 1
+                        reservation_held = False
+
                 try:
                     try:
                         result = await self._start_job(
                             mission, candidate, nodes, ticket, trigger, mandate, default_profile, budget,
+                            on_assignment_persisted=release_reservation if reserved_candidate else None,
                         )
                     except HarnessError as exc:
                         if exc.code == "superagent/mission-paused":
@@ -211,7 +238,7 @@ class CoordinatorDagScheduler:
                     if result is not None:
                         results.append(result)
                 finally:
-                    if reserved_candidate:
+                    if reservation_held:
                         await self._release_slots(mission_id, 1)
                         reservations_remaining -= 1
             self._advance_mission_state(mission_id)
@@ -368,7 +395,7 @@ class CoordinatorDagScheduler:
             (mission_id,),
         )["total"]
 
-    async def _start_job(self, mission, job, nodes, ticket, trigger, mandate, default_profile, budget):
+    async def _start_job(self, mission, job, nodes, ticket, trigger, mandate, default_profile, budget, *, on_assignment_persisted=None):
         e = self._execution
         node = nodes.get(job["node_id"])
         if node is None:
@@ -385,9 +412,21 @@ class CoordinatorDagScheduler:
             return None
         if assignment is None:
             base_prompt, input_ids = e._build_prompt(ticket, trigger, mandate)
+            # DAG 的每个 Assignment 都要保留独立输入身份，不能依赖首次消费的全局状态。
+            selected_inputs = e._read_all(
+                "SELECT input_id FROM ticket_inputs WHERE ticket_id=? "
+                "AND state IN ('waiting','delivered','read') "
+                "AND (context_only=1 OR trigger_id=?) ORDER BY created_at,input_id",
+                (ticket["ticket_id"], trigger["trigger_id"]),
+            )
+            input_ids = list(dict.fromkeys([
+                *input_ids, *(item["input_id"] for item in selected_inputs),
+            ]))
             prompt = self._node_prompt(base_prompt, node)
             assignment = self._create_pending_assignment(mission, job, worker, prompt, input_ids)
             assignment = e._assignment(assignment["assignment_id"])
+            if on_assignment_persisted is not None:
+                await on_assignment_persisted()
         else:
             worker = e._worker_row(assignment["worker_id"])
             if worker is None or worker["state"] != "ready":
@@ -482,6 +521,19 @@ class CoordinatorDagScheduler:
                         uow.db, input_id, "delivered", assignment_id=assignment_id,
                         delivery_key=f"superagent-v2:input:{input_id}:{assignment_id}",
                     )
+                elif row is not None and row["state"] in {"delivered", "read"}:
+                    # 已由其他节点消费的 Input 仍需为本节点固定独立回执。
+                    delivery = e._input_deliveries.prepare_in_transaction(
+                        uow.db, input_id, assignment_id, actor=_ACTOR,
+                        delivery_key=f"superagent-v2:input:{input_id}:{assignment_id}",
+                        initial_state="submitting",
+                    )
+                    if delivery["state"] not in {"pending", "submitting"}:
+                        raise HarnessError("DAG InputDelivery state conflicts with its original submission",
+                                           code="superagent/input-delivery-conflict")
+                else:
+                    raise HarnessError("DAG input is missing or no longer deliverable",
+                                       code="superagent/context-corrupt")
         return e._assignment(assignment_id)
 
     def _required_artifacts(self, job, mission_id):
@@ -618,9 +670,12 @@ class CoordinatorDagScheduler:
             raise LookupError("Assignment Job not found")
         mission_id = job["mission_id"]
         if current["state"] in {"accepted", "running"}:
+            changes = {}
+            if current["state"] == "accepted":
+                changes["started_at"] = current.get("started_at") or _run_started_at(snapshot)
             current = e._transition(
                 "assignment", current["assignment_id"], "capturing",
-                facts={"original_run_settled": True},
+                facts={"original_run_settled": True}, changes=changes,
             )
         elif current["state"] == "stopping":
             current = e._transition(
@@ -638,7 +693,7 @@ class CoordinatorDagScheduler:
             raise LookupError("Assignment disappeared during artifact capture")
         if not self._resume_unknown_mission(
             mission_id,
-            allow_capture_assignment_id=current["assignment_id"] if current["state"] == "unknown" else None,
+            allow_capture_assignment_id=current["assignment_id"] if current["state"] in {"capturing", "unknown"} else None,
         ):
             mission = e._read_one("SELECT state FROM missions WHERE mission_id=?", (mission_id,))
             if mission and mission["state"] == "unknown":
@@ -739,17 +794,60 @@ class CoordinatorDagScheduler:
         if job is not None:
             self._advance_mission_state(job["mission_id"])
 
+    def _block_unstarted_assignment(self, job, assignment, reason):
+        """原 Run 未提交时原子结算 Assignment、InputDelivery 和 Job。"""
+        e = self._execution
+        assignment_id = assignment["assignment_id"]
+        with e._store.unit_of_work(
+            actor=_ACTOR, correlation_id=f"mission:{job['mission_id']}:job:{job['job_id']}",
+        ) as uow:
+            app = CoordinatorApplicationService(uow)
+            current = uow.assignments.get(assignment_id)
+            current_job = uow.jobs.get(job["job_id"])
+            if (current is None or current["state"] != "pending"
+                    or current["job_id"] != job["job_id"] or current.get("run_id")):
+                raise HarnessError("Unstarted Assignment changed before blocking",
+                                   code="superagent/assignment-conflict")
+            app.transition(
+                "assignment", assignment_id,
+                expected_revision=current["aggregate_revision"], target_state="cancelled",
+                facts={"authorized": True, "no_external_side_effect_started": True},
+                changes={"error_ref": reason},
+            )
+            rows = uow.db.execute(
+                "SELECT * FROM input_deliveries WHERE assignment_id=? "
+                "AND state IN ('pending','submitting')", (assignment_id,),
+            ).fetchall()
+            for row in rows:
+                e._input_deliveries.transition_in_transaction(
+                    uow.db, row["input_id"], assignment_id, "rejected",
+                    expected_revision=row["aggregate_revision"],
+                    receipt=e._input_deliveries.make_receipt(
+                        dict(row), "rejected", reason_code=reason,
+                    ), actor=_ACTOR,
+                )
+            owned = uow.db.execute(
+                "SELECT input_id FROM ticket_inputs WHERE delivered_to_assignment_id=? "
+                "AND state='delivered'", (assignment_id,),
+            ).fetchall()
+            for row in owned:
+                e._mark_input_db(uow.db, row["input_id"], "waiting")
+            if current_job and current_job["state"] in {"pending", "ready", "running", "unknown"}:
+                facts = {"authorized": True, "known_failure_or_human_decision": True}
+                if current_job["state"] == "unknown":
+                    facts["reconciliation_verified"] = True
+                app.transition(
+                    "job", current_job["job_id"],
+                    expected_revision=current_job["aggregate_revision"],
+                    target_state="blocked", facts=facts,
+                )
+
     def _block_job(self, job, reason, *, assignment=None):
         e = self._execution
         current_assignment = assignment or self._assignment_for_job(job["job_id"])
         if current_assignment is not None and current_assignment["state"] == "pending":
-            # A never-started Assignment has no started_at; the schema therefore
-            # requires its terminal cancellation to keep ended_at unset.
-            e._transition(
-                "assignment", current_assignment["assignment_id"], "cancelled",
-                facts={"no_external_side_effect_started": True},
-                changes={"error_ref": reason},
-            )
+            self._block_unstarted_assignment(job, current_assignment, reason)
+            return
         current_job = e._read_one("SELECT * FROM jobs WHERE job_id=?", (job["job_id"],))
         if current_job and current_job["state"] in {"pending", "ready", "running", "unknown"}:
             facts = {"known_failure_or_human_decision": True}
