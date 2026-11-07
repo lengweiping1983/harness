@@ -39,7 +39,7 @@ async function loaded() {render(); await vi.waitFor(() => expect(button('ui.mcpS
 beforeEach(() => {
   unmount(); privateToken = ''; writes = []; rejectSave = false
   saved = {status: 'stopped', local_url: '', public_url: '', project_root: '', error: '', error_copy: null,
-    tunnel: {mode: 'quick', public_url: '', origin_port: 18765, has_token: false, token_mask: ''}}
+    tunnel: {mode: 'quick', public_url: '', origin_port: 12345, has_token: false, token_mask: ''}}
   vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit) => {
     if (options.method === 'POST') {
       const body = options.body ? JSON.parse(String(options.body)) : undefined; writes.push({path, body})
@@ -60,6 +60,33 @@ beforeEach(() => {
   }))
 })
 afterEach(async () => {unmount(); vi.unstubAllGlobals(); await setLocale('en')})
+
+it('uses 12345 for a new tunnel and preserves a saved explicit origin port', async () => {
+  render()
+  field('select').props.onChange({target: {value: 'named'}})
+  expect(field('number').props.value).toBe('12345')
+  await loaded()
+  expect(field('number').props.value).toBe('12345')
+  unmount()
+  saved.tunnel = {...saved.tunnel, mode: 'named', origin_port: 18765}
+  await loaded()
+  expect(field('number').props.value).toBe('18765')
+  expect(writes).toEqual([])
+})
+
+it('renders the occupied origin port guidance in the current language without restarting', async () => {
+  saved = {...saved, status: 'failed', error: 'original diagnostic',
+    error_copy: {key: 'ui.mcpService.error.originPortBusy', params: {port: 18765}},
+    tunnel: {...saved.tunnel, mode: 'named', origin_port: 18765}}
+  await loaded()
+  for (const language of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(language)
+    expect(text(nodes(render()).find(node => node.props.role === 'alert')))
+      .toBe(t('ui.mcpService.error.originPortBusy', {port: 18765}))
+    expect(field('number').props.value).toBe('18765')
+  }
+  expect(writes).toEqual([])
+})
 
 it('automatically saves settings on start, restores them on reopen and reuses the saved token', async () => {
   await loaded()
