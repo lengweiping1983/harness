@@ -52,7 +52,7 @@ from .errors import ApiError, BadRequest, NotFound, PayloadTooLarge
 from .hub import ConnectionHub
 from .error_messages import public_error_message
 from .responses import bytes_response, error_response, json_response, text_response
-from .router import Request, Response
+from .router import Request, Response, normalize_segments
 from .static_assets import StaticAssets
 from .wsproto import (
     CLOSE_GOING_AWAY,
@@ -329,6 +329,7 @@ class Handler(BaseHTTPRequestHandler):
     # -- 响应写入 --------------------------------------------------------
     def _send(self, response: Response) -> None:
         """把 :class:`~harness.web.router.Response` 写回 socket。"""
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
         self.send_response(response.status)
         for name, value in response.headers.items():
             # 传输层统一计算实际长度，避免文件/静态资源响应重复发送该头。
@@ -373,12 +374,18 @@ class Handler(BaseHTTPRequestHandler):
             logger.exception(tr('log.95d5dca987bd'))
             payload = {"error": tr('python.server.internal_error'), "code": "internal/error"}
             status = 500
+        if payload.get("code") == "request/origin":
+            self.close_connection = True
         response = error_response(
             payload["error"], status=status, code=payload.get("code", "error"),
             details=payload.get("details"), accept_encoding=self._accept_encoding(),
         )
         if payload.get('code') == 'websocket/version':
             response.with_header('Sec-WebSocket-Version', '13')
+        if status == 405:
+            allowed = (payload.get('details') or {}).get('allow', [])
+            if allowed:
+                response.with_header('Allow', ', '.join(allowed))
         if status == 401 and self.ctx.shared_access is not None:
             response.with_header('WWW-Authenticate', 'Bearer realm="harness-session"')
         self._send(self._apply_cors(response))
@@ -393,12 +400,12 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.headers["X-Request-ID"] = self._request_id
         raw_length = self.headers.get("Content-Length", "0")
-        if not raw_length.isascii() or not raw_length.isdecimal() or len(self.headers.get_all('Content-Length', [])) > 1 or self.headers.get('Transfer-Encoding'):
+        if not raw_length.isascii() or not raw_length.isdecimal() or len(self.headers.get_all('Content-Length', [])) > 1 or len(self.headers.get_all('Transfer-Encoding', [])) > 0:
             self.close_connection = True
             raise BadRequest(tr('python.audit.invalid_length'), code='request/invalid-length')
         limit = (
             MAX_ATTACHMENT_REQUEST_BODY_BYTES
-            if self.command == "POST" and parsed.path == "/api/v1/attachments"
+            if self.command == "POST" and normalize_segments(parsed.path) == ("api", "v1", "attachments")
             else MAX_REQUEST_BODY_BYTES
         )
         normalized_length = raw_length.lstrip('0') or '0'
@@ -451,10 +458,16 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _origin_allowed(self) -> bool:
+        origin_values = self.headers.get_all("Origin", [])
+        if len(origin_values) > 1:
+            return False
         shared = self.ctx.shared_access
         if shared is not None and shared.browser_origin is not None:
             return shared.origin_allowed(self.headers)
-        host = self.headers.get("Host", "")
+        host_values = self.headers.get_all("Host", [])
+        if len(host_values) > 1:
+            return False
+        host = host_values[0] if host_values else ""
         try:
             hostname = urllib.parse.urlparse("http://" + host).hostname if host else None
         except ValueError:
@@ -466,25 +479,36 @@ class Handler(BaseHTTPRequestHandler):
                  for site in value.split(',')}
         if sites & {'cross-site', 'same-site'}:
             return False
-        origin = self.headers.get("Origin", "")
+        origin = origin_values[0] if origin_values else ""
         if not origin:
             # 无浏览器来源的本机客户端继续可用；浏览器跨站请求不能借省略来源放行。
             return True
         try:
             parsed = urllib.parse.urlparse(origin)
+            has_origin_suffix = "?" in origin or "#" in origin
         except ValueError:
             return False
-        host = self.headers.get("Host", "")
-        return parsed.scheme in {"http", "https"} and parsed.netloc == host
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or has_origin_suffix
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            return False
+        return parsed.netloc == host
 
     def _apply_cors(self, response: Response) -> Response:
         response.headers.setdefault("X-Request-ID", getattr(self, "_request_id", None) or uuid.uuid4().hex)
+        vary = response.headers.get("Vary", "")
+        if 'origin' not in {part.strip().lower() for part in vary.split(',')}:
+            response.headers["Vary"] = f"{vary}, Origin" if vary else "Origin"
         origin = self.headers.get("Origin", "")
         if origin and self._origin_allowed():
             response.headers.setdefault("Access-Control-Allow-Origin", origin)
-            vary = response.headers.get("Vary", "")
-            if 'origin' not in {part.strip().lower() for part in vary.split(',')}:
-                response.headers["Vary"] = f"{vary}, Origin" if vary else "Origin"
             response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type,Idempotency-Key,X-Request-ID")
             response.headers.setdefault("Access-Control-Allow-Methods", "GET,HEAD,POST,PATCH,DELETE,OPTIONS")
         return response
@@ -801,7 +825,12 @@ class Handler(BaseHTTPRequestHandler):
                     logger.debug(tr('log.0c45c515d847'))
                     raise
                 except Exception:
-                    logger.debug(tr('log.145fa9f1114a'), exc_info=True)
+                    logger.exception(tr('log.145fa9f1114a'))
+                    with contextlib.suppress(Exception):
+                        await conn.send_json({
+                            "type": "error", "code": "internal/error",
+                            "message": tr('python.server.internal_error'),
+                        })
             finally:
                 if unsubscribe_access is not None:
                     unsubscribe_access()
@@ -876,7 +905,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 await self._answer_question(conn, payload)
             except QuestionError as exc:
-                await conn.send_json({"type": "error", "message": str(exc)})
+                await conn.send_json({
+                    "type": "error", "code": "question/invalid-answer",
+                    "message": public_error_message(str(exc), "question/invalid-answer"),
+                })
         elif action == "cancel":
             try:
                 cancelled = await self.harness.cancel(session_id)
@@ -896,7 +928,9 @@ class Handler(BaseHTTPRequestHandler):
                     original_text=(supplied or {}).get("text"))
                 await conn.send_json({"type": "steer/accepted", **result})
             except (HarnessError, ValueError) as exc:
-                await conn.send_json({"type": "error", "message": public_error_message(exc.message, exc.code) if isinstance(exc, HarnessError) else str(exc), "code": getattr(exc, "code", "run/invalid"), "action": "steer", "submitted": False, "request_id": payload.get("request_id")})
+                code = exc.code if isinstance(exc, HarnessError) else "run/invalid"
+                message = public_error_message(exc.message, code) if isinstance(exc, HarnessError) else tr('web.input.invalid_text')
+                await conn.send_json({"type": "error", "message": message, "code": code, "action": "steer", "submitted": False, "request_id": payload.get("request_id")})
         elif action == "clear_queue":
             for row in self.harness.runtime.queue(session_id):
                 self.harness.runtime.remove(row["id"])

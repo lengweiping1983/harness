@@ -59,8 +59,9 @@ export function useSessionSocket(sessionId: string | null, readOnly = false): Se
     if (!sessionId || readOnly && !visible) return
     let cancelled = false
     let recovering = false
+    let recoveryTimer: ReturnType<typeof setTimeout> | null = null
     ready.current = false
-    const questionAbort = new AbortController()
+    let questionAbort = new AbortController()
     let questionReading = false
     let questionQueued = false
     let questionRevision = 0
@@ -82,6 +83,18 @@ export function useSessionSocket(sessionId: string | null, readOnly = false): Se
       })
     }
     refreshQuestions.current = readQuestions
+    const visibilityChanged = () => {
+      if (readOnly) return
+      if (document.hidden) {
+        ++questionRevision
+        questionAbort.abort()
+        questionQueued = false
+        return
+      }
+      questionAbort = new AbortController()
+      readQuestions(true)
+    }
+    document.addEventListener('visibilitychange', visibilityChanged)
     const store = useChatStore.getState()
     store.markLoading(sessionId, true)
 
@@ -112,13 +125,19 @@ export function useSessionSocket(sessionId: string | null, readOnly = false): Se
         if (type !== 'ready' && Number(raw.seq ?? 0) > current.lastSeq + 1 && current.serverId) {
           if (!recovering) {
             recovering = true
-            socket.send({ action: 'resume', since: current.lastSeq, force_snapshot: true })
+            if (!socket.send({ action: 'resume', since: current.lastSeq, force_snapshot: true })) {
+              recovering = false
+            } else {
+              recoveryTimer = setTimeout(() => { recovering = false; recoveryTimer = null }, 5000)
+            }
           }
           return
         }
         if (type === 'ready') {
           if (!readOnly) void recoverProjectCatalog()
           ready.current = true
+          if (recoveryTimer !== null) clearTimeout(recoveryTimer)
+          recoveryTimer = null
           recovering = false
           if (raw.snapshot) {
             const detail = raw.snapshot as SessionDetail
@@ -153,6 +172,7 @@ export function useSessionSocket(sessionId: string | null, readOnly = false): Se
             }
             if (item.action !== 'send') continue
             void runtimeRequest<SubmissionStatus>('/sessions/' + sessionId + '/submissions/' + encodeURIComponent(item.id)).then((result) => {
+              if (cancelled || useAppStore.getState().activeSessionId !== sessionId) return
               if (result.run) useDraftStore.getState().settleSubmission(sessionId, item.id)
             }).catch(() => undefined)
           }
@@ -191,6 +211,8 @@ export function useSessionSocket(sessionId: string | null, readOnly = false): Se
     return () => {
       cancelled = true
       questionAbort.abort()
+      if (recoveryTimer !== null) clearTimeout(recoveryTimer)
+      document.removeEventListener('visibilitychange', visibilityChanged)
       if (refreshQuestions.current === readQuestions) refreshQuestions.current = null
       window.removeEventListener('harness-service-restored', restored)
       socket.close()
@@ -206,17 +228,26 @@ export function useSessionSocket(sessionId: string | null, readOnly = false): Se
   useEffect(() => {
     if (!sessionId || readOnly) return
     let stopped = false
+    let timer: ReturnType<typeof setInterval> | null = null
     const tick = () => {
       if (stopped || document.hidden) return
       const state = useChatStore.getState().get(sessionId)
       if (!state.hydrated || (!state.running && !state.queueRunning && !state.queued && !state.questions.length)) return
       refreshQuestions.current?.()
     }
-    void tick()
-    const timer = setInterval(tick, 4000)
+    const visibilityChanged = () => {
+      if (timer !== null) { clearInterval(timer); timer = null }
+      if (!document.hidden && !stopped) {
+        void tick()
+        timer = setInterval(tick, 4000)
+      }
+    }
+    visibilityChanged()
+    document.addEventListener('visibilitychange', visibilityChanged)
     return () => {
       stopped = true
-      clearInterval(timer)
+      if (timer !== null) clearInterval(timer)
+      document.removeEventListener('visibilitychange', visibilityChanged)
     }
   }, [sessionId, readOnly, setQuestions])
 

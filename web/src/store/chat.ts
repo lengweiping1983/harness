@@ -1027,7 +1027,10 @@ export function reduceEvent(state: ChatSessionState, event: StreamEvent): Patch 
       // ready.replay 里是本进程启动以来的广播缓存；快照已从 REST 拿到权威历史，
       // 直接丢弃，避免整段对话重影。last_seq 才是真正的续传水位。
       patch.serverId = typeof raw.server_id === 'string' ? raw.server_id : state.serverId
-      patch.lastSeq = Number(raw.last_seq ?? 0)
+      const lastSeq = raw.last_seq
+      if (typeof lastSeq === 'number' && Number.isSafeInteger(lastSeq) && lastSeq >= 0) {
+        patch.lastSeq = Math.max(state.lastSeq, lastSeq)
+      }
       patch.queuePaused = Boolean(raw.paused)
       patch.queuePauseReason = typeof raw.pause_reason === 'string' ? raw.pause_reason : ''
       patch.queueWaitingReason = raw.waiting_reason === 'environment' ? 'environment' : ''

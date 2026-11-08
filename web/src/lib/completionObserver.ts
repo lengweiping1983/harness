@@ -18,9 +18,18 @@ export function createCompletionObserver(deliver: (completion: SessionCompletion
       if (previous?.serverId === snapshot.server_id && snapshot.completion_cursor <= previous.after) return
       if (previous?.serverId === snapshot.server_id) {
         let after = previous.after
+        let invalidSequence = false
         for (const row of snapshot.completions) {
-          if (row.seq <= after || row.seq > snapshot.completion_cursor) throw Error('Invalid completion sequence')
+          if (!Number.isSafeInteger(row.seq) || row.seq <= after || row.seq > snapshot.completion_cursor) {
+            invalidSequence = true
+            break
+          }
           after = row.seq
+        }
+        if (invalidSequence) {
+          gap()
+          cursor = {serverId: snapshot.server_id, after: snapshot.completion_cursor}
+          return
         }
       }
       if (previous && previous.serverId !== snapshot.server_id) handled.clear()

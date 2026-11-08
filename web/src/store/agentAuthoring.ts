@@ -11,12 +11,17 @@ export const useAgentAuthoring = create<State>(set => ({
   discard: key => set(state => {const drafts = {...state.drafts}; delete drafts[key]; return {drafts}}),
 }))
 let guarded = false
+const beforeUnload = (event: BeforeUnloadEvent) => {
+  if (Object.values(useAgentAuthoring.getState().drafts).some(draft => draft.requirements.trim() && !draft.run || draft.submission && !draft.run)) {
+    event.preventDefault(); event.returnValue = ''
+  }
+}
 export function guardAgentAuthoring() {
   if (guarded || typeof window === 'undefined') return
   guarded = true
-  window.addEventListener('beforeunload', event => {
-    if (Object.values(useAgentAuthoring.getState().drafts).some(draft => draft.requirements.trim() && !draft.run || draft.submission && !draft.run)) {
-      event.preventDefault(); event.returnValue = ''
-    }
-  })
+  window.addEventListener('beforeunload', beforeUnload)
 }
+if (import.meta.hot) import.meta.hot.dispose(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('beforeunload', beforeUnload)
+  guarded = false
+})

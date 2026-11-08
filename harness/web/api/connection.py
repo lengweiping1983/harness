@@ -5,7 +5,7 @@ from typing import Any
 from harness.i18n import tr
 from ..router import Router
 from ..responses import json_response
-from ..errors import BadRequest
+from ..errors import BadRequest, ServiceUnavailable
 
 
 def build_router(ctx: Any) -> Router:
@@ -38,7 +38,7 @@ def build_router(ctx: Any) -> Router:
             except ValueError as exc:
                 raise BadRequest(str(exc), code='connection/invalid') from exc
             except OSError as exc:
-                raise BadRequest(tr('python.v1.b331480a0f8d'), code='connection/persist-failed') from exc
+                raise ServiceUnavailable(tr('python.v1.b331480a0f8d'), code='connection/persist-failed') from exc
             first = next(m for m in pool.models if m['enabled'])
             pool.capabilities = ctx.harness.adapter.capabilities
             config.model_routes = pool.models

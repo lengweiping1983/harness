@@ -4,7 +4,7 @@ Harness 提供 HTTP API、WebSocket 实时通道和独立 MCP 执行服务。HTT
 
 ## Web API
 
-HTTP API 使用 `/api/v1`。本机管理入口具有添加任意已有目录为项目、在所选绝对目录下创建文件夹及编辑本地插件源的能力；项目注册约束文件浏览的选择范围，不是隔离本机管理调用方的文件系统沙箱。浏览器请求携带 Origin 时，来源中的主机和端口必须匹配请求 Host，不再特例放行其他开发端口；Vite 代理保留 Host 并禁用自身 CORS 预处理，API OPTIONS 与响应许可头由后端统一决定，仍可使用同源开发入口。无 Origin 的原生客户端继续可用，但浏览器明确声明跨站或同站跨来源的 Fetch Metadata 时拒绝；本机管理入口检查全部 `Sec-Fetch-Site` 头及逗号分隔值，比较前统一大小写并移除首尾空白；即使同时提供同源 Origin，也拒绝其中的跨站／同站跨来源声明。OPTIONS 使用同一策略，拒绝的来源不获得 CORS 许可头；这些检查不认证本机进程。本机管理信任边界也包括模型连接、账号登录与服务启停，不仅是目录读取；当前没有所有管理动作共用的幂等键或审计账本保证，共享访问仍由独立权限合同约束。路由注册位于 `harness/web/api`，当前完整方法、参数和响应见 [生成的 OpenAPI](openapi-v1.json)。运行 `python scripts/generate_protocol.py` 重建契约，使用 `--check` 做同步校验。
+HTTP API 使用 `/api/v1`。本机管理入口具有添加任意已有目录为项目、在所选绝对目录下创建文件夹及编辑本地插件源的能力；项目注册约束文件浏览的选择范围，不是隔离本机管理调用方的文件系统沙箱。浏览器请求携带 Origin 时，来源必须唯一且为纯 Origin 值，主机和端口必须匹配请求 Host，不再特例放行其他开发端口；重复 Origin 或含路径、查询、片段、用户信息的来源均拒绝。响应始终携带 `Vary: Origin`，拒绝来源时关闭连接且不返回 CORS 许可头；Vite 代理保留 Host 并禁用自身 CORS 预处理，API OPTIONS 与响应许可头由后端统一决定，仍可使用同源开发入口。无 Origin 的原生客户端继续可用，但浏览器明确声明跨站或同站跨来源的 Fetch Metadata 时拒绝；本机管理入口检查全部 `Sec-Fetch-Site` 头及逗号分隔值，比较前统一大小写并移除首尾空白；即使同时提供同源 Origin，也拒绝其中的跨站／同站跨来源声明。OPTIONS 使用同一策略，拒绝的来源不获得 CORS 许可头；这些检查不认证本机进程。本机管理信任边界也包括模型连接、账号登录与服务启停，不仅是目录读取；当前没有所有管理动作共用的幂等键或审计账本保证，共享访问仍由独立权限合同约束。路由注册位于 `harness/web/api`，当前完整方法、参数和响应见 [生成的 OpenAPI](openapi-v1.json)。运行 `python scripts/generate_protocol.py` 重建契约，使用 `--check` 做同步校验。
 
 插件 API 的通用文件 I/O 失败仍返回 `400 plugin-package/io-error`，用户提示使用服务端与浏览器共用的双语资源；响应 `details.copy` 保留资源身份、`details.errno` 保留机器原因，不回显原始路径。原异常及完整堆栈进入服务端日志，原 HTTP 状态和失败语义不因文案处理变化。
 
@@ -54,7 +54,7 @@ HTTP API 使用 `/api/v1`。本机管理入口具有添加任意已有目录为�
 
 ### 请求大小与传输
 
-HTTP 请求体在读取前按 `Content-Length` 校验：普通请求（包括运行提交）最多 4 MiB；仅 `POST /api/v1/attachments` 最多 129 MiB，容纳 96 MiB 原始附件的 base64 内容及 1 MiB JSON 元数据。超限返回 `413 request/body-too-large` 并关闭连接，不读取请求体。附件仍执行领域层的文件数、类型和原始字节限额。开发代理在收到请求头后立即转发，并对有长度的正文与后端协商 `Expect: 100-continue`，取得临时回执后才转发正文，避免早期拒绝与代理仍在上传的写入竞争。后端将 100 临时回执延后至长度校验完成，超限或畸形长度直接返回最终拒绝；正常请求读取原正文，下一次请求不继承继续上传标记。后端关闭响应显式携带 `Connection: close`。客户端若同步发送完整正文，可能在发送阶段收到连接关闭，仍须按其 HTTP 传输能力读取响应，不能据此重放写入。
+HTTP 请求体在读取前按 `Content-Length` 校验，并拒绝任何 `Transfer-Encoding` 请求头（包括空值）：普通请求（包括运行提交）最多 4 MiB；仅 `POST /api/v1/attachments` 最多 129 MiB，容纳 96 MiB 原始附件的 base64 内容及 1 MiB JSON 元数据。超限返回 `413 request/body-too-large` 并关闭连接，不读取请求体。附件仍执行领域层的文件数、类型和原始字节限额。开发代理在收到请求头后立即转发，并对有长度的正文与后端协商 `Expect: 100-continue`，取得临时回执后才转发正文，避免早期拒绝与代理仍在上传的写入竞争。后端将 100 临时回执延后至长度校验完成，超限或畸形长度直接返回最终拒绝；正常请求读取原正文，下一次请求不继承继续上传标记。后端关闭响应显式携带 `Connection: close`。客户端若同步发送完整正文，可能在发送阶段收到连接关闭，仍须按其 HTTP 传输能力读取响应，不能据此重放写入。
 
 OpenAPI 请求体覆盖实际读取 JSON 的管理接口；无参动作不要求请求体。协议源复用 `input_schemas.py` 的写入边界，并由 `request_contracts.py` 补充管理字段声明。OpenAPI 与提供商目录响应按 Accept-Encoding 协商 gzip，解压后的 JSON 及 no-store 策略保持一致。OpenAPI、提供商和工具目录不提供 ETag／304 条件请求契约；If-None-Match 不使这些目录返回 304。内容寻址附件和生产静态资源的条件请求沿各自已有规则处理。
 
@@ -117,7 +117,7 @@ Python SDK 的 `Harness.steer(..., before_accept=check)` 允许可信宿主在�
 
 轮次开始事件的`run_id`同时用于实时与历史恢复的运行归属。运行终态`run/state.id`及由它派生的`done.run_id`若明确属于另一运行，不结算当前轮次草稿或关闭当前运行状态；服务端Hub同样保留当前临时生成投影。旧事件仍进入重放序列，不通过丢弃游标制造缺口。缺少明确运行身份的事件不补造身份。
 
-对话 WebSocket `/ws?session=...&since=N` 发送 `ready` 快照和按 `seq` 排序的事件；`resume` 使用同一游标，缓冲区无法覆盖缺口时返回需要重置的快照。前端检测事件序号缺口后请求 `force_snapshot`，不会继续应用残缺流。`GET /api/v1/sessions/{session_id}/live-events?since=N` 是按相同序号增量读取的 HTTP 通道，返回 `since`、`last_seq` 和事件列表；共享访问可能过滤不可见事件，因此列表数量不等于序号差值。
+对话 WebSocket `/ws?session=...&since=N` 发送 `ready` 快照和按 `seq` 排序的事件；前端只把 JSON 对象帧交给业务事件层，非法 JSON 与非对象帧丢弃；`pong` 仅由传输层消费，不作为业务事件分发。`resume` 使用同一游标，缓冲区无法覆盖缺口时返回需要重置的快照。前端检测事件序号缺口后请求 `force_snapshot`，不会继续应用残缺流。`GET /api/v1/sessions/{session_id}/live-events?since=N` 是按相同序号增量读取的 HTTP 通道，返回 `since`、`last_seq` 和事件列表；共享访问可能过滤不可见事件，因此列表数量不等于序号差值。
 
 首次连接、`resume` 和增量 HTTP 的 `since` 必须为 0 至 JavaScript 安全整数上限的整数，省略为 0。空值、非法格式、负数和越界值返回 `request/invalid-query`，不回退为全量补发。HTTP 和 WebSocket URL 的重复 `since` 也会被拒绝。HTTP 在查询会话存在性之前校验游标，拒绝为 400；WebSocket 首次请求在升级前拒绝；已经连接的 `resume` 返回错误帧，保留连接。跨来源的 WebSocket 请求仍为 403，升级前使用 JSON 错误响应。
 

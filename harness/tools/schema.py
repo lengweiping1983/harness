@@ -90,7 +90,12 @@ def _validate(value: Any, schema: dict[str, Any], path: str, errors: list[str]) 
         pattern = schema.get("pattern")
         if isinstance(pattern, str):
             try:
-                if re.search(pattern, value) is None:
+                anchored = pattern.startswith("^") and pattern.endswith("$")
+                if anchored:
+                    escapes = len(pattern[:-1]) - len(pattern[:-1].rstrip("\\"))
+                    anchored = escapes % 2 == 0
+                matched = re.fullmatch(pattern, value) if anchored else re.search(pattern, value)
+                if matched is None:
                     errors.append(tr('python.schema.7d249b705886', p0=f'{path}', p1=f'{pattern!r}'))
             except re.error:
                 pass  # 非法正则直接跳过，不因 schema 缺陷阻塞调用

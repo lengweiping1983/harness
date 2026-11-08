@@ -17,7 +17,7 @@ from harness.web.api.attachments import build_router as attachment_router
 from harness.web.api.sessions import build_router as session_router
 from harness.web.api.voice import build_router as voice_router
 from harness.web.attachment_store import AttachmentStore, AttachmentStorageError
-from harness.web.errors import ApiError
+from harness.web.errors import ApiError, BadRequest
 from harness.web.input_schemas import TITLE_MAX_LENGTH
 from harness.web.responses import json_response
 from harness.web.router import Request, Router
@@ -65,6 +65,7 @@ class QaHttpBoundaryTests(unittest.TestCase):
             with self.subTest(path=path):
                 response, body = self.request('HEAD', path)
                 self.assertEqual(response.status, status)
+                self.assertEqual(response.getheader('X-Content-Type-Options'), 'nosniff')
                 self.assertEqual(body, b'')
                 self.assertIn('application/json', response.getheader('Content-Type'))
                 self.assertGreater(int(response.getheader('Content-Length')), 0)
@@ -73,6 +74,26 @@ class QaHttpBoundaryTests(unittest.TestCase):
         head, _ = self.request('HEAD', '/api/v1/status')
         self.assertEqual(head.getheader('Content-Length'), str(len(body)))
         self.write.assert_not_called()
+
+    def test_origin_rejection_closes_the_http_connection(self):
+        for method in ('GET', 'OPTIONS'):
+            with self.subTest(method=method):
+                response, body = self.request(method, '/api/v1/status', {'Origin': 'https://evil.example'})
+                self.assertEqual(response.status, 403)
+                self.assertEqual(response.getheader('Connection'), 'close')
+                self.assertEqual(json.loads(body)['code'], 'request/origin')
+
+    def test_method_not_allowed_includes_route_specific_allow_header(self):
+        response, body = self.request('POST', '/api/v1/status')
+        self.assertEqual(response.status, 405)
+        self.assertEqual(response.getheader('Allow'), 'GET, HEAD, OPTIONS')
+        self.assertEqual(response.getheader('X-Content-Type-Options'), 'nosniff')
+        self.assertEqual(json.loads(body)['code'], 'method-not-allowed')
+
+        response, body = self.request('GET', '/api/v1/write-only')
+        self.assertEqual(response.status, 405)
+        self.assertEqual(response.getheader('Allow'), 'OPTIONS, POST')
+        self.assertEqual(json.loads(body)['code'], 'method-not-allowed')
 
     def test_unknown_ws_paths_cannot_serve_spa_or_upgrade(self):
         for headers, status in (({}, 404), ({'Origin': 'https://evil.example'}, 403)):
@@ -170,6 +191,45 @@ class QaAdmissionBoundaryTests(unittest.TestCase):
                     self.assertEqual(handler._origin_allowed(), allowed)
                     response = handler._apply_cors(json_response({}))
                     self.assertEqual(response.headers.get('Access-Control-Allow-Origin'), origin if allowed and origin else None)
+                    self.assertIn('origin', {part.strip().lower() for part in response.headers.get('Vary', '').split(',')})
+
+        handler.headers = Message()
+        handler.headers['Host'] = '127.0.0.1:8765'
+        response = json_response({})
+        response.headers['Vary'] = 'Accept-Encoding'
+        self.assertEqual(handler._apply_cors(response).headers['Vary'], 'Accept-Encoding, Origin')
+
+    def test_origin_rejects_non_origin_components_and_duplicate_hosts(self):
+        handler = object.__new__(Handler)
+        handler._web_ctx = SimpleNamespace(shared_access=None)
+        handler.server = SimpleNamespace(server_address=('127.0.0.1', 8765))
+        invalid_origins = (
+            'http://127.0.0.1:8765/evil',
+            'http://127.0.0.1:8765/?x=1',
+            'http://127.0.0.1:8765#fragment',
+            'http://user@127.0.0.1:8765',
+        )
+        for origin in invalid_origins:
+            with self.subTest(origin=origin):
+                handler.headers = Message()
+                handler.headers['Host'] = '127.0.0.1:8765'
+                handler.headers['Origin'] = origin
+                self.assertFalse(handler._origin_allowed())
+
+        handler.headers = Message()
+        handler.headers['Host'] = '127.0.0.1:8765'
+        handler.headers['Host'] = 'evil.example'
+        self.assertFalse(handler._origin_allowed())
+
+        handler.headers = Message()
+        handler.headers['Host'] = '127.0.0.1:8765'
+        handler.headers['Origin'] = 'http://127.0.0.1:8765'
+        handler.headers['Origin'] = 'https://evil.example'
+        self.assertFalse(handler._origin_allowed())
+        shared = SimpleNamespace(browser_origin='https://share.example', origin_allowed=Mock(return_value=True))
+        handler._web_ctx = SimpleNamespace(shared_access=shared)
+        self.assertFalse(handler._origin_allowed())
+        shared.origin_allowed.assert_not_called()
 
     def test_session_rejections_happen_before_creation_or_update(self):
         host = Mock()
@@ -227,6 +287,7 @@ class QaAdmissionBoundaryTests(unittest.TestCase):
                         Request('POST', '/', {}, {}, body).json()
                     self.assertEqual(error.exception.message, tr('ui.http.invalidJsonRequest'))
                     self.assertEqual(error.exception.code, 'bad-json')
+                    self.assertIsInstance(error.exception, BadRequest)
                     self.assertNotIn('Expecting', error.exception.message)
                     self.assertTrue(set(error.exception.details) & {'lineno', 'start'})
 

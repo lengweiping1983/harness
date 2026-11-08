@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import Mock
 
 from harness.web.attachments import MAX_BATCH_BYTES
-from harness.web.errors import PayloadTooLarge
+from harness.web.errors import BadRequest, PayloadTooLarge
 from harness.web.api.v1 import build_router
 from harness.web.server import Handler, MAX_ATTACHMENT_REQUEST_BODY_BYTES, MAX_REQUEST_BODY_BYTES
 
@@ -29,6 +29,8 @@ class RequestBodyLimitTests(unittest.TestCase):
             ("/api/v1/attachments", "GET", MAX_REQUEST_BODY_BYTES),
             ("/api/v1/attachments/other", "POST", MAX_REQUEST_BODY_BYTES),
             ("/api/v1/attachments?session=x", "POST", MAX_ATTACHMENT_REQUEST_BODY_BYTES),
+            ("/api/v1/attachments/", "POST", MAX_ATTACHMENT_REQUEST_BODY_BYTES),
+            ("/api/v1//attachments//", "POST", MAX_ATTACHMENT_REQUEST_BODY_BYTES),
         ]
         for path, method, limit in cases:
             with self.subTest(path=path, method=method):
@@ -67,6 +69,7 @@ class RequestBodyLimitTests(unittest.TestCase):
         for path, limit in [
             ("/api/v1/sessions", MAX_REQUEST_BODY_BYTES),
             ("/api/v1/attachments", MAX_ATTACHMENT_REQUEST_BODY_BYTES),
+            ("/api/v1/attachments/", MAX_ATTACHMENT_REQUEST_BODY_BYTES),
         ]:
             handler = self.handler(path, limit)
             # 用可识别的读取异常确认边界被接受，不分配百兆测试数据。
@@ -74,6 +77,15 @@ class RequestBodyLimitTests(unittest.TestCase):
             with self.assertRaises(EOFError):
                 Handler._build_request(handler)
             handler.rfile.read1.assert_called_once()
+
+    def test_empty_transfer_encoding_header_is_rejected_before_body_read(self):
+        handler = self.handler('/api/v1/sessions', 0)
+        handler.headers['Transfer-Encoding'] = ''
+        with self.assertRaises(BadRequest) as caught:
+            Handler._build_request(handler)
+        self.assertEqual(caught.exception.code, 'request/invalid-length')
+        self.assertTrue(handler.close_connection)
+        handler.rfile.read1.assert_not_called()
 
     def test_small_body_is_preserved(self):
         handler = self.handler("/api/v1/attachments", 2)

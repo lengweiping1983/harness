@@ -12,7 +12,7 @@ import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .errors import NotFound
+from .errors import BadRequest, NotFound
 
 #: 处理器签名：``handler(request, **params) -> Response``
 Handler = Callable[..., Any]
@@ -68,10 +68,10 @@ class Request:
             payload = _json.loads(self.body.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:
             details = {name: getattr(exc, name) for name in ('lineno', 'colno', 'pos', 'start', 'end') if hasattr(exc, name)}
-            raise NotFound(tr('ui.http.invalidJsonRequest'), code="bad-json", status=400,
+            raise BadRequest(tr('ui.http.invalidJsonRequest'), code="bad-json", status=400,
                            details={**details, 'copy': {'key': 'ui.http.invalidJsonRequest'}}) from exc
         if not isinstance(payload, dict):
-            raise NotFound(tr('python.router.37840a0a4194'), code="bad-json", status=400)
+            raise BadRequest(tr('python.router.37840a0a4194'), code="bad-json", status=400)
         return payload
 
 
@@ -164,16 +164,24 @@ class Router:
         segments = tuple(part for part in path.strip("/").split("/") if part != "")
         method = method.upper()
         path_matched = False
+        allowed_methods: set[str] = set()
         for route in self._routes:
             params = route.match(segments)
             if params is None:
                 continue
             path_matched = True
+            allowed_methods.add(route.method)
             if route.method == method:
                 return route.handler, params
         if path_matched:
+            if "GET" in allowed_methods:
+                allowed_methods.add("HEAD")
+            allowed_methods.add("OPTIONS")
             raise NotFound(
-                tr('python.router.76a986e2bcbc', p0=f'{method}'), code="method-not-allowed", status=405
+                tr('python.router.76a986e2bcbc', p0=f'{method}'),
+                code="method-not-allowed",
+                status=405,
+                details={"allow": sorted(allowed_methods)},
             )
         raise NotFound(tr('python.router.f94ec39b7259', p0=path[:200]), code="route/not-found")
 

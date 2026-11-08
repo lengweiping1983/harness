@@ -60,7 +60,7 @@ export function SharedSessionPage({initialToken}: {initialToken: string}) {
   const channel = useSessionSocket(authorized && visible ? activeId : null, true)
   const chat = useChat(authorized ? activeId : null)
   const blocks = useMemo(() => mainConversationBlocks(displayBlocks(chat)).filter(block =>
-    block.kind === 'user' || block.kind === 'assistant' || block.kind === 'question' || block.kind === 'error'), [chat])
+    block.kind === 'user' || block.kind === 'assistant' || block.kind === 'question' || block.kind === 'error'), [chat, locale])
 
   const clear = useCallback(() => {
     for (const id of owned.current) useChatStore.getState().drop(id)

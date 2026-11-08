@@ -52,12 +52,17 @@ export const usePluginSourceDrafts = create<State>((set) => ({
 }))
 
 let guarded = false
+const beforeUnload = (event: BeforeUnloadEvent) => {
+  if (Object.values(usePluginSourceDrafts.getState().drafts).some(sourceDirty)) {
+    event.preventDefault(); event.returnValue = ''
+  }
+}
 export function guardSourceDrafts() {
   if (guarded || typeof window === 'undefined') return
   guarded = true
-  window.addEventListener('beforeunload', event => {
-    if (Object.values(usePluginSourceDrafts.getState().drafts).some(sourceDirty)) {
-      event.preventDefault(); event.returnValue = ''
-    }
-  })
+  window.addEventListener('beforeunload', beforeUnload)
 }
+if (import.meta.hot) import.meta.hot.dispose(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('beforeunload', beforeUnload)
+  guarded = false
+})

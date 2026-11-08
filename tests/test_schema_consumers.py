@@ -91,6 +91,14 @@ class SchemaConsumerTests(unittest.TestCase):
                 self.assertIs(validate_or_raise(valid, schema), valid)
         self.assertEqual((schema, value), original)
 
+    def test_anchored_schema_patterns_reject_trailing_newline_and_keep_search_semantics(self):
+        from harness.tools.schema import validate
+
+        anchored = {'type': 'string', 'pattern': '^[a-f0-9]{64}$'}
+        self.assertEqual(validate('a' * 64, anchored), [])
+        self.assertTrue(validate('a' * 64 + chr(10), anchored))
+        self.assertEqual(validate('prefix-needle-suffix', {'type': 'string', 'pattern': 'needle'}), [])
+
     def test_real_tool_families_resolve_same_registered_schemas_for_both_consumers(self):
         import copy
         from harness.i18n import tr

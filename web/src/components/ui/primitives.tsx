@@ -99,8 +99,10 @@ export interface RefreshButtonProps extends Omit<ButtonProps, 'children' | 'icon
 
 export function RefreshButton({ label, spinning = false, className, variant = 'ghost', ...rest }: RefreshButtonProps) {
   useLocale()
-  return <Button {...rest} variant={variant} aria-label={label} title={label} className={cn('refresh-action shrink-0', className)} icon={<RefreshCw aria-hidden className={cn('h-3.5 w-3.5 shrink-0', spinning && 'animate-spin')} />}>
-    <span className="refresh-action-label">{t('ui.worktrees.refresh')}</span>
+  const visibleLabel = t('ui.worktrees.refresh')
+  const accessibleLabel = label === visibleLabel ? label : visibleLabel + ' · ' + label
+  return <Button {...rest} variant={variant} aria-label={accessibleLabel} title={label} className={cn('refresh-action shrink-0', className)} icon={<RefreshCw aria-hidden className={cn('h-3.5 w-3.5 shrink-0', spinning && 'animate-spin')} />}>
+    <span className="refresh-action-label">{visibleLabel}</span>
   </Button>
 }
 
@@ -488,8 +490,8 @@ export function EmptyHint({
   )
 }
 
-export function Switch({ className, ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'role'>) {
-  return <input {...props} type="checkbox" role="switch" className={cn(
+export function Switch({ className, label, ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'role'> & {label?: string}) {
+  return <input {...props} aria-label={props['aria-label'] ?? label} type="checkbox" role="switch" className={cn(
     'relative inline-block h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full border border-line-strong bg-raised align-middle transition-colors checked:border-brand checked:bg-brand before:absolute before:left-0.5 before:top-0.5 before:h-3.5 before:w-3.5 before:rounded-full before:bg-ink before:shadow before:transition-transform checked:before:translate-x-4 checked:before:bg-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-50',
     className,
   )} />

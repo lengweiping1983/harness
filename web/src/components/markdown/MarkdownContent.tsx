@@ -410,6 +410,10 @@ const MarkdownSegment = memo(function MarkdownSegment({
     void loadMathRenderer().then(value => { if (current) {setMath(() => value); setMathFailed(false)} }, () => { if (current) setMathFailed(true) }).finally(() => clearTimeout(timer))
     return () => { current = false; clearTimeout(timer) }
   }, [needsMath, math])
+  const retryMath = () => {
+    setMathFailed(false)
+    void loadMathRenderer().then(value => setMath(() => value), () => setMathFailed(true))
+  }
   const rehype = useMemo(() => [
     [rehypeSanitize, SCHEMA],
     ...(math ? [[math, { throwOnError: false, strict: false }]] : []),
@@ -420,7 +424,7 @@ const MarkdownSegment = memo(function MarkdownSegment({
   if (!body.trim()) return null
   return (
     <>
-    {needsMath && mathFailed && !math ? <p role="alert" className="text-xs text-warn">{t('ui.deferred.math.failed')} <button type="button" className="inline-flex items-center gap-1 underline" onClick={() => window.location.reload()}><RotateCw aria-hidden className="h-3 w-3" />{t('ui.deferred.reload')}</button></p> : null}
+    {needsMath && mathFailed && !math ? <p role="alert" className="text-xs text-warn">{t('ui.deferred.math.failed')} <button type="button" className="inline-flex items-center gap-1 underline" onClick={retryMath}><RotateCw aria-hidden className="h-3 w-3" />{t('ui.deferred.reload')}</button></p> : null}
     <Streaming.Provider value={streaming}><ReactMarkdown
       urlTransform={(url) => /^[A-Za-z]:(?:[\\/]|%5c|%2f)/i.test(url) ? url.replace(/%5c/gi, '/') : defaultUrlTransform(url)}
       remarkPlugins={remark}

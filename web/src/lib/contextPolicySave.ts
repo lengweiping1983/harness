@@ -59,4 +59,8 @@ export function createContextPolicySaves(transport: Transport = request, announc
 export const contextPolicySaves = createContextPolicySaves(request, (snapshot, id) => {
   window.dispatchEvent(new CustomEvent('harness-context-policy-saved', {detail: {...snapshot, context_save_id: id}}))
 })
-if (typeof window !== 'undefined') window.addEventListener('harness-context-policy-saved', () => contextPolicySaves.notified())
+const contextPolicySaved = () => contextPolicySaves.notified()
+if (typeof window !== 'undefined') {
+  window.addEventListener('harness-context-policy-saved', contextPolicySaved)
+  if (import.meta.hot) import.meta.hot.dispose(() => window.removeEventListener('harness-context-policy-saved', contextPolicySaved))
+}

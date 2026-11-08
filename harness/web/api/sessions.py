@@ -67,6 +67,11 @@ def build_router(ctx: Any) -> Router:
             if payload.get(field) is not None and not isinstance(payload[field], str):
                 raise BadRequest(tr('python.sessions.invalid_field', field=field),
                                  code='session/invalid-field', details={'field': field})
+        model = str(payload.get('model') or '').strip()
+        if model:
+            known_models = {row['id'] for row in model_catalog(ctx.harness.config)['models']}
+            if model not in known_models:
+                raise BadRequest(tr('python.sessions.28af3eb8ea53', p0=f'{model}'), code='model/unknown')
         if isinstance(payload.get('title'), str) and len(payload['title']) > TITLE_MAX_LENGTH:
             raise BadRequest(tr('ui.session.titleTooLong', limit=TITLE_MAX_LENGTH), code='session/invalid-field',
                              details={'field': 'title', 'maxLength': TITLE_MAX_LENGTH,
@@ -152,14 +157,17 @@ def build_router(ctx: Any) -> Router:
             accept_encoding=request.header("Accept-Encoding"),
         )
 
-    def integer(request, key, default=None):
+    def integer(request, key, default=None, *, maximum=2**53 - 1):
         value = request.get(key)
         if value is None:
             return default
         try:
-            return int(value)
+            result = int(value)
         except (TypeError, ValueError) as exc:
             raise BadRequest(tr('python.sessions.22ebc6a27f38', p0=f'{key}'), code='search/invalid-position') from exc
+        if result < 0 or result > maximum:
+            raise BadRequest(tr('python.sessions.22ebc6a27f38', p0=f'{key}'), code='search/invalid-position')
+        return result
 
     @router.get('/api/v1/sessions/{session_id}/context')
     def audit_context(request, session_id):
@@ -178,7 +186,7 @@ def build_router(ctx: Any) -> Router:
                 count = len({row['agent_id'] for row in agents_for(ctx.harness.subagents, session.id, live)
                              if row['parent_session_id'] == session.id}) if through is None else None
                 return context_audit(session, through=through, before=integer(request, 'before'),
-                                     limit=integer(request, 'limit', 20), snapshot=snapshot, subagent_count=count,
+                                     limit=integer(request, 'limit', 20, maximum=20000), snapshot=snapshot, subagent_count=count,
                                      request_sequence=request_sequence)
             return await asyncio.to_thread(project)
         return json_response(ctx.call(read()), accept_encoding=request.header('Accept-Encoding'))
@@ -210,7 +218,7 @@ def build_router(ctx: Any) -> Router:
             session = await resolve_context(ctx.harness, session_id, request.get('agent_id'))
             return await asyncio.to_thread(skill_audit, session.events,
                 through=integer(request, 'through'), before=integer(request, 'before'),
-                limit=integer(request, 'limit', 20))
+                limit=integer(request, 'limit', 20, maximum=20000))
         return json_response(ctx.call(read()), accept_encoding=request.header('Accept-Encoding'))
 
     @router.get('/api/v1/sessions/{session_id}/context/skills/{result_seq}')
@@ -246,7 +254,7 @@ def build_router(ctx: Any) -> Router:
         from ..execution_trace import read
         return json_response(ctx.call(read(ctx.harness, session_id,
             agent_session=request.get('agent_session'), after=request.get('after'),
-            limit=integer(request, 'limit', 50), entry=request.get('entry'),
+            limit=integer(request, 'limit', 50, maximum=20000), entry=request.get('entry'),
             part=request.get('part', 'input'), offset=integer(request, 'offset', 0))),
             accept_encoding=request.header('Accept-Encoding'))
 
@@ -257,7 +265,7 @@ def build_router(ctx: Any) -> Router:
             archive = ctx.harness.sessions.request_traces
             return await asyncio.to_thread(archive.page, session_id,
                 include_children=request.get_bool('children', True), before=integer(request, 'before'),
-                limit=integer(request, 'limit', 30), agent_session_id=request.get('agent_session'))
+                limit=integer(request, 'limit', 30, maximum=20000), agent_session_id=request.get('agent_session'))
         return json_response(ctx.call(read()), accept_encoding=request.header('Accept-Encoding'))
 
     @router.get('/api/v1/sessions/{session_id}/requests/{trace_id}')
@@ -298,7 +306,7 @@ def build_router(ctx: Any) -> Router:
         from ..conversation_search import search_dialogue
         async def read():
             return await asyncio.to_thread(search_dialogue, ctx.harness.get_session(session_id), request.get('q', ''),
-                                  limit=integer(request, 'limit', 50), through=integer(request, 'through'),
+                                  limit=integer(request, 'limit', 50, maximum=20000), through=integer(request, 'through'),
                                   before=integer(request, 'before'))
         return json_response(ctx.call(read()), accept_encoding=request.header('Accept-Encoding'))
 
@@ -324,7 +332,7 @@ def build_router(ctx: Any) -> Router:
         async def read():
             session = await resolve_context(ctx.harness, session_id, request.get('agent_id'))
             return await asyncio.to_thread(read_result, session, seq, index=integer(request, 'index', 0),
-                offset=integer(request, 'offset', 0), limit=integer(request, 'limit', 8192),
+                offset=integer(request, 'offset', 0), limit=integer(request, 'limit', 8192, maximum=20000),
                 expected_hash=request.get('sha256'), query=request.get('q'))
         return json_response(ctx.call(read()), accept_encoding=request.header('Accept-Encoding'))
 
@@ -421,7 +429,7 @@ def build_router(ctx: Any) -> Router:
                 raise NotFound(tr('python.sessions.60b7cd2dc48e'), code="goal/evidence-not-found")
             try:
                 return evidence_page(ctx.harness.get_session(session_id), goal, int(source_seq),
-                                     integer(request, 'offset', 0), integer(request, 'limit', 20000))
+                                     integer(request, 'offset', 0), integer(request, 'limit', 20000, maximum=20000))
             except ValueError as exc:
                 raise BadRequest(tr('python.sessions.7a99397c7b45'), code="goal/evidence-invalid") from exc
             except ToolError as exc:

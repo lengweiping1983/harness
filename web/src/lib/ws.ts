@@ -59,7 +59,7 @@ export class SessionSocket {
   connect(): void {
     if (this.disposed) return
     this.clearTimers()
-    this.opts.onState(this.attempt === 0 ? 'connecting' : 'reconnecting', { attempt: this.attempt })
+    if (this.attempt === 0) this.opts.onState('connecting', { attempt: 0 })
 
     let socket: WebSocket
     try {
@@ -80,15 +80,20 @@ export class SessionSocket {
     socket.onmessage = (message) => {
       if (this.ws !== socket || this.disposed) return
       if (typeof message.data !== 'string') return
-      let payload: StreamEvent
+      let decoded: unknown
       try {
-        payload = JSON.parse(message.data) as StreamEvent
+        decoded = JSON.parse(message.data)
       } catch {
         return
       }
-      if (payload.type === 'pong' && this.pongTimer !== null) {
-        clearTimeout(this.pongTimer)
-        this.pongTimer = null
+      if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) return
+      const payload = decoded as StreamEvent
+      if (payload.type === 'pong') {
+        if (this.pongTimer !== null) {
+          clearTimeout(this.pongTimer)
+          this.pongTimer = null
+        }
+        return
       }
       this.opts.onEvent(payload)
     }
@@ -105,7 +110,6 @@ export class SessionSocket {
         this.opts.onState('closed')
         return
       }
-      this.opts.onState('reconnecting', { attempt: this.attempt })
       this.scheduleReconnect()
     }
   }

@@ -52,14 +52,26 @@ describe('WebSocket heartbeat recovery', () => {
     client.close()
   })
 
-  it('accepts pong and retains the same healthy connection', () => {
+  it('accepts pong as transport control without forwarding it to business events', () => {
     const { client, socket, onEvent } = connection()
     vi.advanceTimersByTime(20_000)
     socket.message({ type: 'pong' })
     vi.advanceTimersByTime(10_000)
     expect(socket.close).not.toHaveBeenCalled()
-    expect(onEvent).toHaveBeenCalledWith({ type: 'pong' })
+    expect(onEvent).not.toHaveBeenCalled()
+    socket.message({ type: 'turn/start' })
+    expect(onEvent).toHaveBeenCalledWith({ type: 'turn/start' })
     expect(FakeSocket.instances).toHaveLength(1)
+    client.close()
+  })
+
+  it('ignores valid JSON frames that are not event objects', () => {
+    const { client, socket, onEvent } = connection()
+    for (const payload of [null, [], 1, true, 'text']) socket.message(payload)
+    expect(onEvent).not.toHaveBeenCalled()
+    socket.message({ type: 'turn/start' })
+    expect(onEvent).toHaveBeenCalledOnce()
+    expect(onEvent).toHaveBeenCalledWith({ type: 'turn/start' })
     client.close()
   })
 

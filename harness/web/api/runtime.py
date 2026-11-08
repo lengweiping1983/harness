@@ -127,7 +127,7 @@ def build_router(ctx: Any) -> Router:
             window = terminal.peek(count) if tail else terminal.read(offset, count)
             if tail:
                 window['terminal'] = terminal.snapshot()
-            window["sessionId"] = terminal_id
+            window["sessionId"] = resolved
             window["session"] = terminal.status()
             return window
 

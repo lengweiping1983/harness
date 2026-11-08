@@ -100,7 +100,8 @@ def build_router(ctx: Any) -> Router:
         if not name:
             raise BadRequest(tr('python.workspaces.e356da1e97d6'), code="workspace/missing-name")
         # 目录名不能带分隔符，否则一次调用能创建出一整条路径。
-        if "/" in name or "\\" in name or name in {".", ".."}:
+        if ("/" in name or "\\" in name or name in {".", ".."}
+                or any(ord(char) < 32 or ord(char) == 127 for char in name)):
             raise BadRequest(tr('python.workspaces.c8233f47cf0d'), code="workspace/bad-name")
         target = Path(parent).expanduser() if parent else ctx.workspace_root()
         # 只接受绝对路径，避免相对路径落到进程工作目录这种意外写入。
@@ -111,6 +112,8 @@ def build_router(ctx: Any) -> Router:
             created.mkdir(parents=False, exist_ok=False)
         except FileExistsError as exc:
             raise BadRequest(tr('python.workspaces.d74b8d0bb10f'), code="workspace/exists") from exc
+        except ValueError as exc:
+            raise BadRequest(tr('python.workspaces.c8233f47cf0d'), code="workspace/bad-name") from exc
         except OSError as exc:
             raise BadRequest(tr('python.workspaces.c6c409894789', p0=f'{exc}'), code="workspace/mkdir-failed") from exc
         return json_response({"created": str(created), "name": name}, status=201)
