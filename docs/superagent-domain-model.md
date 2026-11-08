@@ -316,7 +316,7 @@ Draft、模型报告或 send() 已调用均不等于消息 Sent；只有 Provide
 
 **ControlCommand** 保存 pause | resume | cancel 的独立命令、期望修订、提交身份和原回执。MissionControl 是 Mission 当前控制投影，不取代原 Run / Background Job 的真实状态。
 
-**WatchdogSnapshot** 持久保存 mission_id、fingerprint、ledger_fingerprint、activity_baseline_trusted、state、aggregate_revision、last_progress_at、observed_at；**WatchdogAssignmentCursor** 按原 Assignment / Run / Session 记录 last_event_seq、last_event_time、last_event_type、aggregate_revision、last_progress_revision。Schema v18 仅以已确认账本进度或完整且单调的原生 Run 活动观察恢复 stalled / blocked；全部活跃 Run 的身份、游标须先完整核验，单个 Run 缺失、倒退、同序号内容冲突时不得提前消耗其他 Run 的新回执。Schema v17 的首次可信观察仍只建立基线，不刷新进度或解除阻断。Watchdog 仅观察活性，不自行重放 Assignment 或 Effect；此保守策略可能推迟其他已进展 Run 的状态恢复，须在下一次完整观察后重新确认。
+**WatchdogSnapshot** 持久保存 mission_id、fingerprint、ledger_fingerprint、activity_baseline_trusted、state、aggregate_revision、last_progress_at、observed_at；**WatchdogAssignmentCursor** 按原 Assignment / Run / Session 记录 last_event_seq、last_event_time、last_event_type、aggregate_revision、last_progress_revision。Schema v18 持久化每个原生 Run / Session 的单调游标；Schema v19 增加由 SQLite 视图投影的 Mission / Job / Assignment 账本事实，快照逐字绑定该事实并校验 SHA-256，只有完整活动快照才能更新账本基线；Watchdog 仅以已确认账本进度或完整且单调的原生 Run 活动观察恢复 stalled / blocked；confirmed 检查必须绑定非空且持久化的原生 Run / Session 身份，缺失身份视为不可信观察，不建立游标；全部活跃 Run 的身份、游标须先完整核验，单个 Run 缺失、倒退、同序号内容冲突时不得提前消耗其他 Run 的新回执。Schema v17 的首次可信观察仍只建立基线，不刷新进度或解除阻断。Watchdog 仅观察活性，不自行重放 Assignment 或 Effect；此保守策略可能推迟其他已进展 Run 的状态恢复，须在下一次完整观察后重新确认。
 
 **AuditEvent** 追加记录状态转移、授权、提交、回执、人工控制、策略变更、未知结果和恢复操作。至少包括：
 
@@ -378,6 +378,7 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 - missions(ticket_id, sequence) 唯一；每 Ticket 对非终态 Mission 建立部分唯一索引，unknown 仍占用名额直至核实。
 - jobs(mission_id, plan_revision, node_id) 唯一；依赖表拒绝跨 Mission / PlanRevision、自依赖和环。
 - assignments(job_id, attempt_no) 唯一；submission_key 全局或 Instance 作用域唯一；每 Job 同时最多一个活动 / 未知 Assignment。
+- watchdog_assignment_cursors 插入必须绑定同 Mission 的活动原始 Assignment / Run / Session；更新不得改写身份、回退或重放事件序号、跳跃 Revision，且原 Assignment 必须仍活动；游标历史不可删除。CoordinatorWatchdog 在同一写事务保存多 Run 游标与 Snapshot，任一游标写入失败整体回滚；Schema v18 DDL 迁移失败必须回滚新增列、表和迁移记录；Schema v19 账本事实视图、快照列和触发器迁移失败也必须整体回滚。
 - deliveries(idempotency_key) 唯一；effects(kind, idempotency_key) 唯一。
 - outbox_messages(state, created_at)、effects(state, due_at, kind)、assignments(state, started_at) 建立调度索引。
 - 外键启用；写事务使用 BEGIN IMMEDIATE 或等效 CAS 机制。

@@ -266,6 +266,7 @@ class CoordinatorWatchdog:
             revision = row["aggregate_revision"]
             baseline_trusted = row["activity_baseline_trusted"]
             ledger_fingerprint = row["ledger_fingerprint"]
+            ledger_facts_json = row["ledger_facts_json"]
             observed = _coordinator_time(row["observed_at"], "observed_at")
             progress = _coordinator_time(row["last_progress_at"], "last_progress_at")
             if (
@@ -274,9 +275,12 @@ class CoordinatorWatchdog:
                 or any(char not in "0123456789abcdef" for char in fingerprint)
                 or type(revision) is not int or revision < 1
                 or type(baseline_trusted) is not int or baseline_trusted not in (0, 1)
+                or not isinstance(ledger_facts_json, str)
+                or _coordinator_json(json.loads(ledger_facts_json)) != ledger_facts_json
                 or (ledger_fingerprint is not None and (
                     not isinstance(ledger_fingerprint, str) or len(ledger_fingerprint) != 64
                     or any(char not in "0123456789abcdef" for char in ledger_fingerprint)
+                    or _coordinator_hash(ledger_facts_json) != ledger_fingerprint
                 ))
                 or observed != row["observed_at"] or progress != row["last_progress_at"]
                 or progress > observed
@@ -292,6 +296,7 @@ class CoordinatorWatchdog:
                 "stagnant_ticks": int(stagnant_seconds // limits["stale_after"]),
                 "activity_baseline_trusted": bool(baseline_trusted),
                 "ledger_fingerprint": ledger_fingerprint,
+                "ledger_facts_json": ledger_facts_json,
             }
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             raise _error("corrupt") from exc
@@ -335,9 +340,13 @@ class CoordinatorWatchdog:
             if item.get("inspection") != "confirmed":
                 continue
             identity = active_assignments[assignment_id]
+            run_id = identity.get("run_id")
+            session_id = identity.get("session_id")
             if (
-                item.get("run_id") != identity["run_id"]
-                or item.get("session_id") != identity["session_id"]
+                not isinstance(run_id, str) or not run_id
+                or not isinstance(session_id, str) or not session_id
+                or item.get("run_id") != run_id
+                or item.get("session_id") != session_id
                 or not isinstance(item.get("status"), str) or not item["status"]
                 or type(item.get("settled")) is not bool
             ):
@@ -358,7 +367,7 @@ class CoordinatorWatchdog:
             else:
                 continue
             observations[assignment_id] = {
-                "run_id": identity["run_id"], "session_id": identity["session_id"],
+                "run_id": run_id, "session_id": session_id,
                 "last_event_seq": sequence, "last_event_time": event_time,
                 "last_event_type": event_type,
             }
@@ -398,26 +407,15 @@ class CoordinatorWatchdog:
         return _coordinator_hash(_coordinator_json(payload))
 
     @staticmethod
-    def _ledger_fingerprint(mission, jobs, assignments) -> str:
-        """只将账本中已开始的原生运行和冻结结果视为可追溯进度。"""
-        payload = {
-            "mission": {
-                "mission_id": mission["mission_id"],
-                "plan_revision": mission["plan_revision"],
-                "round_no": mission["round_no"],
-            },
-            "jobs": [
-                {"job_id": row["job_id"], "state": row["state"], "result_hash": row["result_hash"]}
-                for row in jobs
-                if row["state"] in {"done", "checkpointed"} or row["result_hash"] is not None
-            ],
-            "assignments": [
-                {"assignment_id": row["assignment_id"], "run_id": row["run_id"],
-                 "started_at": row["started_at"], "ended_at": row["ended_at"]}
-                for row in assignments if row["started_at"] is not None
-            ],
-        }
-        return _coordinator_hash(_coordinator_json(payload))
+    def _ledger_facts_json(db, mission_id: str) -> str:
+        """读取由 SQLite 按固定顺序投影的实际账本事实，供快照守卫逐字核验。"""
+        row = db.execute(
+            "SELECT facts_json FROM watchdog_ledger_facts WHERE mission_id=?",
+            (mission_id,),
+        ).fetchone()
+        if row is None:
+            raise LookupError("Mission ledger facts not found")
+        return row["facts_json"]
 
     @staticmethod
     def _persist_activity_cursors(db, mission_id, observations, next_revision):
@@ -504,7 +502,8 @@ class CoordinatorWatchdog:
                 activity_value, active_assignments,
             )
             fingerprint = self._fingerprint(mission, jobs, assignments, activity_value)
-            ledger_fingerprint = self._ledger_fingerprint(mission, jobs, assignments)
+            ledger_facts_json = self._ledger_facts_json(db, mission_id)
+            ledger_fingerprint = _coordinator_hash(ledger_facts_json)
             previous = db.execute(
                 "SELECT * FROM watchdog_snapshots WHERE mission_id=?",
                 (mission_id,),
@@ -512,9 +511,12 @@ class CoordinatorWatchdog:
             if previous is None:
                 db.execute(
                     "INSERT INTO watchdog_snapshots(mission_id,fingerprint,state,last_progress_at,observed_at,"
-                    "aggregate_revision,activity_baseline_trusted,ledger_fingerprint) "
-                    "VALUES(?,?,'healthy',?,?,1,?,?)",
-                    (mission_id, fingerprint, observed_at, observed_at, int(activity_complete), ledger_fingerprint),
+                    "aggregate_revision,activity_baseline_trusted,ledger_fingerprint,ledger_facts_json) "
+                    "VALUES(?,?,'healthy',?,?,1,?,?,?)",
+                    (
+                        mission_id, fingerprint, observed_at, observed_at, int(activity_complete),
+                        ledger_fingerprint, ledger_facts_json,
+                    ),
                 )
                 if activity_complete:
                     self._persist_activity_cursors(
@@ -526,6 +528,7 @@ class CoordinatorWatchdog:
                 if (
                     fingerprint == current["fingerprint"]
                     and ledger_fingerprint == current["ledger_fingerprint"]
+                    and ledger_facts_json == previous["ledger_facts_json"]
                     and observed_at == current["observed_at"]
                     and (current["activity_baseline_trusted"] or not activity_complete)
                 ):
@@ -547,22 +550,16 @@ class CoordinatorWatchdog:
                     )
                     baseline_trusted = cursor_complete
                 complete_snapshot = activity_complete and cursor_complete
-                old_ledger_fingerprint = current["ledger_fingerprint"]
-                if old_ledger_fingerprint is None:
+                old_ledger_facts_json = previous["ledger_facts_json"]
+                if complete_snapshot:
                     next_ledger_fingerprint = ledger_fingerprint
-                    ledger_progress = False
-                elif complete_snapshot:
-                    next_ledger_fingerprint = ledger_fingerprint
-                    ledger_progress = ledger_fingerprint != old_ledger_fingerprint
+                    next_ledger_facts_json = ledger_facts_json
+                    ledger_progress = ledger_facts_json != old_ledger_facts_json
                 else:
-                    next_ledger_fingerprint = old_ledger_fingerprint
+                    next_ledger_fingerprint = current["ledger_fingerprint"]
+                    next_ledger_facts_json = old_ledger_facts_json
                     ledger_progress = False
-                opaque_progress = (
-                    baseline_trusted and old_ledger_fingerprint is not None
-                    and not active_assignments and "assignments" not in activity_value
-                    and fingerprint != current["fingerprint"]
-                )
-                progressed = ledger_progress or cursor_progress or opaque_progress
+                progressed = ledger_progress or cursor_progress
                 if progressed:
                     state = "healthy"
                     last_progress_at = observed_at
@@ -583,11 +580,13 @@ class CoordinatorWatchdog:
                         )
                 changed = db.execute(
                     "UPDATE watchdog_snapshots SET fingerprint=?,state=?,last_progress_at=?,observed_at=?,"
-                    "activity_baseline_trusted=?,ledger_fingerprint=?,aggregate_revision=aggregate_revision+1 "
+                    "activity_baseline_trusted=?,ledger_fingerprint=?,ledger_facts_json=?,"
+                    "aggregate_revision=aggregate_revision+1 "
                     "WHERE mission_id=? AND aggregate_revision=?",
                     (
                         fingerprint, state, last_progress_at, observed_at, int(baseline_trusted),
-                        next_ledger_fingerprint, mission_id, current["aggregate_revision"],
+                        next_ledger_fingerprint, next_ledger_facts_json,
+                        mission_id, current["aggregate_revision"],
                     ),
                 )
                 if changed.rowcount != 1:

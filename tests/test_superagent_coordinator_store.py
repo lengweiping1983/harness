@@ -176,14 +176,80 @@ class CoordinatorStoreTests(unittest.TestCase):
             """)
         upgraded = CoordinatorStore(path, instance_id=instance_id, identity=identity)
         with closing(sqlite3.connect(path)) as db:
-            row = db.execute("SELECT state,last_progress_at,activity_baseline_trusted FROM watchdog_snapshots").fetchone()
-        self.assertEqual(tuple(row), ("blocked", stamp, 0))
+            row = db.execute(
+                "SELECT state,last_progress_at,activity_baseline_trusted,ledger_fingerprint,ledger_facts_json "
+                "FROM watchdog_snapshots"
+            ).fetchone()
+            facts = db.execute(
+                "SELECT facts_json FROM watchdog_ledger_facts WHERE mission_id='mission-wd-migration'"
+            ).fetchone()[0]
+        self.assertEqual(tuple(row[:3]), ("blocked", stamp, 0))
+        self.assertIsNone(row[3])
+        self.assertEqual(row[4], facts)
         result = CoordinatorWatchdog(upgraded, limits={
             "stale_after": 1.0, "max_stale_ticks": 2, "action": "block",
         }).observe("mission-wd-migration", activity={}, now="2026-01-01T00:30:01.000Z")
         self.assertEqual(result["state"], "blocked")
         self.assertEqual(result["last_progress_at"], stamp)
         self.assertTrue(result["activity_baseline_trusted"])
+        self.assertIsNotNone(result["ledger_fingerprint"])
+        self.assertEqual(
+            result["ledger_fingerprint"],
+            hashlib.sha256(result["ledger_facts_json"].encode("utf-8")).hexdigest(),
+        )
+
+
+    def test_migration18_rolls_back_ddl_when_cursor_table_name_conflicts(self):
+        """v18 迁移冲突时回滚新增列、迁移记录并保留原有同名表。"""
+        path = Path(self.temp.name) / "schema-v17-watchdog-conflict.sqlite3"
+        instance_id, identity, _ = self._create_legacy_schema_with_effect(path, 17)
+        with closing(sqlite3.connect(path)) as db:
+            db.execute("CREATE TABLE watchdog_assignment_cursors(marker TEXT NOT NULL)")
+            db.execute("INSERT INTO watchdog_assignment_cursors(marker) VALUES('preserve')")
+            db.commit()
+        with self.assertRaises(sqlite3.OperationalError):
+            CoordinatorStore(path, instance_id=instance_id, identity=identity)
+        with closing(sqlite3.connect(path)) as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 17)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 17)
+            self.assertNotIn(
+                "ledger_fingerprint",
+                {row[1] for row in db.execute("PRAGMA table_info(watchdog_snapshots)")},
+            )
+            self.assertEqual(
+                db.execute("SELECT marker FROM watchdog_assignment_cursors").fetchone()[0],
+                "preserve",
+            )
+            self.assertIsNone(db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' "
+                "AND name='watchdog_assignment_cursors_insert_guard'"
+            ).fetchone())
+
+    def test_migration19_rolls_back_ddl_when_ledger_facts_view_name_conflicts(self):
+        """v19 视图名称冲突时回滚新增列、触发器和迁移记录。"""
+        path = Path(self.temp.name) / "schema-v18-ledger-facts-conflict.sqlite3"
+        instance_id, identity, _ = self._create_legacy_schema_with_effect(path, 18)
+        with closing(sqlite3.connect(path)) as db:
+            db.execute("CREATE TABLE watchdog_ledger_facts(marker TEXT NOT NULL)")
+            db.execute("INSERT INTO watchdog_ledger_facts(marker) VALUES('preserve')")
+            db.commit()
+        with self.assertRaises(sqlite3.OperationalError):
+            CoordinatorStore(path, instance_id=instance_id, identity=identity)
+        with closing(sqlite3.connect(path)) as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 18)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 18)
+            self.assertNotIn(
+                "ledger_facts_json",
+                {row[1] for row in db.execute("PRAGMA table_info(watchdog_snapshots)")},
+            )
+            self.assertEqual(
+                db.execute("SELECT marker FROM watchdog_ledger_facts").fetchone()[0],
+                "preserve",
+            )
+            self.assertIsNotNone(db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' "
+                "AND name='watchdog_snapshots_transition_guard'"
+            ).fetchone())
 
     def test_migration7_unique_index_failure_rolls_back_entire_upgrade(self):
         path = Path(self.temp.name) / "schema-v6-duplicate-assignments.sqlite3"
@@ -705,11 +771,15 @@ class CoordinatorStoreTests(unittest.TestCase):
                 "evaluations", "decisions", "mandates", "ticket_subscriptions", "ticket_inputs",
                 "workers", "evidence", "attentions",
                 "input_deliveries", "artifacts", "deliveries", "reviews", "mission_controls",
-                "control_commands", "mission_instructions", "watchdog_snapshots",
+                "control_commands", "mission_instructions", "watchdog_snapshots", "watchdog_assignment_cursors",
             } <= names)
-            self.assertIn("activity_baseline_trusted", {
+            watchdog_columns = {
                 row[1] for row in db.execute("PRAGMA table_info(watchdog_snapshots)")
-            })
+            }
+            self.assertTrue({"activity_baseline_trusted", "ledger_fingerprint", "ledger_facts_json"} <= watchdog_columns)
+            self.assertIsNotNone(db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='view' AND name='watchdog_ledger_facts'"
+            ).fetchone())
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], len(MIGRATIONS))
             self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], len(MIGRATIONS))
             self.assertIn("updated_at", {row[1] for row in db.execute("PRAGMA table_info(workers)")})
@@ -826,10 +896,19 @@ class CoordinatorStoreTests(unittest.TestCase):
                 )
 
         with self.store.transaction(write=True) as db:
+            ledger_facts_json = db.execute(
+                "SELECT facts_json FROM watchdog_ledger_facts WHERE mission_id=?",
+                (mission["mission_id"],),
+            ).fetchone()["facts_json"]
+            ledger_fingerprint = hashlib.sha256(ledger_facts_json.encode("utf-8")).hexdigest()
             db.execute(
                 "INSERT INTO watchdog_snapshots(mission_id,fingerprint,state,last_progress_at,observed_at,"
-                "aggregate_revision,activity_baseline_trusted) VALUES(?,?,'healthy',?,?,1,1)",
-                (mission["mission_id"], "a" * 64, stamp, stamp),
+                "aggregate_revision,activity_baseline_trusted,ledger_fingerprint,ledger_facts_json) "
+                "VALUES(?,?,'healthy',?,?,1,1,?,?)",
+                (
+                    mission["mission_id"], "a" * 64, stamp, stamp,
+                    ledger_fingerprint, ledger_facts_json,
+                ),
             )
             db.execute(
                 "UPDATE watchdog_snapshots SET state='stalled',observed_at=?,aggregate_revision=2 WHERE mission_id=?",
@@ -841,12 +920,20 @@ class CoordinatorStoreTests(unittest.TestCase):
                     "UPDATE watchdog_snapshots SET state='healthy',observed_at=?,aggregate_revision=3 WHERE mission_id=?",
                     ("2026-11-06T00:16:00.000Z", mission["mission_id"]),
                 )
-        with self.store.transaction(write=True) as db:
-            db.execute(
-                "UPDATE watchdog_snapshots SET fingerprint=?,state='healthy',last_progress_at=?,observed_at=?,"
-                "aggregate_revision=3 WHERE mission_id=?",
-                ("b" * 64, "2026-11-06T00:20:00.000Z", "2026-11-06T00:20:00.000Z", mission["mission_id"]),
-            )
+        forged_facts = (
+            '{"assignments":[],"jobs":[],"mission":'
+            '{"mission_id":"forged","plan_revision":1,"round_no":0}}'
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "UPDATE watchdog_snapshots SET fingerprint=?,ledger_fingerprint=?,ledger_facts_json=?,"
+                    "state='healthy',last_progress_at=?,observed_at=?,aggregate_revision=3 WHERE mission_id=?",
+                    (
+                        "b" * 64, hashlib.sha256(forged_facts.encode("utf-8")).hexdigest(), forged_facts,
+                        "2026-11-06T00:20:00.000Z", "2026-11-06T00:20:00.000Z", mission["mission_id"],
+                    ),
+                )
         with self.assertRaises(sqlite3.IntegrityError):
             with self.store.transaction(write=True) as db:
                 db.execute(

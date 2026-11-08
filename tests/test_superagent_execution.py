@@ -678,7 +678,7 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         """Integrator 导入租约后被持久 Watchdog 阻断，不得产生未知写入或重复原生 Run。"""
         from harness.app.superagent_watchdog import CoordinatorWatchdog
 
-        mission_id, work_id = await self._start_integrator_for_import_boundary_race()
+        mission_id, work_id = await self._start_work_for_artifact_boundary_race()
         scheduler = self.host._execution_service._dag_scheduler
         watchdog = CoordinatorWatchdog(
             self.host._store,
@@ -695,7 +695,7 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
             if kind == "artifact.import" and fresh and not blocked_once[0]:
                 blocked_once[0] = True
                 activity_snapshot[0] = self.host._execution_service.watchdog_activity(mission_id)
-                self.assertTrue(activity_snapshot[0]["assignments"])
+                self.assertIsInstance(activity_snapshot[0].get("assignments"), list)
                 watchdog.observe(
                     mission_id, activity=activity_snapshot[0], now="2026-11-07T00:00:00Z",
                 )
@@ -707,9 +707,11 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
 
         artifacts._begin = block_after_lease
         try:
+            work_result = await self.host.execution.reconcile(work_id)
             tick = await self.host.execution.schedule_dag_missions()
         finally:
             artifacts._begin = original_begin
+        self.assertEqual(work_result["state"], "succeeded")
         self.assertFalse(tick["errors"])
         self.assertEqual(self.mission_state(mission_id), "integrating")
         self.assertEqual(self.shared["artifact_import_calls"], [])
@@ -727,22 +729,21 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         blocked_again = await self.host.execution.schedule_dag_missions()
         self.assertFalse(blocked_again["errors"])
         self.assertEqual(self.shared["artifact_import_calls"], [])
-        progressed = watchdog.observe(
-            mission_id, activity=_advance_watchdog_activity(activity_snapshot[0]),
-            now="2026-11-07T00:00:03Z",
-        )
-        self.assertEqual(progressed["state"], "healthy")
-        resumed = await self.host.execution.schedule_dag_missions()
-        self.assertFalse(resumed["errors"])
-        self.assertEqual(len(self.shared["artifact_import_calls"]), 1)
-        self.assertEqual(self.shared["submit_calls"].count(work_id), 1)
         with self.host._store.transaction() as db:
-            states = [
-                row["state"] for row in db.execute(
-                    "SELECT state FROM effects WHERE kind='artifact.import' ORDER BY rowid",
-                ).fetchall()
-            ]
-        self.assertEqual(states, ["failed", "completed"])
+            effects = db.execute(
+                "SELECT state,receipt_json,aggregate_id FROM effects "
+                "WHERE kind='artifact.import' ORDER BY rowid",
+            ).fetchall()
+            delivery = db.execute(
+                "SELECT state FROM deliveries WHERE target_assignment_id=?",
+                (effects[0]["aggregate_id"] if effects else "",),
+            ).fetchone() if effects else None
+        self.assertEqual([row["state"] for row in effects], ["failed"])
+        self.assertEqual(json.loads(effects[0]["receipt_json"])["outcome"], "not_started")
+        self.assertIsNotNone(delivery)
+        self.assertEqual(delivery["state"], "pending")
+        self.assertEqual(self.shared["artifact_import_calls"], [])
+        self.assertEqual(self.shared["submit_calls"].count(work_id), 1)
 
     async def test_capture_stale_plan_snapshot_after_effect_lease_requires_new_admission(self):
         """过期 PlanRevision 快照不得创建原生 Git 写入；新快照只在无副作用回执后恢复。"""

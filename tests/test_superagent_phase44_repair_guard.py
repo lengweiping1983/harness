@@ -1,6 +1,7 @@
 """Phase 4.4 修正授权必须绑定冻结的失败 Review、当前候选与预算。"""
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -609,8 +610,11 @@ class Phase44RepairGuardTests(unittest.TestCase):
         real = {"assignments": [self._watchdog_activity_item(active, "watchdog-coverage", 2)]}
         self.assertEqual(watchdog.observe(mission_id, activity=real,
                          now="2026-11-07T00:00:07Z")["state"], "healthy")
-        self.assertEqual(watchdog.observe(mission_id, activity=real,
-                         now="2026-11-07T00:00:09Z")["state"], "blocked")
+        reblocked = watchdog.observe(
+            mission_id, activity=real, now="2026-11-07T00:00:09Z",
+        )
+        self.assertEqual(reblocked["state"], "blocked")
+        ledger_before_settlement = reblocked["ledger_facts_json"]
         # 账本确实完成时，先收到过期 Run 快照仍需阻断，补采新快照后才恢复。
         with self.store.unit_of_work(actor={"kind": "system"}) as uow:
             current = uow.assignments.get(active)
@@ -619,10 +623,18 @@ class Phase44RepairGuardTests(unittest.TestCase):
                 changes={"state": "succeeded", "ended_at": "2026-11-07T00:00:09Z"},
                 event_type="assignment.fixture.succeeded",
             )
-        self.assertEqual(watchdog.observe(mission_id, activity=real,
-                         now="2026-11-07T00:00:10Z")["state"], "blocked")
-        self.assertEqual(watchdog.observe(mission_id, activity={"assignments": []},
-                         now="2026-11-07T00:00:11Z")["state"], "healthy")
+        incomplete = watchdog.observe(
+            mission_id, activity=real, now="2026-11-07T00:00:10Z",
+        )
+        self.assertEqual(incomplete["state"], "blocked")
+        self.assertEqual(incomplete["ledger_facts_json"], ledger_before_settlement)
+        self.assertEqual(incomplete["last_progress_at"], reblocked["last_progress_at"])
+        complete = watchdog.observe(
+            mission_id, activity={"assignments": []}, now="2026-11-07T00:00:11Z",
+        )
+        self.assertEqual(complete["state"], "healthy")
+        self.assertNotEqual(complete["ledger_facts_json"], ledger_before_settlement)
+        self.assertEqual(complete["ledger_fingerprint"], _hash(complete["ledger_facts_json"]))
 
     def test_watchdog_first_trusted_snapshot_after_untrusted_baseline_does_not_unblock(self):
         """首次观察不可信时，首个可信快照只建立基线，不伪造进度。"""
@@ -750,6 +762,309 @@ class Phase44RepairGuardTests(unittest.TestCase):
         self.assertEqual(restarted.observe(mid, activity=snap(3, 6),
             now="2026-11-07T00:00:07Z")["state"], "healthy")
 
+
+    def test_watchdog_rejects_confirmed_activity_without_original_run_session(self):
+        """缺少原生 Run / Session 身份的 Assignment 即使标为 confirmed 也不能建立游标。"""
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            mission = self._fixture(uow, "watchdog-unbound-native-run")
+            job_id = uow.db.execute(
+                "SELECT job_id FROM jobs WHERE mission_id=? AND node_id='work'",
+                (mission["mission_id"],),
+            ).fetchone()["job_id"]
+            assignment_id = "active-watchdog-unbound-native-run"
+            uow.assignments.create({
+                "assignment_id": assignment_id, "job_id": job_id, "attempt_no": 1,
+                "submission_key": "submission-watchdog-unbound-native-run",
+                "state": "running", "started_at": "2026-11-07T00:00:00Z",
+            })
+        activity = {"assignments": [{
+            "assignment_id": assignment_id, "run_id": None, "session_id": None,
+            "inspection": "confirmed", "status": "running", "settled": False,
+            "last_activity": {
+                "seq": 1, "time": "2026-11-07T00:00:01Z", "type": "assistant_message",
+            },
+        }]}
+        watchdog = CoordinatorWatchdog(self.store, limits={
+            "stale_after": 1.0, "max_stale_ticks": 2, "action": "block",
+        })
+        first = watchdog.observe(
+            mission["mission_id"], activity=activity, now="2026-11-07T00:00:00Z",
+        )
+        self.assertFalse(first["activity_baseline_trusted"])
+        with self.store.transaction() as db:
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM watchdog_assignment_cursors WHERE assignment_id=?",
+                (assignment_id,),
+            ).fetchone()[0], 0)
+        blocked = watchdog.observe(
+            mission["mission_id"], activity=activity, now="2026-11-07T00:00:02Z",
+        )
+        self.assertEqual(blocked["state"], "blocked")
+        self.assertFalse(blocked["activity_baseline_trusted"])
+
+    def test_watchdog_snapshot_sql_guard_rejects_forged_ledger_recovery(self):
+        """没有新账本事实或原生 Run 游标时，直接 SQL 不能伪造健康恢复。"""
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            mission = self._fixture(uow, "watchdog-snapshot-sql-progress")
+            active = self._watchdog_active_assignment(
+                uow, mission["mission_id"], "watchdog-snapshot-sql-progress",
+            )
+        mission_id = mission["mission_id"]
+        watchdog = CoordinatorWatchdog(self.store, limits={
+            "stale_after": 1.0, "max_stale_ticks": 2, "action": "block",
+        })
+        activity = {"assignments": [
+            self._watchdog_activity_item(active, "watchdog-snapshot-sql-progress", 1),
+        ]}
+        watchdog.observe(mission_id, activity=activity, now="2026-11-07T00:00:00Z")
+        blocked = watchdog.observe(
+            mission_id, activity=activity, now="2026-11-07T00:00:02Z",
+        )
+        self.assertEqual(blocked["state"], "blocked")
+        with self.store.transaction() as db:
+            before = dict(db.execute(
+                "SELECT * FROM watchdog_snapshots WHERE mission_id=?", (mission_id,),
+            ).fetchone())
+            facts_json = db.execute(
+                "SELECT facts_json FROM watchdog_ledger_facts WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()[0]
+            cursor = dict(db.execute(
+                "SELECT * FROM watchdog_assignment_cursors WHERE mission_id=? AND assignment_id=?",
+                (mission_id, active),
+            ).fetchone())
+        self.assertEqual(before["ledger_facts_json"], facts_json)
+        self.assertEqual(before["ledger_fingerprint"], _hash(facts_json))
+        self.assertEqual(cursor["last_event_seq"], 1)
+        self.assertEqual(cursor["last_progress_revision"], 0)
+        forged_facts = (
+            '{"assignments":[],"jobs":[],"mission":'
+            '{"mission_id":"forged","plan_revision":1,"round_no":0}}'
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "UPDATE watchdog_snapshots SET fingerprint=?,ledger_fingerprint=?,ledger_facts_json=?,"
+                    "state='healthy',last_progress_at=?,observed_at=?,"
+                    "aggregate_revision=aggregate_revision+1 WHERE mission_id=?",
+                    (
+                        "f" * 64, _hash(forged_facts), forged_facts,
+                        "2026-11-07T00:00:03.000Z", "2026-11-07T00:00:03.000Z", mission_id,
+                    ),
+                )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "UPDATE watchdog_snapshots SET fingerprint=?,ledger_fingerprint=?,state='healthy',"
+                    "last_progress_at=?,observed_at=?,aggregate_revision=aggregate_revision+1 "
+                    "WHERE mission_id=?",
+                    (
+                        "f" * 64, "e" * 64,
+                        "2026-11-07T00:00:03.000Z", "2026-11-07T00:00:03.000Z", mission_id,
+                    ),
+                )
+        fake_facts = _json({
+            "assignments": [],
+            "jobs": [],
+            "mission": {"mission_id": "forged", "plan_revision": 1, "round_no": 0},
+        })
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "UPDATE watchdog_snapshots SET fingerprint=?,ledger_fingerprint=?,ledger_facts_json=?,"
+                    "state='healthy',last_progress_at=?,observed_at=?,aggregate_revision=aggregate_revision+1 "
+                    "WHERE mission_id=?",
+                    (
+                        "f" * 64, _hash(fake_facts), fake_facts,
+                        "2026-11-07T00:00:04.000Z", "2026-11-07T00:00:04.000Z", mission_id,
+                    ),
+                )
+        with self.store.transaction() as db:
+            after = dict(db.execute(
+                "SELECT * FROM watchdog_snapshots WHERE mission_id=?", (mission_id,),
+            ).fetchone())
+        self.assertEqual(after, before)
+
+    def test_watchdog_cursor_sql_guards_reject_rebinding_regression_and_replay(self):
+        """数据库守卫拒绝原 Run 重绑、游标回退、同序号重放及删除。"""
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            mission = self._fixture(uow, "watchdog-cursor-sql", multi_work=True)
+            first = self._watchdog_active_assignment(
+                uow, mission["mission_id"], "watchdog-cursor-sql-a",
+            )
+            second_job = uow.db.execute(
+                "SELECT job_id FROM jobs WHERE mission_id=? AND node_id='work-secondary'",
+                (mission["mission_id"],),
+            ).fetchone()["job_id"]
+            second = "active-watchdog-cursor-sql-b"
+            uow.assignments.create({
+                "assignment_id": second, "job_id": second_job, "attempt_no": 1,
+                "submission_key": "submission-watchdog-cursor-sql-b", "state": "running",
+                "run_id": "run-watchdog-cursor-sql-b",
+                "workspace_id": "workspace-watchdog-cursor-sql-b",
+                "session_id": "session-watchdog-cursor-sql-b",
+                "started_at": "2026-11-07T00:00:00Z",
+            })
+        mission_id = mission["mission_id"]
+        watchdog = CoordinatorWatchdog(self.store, limits={
+            "stale_after": 1.0, "max_stale_ticks": 2, "action": "block",
+        })
+        snapshot = lambda a, b: {"assignments": [
+            self._watchdog_activity_item(first, "watchdog-cursor-sql-a", a),
+            self._watchdog_activity_item(second, "watchdog-cursor-sql-b", b),
+        ]}
+        watchdog.observe(mission_id, activity=snapshot(1, 1), now="2026-11-07T00:00:00Z")
+        watchdog.observe(mission_id, activity=snapshot(2, 2), now="2026-11-07T00:00:01Z")
+
+        # 重复插入已存在的 Assignment 并伪造 Run 身份，必须先被身份守卫拒绝。
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "watchdog cursor must bind"):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "INSERT INTO watchdog_assignment_cursors(mission_id,assignment_id,run_id,session_id,"
+                    "last_event_seq,last_event_time,last_event_type,aggregate_revision,last_progress_revision) "
+                    "VALUES(?,?,?,?, -1,NULL,NULL,1,0)",
+                    (mission_id, first, "forged-run", "session-watchdog-cursor-sql-a"),
+                )
+
+        with self.store.transaction() as db:
+            cursor = dict(db.execute(
+                "SELECT * FROM watchdog_assignment_cursors WHERE mission_id=? AND assignment_id=?",
+                (mission_id, first),
+            ).fetchone())
+            snapshot_row = dict(db.execute(
+                "SELECT aggregate_revision FROM watchdog_snapshots WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone())
+        next_snapshot_revision = snapshot_row["aggregate_revision"] + 1
+        next_cursor_revision = cursor["aggregate_revision"] + 1
+        next_seq = cursor["last_event_seq"] + 1
+        next_time = "2026-11-07T00:00:02Z"
+        common = (
+            next_cursor_revision, next_seq, next_time, "assistant_message",
+            next_snapshot_revision, first,
+        )
+        invalid_updates = [
+            ("run_id=?,aggregate_revision=?,last_event_seq=?,last_event_time=?,last_event_type=?,last_progress_revision=?",
+             ("forged-run", *common)),
+            ("session_id=?,aggregate_revision=?,last_event_seq=?,last_event_time=?,last_event_type=?,last_progress_revision=?",
+             ("forged-session", *common)),
+            ("aggregate_revision=?,last_event_seq=?,last_event_time=?,last_event_type=?,last_progress_revision=?",
+             (next_cursor_revision, cursor["last_event_seq"] - 1, next_time, "assistant_message",
+              next_snapshot_revision, first)),
+            ("aggregate_revision=?,last_event_seq=?,last_event_time=?,last_event_type=?,last_progress_revision=?",
+             (next_cursor_revision, cursor["last_event_seq"], next_time, "replayed_event",
+              next_snapshot_revision, first)),
+            ("aggregate_revision=?,last_event_seq=?,last_event_time=?,last_event_type=?,last_progress_revision=?",
+             (next_cursor_revision + 1, next_seq, next_time, "assistant_message",
+              next_snapshot_revision, first)),
+            ("aggregate_revision=?,last_event_seq=?,last_event_time=?,last_event_type=?,last_progress_revision=?",
+             (next_cursor_revision, next_seq, "", "assistant_message",
+              next_snapshot_revision, first)),
+        ]
+        for clause, values in invalid_updates:
+            with self.subTest(update=clause):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    with self.store.transaction(write=True) as db:
+                        db.execute(
+                            f"UPDATE watchdog_assignment_cursors SET {clause} WHERE assignment_id=?",
+                            values,
+                        )
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "cursor history is immutable"):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "DELETE FROM watchdog_assignment_cursors WHERE assignment_id=?",
+                    (first,),
+                )
+        with self.store.transaction() as db:
+            after = dict(db.execute(
+                "SELECT * FROM watchdog_assignment_cursors WHERE mission_id=? AND assignment_id=?",
+                (mission_id, first),
+            ).fetchone())
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM watchdog_assignment_cursors WHERE assignment_id=?",
+                (first,),
+            ).fetchone()[0], 1)
+        self.assertEqual(after, cursor)
+
+    def test_watchdog_multi_run_cursor_and_snapshot_updates_roll_back_together(self):
+        """后一个 Run 游标写入失败时，前一个游标与 Watchdog 快照必须整体回滚。"""
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            mission = self._fixture(uow, "watchdog-cursor-atomic", multi_work=True)
+            first = self._watchdog_active_assignment(
+                uow, mission["mission_id"], "watchdog-cursor-atomic-a",
+            )
+            second_job = uow.db.execute(
+                "SELECT job_id FROM jobs WHERE mission_id=? AND node_id='work-secondary'",
+                (mission["mission_id"],),
+            ).fetchone()["job_id"]
+            second = "active-watchdog-cursor-atomic-b"
+            uow.assignments.create({
+                "assignment_id": second, "job_id": second_job, "attempt_no": 1,
+                "submission_key": "submission-watchdog-cursor-atomic-b", "state": "running",
+                "run_id": "run-watchdog-cursor-atomic-b",
+                "workspace_id": "workspace-watchdog-cursor-atomic-b",
+                "session_id": "session-watchdog-cursor-atomic-b",
+                "started_at": "2026-11-07T00:00:00Z",
+            })
+        mission_id = mission["mission_id"]
+        watchdog = CoordinatorWatchdog(self.store, limits={
+            "stale_after": 1.0, "max_stale_ticks": 2, "action": "block",
+        })
+        snapshot = lambda a, b: {"assignments": [
+            self._watchdog_activity_item(first, "watchdog-cursor-atomic-a", a),
+            self._watchdog_activity_item(second, "watchdog-cursor-atomic-b", b),
+        ]}
+        watchdog.observe(mission_id, activity=snapshot(2, 5), now="2026-11-07T00:00:00Z")
+        with self.store.transaction(write=True) as db:
+            before_snapshot = dict(db.execute(
+                "SELECT * FROM watchdog_snapshots WHERE mission_id=?", (mission_id,),
+            ).fetchone())
+            before_cursors = {
+                row["assignment_id"]: dict(row)
+                for row in db.execute(
+                    "SELECT * FROM watchdog_assignment_cursors WHERE mission_id=?",
+                    (mission_id,),
+                )
+            }
+            db.execute(
+                "CREATE TRIGGER reject_second_watchdog_cursor_update "
+                "BEFORE UPDATE ON watchdog_assignment_cursors "
+                f"WHEN OLD.assignment_id='{second}' "
+                "BEGIN SELECT RAISE(ABORT,'injected second cursor failure'); END"
+            )
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "injected second cursor failure"):
+            watchdog.observe(
+                mission_id, activity=snapshot(3, 6), now="2026-11-07T00:00:02Z",
+            )
+        with self.store.transaction() as db:
+            after_snapshot = dict(db.execute(
+                "SELECT * FROM watchdog_snapshots WHERE mission_id=?", (mission_id,),
+            ).fetchone())
+            after_cursors = {
+                row["assignment_id"]: dict(row)
+                for row in db.execute(
+                    "SELECT * FROM watchdog_assignment_cursors WHERE mission_id=?",
+                    (mission_id,),
+                )
+            }
+        self.assertEqual(after_snapshot, before_snapshot)
+        self.assertEqual(after_cursors, before_cursors)
+        with self.store.transaction(write=True) as db:
+            db.execute("DROP TRIGGER reject_second_watchdog_cursor_update")
+        recovered = watchdog.observe(
+            mission_id, activity=snapshot(3, 6), now="2026-11-07T00:00:02Z",
+        )
+        self.assertEqual(recovered["state"], "healthy")
+        with self.store.transaction() as db:
+            recovered_cursors = {
+                row["assignment_id"]: row["last_event_seq"]
+                for row in db.execute(
+                    "SELECT assignment_id,last_event_seq FROM watchdog_assignment_cursors WHERE mission_id=?",
+                    (mission_id,),
+                )
+            }
+        self.assertEqual(recovered_cursors, {first: 3, second: 6})
+
     def test_blocking_watchdog_prevents_review_settlement_until_true_progress(self):
         """Watchdog 已确认 blocked 时不推进质量门，新真实进度恢复后才解锁。"""
         with self.store.unit_of_work(actor={"kind": "system"}) as uow:
@@ -760,13 +1075,11 @@ class Phase44RepairGuardTests(unittest.TestCase):
             limits={"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"},
         )
         first = watchdog.observe(
-            mission["mission_id"], activity={"run_status": "running", "event_seq": 1},
-            now="2026-11-07T00:00:00Z",
+            mission["mission_id"], activity={}, now="2026-11-07T00:00:00Z",
         )
         self.assertEqual(first["state"], "healthy")
         blocked = watchdog.observe(
-            mission["mission_id"], activity={"run_status": "running", "event_seq": 1},
-            now="2026-11-07T00:00:02Z",
+            mission["mission_id"], activity={}, now="2026-11-07T00:00:02Z",
         )
         self.assertEqual(blocked["state"], "blocked")
 
@@ -783,9 +1096,25 @@ class Phase44RepairGuardTests(unittest.TestCase):
             current = uow.missions.get(mission["mission_id"])
             self.assertEqual((current["state"], current["round_no"]), ("reviewing", 0))
 
-        progressed = watchdog.observe(
+        forged = watchdog.observe(
             mission["mission_id"], activity={"run_status": "finished", "event_seq": 2},
             now="2026-11-07T00:00:03Z",
+        )
+        self.assertEqual(forged["state"], "blocked")
+        self.assertEqual(forged["last_progress_at"], first["last_progress_at"])
+
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            job = uow.db.execute(
+                "SELECT job_id,aggregate_revision FROM jobs WHERE mission_id=? AND role='work'",
+                (mission["mission_id"],),
+            ).fetchone()
+            uow.jobs._transition(
+                job["job_id"], expected_revision=job["aggregate_revision"],
+                changes={"state": "done", "result_hash": "e" * 64},
+                event_type="job.fixture.new_verified_result",
+            )
+        progressed = watchdog.observe(
+            mission["mission_id"], activity={}, now="2026-11-07T00:00:04Z",
         )
         self.assertEqual(progressed["state"], "healthy")
         scheduler._advance_mission_state(mission["mission_id"])
