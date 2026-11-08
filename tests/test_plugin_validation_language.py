@@ -90,6 +90,24 @@ class PluginValidationLanguageTests(unittest.TestCase):
                     self.assertEqual(manifest.read_bytes(), original)
                     self.assertEqual(list(root.iterdir()), [manifest])
 
+    def test_mcp_server_timeouts_reject_integers_outside_float_range(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / 'plugin.json'
+            declaration = root / 'mcp.json'
+            manifest_bytes = json.dumps({'name': 'fixture', 'mcpServers': 'mcp.json'}).encode()
+            for key in ('startup_timeout_sec', 'tool_timeout_sec'):
+                declaration_bytes = json.dumps({'mcpServers': {'fixture': {'command': 'fixture', key: 10 ** 400}}}).encode()
+                manifest.write_bytes(manifest_bytes)
+                declaration.write_bytes(declaration_bytes)
+                for language in ('en', 'zh-CN', 'en'):
+                    with self.subTest(key=key, language=language), current_language.set(language), self.assertRaises(PackageError) as caught:
+                        read_package(root)
+                    self.assert_language(caught.exception.message, language)
+                    self.assertEqual(caught.exception.code, 'plugin-package/invalid')
+                    self.assertEqual(manifest.read_bytes(), manifest_bytes)
+                    self.assertEqual(declaration.read_bytes(), declaration_bytes)
+
     def test_path_parameters_and_git_rejections_do_not_access_network(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

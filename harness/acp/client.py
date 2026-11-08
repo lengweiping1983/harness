@@ -25,6 +25,11 @@ class AcpError(RuntimeError):
     """外部 Agent 启动、协商或请求失败。"""
 
 
+def _reject_json_constant(_value: str) -> Any:
+    """拒绝 Python JSON 解码器额外接受的非标准数值。"""
+    raise AcpError(tr('acp.client.761c95d5aa14'))
+
+
 def _validate_unicode(value: Any) -> None:
     """在协议边界拒绝孤立代理码点，避免外部消息破坏会话持久化。"""
     pending = [value]
@@ -232,7 +237,7 @@ class AcpClient:
                     raise AcpError(tr('acp.client.65516b50779b'))
                 # bytes 形式的 json.loads 会接受 UTF-16/32，ACP 只允许 UTF-8。
                 try:
-                    message = json.loads(line.decode('utf-8'))
+                    message = json.loads(line.decode('utf-8'), parse_constant=_reject_json_constant)
                 except UnicodeDecodeError as exc:
                     raise AcpError(tr('acp.client.19582a180dbc')) from exc
                 _validate_unicode(message)

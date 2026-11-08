@@ -44,6 +44,13 @@ class GenerationPolicyTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(name, SCHEMAS['SettingsPatch']['properties'])
                 self.assertFalse(hasattr(OpenRouterAdapter('fixture'), name))
 
+    def test_oversized_subagent_timeout_is_rejected_without_breaking_config_load(self):
+        with tempfile.TemporaryDirectory() as folder:
+            config = HarnessConfig(home=Path(folder), subagent_job_timeout=10 ** 400)
+            self.assertIsNone(config.subagent_job_timeout)
+            valid = HarnessConfig(home=Path(folder) / 'valid', subagent_job_timeout=0.5)
+            self.assertEqual(valid.subagent_job_timeout, 0.5)
+
     async def test_heartbeat_stream_has_no_total_or_progress_deadline(self):
         adapter = OpenRouterAdapter('fixture', network_timeout=0.1)
         async def raw():

@@ -31,7 +31,7 @@ class SubagentWaitTimeoutTests(unittest.IsolatedAsyncioTestCase):
                 manager = SubagentManager(adapter=None, tools=None, prompts=None)
                 manager.get = Mock(return_value=AgentRun(id='fixture'))
                 tool = next(t for t in build_subagent_tools(manager) if t.schema.name == 'wait_agent')
-                for value in (True, False, '1', [], {}, -1, float('nan'), float('inf')):
+                for value in (True, False, '1', [], {}, -1, float('nan'), float('inf'), 10 ** 400):
                     with self.assertRaises(ValueError) as error:
                         await manager.wait('fixture', timeout=value)
                     self.assertEqual(str(error.exception), tr('subagent.wait.invalid_timeout'))

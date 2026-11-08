@@ -273,8 +273,13 @@ def read_package(root: str | Path) -> PackageSpec:
                 raise PackageError(tr('plugin.validation.c9a4403265f1', p0=server_name))
             for key in ('startup_timeout_sec', 'tool_timeout_sec'):
                 value = config.get(key)
-                if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0):
-                    raise PackageError(tr('plugin.validation.91124b528412', p0=key, p1=server_name))
+                if value is not None:
+                    try:
+                        valid_timeout = type(value) in (int, float) and value > 0 and math.isfinite(float(value))
+                    except OverflowError:
+                        valid_timeout = False
+                    if not valid_timeout:
+                        raise PackageError(tr('plugin.validation.91124b528412', p0=key, p1=server_name))
             for key in ('enabled_tools', 'disabled_tools'):
                 value = config.get(key)
                 if value is not None and (not isinstance(value, list) or not all(isinstance(item, str) and item for item in value)):

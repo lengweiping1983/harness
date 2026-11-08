@@ -75,7 +75,7 @@ class CapabilityRegistry:
                     if name in ('context_window', 'max_output_tokens'):
                         valid = value is None or positive(value) is not None
                     elif name == 'fetched_at':
-                        valid = type(value) in (int, float) and math.isfinite(value) and value >= 0
+                        valid = type(value) in (int, float) and 0 <= value <= time.time() and math.isfinite(value)
                     elif name in ('supported_parameters', 'supported_efforts'):
                         valid = isinstance(value, list) and all(isinstance(item, str) for item in value)
                     elif name in ('reasoning_mandatory', 'supports_reasoning_budget'):
@@ -90,7 +90,7 @@ class CapabilityRegistry:
     def _clean(value):
         result = {name: positive(value.get(name)) for name in ('context_window', 'max_output_tokens')}
         stamp = value.get('fetched_at')
-        result['fetched_at'] = stamp if type(stamp) in (int, float) and math.isfinite(stamp) and 0 <= stamp <= time.time() else 0
+        result['fetched_at'] = stamp if type(stamp) in (int, float) and 0 <= stamp <= time.time() and math.isfinite(stamp) else 0
         supported = value.get('supported_parameters')
         if isinstance(supported, list) and all(isinstance(v, str) for v in supported):
             result['supported_parameters'] = supported

@@ -18,7 +18,8 @@ class HookLanguageTests(unittest.IsolatedAsyncioTestCase):
     def test_invalid_declarations_and_regex_limit_do_not_authorize_handlers(self):
         cases = [('PreToolUse', {'type': 'mcp_tool', 'server': '', 'tool': 'tool'}),
             ('SessionEnd', {'type': 'mcp_tool', 'server': 'server', 'tool': 'tool'}),
-            ('PreToolUse', {'type': 'command', 'command': 'fixture', 'additionalContextLimit': True})]
+            ('PreToolUse', {'type': 'command', 'command': 'fixture', 'additionalContextLimit': True}),
+            ('PreToolUse', {'type': 'command', 'command': 'fixture', 'timeout': 10 ** 400})]
         for language in ('en', 'zh-CN', 'en'):
             for event, handler in cases:
                 document = {'hooks': {event: [{'hooks': [handler]}]}}
