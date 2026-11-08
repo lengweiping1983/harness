@@ -535,11 +535,21 @@ Watchdog 仍不是跨设备租约、操作系统级进程监督或业务验收�
 
 当前 `--superagent CONFIG` 仍启动前述事件路由或自主目标服务。统一协调账本、来源授权与单 Worker 执行基础已通过显式 CoordinatorHost API 提供；这不等于生产入口已经替换。
 
-Phase 4.1–4.4 已在显式 `SuperagentService.open_coordinator` / `CoordinatorHost` 内接通统一生命周期、持久暂停及目标停止、单多节点 DAG、真实 Artifact / Delivery、独立 Review、有限修正和 Watchdog。完整已实现边界和剩余缺口见[领域模型](superagent-domain-model.md#9-phase-14-当前实现边界)；生产信道和 CLI 切换仍未完成。
+Phase 4.1–4.4 已在显式 `SuperagentService.open_coordinator` / `CoordinatorHost` 内接通统一生命周期、持久暂停及目标停止、单多节点 DAG、真实 Artifact / Delivery、独立 Review、有限修正和 Watchdog。完整已实现边界和剩余缺口见[领域模型](superagent-domain-model.md#9-phase-14-当前实现边界)；既有信道已接入统一服务；CLI 切换和旧编排退役归 Phase 4.6。
 
 统一链路通过宿主 `WorkerProfile(max_work_turns=3, ...)` 显式启用长 Work 节点的三阶段预算（合法整数 1–32，None 使用普通报告协议）。宿主将阶段预算和结构化任务数据冻结到 PlanRevision，Planner 不能覆盖；此字段与单次 Run 的 `max_turns`、Mission 全局 Assignment 预算分别约束。每阶段使用前文的严格 `status/summary/next_steps` 检查点协议，阶段提示按当前调用语言解析。continue 冻结原输出及 Artifact，以同一 Job 的新 Assignment、新会话和新工作树导入累计文件与必需依赖；ready 才解锁下游，之后仍须集成及独立复核。blocked、非法报告、阶段／总预算耗尽或与任意旧阶段相同的检查点及文件树均阻断。未知 Capture / Import / Submit 仅回查原身份，不能重新执行。原任务数据是冻结输入，后续已应用指令通过独立上下文传递，不改变冻结 DAG 或验收条件。
 
-Phase 4.5 已接入阶段间已应用指令上下文。可信宿主通过 `execution.instruction_context(mission_id, job_id=...)` 只读原生回执已确认 applied 的指令，accepted 但 pending、unapplied、unknown 或其他 Mission / PlanRevision 的内容不会被当作已应用指令。Scheduler 在创建 Assignment 时冻结实际提示：Work 只继承本 Job 的指令，Integrator / Reviewer 获得当前 Mission 的已应用上下文；每项保留原 Assignment / Run / Turn 与 applied_seq。上下文优先保留最新内容，最多 16 项、单项正文最多 2048 字符，总 JSON 小于 16 KiB；`total/has_more/text_truncated` 显式报告遗漏或截断，原指令不改写。重启继续读取原持久回执，不向新 Run 重放 steer。产品说明按新派工时的语言解析，指令原文保持原样。普通来源跟进现已支持同一 Mission 多个活动 Work Assignment 的独立 InputDelivery；unknown 只回查原 delivery key，部分 ACK 丢失后可继续完成其余目标而不重放已受理投递。单节点原路由和 context-only 行为保持不变。Attention / Handback 的完整统一服务接线、信道 Sender 和周期性回查仍未完成。
+Phase 4.5 已接入阶段间已应用指令上下文。可信宿主通过 `execution.instruction_context(mission_id, job_id=...)` 只读原生回执已确认 applied 的指令，accepted 但 pending、unapplied、unknown 或其他 Mission / PlanRevision 的内容不会被当作已应用指令。Scheduler 在创建 Assignment 时冻结实际提示：Work 只继承本 Job 的指令，Integrator / Reviewer 获得当前 Mission 的已应用上下文；每项保留原 Assignment / Run / Turn 与 applied_seq。上下文优先保留最新内容，最多 16 项、单项正文最多 2048 字符，总 JSON 小于 16 KiB；`total/has_more/text_truncated` 显式报告遗漏或截断，原指令不改写。重启继续读取原持久回执，不向新 Run 重放 steer。产品说明按新派工时的语言解析，指令原文保持原样。普通来源跟进在首次原生投递前冻结活动 Work Assignment 目标集合，每个 Input / Assignment 保存独立 InputDelivery；单节点同样使用该入口。unknown 只回查原 delivery key，原 Assignment 结束也不从恢复集合移除；全部目标 applied 后才把 TicketInput 投影为 read。context-only 不启动运行。统一服务每轮回查 submitting / unknown / accepted-pending MissionInstruction，已受理指令不重新提交。
+
+统一信道由 `SuperagentService.open_coordinator(provider_clients={source_instance_id: client})` 装配，凭据仍由可信宿主提供；使用 `receive_source(source_id, headers=..., raw=...)` 或 `source_ingress(source_id)` 向同一 SourceRegistry 提交原始事件。GitHub 验签和飞书解密发生在来源边界，重复事件复用原 Trigger；可选 SourceCursor 在持久接收成功后按修订推进。`source_ingress` 可供共用有界 WebhookServer 使用，显式内部 API 不自动启动公网监听。这里不加载旧信道的独立业务账本，也不从旧 Results 取候选。
+
+`CoordinatorDeliveryRuntime` 解析当前来源身份及原 Trigger 的回复目标；飞书后续消息不会扩大原结果的收件集合。Schema v20 的 Channel 回复传输绑定独立于不可变地址，以当前 Source 修订登记并审计；本机投影或注入对应 Provider 客户端只初始化尚未登记的绑定。显式禁用及来源修订变化不会被 Tick／重启自动重新授权，可信宿主须调用 `sources.set_channel_reply(channel_id, expected_source_revision=..., enabled=True, actor=...)` 明确登记。传输能力不能替代 Mandate 的 reply Scope。
+
+报告回复、Attention 问题及经过独立 Review passed 的冻结候选均生成稳定 Outbox 消息。产物任务的结果正文引用冻结候选与独立 Review；生成时的语言随 body_ref 冻结，语言切换不改写已发布正文。Sender 每次原生写入前重新检查 Ticket、Mandate、Source 修订、原目标、控制模式、Watchdog 与正文哈希；飞书刷新令牌后仍重新检查，关闭等待所属请求收尾。GitHub 评论使用稳定正文标记，飞书使用稳定 UUID 及正文标记。POST 返回不等于 sent，必须只读回查到唯一、正文／身份／目标匹配的远端对象；丢失响应、未找到、重复匹配或分页不完整均保持 unknown，周期恢复只回查原操作，不再次 POST。本机结果只投影到 `replies/` 的独占发布文件，SQLite Outbox / Effect 保持唯一业务事实。
+
+Attention 问题经同一 Outbox 交付。唯一已阻塞问题的获准人工跟进可自动标记 answered，并携带原问题与回答创建新的有界 Mission；多个问题须显式提供 attention_id，不能猜测或广播。原阻塞运行不重放，新的活动仍受原 Mandate 与预算约束。Handback 只归还已投递的指定跟进 Input；原始请求的 Handback 转为 Attention。周期 Tick、重启和迟到回执不会重新投递已归还输入。
+
+服务状态区分 pending、sent、unknown、不可用传输、开放问题、最新阻塞 Mission 和各类积压；once 遇到未知、问题或不可用传输返回需处理状态。每轮发送、候选扫描、指令回查与 Effect 回查均有批次上限，发送和未知 Effect 轮转避免首批缺失传输阻塞后续项。GitHub／飞书验收使用受控 Provider 与本机 HTTP，不代表真实外部账号部署或在线模型质量。
 
 `CoordinatorExecutionService.watchdog_activity` 将 Harness 原生 Unix 毫秒时间转换为监督用 UTC 文本，原事件和 Evidence 保留原值。监督器重建、长期检查失败或不完整快照均不解除 blocked；原 Run 的新事件或经过核验的账本进度才可恢复。真实文件跨阶段、Host 重启及受控时钟 24 小时检查失败恢复由 `tests/test_superagent_unified_dag_artifact_integration.py` 的阶段接续用例验证；它不代表真实长期负载或在线模型判断质量。
 

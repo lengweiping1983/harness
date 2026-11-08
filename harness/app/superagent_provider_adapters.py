@@ -14,9 +14,10 @@ from .superagent_effect_recovery import EffectLookupResult
 from .superagent_http import api_root
 
 class ProviderRequestClient(Protocol):
-    """复用已配置的 Provider HTTP 客户端；本适配层只调用 GET。"""
+    """复用已认证客户端；回查只用 GET，发送回调在原生写入前同步执行。"""
 
-    async def request(self, method: str, path: str, data: object | None = None) -> object:
+    async def request(self, method: str, path: str, data: object | None = None,
+                      *, before_request: Callable[[], None] | None = None) -> object:
         ...
 
 @dataclass(frozen=True)

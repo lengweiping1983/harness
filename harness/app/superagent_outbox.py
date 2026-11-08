@@ -106,7 +106,7 @@ class OutboxEffectService:
             raise ValueError("provider receipt must confirm the original idempotency key")
         return receipt
 
-    def claim(self, *, owner: str, limit: int = 100, lease_until: str) -> list[dict]:
+    def claim(self, *, owner: str, limit: int = 100, lease_until: str, message_id: str | None = None) -> list[dict]:
         """领取 Outbox Effect，并原子地把对应消息推进到 sending。"""
         owner = _text(owner, "owner")
         if type(limit) is not int or not 1 <= limit <= 100:
@@ -121,9 +121,9 @@ class OutboxEffectService:
                 "JOIN outbox_effect_links AS link ON link.effect_id=effect.effect_id "
                 "JOIN outbox_messages AS message ON message.message_id=link.message_id "
                 "WHERE effect.kind='outbox.send' AND effect.state IN ('pending','retry_wait') "
-                "AND effect.due_at<=? AND message.state=effect.state "
+                "AND effect.due_at<=? AND message.state=effect.state AND (? IS NULL OR message.message_id=?) "
                 "ORDER BY effect.due_at,effect.created_at LIMIT ?",
-                (_now(), limit),
+                (_now(), message_id, message_id, limit),
             ).fetchall()
             for candidate in rows:
                 effect_id = candidate["effect_id"]

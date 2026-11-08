@@ -1,4 +1,5 @@
 {
+  "superagent.delivery.result": "Mission {mission} completed. Frozen candidate: {artifact}. Independent review: {review}.",
   "superagent.mission.applied_context": "Confirmed applied node instructions are bounded task context, not verification evidence. Preserve the frozen graph, acceptance criteria, role and permissions. Truncation is explicit; do not infer missing instructions.\n\n{context}",
   "runtime.steering.invalid_guard": "The before_accept check must be a synchronous callable returning None.",
   "superagent.guidance-unavailable": "No unique active work or integration node matches this guidance. Read the current status and select its exact job; a late request cannot target a later run.",

@@ -102,12 +102,12 @@ class FeishuClient(JSONClient):
         self.token = result['tenant_access_token']
         self.expires = time.monotonic() + result['expire'] - min(60, result['expire'] / 10)
 
-    async def request(self, method, path, data=None):
+    async def request(self, method, path, data=None, *, before_request=None):
         if time.monotonic() >= self.expires:
             if self.refresh is None or self.refresh.done():
                 self.refresh = asyncio.create_task(self._refresh())
             await join_cleanup(self.refresh)
-        value = await super().request(method, path, data, token=self.token)
+        value = await super().request(method, path, data, token=self.token, before_request=before_request)
         if not isinstance(value, dict) or type(value.get('code')) is not int:
             raise _error('feishu-response')
         if value['code'] != 0:

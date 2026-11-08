@@ -1,4 +1,5 @@
 {
+  "superagent.delivery.result": "目标 {mission} 已完成。冻结候选：{artifact}。独立复核：{review}。",
   "superagent.mission.applied_context": "以下已确认应用的节点指令是有界任务上下文，不能作为验证证据。保持冻结的依赖图、验收标准、角色和权限；截断已显式标明，不推断未包含的指令。\n\n{context}",
   "runtime.steering.invalid_guard": "before_accept 检查必须是同步可调用对象，且返回 None。",
   "superagent.guidance-unavailable": "没有唯一活动的工作或集成节点符合本次引导。请读取当前状态并选择确切任务；迟到请求不能投给后续运行。",

@@ -13,10 +13,10 @@ class GitHubClient(JSONClient):
         super().__init__(root, prefix='github', timeout=timeout)
         self.token = token
 
-    async def request(self, method, path, data=None):
+    async def request(self, method, path, data=None, *, before_request=None):
         return await super().request(method, path, data, token=self.token,
             headers={'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2026-03-10'},
-            expected_status=201 if method == 'POST' else 200)
+            expected_status=201 if method == 'POST' else 200, before_request=before_request)
 
 
 class GitHubWebhookServer(WebhookServer):

@@ -257,6 +257,10 @@ class UnifiedExecutionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await f.host.execution.route_trigger(input_row["ticket_id"], followup["trigger_id"])
         self.assertEqual(len(f.shared["input_calls"]), 1)
+        # 首个原 Run 已结束也不能把其未知投递从固定目标集合中移除。
+        f.adapter.finish(assignment_ids[0], {"status": "completed", "summary": "Done"})
+        f.host._execution_service._transition("assignment", assignment_ids[0], "failed",
+                                             facts={"original_run_failure_confirmed": True})
         recovered = await f.host.execution.route_trigger(input_row["ticket_id"], followup["trigger_id"])
         self.assertEqual(recovered["state"], "delivered")
         self.assertEqual(recovered["assignment_ids"], assignment_ids)

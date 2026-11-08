@@ -28,7 +28,7 @@
 
 ## Phase 4 协调模型与文件适配审查
 
-本节相对于整合改造前 `5f1c3b7` 核对当前增量，覆盖统一模型、显式内部适配入口、Phase 4.2 唯一服务生命周期、Phase 4.3 DAG Scheduler 真实交付闭环，以及 Phase 4.4 的独立质量门、有限修正、阶段接续与故障恢复。2026-11-08 已完成统一内部链路的定向验收；生产 CLI、生产 Sender、默认路由切换和旧生产链退役仍未交付。当前不切换生产默认路由。
+本节相对于整合改造前 `5f1c3b7` 核对当前增量，覆盖统一模型、显式内部适配入口、Phase 4.2 唯一服务生命周期、Phase 4.3 DAG Scheduler 真实交付闭环，以及 Phase 4.4 的独立质量门、有限修正、阶段接续与故障恢复。2026-11-08 已完成统一内部链路的定向验收；Phase 4.5 已在统一服务交付 Sender 与持续协作；生产 CLI、默认路由切换和旧生产链退役仍未交付。当前不切换生产默认路由。
 
 | 触发条件 | 源码措施 | 对应回归 |
 |---|---|---|
@@ -172,12 +172,30 @@
 
 基准脚本 SHA-256 为 `b2d880e214f5723982ed929c4aa8d3e1694e9a1f19017c37a645e4ddd8fc94ba`；基线存储源码为 `f157f4d1c1bd6db6a549e632c01b96dcef3ca338f1788dc5b9b478668afc4ded`，快照源码为 `a691cd2459ede295e77b9552d0559e5b73bf4111e22572ade24031f5fd45dc71`。当前实现可用 `python scripts/benchmark_superagent_reads.py` 复测；`benchmark(store_type)` 可接收从上述基线源码独立加载的存储类，保留同一测量方法。该结果仅证明固定小账本读取减少重复工作，不代表完整状态生成、模型执行、真实任务吞吐或跨平台性能；没有据此给出端到端加速结论。
 
+### Phase 4.5：持续协作与既有信道
+
+本节核对 `CoordinatorDeliveryRuntime` → SourceRegistry / Authorization / OutboxEffectService → 已认证 HTTP 客户端 → 只读 Provider Lookup，以及统一服务到原生指令回执的周期回查。既有阶段指令上下文和 DAG Attention / Handback 回归继续保留；本次新增证据针对完整服务接线。
+
+| 触发条件 | 源码措施 | 对应回归 |
+|---|---|---|
+| 重复来源事件、跟进 ACK 丢失或飞书后续消息产生另一个 Channel | 来源入口复用 Trigger，跟进绑定原 InputDelivery，回复目标由原 Trigger 定位，全部 applied 后才读标记 | `test_github_followup_uses_original_delivery_key_and_never_starts_extra_mission`、`test_feishu_followup_keeps_original_reply_target_without_duplicate_result` |
+| 部分跟进受理后原 Assignment 结束，恢复丢掉未知目标 | 原生投递前同事务冻结完整目标集合，终态 Assignment 仍回查原键 | `test_route_trigger_reconciles_partial_fanout_without_replaying_unknown_delivery` |
+| POST 成功但回执丢失，或恢复遇到未找到、多个匹配、分页不完整 | 只凭唯一精确远端对象结算 sent；unknown 仅 GET 原操作，重启不 POST | `test_github_lost_post_ack_recovers_after_restart_without_second_post`、`test_feishu_lost_post_ack_recovers_after_restart_without_second_post`、`test_lost_local_write_ack_is_reconciled_without_a_second_publish` |
+| 刷新凭据期间撤权，或关闭期间仍有所属发送 | 原生写入前同步复核；令牌刷新后再次复核，关闭等待所属请求 | `test_revocation_while_credentials_are_pending_prevents_late_provider_post`、`test_close_waits_for_owned_send_and_never_starts_late_post`、`test_real_feishu_token_refresh_rechecks_revocation_before_http_reply` |
+| 真实传输无法消费发送准入或认证头 | JSONClient 在线程内执行准入回调，GitHubClient 原样传播并按原目标只读确认 | `test_real_github_http_transport_sends_then_confirms_original_comment` |
+| Tick 或重启重新开启禁用回复能力、来源变更后沿用旧授权 | v20 独立绑定及 SQL 修订守卫；保留不可变 Channel，只初始化未登记绑定；来源修订变化后明确重新登记 | `test_reply_binding_preserves_immutable_channel_and_requires_explicit_regrant`、`test_migration20_preserves_v19_effects_and_rejects_conflicting_binding_table_atomically` |
+| 已完成真实产物重复发布、语言切换改写冻结正文或重启重新执行 | 结果绑定 passing Review、候选及冻结语言，稳定 Outbox 身份；本机文件仅投影 | `test_staged_work_survives_restart_and_reaches_independent_quality_gate`、`test_local_result_is_projected_once_and_restart_does_not_execute_or_send_again`、`test_revocation_after_capture_prevents_queued_result_publication` |
+| Attention 答案重放旧 Run，或 Handback 输入被再次派发 | 唯一获准人工答案关联原问题并创建新有界 Mission；Handback 只归还确切跟进输入 | `test_attention_answer_starts_fresh_bounded_activity_with_original_question_context`、`test_handback_settles_only_original_followup_and_restart_never_redelivers_it` |
+| accepted-pending 指令没有周期追踪，或首个无 Adapter 的 unknown 永久饿死后续 Effect | 服务周期查询原 request_id；有界轮转恢复，未确认写入不重试 | `test_periodic_instruction_reconciliation_tracks_application_without_resubmission`、`test_unavailable_unknown_does_not_starve_later_effect_in_bounded_ticks` |
+
+2026-11-08，本节新增或修改的服务、迁移、跟进、轮转用例及真实 Harness / Git 用例已通过定向验证。首次批量命令中真实用例类名写错导致加载错误；更正类名后单独通过。固定目标的终态 Assignment 回归曾暴露 NULL goal_ref 的 SQL 排除问题，修正后复测通过。未运行全量 Python／Web 回归、生产构建、桌面／浏览器专项；未访问外部账号或在线模型。
+
 ## 待验证风险与产品缺口
 
 - 首次原生活动观察不可信时，首次后续可信观察只建立持久基线，不重置停滞时间或解除既有阻断；Schema v17 将历史快照保守标为未建立可信基线。若真实进度发生在可信基线建立前，该变化无法从旧指纹中追溯证明，必须等待后续可核验变化才恢复；这是避免误解锁的保守恢复代价，仍需真实长时运行评估。
 - 完成标准由模型规划，语义覆盖与复核质量需要真实在线任务集、固定模型和人工判定；任意 Shell 正文的语义没有被宿主证明，显式 cwd 检查不是沙箱。
 - 现有测试在本机运行；没有取得 Windows／Linux 实机、多设备、外部账号、长期负载或模型成本对比证据。
-- 自主目标已支持可信本机节点指令，但没有中途问答、跨来源目标续接、目标验收或依赖变更、动态重规划和人工未知结果核实界面。节点不订阅来源 Thread，不能把默认 Router 的跟进能力写成自主目标已支持；本机指令也不代表远端信道或工作台已经支持交互。
+- 统一服务已支持原 Thread 跟进、节点指令和 Attention 答案；跨来源目标续接、目标验收或依赖变更、动态重规划及人工未知结果核实界面仍待开发。CLI 仍使用旧入口，不能把显式统一 API 的能力写成默认 CLI 已提供。
 - 合并冲突、失败或中断运行、未知操作和资源总容量耗尽保留明确状态；当前不自动解决冲突、迁移配置、清理历史资源或重放任务。
 - 长节点阶段接续为显式协议，真实模型的交接质量、是否过早选择 `ready`、上下文重建成本及长时负载仍需独立在线评估。同树同报告的停止条件不能识别所有语义停滞；新阶段也不能自动带走忽略文件、环境、进程或外部服务状态。
 - 目标控制仅限可信本机操作者，尚未提供远端控制认证或多人权限审批工作台。停止只作用于当前拥有的句柄；重启前外部进程没有确切终态回执时仍需核实，不能根据旧 PID 重放停止。控制历史有明确容量上限，当前不自动归档或迁移。

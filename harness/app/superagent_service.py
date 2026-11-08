@@ -273,6 +273,7 @@ class SuperagentService:
         interval: float = 0.5, once_timeout: float = 600,
         max_threads_per_tick: int = 16, planner: object | None = None,
         system_profiles: Mapping[str, str] | None = None,
+        provider_clients: Mapping | None = None,
     ):
         """显式打开统一协调运行模式；不被旧 CLI 或生产默认路由自动选择。"""
         if (
@@ -300,8 +301,16 @@ class SuperagentService:
             service._coordinator_mode = True
             service._coordinator_host = host
             service._coordinator_assessor = assessor
+            from .superagent_delivery_runtime import CoordinatorDeliveryRuntime
+            service._coordinator_delivery = CoordinatorDeliveryRuntime(
+                host, provider_clients=provider_clients, closing=lambda: service.closed,
+            )
+            adapters = dict(effect_adapters or {})
+            if "outbox.send" in adapters:
+                raise ValueError(tr("superagent.invalid", field="outbox.send"))
+            adapters["outbox.send"] = service._coordinator_delivery
             service._coordinator_effect_recovery = host.effect_recovery_service(
-                {} if effect_adapters is None else effect_adapters,
+                adapters,
             )
             service._coordinator_thread_cursor = 0
             service._coordinator_max_threads_per_tick = max_threads_per_tick
@@ -335,6 +344,16 @@ class SuperagentService:
         if not getattr(self, "_coordinator_mode", False):
             raise HarnessError(tr("superagent.conflict"), code="superagent/coordinator-unavailable")
         return self._coordinator_last_status
+
+    def receive_source(self, source_id, *, headers, raw, **kwargs):
+        """外部监听器只向统一来源入口提交，不创建独立收件账本。"""
+        self.coordinator
+        return self._coordinator_delivery.receive(source_id, headers=headers, raw=raw, **kwargs)
+
+    def source_ingress(self, source_id):
+        """为通用 WebhookServer 提供已绑定来源的接收适配。"""
+        self.coordinator
+        return self._coordinator_delivery.ingress(source_id)
 
     @contextmanager
     def _db(self, *, initialize=False, write=False):
@@ -447,7 +466,9 @@ class SuperagentService:
 
     async def _tick_coordinator(self):
         host = self._coordinator_host
+        self._coordinator_delivery.prepare_channels()
         controls = await host.execution.reconcile_controls(limit=100)
+        instructions = await host.execution.reconcile_instructions(limit=100)
         threads = host.sources.list_threads(limit=1000)
         selected = []
         if threads:
@@ -474,13 +495,17 @@ class SuperagentService:
                 receipt = await host.execution.route_trigger(
                     item["ticket_id"], item["trigger_id"],
                 )
-            except (HarnessError, PermissionError, LookupError) as exc:
+            except Exception as exc:
                 route_errors.append({
                     "ticket_id": item["ticket_id"],
                     "trigger_id": item["trigger_id"],
                     "code": getattr(exc, "code", type(exc).__name__),
+                    "detail": str(exc),
                 })
             else:
+                if receipt.get("state") == "attention_required":
+                    route_errors.append({"ticket_id": item["ticket_id"], "trigger_id": item["trigger_id"],
+                                         "code": "superagent/attention-required"})
                 routes.append({
                     "ticket_id": item["ticket_id"],
                     "trigger_id": item["trigger_id"],
@@ -539,6 +564,9 @@ class SuperagentService:
             1 for item in assessments if item.get("state") == "blocked"
         )
         effect_report = None
+        with host._operation():
+            publication_backlog = self._coordinator_delivery.prepare_candidates()
+            sending = await self._coordinator_delivery.tick()
         if self._coordinator_effect_recovery is not None:
             effect_report = asdict(await self._coordinator_effect_recovery.recover_async(limit=100))
         uncertain_effects = 0 if effect_report is None else (
@@ -546,6 +574,15 @@ class SuperagentService:
         )
         status = {
             "runtime_state": "running",
+            "outbox": sending,
+            "instructions": instructions,
+            "open_attentions": host._execution_service._read_one("SELECT count(*) AS n FROM attentions WHERE state='open'")["n"],
+            "blocked_missions": host._execution_service._read_one(
+                "SELECT count(*) AS n FROM missions m JOIN tickets t ON t.ticket_id=m.ticket_id "
+                "WHERE t.state='open' AND m.state IN ('blocked','rejected','suppressed') "
+                "AND NOT EXISTS(SELECT 1 FROM missions newer WHERE newer.ticket_id=m.ticket_id AND newer.sequence>m.sequence)"
+            )["n"],
+            "publication_backlog": publication_backlog,
             "threads_considered": len(selected),
             "evaluations": len(assessments),
             "accepted": sum(1 for item in assessments if item.get("kind") in {"accept", "reopen"}),
@@ -598,6 +635,9 @@ class SuperagentService:
                 or status["dag_scheduler_backlog"]
                 or status["control_pending"] or status["control_backlog"]
                 or status["reconcile_backlog"]
+                or status["publication_backlog"] or status["outbox"]["backlog"]
+                or status["outbox"]["pending"] > status["outbox"]["unavailable"]
+                or status["instructions"]["backlog"]
             )
             uncertain = bool(
                 status["control_unknown"] or status["unknown_assignments"]
@@ -605,6 +645,8 @@ class SuperagentService:
                 or status["uncertain_effects"] or status["unavailable_assessments"]
                 or status["blocked_assessments"] or status["route_errors"]
                 or status["dag_scheduler_errors"]
+                or status["outbox"]["unavailable"] or status["outbox"]["unknown"]
+                or status["open_attentions"] or status["blocked_missions"] or status["instructions"]["errors"]
             )
             if once and not pending:
                 return 2 if uncertain else 0

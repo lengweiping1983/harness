@@ -65,6 +65,19 @@ class EffectRecoveryServiceTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual((row["state"], row["receipt_json"]), ("completed", '{"provider_id":"remote-1"}'))
 
+    def test_unavailable_unknown_does_not_starve_later_effect_in_bounded_ticks(self):
+        first, _ = self._unknown_effect("missing", kind="unavailable.send")
+        adapter = FakeLookupAdapter(EffectLookupResult("applied", receipt={"provider_id": "found"}))
+        recovery = EffectRecoveryService(self.store, {"provider.send": adapter})
+        self.assertEqual(recovery.recover(limit=1).unavailable, 1)
+        second, _ = self._unknown_effect("available")
+        for _ in range(2):
+            recovery.recover(limit=1)
+        self.assertEqual([item["effect_id"] for item in adapter.seen], [second])
+        with self.store.transaction() as db:
+            states = dict(db.execute("SELECT effect_id,state FROM effects").fetchall())
+        self.assertEqual(states, {first: "unknown", second: "completed"})
+
     def test_retry_requires_explicit_provider_proof_and_retry_safe_flag(self):
         effect_id, _ = self._unknown_effect()
         adapter = FakeLookupAdapter(EffectLookupResult(

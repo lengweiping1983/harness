@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import inspect
 import json
 import re
 import threading
@@ -14,7 +15,7 @@ from ..core.language import current_language
 from ..core.errors import HarnessError
 from ..net.http import ipv4_preferred_get
 from ..net.request_control import RequestControl
-from .superagent_inbox import _error, _json, _text
+from .superagent_common import _error, _json, _text
 
 
 def api_root(value):
@@ -42,7 +43,8 @@ class JSONClient:
     def __init__(self, root, *, prefix, timeout=10):
         self.root, self.prefix, self.timeout = root, prefix, timeout
 
-    async def request(self, method, path, data=None, *, token=None, headers=None, expected_status=200):
+    async def request(self, method, path, data=None, *, token=None, headers=None, expected_status=200,
+                      before_request=None):
         def invoke():
             control = RequestControl(threading.Event())
             timer = threading.Timer(self.timeout,control.close)
@@ -51,6 +53,14 @@ class JSONClient:
             def no_redirect(_):
                 raise _error(self.prefix + '-response')
             try:
+                if before_request is not None:
+                    checked = before_request()
+                    if inspect.isawaitable(checked):
+                        if inspect.iscoroutine(checked):
+                            checked.close()
+                        raise _error('invalid', field='before_request')
+                    if checked is not None:
+                        raise _error('invalid', field='before_request')
                 with control.scope(), ipv4_preferred_get(self.root + path,method=method,
                         data=json.dumps(data).encode('utf-8') if data is not None else None,
                         headers={'Content-Type':'application/json','User-Agent':'Harness-Superagent',

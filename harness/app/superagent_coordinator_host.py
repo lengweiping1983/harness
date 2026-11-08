@@ -160,9 +160,9 @@ class _HostOutboxService:
         self.__host = host
         self.__service = service
 
-    def claim(self, *, owner: str, limit: int = 100, lease_until: str) -> list[dict]:
+    def claim(self, *, owner: str, limit: int = 100, lease_until: str, message_id=None) -> list[dict]:
         with self.__host._operation():
-            return self.__service.claim(owner=owner, limit=limit, lease_until=lease_until)
+            return self.__service.claim(owner=owner, limit=limit, lease_until=lease_until, message_id=message_id)
 
     def settle(self, **kwargs) -> bool:
         with self.__host._operation():
@@ -257,6 +257,14 @@ class _HostSourceRegistry:
     def list_channels(self, *args, **kwargs):
         with self.__host._operation():
             return self.__service.list_channels(*args, **kwargs)
+
+    def set_channel_reply(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.set_channel_reply(*args, **kwargs)
+
+    def reply_channels(self, trigger_id):
+        with self.__host._operation():
+            return self.__service.reply_channels(trigger_id)
 
     def get_cursor(self, *args, **kwargs):
         with self.__host._operation():
@@ -386,46 +394,65 @@ class _HostExecutionService:
         self.__input_delivery, self.__mission_instruction = input_delivery, mission_instruction
     async def route_trigger(self, ticket_id, trigger_id):
         with self.__host._operation():
+            attention = self.__service.route_attention_answer(ticket_id, trigger_id)
+            if attention is not None:
+                return attention
             input_row = self.__service._input(ticket_id, trigger_id)
             if input_row is not None and not input_row["context_only"] and input_row["state"] != "handed_back":
-                mission = self.__service._read_one(
-                    "SELECT mission_id,state FROM missions WHERE ticket_id=? "
-                    "AND state IN ('running','integrating','reviewing','unknown') "
-                    "ORDER BY sequence DESC LIMIT 1", (ticket_id,),
+                existing = self.__service._read_all(
+                    "SELECT assignment.assignment_id,job.mission_id FROM input_deliveries delivery "
+                    "JOIN assignments assignment ON assignment.assignment_id=delivery.assignment_id "
+                    "JOIN jobs job ON job.job_id=assignment.job_id "
+                    "JOIN missions mission ON mission.mission_id=job.mission_id "
+                    "WHERE delivery.input_id=? AND mission.ticket_id=? AND mission.goal_ref IS NOT ? "
+                    "ORDER BY assignment.assignment_id", (input_row["input_id"], ticket_id, trigger_id),
                 )
-                if mission is not None and mission["state"] == "running":
+                mission = self.__service._read_one(
+                    "SELECT mission_id,state,goal_ref FROM missions WHERE ticket_id=? "
+                    "AND state IN ('running','integrating','reviewing','unknown') ORDER BY sequence DESC LIMIT 1",
+                    (ticket_id,),
+                )
+                active = []
+                if mission is not None and mission["state"] == "running" and mission["goal_ref"] != trigger_id:
                     active = self.__service._read_all(
-                        "SELECT assignment.assignment_id FROM assignments AS assignment "
-                        "JOIN jobs AS job ON job.job_id=assignment.job_id "
-                        "WHERE job.mission_id=? AND job.role='work' "
-                        "AND job.state IN ('ready','running') "
-                        "AND assignment.state IN ('accepted','running') "
-                        "AND assignment.attempt_no=(SELECT MAX(candidate.attempt_no) "
-                        "FROM assignments AS candidate WHERE candidate.job_id=job.job_id) "
-                        "ORDER BY job.node_id,assignment.assignment_id",
-                        (mission["mission_id"],),
+                        "SELECT assignment.assignment_id FROM assignments assignment JOIN jobs job ON job.job_id=assignment.job_id "
+                        "WHERE job.mission_id=? AND job.role='work' AND job.state IN ('ready','running') "
+                        "AND assignment.state IN ('accepted','running') AND assignment.attempt_no="
+                        "(SELECT MAX(candidate.attempt_no) FROM assignments candidate WHERE candidate.job_id=job.job_id) "
+                        "ORDER BY job.node_id,assignment.assignment_id", (mission["mission_id"],),
                     )
-                    if len(active) > 1:
-                        deliveries = []
-                        for row in active:
-                            deliveries.append(await self.__input_delivery.deliver(
-                                input_row["input_id"], row["assignment_id"],
-                            ))
-                        states = [item["state"] for item in deliveries]
-                        if all(state == "applied" for state in states):
-                            state = "delivered"
-                        elif any(state == "unknown" for state in states):
-                            state = "unknown"
-                        elif any(state in {"rejected", "unapplied"} for state in states):
-                            state = "incomplete"
-                        else:
-                            state = "accepted"
-                        return {
-                            "state": state, "ticket_id": ticket_id, "trigger_id": trigger_id,
-                            "input_id": input_row["input_id"],
-                            "assignment_ids": [row["assignment_id"] for row in active],
-                            "deliveries": deliveries,
-                        }
+                targets = existing or active
+                if targets:
+                    # 首次投递前冻结完整目标集合，未知回执不能因某个 Run 结束而丢失。
+                    if not existing:
+                        with self.__host._store.transaction(write=True) as db:
+                            for target in targets:
+                                aid = target["assignment_id"]
+                                self.__input_delivery._deliveries.prepare_in_transaction(
+                                    db, input_row["input_id"], aid,
+                                    delivery_key=f"superagent-v2:input:{input_row['input_id']}:{aid}",
+                                    actor={"kind": "host", "component": "superagent-followup"},
+                                )
+                    deliveries = [await self.__input_delivery.deliver(input_row["input_id"], target["assignment_id"]) for target in targets]
+                    states = [item["state"] for item in deliveries]
+                    if all(state == "applied" for state in states):
+                        state = "delivered"
+                        current = self.__service._input(ticket_id, trigger_id)
+                        if current["state"] == "waiting":
+                            self.__service._mark_input(input_row["input_id"], "delivered",
+                                assignment_id=targets[0]["assignment_id"], delivery_key=deliveries[0]["delivery_key"])
+                        if current["state"] in {"waiting", "delivered"}:
+                            self.__service._mark_input(input_row["input_id"], "read")
+                    elif any(state == "unknown" for state in states):
+                        state = "unknown"
+                    elif any(state in {"rejected", "unapplied"} for state in states):
+                        state = "incomplete"
+                    else:
+                        state = "accepted"
+                    return {"state": state, "ticket_id": ticket_id, "trigger_id": trigger_id,
+                            "input_id": input_row["input_id"], "assignment_ids": [target["assignment_id"] for target in targets],
+                            **({"assignment_id": targets[0]["assignment_id"], "delivery_key": deliveries[0]["delivery_key"]} if len(targets) == 1 else {}),
+                            "deliveries": deliveries}
             return await self.__service.route_trigger(ticket_id, trigger_id)
     async def reconcile(self, assignment_id):
         with self.__host._operation(): return await self.__service.reconcile(assignment_id)
@@ -463,6 +490,9 @@ class _HostExecutionService:
     async def reconcile_instruction(self, request_id):
         with self.__host._operation():
             return await self.__mission_instruction.reconcile(request_id)
+    async def reconcile_instructions(self, *, limit=100):
+        with self.__host._operation():
+            return await self.__mission_instruction.reconcile_pending(limit=limit)
     def instruction_receipt(self, request_id):
         with self.__host._operation():
             return self.__mission_instruction.receipt(request_id)

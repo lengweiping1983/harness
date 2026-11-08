@@ -59,6 +59,7 @@ class EffectRecoveryService:
     def __init__(self, store: CoordinatorStore, adapters: Mapping[str, EffectLookupAdapter]):
         self._store = store
         self._adapters = dict(adapters)
+        self._cursor = ("", "")
 
     def _record_unknown_lookup_event(
         self, effect_id: str, generation: int, *, event_type: str, payload: dict,
@@ -96,9 +97,11 @@ class EffectRecoveryService:
             expired = self._store.mark_expired_effects_unknown(db, limit=limit)
             rows = db.execute(
                 "SELECT * FROM effects WHERE state='unknown' "
-                "ORDER BY created_at,effect_id LIMIT ?",
-                (limit,),
+                "ORDER BY (created_at,effect_id) <= (?,?),created_at,effect_id LIMIT ?",
+                (*self._cursor, limit),
             ).fetchall()
+            if rows:
+                self._cursor = (rows[-1]["created_at"], rows[-1]["effect_id"])
         return expired, rows
 
     @staticmethod

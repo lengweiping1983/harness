@@ -864,3 +864,44 @@ class DagSchedulerArtifactIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT state FROM reviews")[0]["state"], "passed")
         self.assertEqual(len(self.rows("SELECT * FROM mission_plans")), 1)
         self.assertEqual(len(self.rows("SELECT * FROM artifacts")), 3)
+        # 完整质量门之后由统一服务重启接管发布，不能只证明内部 Mission completed。
+        from harness.app.superagent_service import SuperagentService
+        from harness.core.language import current_language
+        await self.host.aclose()
+        requests_before = len(self.transport.requests)
+        adapter = HarnessExecutorAdapter(
+            self.harness, instance_id="dag-artifact-integration", owner_session_id=self.owner_session_id,
+            profiles=[self.profile, self.integrator_profile, self.reviewer_profile],
+            default_profiles={"local-source": "builder"},
+        )
+        service = await SuperagentService.open_coordinator(
+            self.root / "state", instance_id="dag-artifact-integration",
+            identity={"project": "harness", "suite": "dag-artifact-integration"},
+            executor_adapter=adapter, local_identity_verifier=self._local_identity,
+            planner=Planner(), system_profiles={"integrate": "integrator", "review": "reviewer"},
+        )
+        self.addAsyncCleanup(service.aclose)
+        self.host = service.coordinator
+        token = current_language.set("en")
+        try:
+            status = await service.tick()
+            self.assertEqual(status["outbox"]["sent"], 1)
+            message = self.rows("SELECT * FROM outbox_messages")[0]
+            self.assertEqual((message["kind"], message["state"]), ("result", "sent"))
+            review = self.rows("SELECT review_id,candidate_artifact_id FROM reviews")[0]
+            texts = [service._coordinator_delivery._result_body(mission_id, review["review_id"], language)
+                     for language in ("en", "zh-CN", "en")]
+            self.assertEqual(texts[0], texts[2])
+            self.assertNotEqual(texts[0], texts[1])
+            self.assertTrue(texts[0].startswith("Mission "))
+            self.assertTrue(texts[1].startswith("目标 "))
+            projection = json.loads(next((service.root / "replies").glob("*.json")).read_text())
+            self.assertEqual(projection["body"], texts[0])
+            self.assertIn(review["candidate_artifact_id"], projection["body"])
+            self.assertEqual(_hash(projection["body"]), message["body_hash"])
+            await service.tick()
+            self.assertEqual(len(self.rows("SELECT * FROM outbox_messages")), 1)
+            self.assertEqual(len(list((service.root / "replies").glob("*.json"))), 1)
+            self.assertEqual(len(self.transport.requests), requests_before)
+        finally:
+            current_language.reset(token)

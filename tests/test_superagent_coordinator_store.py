@@ -251,6 +251,29 @@ class CoordinatorStoreTests(unittest.TestCase):
                 "AND name='watchdog_snapshots_transition_guard'"
             ).fetchone())
 
+    def test_migration20_preserves_v19_effects_and_rejects_conflicting_binding_table_atomically(self):
+        for conflict in (False, True):
+            with self.subTest(conflict=conflict):
+                path = Path(self.temp.name) / f"v19-bindings-{conflict}.sqlite3"
+                instance, identity, effect = self._create_legacy_schema_with_effect(path, 19)
+                if conflict:
+                    with closing(sqlite3.connect(path)) as db:
+                        db.execute("CREATE TABLE channel_reply_bindings(original TEXT)")
+                        db.execute("INSERT INTO channel_reply_bindings VALUES('preserve')")
+                        db.commit()
+                    with self.assertRaises(sqlite3.OperationalError):
+                        CoordinatorStore(path, instance_id=instance, identity=identity)
+                    with closing(sqlite3.connect(path)) as db:
+                        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 19)
+                        self.assertEqual(db.execute("SELECT original FROM channel_reply_bindings").fetchone()[0], "preserve")
+                        self.assertEqual(db.execute("SELECT count(*) FROM schema_migrations WHERE version=20").fetchone()[0], 0)
+                else:
+                    upgraded = CoordinatorStore(path, instance_id=instance, identity=identity)
+                    with upgraded.transaction() as db:
+                        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 20)
+                        self.assertEqual(db.execute("SELECT state FROM effects WHERE effect_id=?", (effect,)).fetchone()[0], "pending")
+                        self.assertEqual(db.execute("SELECT count(*) FROM channel_reply_bindings").fetchone()[0], 0)
+
     def test_migration7_unique_index_failure_rolls_back_entire_upgrade(self):
         path = Path(self.temp.name) / "schema-v6-duplicate-assignments.sqlite3"
         identity_json = '{"profile":"upgrade-rollback"}'

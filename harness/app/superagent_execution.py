@@ -499,7 +499,35 @@ class CoordinatorExecutionService:
                 "tools": mandate["scope"].get("tools", []),
             },
         }
+        event["attention_answers"] = self._read_all(
+            "SELECT attention_id,question_text,options_json,answer_trigger_id FROM attentions "
+            "WHERE ticket_id=? AND state='answered' AND answer_trigger_id=? ORDER BY created_at LIMIT 16",
+            (ticket["ticket_id"], trigger["trigger_id"]),
+        )
         return event, input_ids
+
+    def route_attention_answer(self, ticket_id, trigger_id):
+        """唯一已收尾问题的人工跟进建立新有界活动，不重放旧失败运行。"""
+        input_row = self._input(ticket_id, trigger_id)
+        if input_row is None or input_row["context_only"] or input_row["state"] != "waiting":
+            return None
+        rows = self._read_all(
+            "SELECT attention.* FROM attentions attention JOIN missions mission ON mission.mission_id=attention.mission_id "
+            "WHERE attention.ticket_id=? AND attention.state='open' AND mission.state='blocked' ORDER BY attention.created_at",
+            (ticket_id,),
+        )
+        if not rows:
+            return None
+        trigger = self._sources.get_trigger(trigger_id)
+        selected = (trigger or {}).get("metadata", {}).get("attention_id")
+        if selected is not None:
+            rows = [row for row in rows if row["attention_id"] == selected]
+        if len(rows) != 1:
+            return {"state": "attention_required", "ticket_id": ticket_id, "trigger_id": trigger_id}
+        if rows[0]["trigger_id"] == trigger_id:
+            return {"state": "attention_required", "ticket_id": ticket_id, "trigger_id": trigger_id}
+        self.resolve_attention(rows[0]["attention_id"], trigger_id)
+        return None
 
     def _mark_input_db(self, db, input_id: str, target: str, *,
                        assignment_id: str | None = None, delivery_key: str | None = None) -> dict:
@@ -538,7 +566,7 @@ class CoordinatorExecutionService:
         if target == "delivered":
             delivery = self._input_deliveries.prepare_in_transaction(db, input_id, assignment_id,
                 delivery_key=delivery_key, initial_state="submitting", actor=_ACTOR)
-            if delivery["state"] not in {"pending", "submitting"}:
+            if delivery["state"] not in {"pending", "submitting", "applied"}:
                 raise HarnessError(tr("superagent.conflict"), code="superagent/input-delivery-conflict")
         elif owner is not None and target == "read":
             delivery = db.execute("SELECT * FROM input_deliveries WHERE input_id=? AND assignment_id=?", (input_id, owner)).fetchone()
@@ -1768,9 +1796,7 @@ class CoordinatorExecutionService:
             return
         if "reply" not in (mandate.get("scope") or {}).get("actions", []):
             return
-        channels = self._sources.list_channels(
-            source_instance_id=trigger["source_instance_id"], thread_id=trigger.get("primary_thread_id"),
-        )
+        channels = self._sources.reply_channels(trigger["trigger_id"])
         for channel in channels:
             if not (channel.get("capabilities") or {}).get("reply") is True:
                 continue

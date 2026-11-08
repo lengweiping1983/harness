@@ -42,6 +42,7 @@ class CoordinatorMissionInstruction:
         self._profiles = dict(getattr(executor, "profiles", {}))
         self._admit_mission = admit_mission
         self._locks = weakref.WeakValueDictionary()
+        self._reconcile_cursor = 0
 
     def _lock(self, request_id: str) -> asyncio.Lock:
         lock = self._locks.get(request_id)
@@ -664,6 +665,27 @@ class CoordinatorMissionInstruction:
                 row["mission_id"], row["job_id"], row["assignment_id"], authorize=False,
             )
             return self._public(await self._reconcile_locked(row, context))
+
+    async def reconcile_pending(self, *, limit=100):
+        """有界轮转回查原指令；受理结果未知时从不重新调用原生投递。"""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError(tr("superagent.invalid", field="limit"))
+        with self._store.transaction() as db:
+            rows = db.execute(
+                "SELECT rowid AS cursor,request_id FROM mission_instructions WHERE "
+                "(state IN ('submitting','unknown') OR (state='accepted' "
+                "AND json_extract(receipt_json,'$.native_receipt.status')='pending')) "
+                "ORDER BY rowid<=?,rowid LIMIT ?",
+                (self._reconcile_cursor, limit + 1),
+            ).fetchall()
+        results, errors = [], []
+        for row in rows[:limit]:
+            try:
+                results.append(await self.reconcile(row["request_id"]))
+            except Exception as exc:
+                errors.append({"request_id": row["request_id"], "code": getattr(exc, "code", type(exc).__name__)})
+            self._reconcile_cursor = row["cursor"]
+        return {"processed": min(limit, len(rows)), "results": results, "errors": errors, "backlog": len(rows) > limit}
 
     async def _reconcile_locked(self, row: dict, context: dict) -> dict:
         current = self.get(row["request_id"])

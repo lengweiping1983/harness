@@ -448,16 +448,16 @@ Phase 3 范围之外的后续接线：
 
 - Phase 4.2–4.4 已接通统一生命周期、目标停止、DAG 交付、质量门和阶段接续；当前实现见下节。
 - EffectRecoveryService 提供同步与异步只读回查入口；OutboxProviderLookupAdapter 通过宿主注入的 Channel 与正文解析器分发到 GitHubIssueCommentLookupAdapter / FeishuThreadReplyLookupAdapter。两种适配器仅查询 Provider 资源 GET，只有在完整有界扫描中找到唯一、原幂等键标记和发送主体均匹配的远端对象才返回 applied；未找到、重复匹配或分页不完整均保持 indeterminate，不把缺失结果解释为安全重试。GitHub / 飞书列表接口不提供权威的“未执行”回执，因此这两种适配器不会返回 not_applied / permanent_rejection；retry_wait 仍必须由支持原操作状态查询的 Provider 明确证明。
-- Phase 3 的单 Worker Report / Attention / Handback / Outbox Candidate 已接通。周期性 Effect 恢复已装配；生产 Outbox Sender、Channel 注册表及正文 Resolver 仍归 Phase 4.5，Candidate 不等于已发送。
+- Phase 3 的单 Worker Report / Attention / Handback / Outbox Candidate 已接通。Phase 4.5 已在统一服务装配 Outbox Sender、Channel 回复绑定、冻结正文 Resolver 和周期性只读恢复；Candidate 不等于已发送，行为见产品页。
 - CoordinatorHost 的 Source / Authorization / Execution API 仍须显式调用；SuperagentService 已提供显式 open_coordinator 统一装配，生产 CLI 的旧编排入口仍待替换。Phase 4 直接接入统一应用服务，不把接入旧 Router / MissionStore / Dispatcher 作为开发目标。
 - CoordinatorControl 已进入实际调度与写入准入，统一目标停止沿原 Run 与所属后台作业回查。状态观测中的 `control_allows=True` 仍不能替代新写入前对持久模式及当前授权的实际核验。
 - 推断自动接受仅在具体 Source 策略显式启用 `auto` 且 Gate、规则、意图与 Scope 全部通过时可用；它不会因此切换生产默认路由。远程 Worker 与 OS Sandbox 尚未启用。
 
-因此，Phase 1 按持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 的来源事实、授权闭环和只读 Shadow 已交付；Phase 3 的单 Worker 执行、原 Run 恢复、冻结 Report 与后续效果恢复已在显式 CoordinatorHost API 中实现；Phase 4.1 的统一协调契约与数据库状态守卫已由 Schema v16 固化，并通过 5 个测试模块的 112 项回归。后续 Phase 4.2–4.4 的统一生命周期、目标停止、DAG / Delivery、质量门与阶段接续已接通；生产 Channel 外发与唯一入口仍待后续阶段，不回退旧编排。
+因此，Phase 1 按持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 的来源事实、授权闭环和只读 Shadow 已交付；Phase 3 的单 Worker 执行、原 Run 恢复、冻结 Report 与后续效果恢复已在显式 CoordinatorHost API 中实现；Phase 4.1 的统一协调契约与数据库状态守卫已由 Schema v16 固化，并通过 5 个测试模块的 112 项回归。后续 Phase 4.2–4.4 的统一生命周期、目标停止、DAG / Delivery、质量门与阶段接续已接通；Phase 4.5 已接通既有 Channel 外发；唯一入口仍待 Phase 4.6，不回退旧编排。
 
 ### Phase 4 当前统一实现
 
-实施顺序及出口统一见[总体方案](superagent-next-generation-architecture.md#phase-4完整-superagent-整合与替换)。Phase 4.1–4.4 已接通统一内部链路；生产入口仍待 Phase 4.6 替换。
+实施顺序及出口统一见[总体方案](superagent-next-generation-architecture.md#phase-4完整-superagent-整合与替换)。Phase 4.1–4.5 已接通统一服务链路及既有信道；生产入口仍待 Phase 4.6 替换。
 
 - `SuperagentService.open_coordinator` 装配同一 CoordinatorHost、持久控制、来源／授权、DAG Scheduler、Executor、Artifact / Delivery、Review 与 Watchdog。服务从持久输入恢复，取消绑定确切原 Run 与所属后台任务，关闭等待实例操作收尾。
 - PlanRevision 在封存前由宿主物化 integrate / review 节点，Planner 只能提出 work。单节点产物任务仍经过完整质量门；只读单节点报告使用独立接受契约。
@@ -467,10 +467,10 @@ Phase 3 范围之外的后续接线：
 - CoordinatorArtifacts 通过原 Run、工具与后台收尾证据捕获真实文件。Capture / Import 使用持久 Effect 及原生回执，未知只回查原操作；确认尚未开始的失败 Effect 才可获新代次。Manifest 限制为最多 4096 文件、单文件 16 MiB、总内容 64 MiB，Git 文件及删除列表各限 2 MiB，超限保留原件并报错。
 - 独立 Review 绑定当前 Integrator 候选、Acceptance Hash 和原生 Evidence；有限修正保留旧候选和 Verdict，只创建新 Assignment，不改写图。最终结算事务再次核对 Mandate、MissionControl、计划及 Watchdog。
 - WatchdogSnapshot 与逐 Assignment 原 Run 游标持久化；Schema v19 将账本进度绑定 SQLite 实际事实投影。活动不完整、检查失败或重启不解除阻断，真实新事件／账本进度才可恢复。Harness 原生毫秒时间仅在监督投影边界规范化，原始事件与 Evidence 不改写。
-- CoordinatorMissionInstruction 提供显式 `deliver_instruction / reconcile_instruction / instruction_receipt`：绑定同 Ticket 的非 context-only Trigger、来源、Human Actor、Mission / Job / Assignment / 原 Run / Turn；原生接受锁内复核授权，accepted 与 applied 分开，unknown 不重放。`instruction_context` 已只读投影当前计划的已应用指令，并由同一 Scheduler 实际传入后续 Work 阶段、Integrator 和 Reviewer；大小与作用域规则见产品页。生产跟进和周期性指令回查按 Phase 4.5 继续。
+- CoordinatorMissionInstruction 提供显式 `deliver_instruction / reconcile_instruction / instruction_receipt`：绑定同 Ticket 的非 context-only Trigger、来源、Human Actor、Mission / Job / Assignment / 原 Run / Turn；原生接受锁内复核授权，accepted 与 applied 分开，unknown 不重放。`instruction_context` 已只读投影当前计划的已应用指令，并由同一 Scheduler 实际传入后续 Work 阶段、Integrator 和 Reviewer；大小与作用域规则见产品页。Phase 4.5 的普通跟进、Attention / Handback、周期性指令回查和 Sender 已接入同一服务，完整行为见产品页。
 - 保留已登记 Schema 迁移及有效业务回归；旧生产 Router / MissionStore / 信道仍待统一入口替换后退役。不开发旧版运行数据导入、隐式兼容、双轨运行或回退工具。
 
-剩余开发为 Phase 4.5 的持续协作与既有信道 Outbox Sender，以及 Phase 4.6 的 CLI 切换、默认路由与旧编排退役；线上模型质量、外部账号、跨平台实机和长期负载不在当前离线定向验收结论内。
+剩余开发为 Phase 4.6 的 CLI 切换、默认路由与旧编排退役；线上模型质量、外部账号、跨平台实机和长期负载不在当前离线定向验收结论内。
 
 ## 10. 源码依据
 

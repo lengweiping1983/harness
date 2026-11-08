@@ -11,6 +11,7 @@ import re
 import time
 from threading import RLock
 from typing import Any, Callable, Mapping, Protocol
+from ..i18n import tr
 
 from .superagent_coordinator_store import CoordinatorStore, _hash, _json, _now, _text, _time
 
@@ -493,7 +494,7 @@ class LocalSourceKind:
             addressed = identity["addressed"]
             if actor_kind not in {"human", "bot", "system"} or addressed not in {"mention", "direct", "none", "unknown"}:
                 raise PermissionError("Local identity evidence is invalid")
-            channel = event.get("channel_address")
+            channel = event.get("channel_address", {"thread_id": thread_id})
             if channel is not None:
                 if not isinstance(channel, dict) or len(channel) > 16:
                     raise ValueError("Local channel address is invalid")
@@ -802,14 +803,24 @@ class SourceRegistry:
         }
 
     @staticmethod
-    def _channel_view(row) -> dict[str, Any]:
+    def _channel_view(row, db) -> dict[str, Any]:
+        capabilities = json.loads(row["capabilities_json"])
+        binding = db.execute(
+            "SELECT b.enabled,b.source_revision,s.config_revision,s.enabled AS source_enabled "
+            "FROM channel_reply_bindings b JOIN channels c ON c.channel_id=b.channel_id "
+            "JOIN source_instances s ON s.source_instance_id=c.source_instance_id WHERE b.channel_id=?",
+            (row["channel_id"],),
+        ).fetchone()
+        if binding is not None:
+            capabilities["reply"] = bool(binding["enabled"] and binding["source_enabled"]
+                                         and binding["source_revision"] == binding["config_revision"])
         return {
             "channel_id": row["channel_id"],
             "source_instance_id": row["source_instance_id"],
             "thread_id": row["thread_id"],
             "address": json.loads(row["address_json"]),
             "address_hash": row["address_hash"],
-            "capabilities": json.loads(row["capabilities_json"]),
+            "capabilities": capabilities,
             "created_at": row["created_at"],
         }
 
@@ -950,7 +961,47 @@ class SourceRegistry:
         channel_id = _bounded_text(channel_id, "channel_id", limit=128)
         with self._store.transaction() as db:
             row = db.execute("SELECT * FROM channels WHERE channel_id=?", (channel_id,)).fetchone()
-        return None if row is None else self._channel_view(row)
+            return None if row is None else self._channel_view(row, db)
+
+    def reply_channels(self, trigger_id):
+        """回复绑定原 Trigger 的提供方目标，不能因同一 Thread 后续消息扩大收件集合。"""
+        trigger = self.get_trigger(trigger_id)
+        if trigger is None:
+            raise LookupError(tr("superagent.corrupt"))
+        source = self.get_instance(trigger["source_instance_id"])
+        sql = "SELECT * FROM channels WHERE source_instance_id=? AND thread_id=?"
+        params = [trigger["source_instance_id"], trigger["primary_thread_id"]]
+        if source.kind == "feishu":
+            sql += " AND json_extract(address_json,'$.message_id')=?"
+            params.append(trigger["metadata"].get("message_id"))
+        elif source.kind == "github":
+            sql += " AND json_extract(address_json,'$.issue_number')=? AND json_extract(address_json,'$.repository')=?"
+            params.extend([str(trigger["metadata"].get("thread_number")), trigger["metadata"].get("repository")])
+        with self._store.transaction() as db:
+            return [self._channel_view(row, db) for row in db.execute(sql + " ORDER BY channel_id LIMIT 1000", params)]
+
+    def set_channel_reply(self, channel_id: str, *, expected_source_revision: int, enabled: bool, actor: object):
+        """可信宿主登记传输能力；能力不代替每次发送的 Mandate 授权。"""
+        if type(enabled) is not bool or type(expected_source_revision) is not int:
+            raise ValueError(tr("superagent.invalid", field="channel.reply"))
+        with self._store.transaction(write=True) as db:
+            row = db.execute("SELECT * FROM channels WHERE channel_id=?", (channel_id,)).fetchone()
+            if row is None:
+                raise LookupError(tr("superagent.corrupt"))
+            source = db.execute("SELECT * FROM source_instances WHERE source_instance_id=?", (row["source_instance_id"],)).fetchone()
+            if source is None or source["config_revision"] != expected_source_revision or enabled and not source["enabled"]:
+                raise PermissionError(tr("superagent.mandate.unavailable"))
+            binding = db.execute("SELECT * FROM channel_reply_bindings WHERE channel_id=?", (channel_id,)).fetchone()
+            if binding is not None and bool(binding["enabled"]) is enabled and binding["source_revision"] == expected_source_revision:
+                return self._channel_view(row, db)
+            db.execute(
+                "INSERT INTO channel_reply_bindings VALUES(?,?,?,1,?) ON CONFLICT(channel_id) DO UPDATE SET "
+                "source_revision=excluded.source_revision,enabled=excluded.enabled,aggregate_revision=channel_reply_bindings.aggregate_revision+1,updated_at=excluded.updated_at",
+                (channel_id, expected_source_revision, int(enabled), _now()),
+            )
+            self._store.append_audit(db, aggregate_type="channel", aggregate_id=channel_id,
+                event_type="channel.reply_configured", payload={"reply": enabled, "source_revision": expected_source_revision}, actor=actor)
+            return self._channel_view(row, db)
 
     def list_channels(
         self, *, source_instance_id: str | None = None, thread_id: str | None = None,
@@ -972,7 +1023,7 @@ class SourceRegistry:
         params.append(limit)
         with self._store.transaction() as db:
             rows = db.execute(sql, params).fetchall()
-        return [self._channel_view(row) for row in rows]
+            return [self._channel_view(row, db) for row in rows]
 
     def get_cursor(self, source_instance_id: str, stream_key: str) -> dict[str, Any] | None:
         source_instance_id = _bounded_text(source_instance_id, "source_instance_id", limit=128)
