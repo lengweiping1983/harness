@@ -385,7 +385,48 @@ class _HostExecutionService:
         self.__host, self.__service = host, service
         self.__input_delivery, self.__mission_instruction = input_delivery, mission_instruction
     async def route_trigger(self, ticket_id, trigger_id):
-        with self.__host._operation(): return await self.__service.route_trigger(ticket_id, trigger_id)
+        with self.__host._operation():
+            input_row = self.__service._input(ticket_id, trigger_id)
+            if input_row is not None and not input_row["context_only"] and input_row["state"] != "handed_back":
+                mission = self.__service._read_one(
+                    "SELECT mission_id,state FROM missions WHERE ticket_id=? "
+                    "AND state IN ('running','integrating','reviewing','unknown') "
+                    "ORDER BY sequence DESC LIMIT 1", (ticket_id,),
+                )
+                if mission is not None and mission["state"] == "running":
+                    active = self.__service._read_all(
+                        "SELECT assignment.assignment_id FROM assignments AS assignment "
+                        "JOIN jobs AS job ON job.job_id=assignment.job_id "
+                        "WHERE job.mission_id=? AND job.role='work' "
+                        "AND job.state IN ('ready','running') "
+                        "AND assignment.state IN ('accepted','running') "
+                        "AND assignment.attempt_no=(SELECT MAX(candidate.attempt_no) "
+                        "FROM assignments AS candidate WHERE candidate.job_id=job.job_id) "
+                        "ORDER BY job.node_id,assignment.assignment_id",
+                        (mission["mission_id"],),
+                    )
+                    if len(active) > 1:
+                        deliveries = []
+                        for row in active:
+                            deliveries.append(await self.__input_delivery.deliver(
+                                input_row["input_id"], row["assignment_id"],
+                            ))
+                        states = [item["state"] for item in deliveries]
+                        if all(state == "applied" for state in states):
+                            state = "delivered"
+                        elif any(state == "unknown" for state in states):
+                            state = "unknown"
+                        elif any(state in {"rejected", "unapplied"} for state in states):
+                            state = "incomplete"
+                        else:
+                            state = "accepted"
+                        return {
+                            "state": state, "ticket_id": ticket_id, "trigger_id": trigger_id,
+                            "input_id": input_row["input_id"],
+                            "assignment_ids": [row["assignment_id"] for row in active],
+                            "deliveries": deliveries,
+                        }
+            return await self.__service.route_trigger(ticket_id, trigger_id)
     async def reconcile(self, assignment_id):
         with self.__host._operation(): return await self.__service.reconcile(assignment_id)
     async def reconcile_ticket(self, ticket_id):

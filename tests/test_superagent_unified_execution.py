@@ -226,6 +226,43 @@ class UnifiedExecutionTests(unittest.IsolatedAsyncioTestCase):
             ).fetchone()
         return input_row["input_id"], assignment_ids
 
+    async def test_route_trigger_fans_out_followup_to_each_active_work_assignment(self):
+        f = self.fixture
+        _, assignment_ids = await self._create_multi_node_input_assignments()
+        followup = f.receive_followup("followup-multi-node")
+        with f.host._store.transaction() as db:
+            input_row = db.execute(
+                "SELECT input_id,ticket_id FROM ticket_inputs WHERE trigger_id=?",
+                (followup["trigger_id"],),
+            ).fetchone()
+        result = await f.host.execution.route_trigger(input_row["ticket_id"], followup["trigger_id"])
+        self.assertEqual(result["state"], "delivered")
+        self.assertEqual(result["assignment_ids"], assignment_ids)
+        self.assertEqual([item["state"] for item in result["deliveries"]], ["applied", "applied"])
+        self.assertEqual(len(f.shared["input_calls"]), 2)
+        repeated = await f.host.execution.route_trigger(input_row["ticket_id"], followup["trigger_id"])
+        self.assertEqual(repeated, result)
+        self.assertEqual(len(f.shared["input_calls"]), 2)
+
+    async def test_route_trigger_reconciles_partial_fanout_without_replaying_unknown_delivery(self):
+        f = self.fixture
+        _, assignment_ids = await self._create_multi_node_input_assignments()
+        followup = f.receive_followup("followup-multi-node-lost-ack")
+        with f.host._store.transaction() as db:
+            input_row = db.execute(
+                "SELECT input_id,ticket_id FROM ticket_inputs WHERE trigger_id=?",
+                (followup["trigger_id"],),
+            ).fetchone()
+        f.shared["fail_input_ack"] = True
+        with self.assertRaises(RuntimeError):
+            await f.host.execution.route_trigger(input_row["ticket_id"], followup["trigger_id"])
+        self.assertEqual(len(f.shared["input_calls"]), 1)
+        recovered = await f.host.execution.route_trigger(input_row["ticket_id"], followup["trigger_id"])
+        self.assertEqual(recovered["state"], "delivered")
+        self.assertEqual(recovered["assignment_ids"], assignment_ids)
+        self.assertEqual([item["state"] for item in recovered["deliveries"]], ["applied", "applied"])
+        self.assertEqual(len(f.shared["input_calls"]), 2)
+
     async def test_one_ticket_input_is_consumed_independently_by_multiple_assignments(self):
         f = self.fixture
         input_id, assignment_ids = await self._create_multi_node_input_assignments()
