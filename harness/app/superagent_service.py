@@ -21,18 +21,7 @@ from ..session.store import _atomic_write
 from ..session.write_lock import event_write_lock
 from .config import HarnessConfig, _default_owned_processes
 from .harness import Harness
-from .superagent_inbox import SuperagentInbox, _error, _json as strict_json, _names, _text
-from .superagent_dispatch import SuperagentDispatcher
-from .superagent_router import SuperagentRouter
-from .superagent_workers import SuperagentWorkerProfile, SuperagentWorkers
-from .superagent_results import SuperagentResults
-from .superagent_mission_store import MissionStore, validate_autonomy
-from .superagent_missions import SuperagentMissions
-from .superagent_guidance import SuperagentGuidance
-from .superagent_guidance_files import GuidanceFiles
-from .superagent_control import MissionControl
-from .superagent_github import SuperagentGitHub, github_credentials, validate_github
-from .superagent_feishu import SuperagentFeishu, feishu_credentials, validate_feishu
+from .superagent_common import _error, _json as strict_json, _names, _text
 
 
 SCHEMA = '''
@@ -98,10 +87,13 @@ def read_config(path: Path):
         if value['interval'] < 0.01:
             raise ValueError
         if 'autonomy' in value:
+            from .superagent_mission_store import validate_autonomy
             value['autonomy'] = validate_autonomy(value['autonomy'], value['profiles'])
         if 'github' in value:
+            from .superagent_github import validate_github
             value['github'] = validate_github(value['github'],value['sources'])
         if 'feishu' in value:
+            from .superagent_feishu import validate_feishu
             value['feishu'] = validate_feishu(value['feishu'],value['sources'])
         if 'github' in value and 'feishu' in value and (value['github']['source_id'] == value['feishu']['source_id']
                 or value['github']['webhook_port'] and value['github']['webhook_port'] == value['feishu']['webhook_port']):
@@ -130,6 +122,19 @@ class SuperagentService:
 
     @classmethod
     async def open(cls, config_path: Path, *, worker_transport=None, router_transport=None):
+        # 旧入口仍供 CLI 使用；统一服务装配不加载这些待退役模块。
+        from .superagent_inbox import SuperagentInbox
+        from .superagent_dispatch import SuperagentDispatcher
+        from .superagent_router import SuperagentRouter
+        from .superagent_workers import SuperagentWorkerProfile, SuperagentWorkers
+        from .superagent_results import SuperagentResults
+        from .superagent_mission_store import MissionStore
+        from .superagent_missions import SuperagentMissions
+        from .superagent_guidance import SuperagentGuidance
+        from .superagent_guidance_files import GuidanceFiles
+        from .superagent_control import MissionControl
+        from .superagent_github import SuperagentGitHub, github_credentials
+        from .superagent_feishu import SuperagentFeishu, feishu_credentials
         spec = read_config(config_path)
         # 先于凭据读取拒绝 v2 账本；锁内还会复核一次以封闭并发启动竞态。
         if _has_coordinator_state(Path(spec['state_dir'])):
@@ -720,6 +725,8 @@ class SuperagentService:
     async def serve(self, stop: asyncio.Event, *, once=False):
         if getattr(self, "_coordinator_mode", False):
             return await self._serve_coordinator(stop, once=once)
+        from .superagent_missions import SuperagentMissions
+
         started = time.monotonic()
         scans = 0
         if once and self.guidance_files is not None:
@@ -788,6 +795,8 @@ class SuperagentService:
         await join_cleanup(self._close_task)
 
     async def _close(self):
+        from .superagent_missions import SuperagentMissions
+
         errors = []
         for _, channel in reversed(self.channels):
             try:

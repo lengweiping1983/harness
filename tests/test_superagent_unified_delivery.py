@@ -400,7 +400,7 @@ class UnifiedDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0][2]["Authorization"], "Bearer fixture-only-token")
 
     async def test_real_feishu_token_refresh_rechecks_revocation_before_http_reply(self):
-        from harness.app.superagent_feishu import FeishuClient
+        from harness.app.superagent_feishu_http import FeishuClient
         provider, assignment, source_id = await self.remote("feishu")
         entered, release = asyncio.Event(), asyncio.Event()
         root, calls = await self.loopback(provider, token_barrier=(entered, release))

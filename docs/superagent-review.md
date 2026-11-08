@@ -190,6 +190,15 @@
 
 2026-11-08，本节新增或修改的服务、迁移、跟进、轮转用例及真实 Harness / Git 用例已通过定向验证。首次批量命令中真实用例类名写错导致加载错误；更正类名后单独通过。固定目标的终态 Assignment 回归曾暴露 NULL goal_ref 的 SQL 排除问题，修正后复测通过。未运行全量 Python／Web 回归、生产构建、桌面／浏览器专项；未访问外部账号或在线模型。
 
+### Phase 4.6：入口收口与旧编排退役的当前证据
+
+| 触发条件 | 源码措施 | 对应回归 |
+|---|---|---|
+| 统一服务或飞书认证传输隐式装载旧 Inbox／编排／信道账本 | FeishuClient 独立到认证传输模块；共用校验直接来自 common；旧入口依赖仅在实际旧调用边界加载，Shadow 仅在显式目录时加载 | `test_unified_tick_and_authenticated_clients_do_not_import_legacy_orchestrators` |
+| 抽离认证客户端后既有实际回复断裂，或令牌刷新绕过发送准入 | 旧信道与统一服务使用同一 FeishuClient，不保留复制实现；新调用方直接引用独立传输模块 | `test_full_channel_posts_threaded_reply_with_stable_uuid_and_reference`、`test_real_feishu_token_refresh_rechecks_revocation_before_http_reply` |
+
+2026-11-08，上述三个定向用例通过，覆盖新解释器装配／Tick／关闭与真实本机 HTTP。当前只完成依赖解耦；CLI、默认路由、状态／控制／本机提交及旧编排删除仍待完成。未运行全量回归或构建。
+
 ## 待验证风险与产品缺口
 
 - 首次原生活动观察不可信时，首次后续可信观察只建立持久基线，不重置停滞时间或解除既有阻断；Schema v17 将历史快照保守标为未建立可信基线。若真实进度发生在可信基线建立前，该变化无法从旧指纹中追溯证明，必须等待后续可核验变化才恢复；这是避免误解锁的保守恢复代价，仍需真实长时运行评估。

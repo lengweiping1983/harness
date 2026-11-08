@@ -1,7 +1,6 @@
 """加密飞书事件、原消息回复及未知写入的只读回查。"""
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import hmac
@@ -14,10 +13,11 @@ import uuid
 from contextlib import contextmanager
 from urllib.parse import urlencode
 
-from ..core.cleanup import join_cleanup, raise_cleanup_errors
+from ..core.cleanup import raise_cleanup_errors
 from ..core.errors import HarnessError
 from ..core.sqlite import prepare_database
-from .superagent_http import JSONClient, WebhookServer, api_root
+from .superagent_http import WebhookServer, api_root
+from .superagent_feishu_http import FeishuClient
 from .superagent_inbox import _error, _json, _names, _text
 
 
@@ -81,38 +81,6 @@ def feishu_credentials(config):
         raise _error('feishu-credentials')
     return {'encrypt_key':values[0], 'verification_token':values[1],
             'app_secret':values[2] if len(values) == 3 else None, 'cipher':(Cipher, algorithms, modes)}
-
-
-class FeishuClient(JSONClient):
-    """自建应用的租户令牌只保留在内存，所有已接受请求归所属线程收尾。"""
-
-    def __init__(self, config, secret):
-        super().__init__(config['api_url'], prefix='feishu')
-        self.app_id, self.secret = config['app_id'], secret
-        self.token, self.expires, self.refresh = None, 0, None
-
-    async def _refresh(self):
-        result = await super().request('POST', '/open-apis/auth/v3/tenant_access_token/internal',
-                                       {'app_id':self.app_id, 'app_secret':self.secret})
-        if (not isinstance(result, dict) or type(result.get('code')) is not int or result['code'] != 0
-                or type(result.get('expire')) is not int or not 1 <= result['expire'] <= 86400
-                or not isinstance(result.get('tenant_access_token'), str)
-                or not re.fullmatch('[!-~]{1,4096}', result['tenant_access_token'])):
-            raise _error('feishu-response')
-        self.token = result['tenant_access_token']
-        self.expires = time.monotonic() + result['expire'] - min(60, result['expire'] / 10)
-
-    async def request(self, method, path, data=None, *, before_request=None):
-        if time.monotonic() >= self.expires:
-            if self.refresh is None or self.refresh.done():
-                self.refresh = asyncio.create_task(self._refresh())
-            await join_cleanup(self.refresh)
-        value = await super().request(method, path, data, token=self.token, before_request=before_request)
-        if not isinstance(value, dict) or type(value.get('code')) is not int:
-            raise _error('feishu-response')
-        if value['code'] != 0:
-            raise _error('feishu-api', status=value['code'])
-        return value
 
 
 class SuperagentFeishu:

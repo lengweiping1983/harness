@@ -12,7 +12,7 @@
 - **不再沿旧链路开发。** 不为旧 Router / Autonomy 编排增加功能，不包装旧 Router、Dispatcher 或 MissionStore 来实现新服务，不新增 V1 / V2 服务、执行开关、兼容 Facade 或自动回退。缺失能力在统一链路补齐，不能转交旧链路执行。
 - **只保留可复用能力与有效业务回归。** 文件交接、证据核验、停止和引导等能力抽离后接入统一接口；每项能力接通后清除对应旧编排与依赖。Phase 4.6 做最终收口核对，不是到该阶段才开始删除旧实现。
 - **不开发旧运行数据转换。** 当前没有旧 Superagent 运行数据，不开发旧配置别名、旧任务导入、离线转换、双写、双轨运行或旧版回退工具。意外发现的旧目录保留原件并拒绝混用；已登记的 Coordinator Schema 迁移和原始 Harness 事实继续按现有规则保护。
-- **从现有成果继续。** Phase 1–3 为已交付基础，不重做 Phase 0，不重新比较或移植 dsh 运行时。首批统一基础层审查基线为 `a0fbf7d`；以当前源码接续，不回退该提交覆盖后续工作。Phase 4.1 的统一协调契约、Schema v16 状态守卫及 112 项模块回归已验收；Phase 4.2–4.4 的统一生命周期、DAG、质量门与阶段接续已沿同一链路接通；下一步按第 11 节推进 Phase 4.5 持续协作与既有信道，生产入口切换仍归 Phase 4.6。
+- **从现有成果继续。** Phase 1–3 为已交付基础，不重做 Phase 0，不重新比较或移植 dsh 运行时。首批统一基础层审查基线为 `a0fbf7d`；以当前源码接续，不回退该提交覆盖后续工作。Phase 4.1 的统一协调契约、Schema v16 状态守卫及 112 项模块回归已验收；Phase 4.2–4.4 的统一生命周期、DAG、质量门与阶段接续已沿同一链路接通；Phase 4.5 的持续协作与既有信道已完成统一服务接线及离线定向验收，当前推进 Phase 4.6 的唯一入口与旧编排退役。
 - **以实际消费和业务证据验收。** 建表、增加内部 API、适配器单测或某个阶段提交，均不能代替统一服务接线和真实业务闭环。未接线阶段可通过统一应用服务定向验证，不能借旧链路完成验收。Phase 4 总体验收必须包含唯一入口和旧编排退役。
 
 当前源码中尚存的旧入口、旧账本依赖和 Shadow 装配是待清除的实现缺口，不是获准继续维护的第二套方案。本次计划更新不代表这些代码已经删除。
@@ -54,7 +54,7 @@
 
 Phase 1–3 已建立 CoordinatorStore、来源与授权服务、原生 Harness 执行适配及单 Worker 内部闭环；首批 Phase 4 改造已补充执行资源作用域、宿主系统节点封存、独立 InputDelivery 账本与逐 Assignment 消费 API、持久暂停和真实 Artifact / Delivery 适配。
 
-生产入口、统一 Scheduler、质量门、完整停止及信道发送尚未全部接通。具体已实现行为与限制只维护在[领域模型第 9 节](superagent-domain-model.md#9-phase-14-当前实现边界)。现存旧模块仅用于定位能力抽离、调用方改造和删除范围，不能作为后续开发入口。
+统一服务的 Scheduler、质量门、目标停止和既有信道发送已接通；生产 CLI 与默认入口仍待切换。具体已实现行为与限制只维护在[领域模型第 9 节](superagent-domain-model.md#9-phase-14-当前实现边界)。现存旧模块仅用于定位能力抽离、调用方改造和删除范围，不能作为后续开发入口。
 
 ### 2.2 已确定的参考取舍
 
@@ -568,7 +568,7 @@ Phase 0–3 是已经形成的领域和基础能力背景，不再作为待执�
 | Phase 4：统一整合 | 基础层已部分落地；依次完成 4.1 → 4.2 → 4.3 → 4.4 → 4.5 → 4.6 的剩余接线与验收 |
 | Phase 5 / 6：扩展 | 仅扩展 Phase 4 完成后的同一系统，不能承担延后的核心整合或旧编排退役 |
 
-下一次开发先核对领域模型第 9 节与当前源码，完成 4.1 中独立输入投递的实际消费、作用域与状态机守卫；已有资源归属、系统节点封存和文件适配继续复用。不得把“已有表和适配器”直接标记为阶段完成。每次交付同步更新已核验的实现边界、相关正式文档及回归。
+后续开发先核对领域模型第 9 节与当前源码，按 Phase 4.6 收口 CLI、默认路由和旧编排；已接通的独立输入投递、作用域守卫、资源归属、系统节点封存和文件适配继续复用。不得把“已有表和适配器”直接标记为阶段完成。每次交付同步更新已核验的实现边界、相关正式文档及回归。
 
 ### Phase 4：完整 Superagent 整合与替换
 
@@ -577,7 +577,7 @@ Phase 0–3 是已经形成的领域和基础能力背景，不再作为待执�
 #### Phase 4.1：整合契约与协调模型
 
 - 沿现有统一账本补齐 Worker 的 Mission / Job / stage 绑定、独立 InputDelivery，以及 Artifact / Delivery / Review、控制、指令和 Watchdog 的约束与状态转移。
-- 输入投递消费不再依赖 TicketInput 的单 Assignment 字段判断所有节点是否已读取；每条 Input / Assignment 投递使用自己的稳定身份、原生回执与 CAS，禁止跨 Ticket 或节点冒用。 当前已由 CoordinatorAssignmentInputDelivery 提供显式 Host API，并覆盖多 Assignment、丢回执恢复、Handback 后回查、畸形回执、原 Run 冲突和并发单调性；尚未接入统一 Scheduler 或生产默认路由。
+- 输入投递消费不再依赖 TicketInput 的单 Assignment 字段判断所有节点是否已读取；每条 Input / Assignment 投递使用自己的稳定身份、原生回执与 CAS，禁止跨 Ticket 或节点冒用。 当前已由 CoordinatorAssignmentInputDelivery 提供显式 Host API，并由统一 Scheduler 与持续协作入口实际消费，覆盖多 Assignment、丢回执恢复、Handback 后回查、畸形回执、原 Run 冲突和并发单调性；生产默认路由仍待 Phase 4.6 切换。
 - Planner 只提出 work DAG；宿主按允许的多角色 Profile 集确定性建立 Integrator / Reviewer 后整体封存。Assignment 的接续和修正不能覆盖旧 Run，不能改写冻结计划。
 - 保持普通 Repository 更新不能绕过状态机；新增结构使用新迁移，不改写已有迁移校验和。Schema v16 必须在数据库层守住 InputDelivery / MissionInstruction / Delivery 状态与 Revision 单调、DAG 交付作用域、独立 Review 身份、MissionControl 取消终态、终态控制回执及 Watchdog 进度单调性。
 
@@ -631,6 +631,8 @@ Watchdog 接收的原生日志时间在执行观察边界从 Unix 毫秒规范�
 **出口：** 本地、GitHub 和飞书通过统一服务完成授权、工作、跟进和结果交付；受控 Provider 验证重复事件、发送后丢响应、重启及撤权不会重复执行或发送。
 
 #### Phase 4.6：唯一入口收口与旧编排清除
+
+**当前状态（2026-11-08）：开发中。** 已独立飞书认证传输，HTTP 与 Watchdog 的公共校验不再经旧 Inbox 加载；统一服务装配、Tick 和关闭无需导入旧 Router、Dispatcher、MissionStore、Worker、Results、旧信道或 Shadow。新解释器在禁止这些模块加载的条件下验证该链路，既有飞书入口的真实 HTTP 回复与统一服务的令牌刷新撤权检查均通过。旧 CLI 仍可选择旧编排，配置收口、控制／状态／本机提交入口迁接及旧模块删除尚未完成，不能据此宣告 Phase 4 总出口完成。
 
 - 将 CLI 提交、状态、引导、控制和回执全部接到统一 Application 服务；autonomy 不再选择不同协调器，配置只支持当前统一格式。
 - 核对实际调用方、Worker 动态注册和绑定、资源分发、脚本、示例及有效回归，删除残余旧 Router、Dispatcher、MissionStore、Worker / Results 编排和独立控制账本。

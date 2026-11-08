@@ -19,7 +19,6 @@ from .superagent_effect_recovery import EffectLookupAdapter, EffectRecoveryServi
 from .superagent_outbox import OutboxEffectService
 from .superagent_artifacts import CoordinatorArtifacts
 from .superagent_authorization import CoordinatorAuthorizationEngine
-from .superagent_shadow import ShadowComparisonService
 from .superagent_source_registry import LocalIdentityVerifier, SecretResolver, SourceKind, SourceRegistry
 from .superagent_input_delivery import CoordinatorAssignmentInputDelivery
 from .superagent_mission_instruction import CoordinatorMissionInstruction
@@ -606,10 +605,10 @@ class CoordinatorHost:
             initial_kinds=source_kinds,
             secret_resolver=secret_resolver, local_identity_verifier=local_identity_verifier,
         )
-        self._shadow_service = (
-            ShadowComparisonService(store, legacy_state_dir)
-            if legacy_state_dir is not None else None
-        )
+        self._shadow_service = None
+        if legacy_state_dir is not None:
+            from .superagent_shadow import ShadowComparisonService
+            self._shadow_service = ShadowComparisonService(store, legacy_state_dir)
         self._sources = _HostSourceRegistry(self, self._source_service)
         self._authorization = _HostAuthorizationEngine(self, self._authorization_service)
         self._shadow = (

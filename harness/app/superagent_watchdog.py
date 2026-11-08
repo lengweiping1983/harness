@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.sqlite import prepare_database
-from .superagent_inbox import _error, _text
+from .superagent_common import _error, _text
 from .superagent_coordinator_store import (
     CoordinatorStore, _hash as _coordinator_hash, _json as _coordinator_json,
     _now as _coordinator_now, _time as _coordinator_time,

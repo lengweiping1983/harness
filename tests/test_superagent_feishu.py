@@ -266,6 +266,9 @@ class SuperagentFeishuTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.router_transport.requests, [])
 
     async def test_full_channel_posts_threaded_reply_with_stable_uuid_and_reference(self):
+        from harness.app.superagent_feishu_http import FeishuClient
+
+        self.assertIs(type(self.service.feishu.client), FeishuClient)
         self.receive()
         self.assertEqual(await self.service.serve(asyncio.Event(), once=True), 0)
         self.assertEqual(self.service.feishu.status()['outbound'], {'sent':1})
