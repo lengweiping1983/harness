@@ -4793,6 +4793,7 @@
   "ui.companion.failed": "Continuation failed to start. See the error below.",
   "ui.companion.address": "Connection address",
   "ui.companion.token": "Pairing token",
+  "ui.companion.extensionLabel": "Extension folder",
   "ui.companion.extension": "Extension folder ({version})",
   "ui.companion.install": "Load this folder in Chrome or Edge Extensions, then refresh ChatGPT.",
   "ui.companion.invalidConfig": "Invalid companion settings. Only the enabled state and a local port from 1024 to 65535 are allowed; the original file was preserved.",
