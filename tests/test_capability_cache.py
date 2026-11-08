@@ -32,8 +32,9 @@ class CapabilityCacheTests(unittest.TestCase):
             path = root / 'model-capabilities.json'
             frames = [[], {'version': True, 'models': {}, 'learned': {}}, {'version': 1},
                       *[{'version': 1, 'models': {'url|m': row}, 'learned': {}} for row in
-                        [[], {'context_window': True}, {'context_window': -1}, {'fetched_at': float('nan')},
+                        [[], {'context_window': True}, {'context_window': -1}, {'fetched_at': float('nan')}, {'fetched_at': 10 ** 400},
                          {'supported_parameters': [1]}, {'reasoning_mandatory': 1}, {'obsolete': 1}]]]
+            self.assertEqual(CapabilityRegistry._clean({'fetched_at': 10 ** 400})['fetched_at'], 0)
             for content in [b'\xff', b'{', *[json.dumps(row).encode() for row in frames]]:
                 path.write_bytes(content)
                 for operation in (lambda: CapabilityRegistry(root), lambda: registry.learn('url', 'm', context_window=100)):
