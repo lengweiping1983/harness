@@ -208,11 +208,37 @@ Phase 5.2–5.6 增量从只读查询提交 `146b202` 接续。`SuperagentServic
 
 本次未执行全量回归、lint／类型检查、完整生产构建或桌面／浏览器专项；组件测试使用实际组件与 HTTP 客户端的受控 Hook 宿主，不能替代真实浏览器视觉验收。GitHub／飞书使用签名事件、受控 Provider 和真实回环 HTTP，没有操作外部账号，也没有取得在线模型、多平台或长期负载证据。媒体只覆盖接收、显式资源获取及操作者呈现，不包含视觉模型或音视频理解。非 Outbox 未知原生效果仍由相应恢复流程结算；操作者说明不补造完成事实。
 
+### Phase 6：隔离与远程执行
+
+本轮增量基线为 `9c4c911`。核对的生产链为统一配置 `execution` → bootstrap 选择 RemoteExecutionAdapter → 原 Coordinator／Scheduler／Artifact／Review → 签名 WorkerGateway → SandboxNode → NativeWorkerNode → 同一个 HarnessExecutorAdapter。设备端不装配第二个 Coordinator。Schema v23 保存设备身份和原 Mission 租约，设备本地只保存原生引用与操作回执；配置导出、Worker CLI、Dockerfile、协议生成器、CLI／工作台查询和双语消费者已同步。
+
+| 触发条件 | 源码措施与证据 | 对应定向回归 |
+|---|---|---|
+| 第一次观察前原 Run 已结束，单节点终态缺少开始时间 | `superagent_execution` 使用 DAG 已有的 `_run_started_at` 从原生事件取得精确时间，保留状态守卫 | `test_real_remote_harness_completes_through_original_executor_and_ledger` |
+| 断线后原报告完成，unknown 恢复缺少确切 Run 审计 | 报告冻结审计保留原 `run_id` 与原输出／证据引用，不新建运行 | `test_disconnect_keeps_service_alive_and_reconnect_reads_original_run` |
+| 提交／工作树响应丢失，设备重启或原写入仍 pending | 原生稳定资源和操作账本，先 pending 再调用一次；恢复只查询原 Run／资源，pending 拒绝重放 | `test_lost_remote_submit_ack_only_queries_original_run_and_never_resubmits`、`test_lost_workspace_ack_reuses_original_native_resource`、`test_native_kernel_restart_reads_original_run_without_new_model_calls`、`test_remote_native_pending_operation_is_not_replayed_after_reopen` |
+| 伪签名、跨设备配置、执行策略不同或复用设备密钥 | 固定 HMAC／实例／设备／配置／nonce；实际 Profile 与 runtime_manifest 握手，密钥值必须独立 | `test_signature_device_and_profile_identity_fail_before_native_resources`、`test_runtime_policy_mismatch_fails_handshake_before_worker_creation`、`test_different_device_secret_references_cannot_resolve_to_the_same_signing_key` |
+| 来源撤权、旧心跳、租约到期和迟到结果 | 同一 Mandate 重验，撤销固定原代次；设备持久零到期值不可被旧心跳恢复，文件操作排队后实际发送前重验准入，当前 UID／Run 句柄停止 | `test_source_revocation_reaches_native_gate_and_cannot_be_undone_by_old_heartbeat`、`test_lease_expiry_stops_the_owned_run_and_does_not_start_a_replacement`、`test_revoked_mission_stays_pinned_and_late_remote_receipt_is_fenced`、`test_queued_filesystem_request_revalidates_revoked_lease_before_starting_helper` |
+| 关闭只得到停止受理回执，或第二内核打开同一状态 | aclose 只读等待原 Run 实际收尾，未知明确失败；设备持有原生运行跨进程锁 | `test_coordinator_close_stops_original_remote_run_and_waits_for_receipt`、`test_second_native_kernel_cannot_open_the_same_device_state` |
+| 多设备容量与数据串用，文件交付绕过质量门 | Mission 固定原设备，未知／过期不释放容量；原文件交接、独立 Reviewer 与统一 Outbox | `test_two_devices_share_capacity_but_missions_never_move_after_expiry_or_restart`、`test_two_logical_devices_run_distinct_missions_and_never_exchange_receipts`、`test_remote_file_quality_gate` |
+| 长期模型凭据进入容器、任意 URL／Header 转发或能力越界 | 宿主 Unix Broker 固定上游，只授原 Mission／模型／请求预算的短期能力；审计无凭据值，独立进程真实消费 | `test_real_unix_transport_consumes_scoped_capability_without_forwarding_worker_headers`、`test_expired_revoked_wrong_model_and_exhausted_capabilities_never_call_upstream`、`test_native_child_process_uses_unix_broker_and_preserves_original_submission` |
+| Broker 启动绑定失败或重复／取消关闭等待 | 启动失败释放审计句柄；单次收尾任务拥有 Socket 和线程，重复调用等待原任务 | `test_failed_broker_bind_releases_audit_handle_and_repeated_close_waits_original_cleanup` |
+| 路径／符号链接越界、文件观察缓存丢失或异步 grep 未消费 | 精确原工作树路径检查，文件工具使用持久辅助进程；真实文件读写、异步搜索及同桥接语言消费 | `test_absolute_targets_symlinks_and_glob_escape_are_rejected_but_original_workspace_is_allowed`、`test_filesystem_helper_keeps_observation_cache_and_consumes_async_grep`、`test_same_filesystem_bridge_consumes_scope_error_english_chinese_english` |
+| Worker 改写 Git 配置使受信内核执行用户 Git 设置 | Shell 使用独立可写 Git 视图，IsolatedWorktreeService 始终显式指定保护目录；Artifact 有界对象读取也走同一服务 | `test_private_git_view_supports_git_without_mutating_kernel_refs`、`test_kernel_capture_ignores_worker_replaced_git_config_and_keeps_bounded_object_reads` |
+| Docker 上下文变化、Rootful／远端 Engine 或配额未生效 | 探测／运行／终止固定同一本机 Unix Engine 及过滤后的 CLI 环境，避免后来的 DOCKER_CONTEXT 干扰；要求 Rootless，启动核对真实 cgroup 文件；无宿主回退 | `test_probe_pins_rootless_socket_and_does_not_pass_model_secrets_to_docker_client`、`test_rootful_or_remote_engine_is_rejected_instead_of_falling_back`、`test_owned_container_kill_keeps_pinned_engine_and_filtered_environment`、`test_actual_cgroup_values_must_be_bounded_and_complete_before_execution`；这些为受控输入验证，尚无真实 Docker 证据 |
+| TLS 客户端停在握手，阻塞后续连接或网关关闭 | 监听 Socket 不在 accept 中同步握手，握手在有界连接线程及 Socket 超时内执行 | `test_stalled_tls_client_does_not_block_admission_of_the_next_connection`；回环夹具不代表部署证书验收 |
+| 设备迁移冲突、配置重复字段、旧数据被覆盖 | 仅新增迁移，失败整笔回滚；原件及迁移校验和保留，模板独占创建，设备配置明确报错 | `test_migration_preserves_v22_effects_and_creates_no_fake_devices_or_leases`、`test_conflicting_lease_table_preserves_original_and_rolls_back_device_migration`、`test_invalid_worker_config_uses_explicit_error_and_preserves_original_bytes`及模板／协议回归 |
+| 工作台错看另一 Mission 租约或语言切换重新执行 | 相同查询端口按 Mission 范围读取，不暴露凭据，页面仍复用原异步隔离；双语资源实际消费 | 修改的工作台 API 用例、远程任务查询断言，以及组件 `shows device ownership and the original lease without exposing credentials`、`reads a mission lease only within the selected mission detail` |
+
+五个新增 Phase 6 测试文件和修改的工作台 API 方法共 42 个后端定向用例通过；随后补充的真实回环 TLS 握手阻塞用例单独通过，共 43 个不同用例。原任务租约查询、文件排队撤权和固定 Engine 收尾均有对应当前断言。两个新增／修改组件用例通过，同文件其他 10 项因精确选择器未执行；此前旧组件输入的整文件结果不作为最终新增场景的替代证据。协议与语言从正式源正常生成，未手工编辑生成文件。
+
+本轮没有运行全量回归、lint／类型检查、生成全套检查、生产构建或桌面／浏览器专项，没有使用在线模型、外部账号、部署或发布。两个设备用例是独立 Harness／Git 副本／密钥／网关的回环逻辑设备；独立进程用例显式注入原生子进程，仅验证 stdio 与 Unix 代理。当前宿主无 Docker，未构建／运行镜像，Linux Rootless 的真实 UID、PID、网络、文件、凭据、资源越权及跨平台双机断网／迟到回执仍未验收。采样磁盘预算不是硬性总盘配额；设备密钥握手不是硬件证明。不将本轮代码和本机证据计作 Phase 6 总出口完成。
+
 ## 待验证风险与产品缺口
 
 - 首次原生活动观察不可信时，首次后续可信观察只建立持久基线，不重置停滞时间或解除既有阻断；Schema v17 将历史快照保守标为未建立可信基线。若真实进度发生在可信基线建立前，该变化无法从旧指纹中追溯证明，必须等待后续可核验变化才恢复；这是避免误解锁的保守恢复代价，仍需真实长时运行评估。
 - 完成标准由模型规划，语义覆盖与复核质量需要真实在线任务集、固定模型和人工判定；任意 Shell 正文的语义没有被宿主证明，显式 cwd 检查不是沙箱。
-- 现有测试在本机运行；没有取得 Windows／Linux 实机、多设备、外部账号、长期负载或模型成本对比证据。
+- Phase 6 已取得本机双逻辑设备、原生进程与原回执恢复证据；没有取得 Windows／Linux 实机、真实双机、Rootless Docker 隔离越权、外部账号、长期负载或模型成本对比证据。
 - 统一服务已支持原 Thread 跟进、节点指令、Attention 答案和确切授权的跨来源 Subscription。自动跨来源关联、目标验收或依赖变更、动态重规划仍待开发；CLI 与本机工作台均已使用统一入口。
 - 合并冲突、失败或中断运行、未知操作和资源总容量耗尽保留明确状态；当前不自动解决冲突、迁移配置、清理历史资源或重放任务。
 - 长节点阶段接续为显式协议，真实模型的交接质量、是否过早选择 `ready`、上下文重建成本及长时负载仍需独立在线评估。同树同报告的停止条件不能识别所有语义停滞；新阶段也不能自动带走忽略文件、环境、进程或外部服务状态。

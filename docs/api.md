@@ -12,6 +12,8 @@ HTTP API 使用 `/api/v1`。本机管理入口具有添加任意已有目录为�
 
 Superagent 本机工作台使用 `/api/v1/superagents` 的连接、分页查询、固定请求命令与媒体读取端点，复用同一实例协调账本。仅允许回环客户端与本机 Host，拒绝共享主体；运行归主宿主持有，取消 HTTP 等待不撤销已受理写入。完整行为、原请求查回和媒体安全边界见[工作台产品页](superagent.md#统一工作台)，字段以生成 OpenAPI 为准。
 
+Superagent Worker 网关独立监听 `/executor/v1`，不注册在本机管理 API 下。其 HMAC 帧、nonce、原操作号和回执结构由 `superagent_remote_protocol.worker_openapi()` 生成到 [Worker OpenAPI](openapi-worker-v1.json)；设备身份、TLS、执行约束与租约规则见[远程执行产品页](superagent.md#隔离与远程-worker)。同一生成器同步维护两个 OpenAPI，设备端不运行另一套协调器。
+
 创建对话只接受契约列出的字段，未知字段在持久化前拒绝。显式创建和 PATCH 改名的标题最多 512 个 Unicode 码点，超限返回 `400 session/invalid-field`；不截断或改写已有标题。PATCH 同样拒绝未知字段及非法的标题、模型、思考强度类型。创建对话时，`cwd`、`title` 和 `model` 若提供非空值，必须为字符串；非字符串且非 `null` 的值在创建任何持久对话前返回 `400 session/invalid-field`，`details.field` 标识具体字段。省略字段或空请求体仍允许按当前配置创建默认对话。显式非空 `cwd` 还会展开用户目录并严格解析，必须是已存在目录；不存在、不是目录或无法解析时，在创建持久记录前返回 `400 session/invalid-cwd`，`details.field` 为 `cwd`。省略 `cwd`、`null` 和空字符串使用默认工作目录，不自动创建目录；创建后目录被移除仍由实际操作报告错误。
 
 网页新建对话未指定标题时，头信息登记 `metadata.auto_title=awaiting`。首次人工任务提交后先保存不超过 50 个 Unicode 码点的临时标题，再在独立后台请求中使用当前对话的模型连接生成不超过 50 个码点的任务标题；输入只取用户原文的前 12000 个码点，不发送对话历史、系统上下文或附件正文，不提供工具。命名请求的超时预算为 30 秒，取消后仍等待底层清理，失败、无凭据或非法输出保留临时标题，不阻塞执行轮次。纯附件消息使用原附件文件名，不额外请求模型。

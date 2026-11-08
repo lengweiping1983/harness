@@ -173,6 +173,10 @@ class SuperagentService:
 
     async def _tick_coordinator(self):
         host = self._coordinator_host
+        executor=host._execution_service._executor
+        remote_lease_errors=[]
+        if callable(getattr(executor,'refresh_leases',None)):
+            remote_lease_errors=await executor.refresh_leases()
         if self._production_config is not None:
             marker = tuple((source.source_instance_id,source.config_revision) for source in host.sources.list_instances())
             if marker != self._source_config_marker:
@@ -299,6 +303,7 @@ class SuperagentService:
             "local_requests": local_requests,
             "outbox": sending,
             "instructions": instructions,
+            "remote_lease_errors": remote_lease_errors,
             "open_attentions": host._execution_service._read_one("SELECT count(*) AS n FROM attentions WHERE state='open'")["n"],
             "blocked_missions": host._execution_service._read_one(
                 "SELECT count(*) AS n FROM missions m JOIN tickets t ON t.ticket_id=m.ticket_id "
@@ -371,7 +376,7 @@ class SuperagentService:
                 or status["unknown_missions"] or status["watchdog_attention"]
                 or status["uncertain_effects"] or status["unavailable_assessments"]
                 or status["blocked_assessments"] or status["route_errors"]
-                or status["dag_scheduler_errors"]
+                or status["dag_scheduler_errors"] or status.get("remote_lease_errors")
                 or status["outbox"]["unavailable"] or status["outbox"]["unknown"]
                 or status["open_attentions"] or status["blocked_missions"] or status["instructions"]["errors"]
             )

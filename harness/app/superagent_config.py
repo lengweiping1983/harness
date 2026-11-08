@@ -21,7 +21,7 @@ def read_config(path):
         required = {'version', 'instance_id', 'state_dir', 'language', 'model', 'base_url',
                     'permission_policy', 'sources', 'profiles', 'default_profiles', 'system_profiles', 'policy'}
         if (len(raw) > 262144 or not isinstance(value, dict) or required - set(value)
-                or set(value) - required - {'interval', 'once_timeout', 'max_workers', 'secrets', 'watchdog'}
+                or set(value) - required - {'interval', 'once_timeout', 'max_workers', 'secrets', 'watchdog', 'execution'}
                 or type(value['version']) is not int or value['version'] != 2):
             raise ValueError
         _text(value['instance_id'], 'instance_id', limit=128)
@@ -109,6 +109,9 @@ def read_config(path):
         if not isinstance(secrets, dict) or any(not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', key)
                 or not isinstance(env, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,127}', env) for key, env in secrets.items()):
             raise ValueError
+        if 'execution' in value:
+            from .superagent_remote_protocol import execution_config
+            value['execution']=execution_config(value['execution'],secrets)
         return value
     except (ValueError, TypeError, KeyError, UnicodeError, RecursionError) as exc:
         raise _error('invalid', field='config') from exc

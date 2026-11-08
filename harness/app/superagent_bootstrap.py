@@ -115,7 +115,13 @@ async def open_service(cls, config_path, *, worker_transport=None, coordinator_t
         if len(owners) > 1:
             raise _error('conflict')
         owner = worker.get_session(owners[0].id) if owners else worker.create_session(metadata={'superagent_owner': spec['instance_id']})
-        executor = HarnessExecutorAdapter(worker, instance_id=spec['instance_id'], owner_session_id=owner.id,
+        adapter_class=HarnessExecutorAdapter
+        remote_options={}
+        if 'execution' in spec:
+            from .superagent_remote_client import RemoteExecutionAdapter
+            adapter_class=RemoteExecutionAdapter
+            remote_options={'store':store,'spec':spec,'secret_resolver':secret}
+        executor = adapter_class(worker, instance_id=spec['instance_id'], owner_session_id=owner.id,**remote_options,
             profiles=profiles, max_workers=spec['max_workers'], default_profiles=spec['default_profiles'])
         models = CoordinatorModels(roles, [p for p in profiles if p.profile_id not in spec['system_profiles'].values()])
         service = await cls.open_coordinator(root, instance_id=spec['instance_id'], identity=config_identity(spec),

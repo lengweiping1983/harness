@@ -13,6 +13,7 @@ from harness.web.context import WebContext
 from harness.web.protocol import openapi, typescript
 from harness.web.response_contracts import response_contracts
 from harness.codex_gateway.protocol import openapi as gateway_openapi
+from harness.app.superagent_remote_protocol import worker_openapi
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--check', action='store_true')
@@ -27,6 +28,7 @@ with tempfile.TemporaryDirectory(prefix='harness-protocol-') as directory:
     finally:
         loop.close()
 outputs = {
+    root / 'docs' / 'openapi-worker-v1.json': json.dumps(worker_openapi(), ensure_ascii=False, indent=2) + '\n',
     root / 'docs' / 'openapi-codex-gateway.json': json.dumps(gateway_openapi(), ensure_ascii=False, indent=2) + '\n',
     root / 'docs' / 'openapi-v1.json': json.dumps(schema, ensure_ascii=False, indent=2) + '\n',
     root / 'web' / 'src' / 'lib' / 'protocol.generated.ts': typescript(),

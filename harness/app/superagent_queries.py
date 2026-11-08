@@ -10,6 +10,9 @@ from .superagent_coordinator_store import PlanRevisionRepository, _hash, _json
 
 # 关系、列与排序均由宿主固定；外部参数只作为绑定值传入。
 _PAGES = {
+    'devices': ('remote_devices d','d','d.device_id','d.device_id,d.identity_hash,d.endpoint,d.capacity,d.created_at'),
+    'leases': ('remote_mission_leases l','l','l.mission_id',
+        "l.mission_id,l.device_id,l.generation,l.expires_at,l.created_at,l.updated_at,CASE WHEN l.state='active' AND l.expires_at<=unixepoch() THEN 'expired' ELSE l.state END AS state"),
     'audit': ('audit_events a','a','a.aggregate_id','a.event_id,a.aggregate_type,a.aggregate_id,a.event_type,a.payload_json,a.actor_json,a.occurred_at'),
     'mandates': ('mandates d JOIN tickets t ON t.ticket_id=d.ticket_id','d','d.ticket_id',
         'd.mandate_id,d.ticket_id,d.source_instance_id,d.policy_version,d.strength,d.scope_json,t.state AS ticket_state,'
@@ -39,7 +42,7 @@ _PAGES = {
         'r.review_id,r.mission_id,r.reviewer_assignment_id,r.candidate_artifact_id,r.plan_revision,'
         'r.acceptance_hash,r.evidence_set_hash,r.state,r.created_at'),
 }
-GLOBAL_RESOURCES = ('missions','audit','mandates','channels','sources','effects','attentions','events','evaluations')
+GLOBAL_RESOURCES = ('missions','devices','leases','audit','mandates','channels','sources','effects','attentions','events','evaluations')
 QUERY_RESOURCES = tuple(_PAGES)
 
 
@@ -86,7 +89,7 @@ class CoordinatorQueries:
         _page(0, limit)
         if mission_id is not None:
             _text(mission_id, 'mission_id')
-            if resource in {'audit','mandates','channels','sources','effects','events','evaluations'}:
+            if resource in {'devices','audit','mandates','channels','sources','effects','events','evaluations'}:
                 raise _error('invalid', field='mission_id')
         elif resource not in GLOBAL_RESOURCES:
             raise _error('invalid', field='mission_id')

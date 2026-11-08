@@ -20948,6 +20948,8 @@
             "schema": {
               "type": "string",
               "enum": [
+                "devices",
+                "leases",
                 "audit",
                 "mandates",
                 "events",

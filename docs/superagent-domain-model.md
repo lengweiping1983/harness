@@ -1,6 +1,6 @@
 # Harness Superagent 统一领域模型与数据契约
 
-> 文档状态：统一开发契约；Phase 1–4 当前实现边界见第 9 节。\
+> 文档状态：统一开发契约；Phase 1–6 当前实现边界见第 9 节。\
 > 文档性质：目标领域模型，不代表当前代码已经实现。\
 > 后续开发唯一入口：[Harness Superagent 统一架构与开发计划](superagent-next-generation-architecture.md#开发执行规则)。\
 > 关联规范：[状态机与合法转移](superagent-state-machines.md) · [架构决策与接口协议](superagent-architecture-decisions.md)。\
@@ -410,7 +410,7 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 
 旧实现仅用于提取可复用原语、识别待改调用方并迁接有效业务回归。新增能力只进入统一协调账本、应用服务和原生 Harness 执行边界；接线缺失不能通过调用旧编排补足。
 
-## 9. Phase 1–5 当前实现边界
+## 9. Phase 1–6 当前实现边界
 
 Phase 4.1–4.6 的统一链路已接通：CLI 和嵌入端口装配同一个 SuperagentService，SourceRegistry、Gate / Evaluation、Mandate / Ticket、Mission / PlanRevision、CoordinatorDagScheduler、原生 Executor、Artifact / Delivery / Review、控制及 Outbox 共用单实例协调账本。生产默认入口不再选择旧 Router / Autonomy，也不装配 Shadow 或旧来源映射。
 
@@ -420,7 +420,9 @@ Schema v21 为原生协调模型调用、本机事件身份、本机指令请求
 
 Phase 5 已提供同库分页／任务详情、本机工作台、人工原操作只读核实、来源／策略／回复授权管理，以及 GitHub Review／CI 上下文和飞书媒体接收／呈现。操作者请求回执与媒体摘要进入同一协调账本，固定请求身份及原消息来源，不复制业务状态。CLI、工作台与可信宿主使用相同查询和领域操作；完整行为与限制见[产品页](superagent.md#统一工作台)。
 
-当前仍限单实例、本机执行和单仓库 Mission。动态 Source Plugin、自动跨来源关联、动态重规划、远程 Worker、操作系统 Sandbox 和多人工作台属后续扩展；显式授权的 Subscription 已可跨来源参与同一活动。离线回归不代表在线模型质量、外部账号、跨平台实机或长期负载验收。
+Phase 6 的 Schema v23 增加不可变 remote_devices 和 remote_mission_leases，Mission 的原设备、代次和撤销状态进入同一协调账本。设备仅保存原生资源及操作回执；Session / Run / 工具 / 工作树仍归该设备的 Harness。远程适配复用同一 Executor Port，固定 Mission 的设备，未知或租约过期不产生替代执行；来源失效停止续租并撤销设备准入。隔离、代理、握手、部署和恢复完整说明见[产品页](superagent.md#隔离与远程-worker)。
+
+当前仍限单实例和单仓库 Mission；多设备分配以 Mission 为单位，不支持跨设备 DAG、自动故障转移或跨设备数据迁移。动态 Source Plugin、自动跨来源关联、动态重规划和多人工作台属后续扩展。远程回环与独立原生进程回归已通过，Linux Rootless Sandbox、真实双机及跨平台实机验收待环境，不能把接口或替身当作 OS 隔离证明。离线回归也不代表在线模型质量、外部账号或长期负载验收。
 
 ## 10. 源码依据
 
@@ -430,6 +432,7 @@ Phase 5 已提供同库分页／任务详情、本机工作台、人工原操作
 - `superagent_source_registry.py`、`superagent_authorization.py`：来源原文、身份、Gate、授权、Ticket 和 Subscription。
 - `superagent_models.py`：无工具原生 Assessor / Planner、冻结提案与原提交恢复。
 - `superagent_execution.py`、`superagent_dag_scheduler.py`、`superagent_executor.py`：Mission、调度、独立资源和原 Run 证据。
+- `superagent_remote_client.py`、`superagent_remote_gateway.py`、`superagent_remote_node.py`、`superagent_remote_leases.py`：同端口远程传输、原生回执、设备归属及撤销；`harness/superagent_worker.py` 为设备入口，`superagent_sandbox.py`、`superagent_process_isolation.py`、`superagent_secret_broker.py` 持有隔离与凭据生命周期。
 - `superagent_artifacts.py`、`superagent_quality_gate.py`、`superagent_checkpoints.py`：文件交付、独立 Review 和阶段协议。
 - `superagent_coordination.py`、`superagent_input_delivery.py`、`superagent_mission_instruction.py`、`superagent_watchdog.py`：控制、逐执行输入、指令和持久监督。
 - `superagent_delivery_runtime.py`、`superagent_provider_adapters.py`、`superagent_outbox.py`、`superagent_effect_recovery.py`：发送准入、原回复目标、确认及未知效果只读恢复。

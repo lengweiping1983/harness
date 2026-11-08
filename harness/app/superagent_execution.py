@@ -17,7 +17,7 @@ from .superagent_coordinator_store import CoordinatorStore, _hash, _json, _now, 
 from .superagent_executor import ExecutionAdapter, WorkerProfile
 from .superagent_coordination import CoordinatorControl, CoordinatorInputDelivery
 from .superagent_scheduler import CoordinatorScheduler
-from .superagent_dag_scheduler import CoordinatorDagScheduler
+from .superagent_dag_scheduler import CoordinatorDagScheduler, _run_started_at
 
 
 _ACTOR = {"kind": "host", "component": "superagent-v2-execution"}
@@ -1619,25 +1619,26 @@ class CoordinatorExecutionService:
         current = self._assignment(assignment["assignment_id"])
         if current["state"] in {"accepted", "running"}:
             current = self._transition("assignment", current["assignment_id"], "capturing",
-                                       facts={"original_run_settled": True})
+                                       facts={"original_run_settled": True},
+                                       changes={"started_at":current.get("started_at") or _run_started_at(snapshot)})
         if current["state"] == "unknown":
             current = self._transition(
                 "assignment", current["assignment_id"], "succeeded",
                 facts={"reconciliation_verified": True, "original_run_completed": True,
                        "output_frozen_and_validated": True, "report_frozen": True},
-                changes={"report_json": report, "ended_at": _now()},
+                changes={"report_json": report, "ended_at": _now(), "started_at":current.get("started_at") or _run_started_at(snapshot)},
                 audit_payload={"reconciliation_ref": f"assignment:{current['assignment_id']}:report",
-                               "run_evidence_ref": evidence_ids[0], "output_ref": output_ref,
+                               "run_id":current["run_id"], "run_evidence_ref": evidence_ids[0], "output_ref": output_ref,
                                "output_hash": snapshot["output_hash"]},
             )
         elif current["state"] == "capturing":
             current = self._transition("assignment", current["assignment_id"], "succeeded",
                 facts={"output_frozen_and_validated": True, "report_frozen": True},
-                changes={"report_json": report, "ended_at": _now()})
+                changes={"report_json": report, "ended_at": _now(), "started_at":current.get("started_at") or _run_started_at(snapshot)})
         elif current["state"] == "stopping":
             current = self._transition("assignment", current["assignment_id"], "succeeded",
                 facts={"original_run_completed": True, "output_frozen_and_validated": True, "report_frozen": True},
-                changes={"report_json": report, "ended_at": _now()})
+                changes={"report_json": report, "ended_at": _now(), "started_at":current.get("started_at") or _run_started_at(snapshot)})
         else:
             raise HarnessError("Assignment is not eligible to freeze a Worker Report", code="superagent/assignment-state-conflict")
         current = self._assignment(current["assignment_id"])
@@ -1780,7 +1781,7 @@ class CoordinatorExecutionService:
             audit = None
         self._transition(
             "assignment", current["assignment_id"], target, facts=facts,
-            changes={"ended_at": _now(), "error_ref": f"harness-run:{current['run_id']}:{status}",
+            changes={"ended_at": _now(), "started_at":current.get("started_at") or _run_started_at(snapshot), "error_ref": f"harness-run:{current['run_id']}:{status}",
                      "report_json": {"kind": "run_failure", "run_id": current["run_id"],
                                      "status": status, "evidence_ids": evidence_ids}},
             audit_payload=audit,

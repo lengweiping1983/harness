@@ -1,0 +1,14 @@
+**
+!docker/
+!docker/superagent-worker.Dockerfile
+!pyproject.toml
+!build_support.py
+!README.md
+!harness/
+!harness/**
+**/research
+**/research/**
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.DS_Store

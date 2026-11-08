@@ -8,8 +8,8 @@ import type {ResourceText} from '@/types'
 import * as sg from '@/lib/superagent'
 
 const tabs = {missions:'ui.sg.missions',sources:'ui.sg.sources',channels:'ui.sg.channels',effects:'ui.sg.effects',attentions:'ui.sg.attentions',
-  policy:'ui.sg.policy',mandates:'ui.sg.mandates',audit:'ui.sg.audit',events:'ui.sg.inputs',evaluations:'ui.sg.evaluations'}
-const detailTabs = {jobs:'ui.sg.jobs',assignments:'ui.sg.assignments',artifacts:'ui.sg.artifacts',reviews:'ui.sg.reviews',inputs:'ui.sg.inputs',outbox:'ui.sg.outbox'}
+  policy:'ui.sg.policy',devices:'ui.sg.devices',leases:'ui.sg.leases',mandates:'ui.sg.mandates',audit:'ui.sg.audit',events:'ui.sg.inputs',evaluations:'ui.sg.evaluations'}
+const detailTabs = {jobs:'ui.sg.jobs',assignments:'ui.sg.assignments',artifacts:'ui.sg.artifacts',reviews:'ui.sg.reviews',inputs:'ui.sg.inputs',outbox:'ui.sg.outbox',leases:'ui.sg.leases'}
 type Tab = keyof typeof tabs
 type DetailTab = keyof typeof detailTabs
 const value = (row: sg.Row, key: string) => typeof row[key] === 'string' || typeof row[key] === 'number' ? String(row[key]) : ''
@@ -238,7 +238,7 @@ export function SuperagentPanel({active = true}: {active?: boolean}) {
           <td className="py-2">
             {!missionId && tab === 'missions' ? <button type="button" className={button} onClick={() => enterMission(String(row.mission_id))}>{t('ui.sg.details')}</button> : null}
             {!missionId && tab === 'sources' ? <button type="button" className={button} disabled={busy} onClick={() => setEditor({source:row,text:JSON.stringify(parsed(String(row.config_json)),null,2),enabled:!!row.enabled})}>{t('ui.sg.edit')}</button> : null}
-            {!missionId && ['audit','mandates'].includes(tab) ? <details><summary>{t('ui.sg.details')}</summary><pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(row,null,2)}</pre></details> : null}
+            {(!missionId && ['audit','mandates','devices','leases'].includes(tab) || missionId && detailTab === 'leases') ? <details><summary>{t('ui.sg.details')}</summary><pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(row,null,2)}</pre></details> : null}
             {!missionId && tab === 'channels' ? <><details><summary>{t('ui.sg.replyTarget')}</summary><pre className="max-h-32 overflow-auto whitespace-pre-wrap text-xs">{String(row.address_json)}</pre></details><button type="button" className={button} disabled={busy} onClick={() => void execute('reply',{channel_id:row.channel_id,expected_source_revision:row.source_revision,enabled:!row.reply_enabled})}>{t(row.reply_enabled ? 'ui.sg.revokeReply' : 'ui.sg.grantReply')}</button></> : null}
             {!missionId && tab === 'attentions' ? <><p className="text-xs text-muted">{t('ui.sg.answerScope')}</p><pre className="whitespace-pre-wrap text-xs">{String(row.options_json ?? '')}</pre>{row.state === 'open' ? <button type="button" className={button} disabled={busy} onClick={() => {setAttention(row);setAnswer('')}}>{t('ui.sg.answer')}</button> : null}</> : null}
             {!missionId && tab === 'effects' ? <button type="button" className={button} disabled={busy} onClick={() => void inspectEffect(row)}>{t('ui.sg.verify')}</button> : null}

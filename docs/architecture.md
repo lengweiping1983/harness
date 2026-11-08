@@ -24,7 +24,7 @@ Superagent 由 `superagent_cli.py`、`app/superagent_config.py` 和 `app/superag
 | 独立执行器默认提供器 | 项目授权及路径策略 | Windows Job／Linux 所属进程组／macOS 所属进程组；其他平台拒绝 | 宿主环境，不隔离文件与网络 |
 | Academy | 独立实验目录及课程限制 | 独立运行器回收 | macOS Seatbelt／Linux bwrap；不可用时拒绝，Windows 不降级到无隔离运行 |
 
-隔离环境提供器及其跨平台实机验收仍是独立工作包；接口和平台分支存在不能代替真实操作系统隔离证据。远程执行与企业治理未在该接口中自动实现。
+Superagent 的远程执行沿同一 Executor Port 经签名设备网关进入原生 Harness，设备与原 Mission 租约归协调账本，原生回执归设备。Linux Worker 的 Rootless Docker Runner、独立 UID 与宿主 Secret Broker 单独持有隔离和凭据生命周期，不由通用 ExecutionEnvironment 自动获得；详细支持、配额和恢复边界见[产品页](superagent.md#隔离与远程-worker)。真实隔离、双机与跨平台验收仍待环境，接口和平台分支存在不能代替实机证据；企业治理未实现。
 
 轮次交付投影位于 `harness/session/turn_delivery.py`，验证回执位于 `harness/session/verification.py`，HTTP 收尾读取位于 `harness/web/api/turn_completion.py`。它们复用既有轮次和工具日志，不另建运行事实源；查询在不可变事件快照上计算，返回前核对所属历史与目录。可信宿主可用 `Harness(..., codex_gateway_home=...)` 将网关账号目录显式装配到其拥有的数据范围，默认产品路径不变；离线评估使用独立临时目录，不修改全局环境变量。
 

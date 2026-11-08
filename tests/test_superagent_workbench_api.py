@@ -51,7 +51,7 @@ class WorkbenchApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((self.root/'state').exists())
         write = await self.request('POST',base+'/commands',{'request_id':'submit','action':'submit','payload':{'text':'Fix the typo.'}})
         self.assertEqual(write['instance_id'],'product')
-        for resource in ('missions','audit','mandates','channels','sources','effects','attentions','events','evaluations','policy','local_options'):
+        for resource in ('missions','devices','leases','audit','mandates','channels','sources','effects','attentions','events','evaluations','policy','local_options'):
             with self.subTest(resource=resource):
                 result = await self.request('GET',base+'/read?resource='+resource)
                 self.assertEqual(result['connection_id'],key)

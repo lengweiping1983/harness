@@ -55,7 +55,7 @@ export async function read(item: Connection, resource: string, params: Record<st
   return result.data
 }
 const rowIds: Record<string, string> = {missions:'mission_id',jobs:'job_id',assignments:'assignment_id',artifacts:'artifact_id',reviews:'review_id',
-  audit:'event_id',mandates:'mandate_id',channels:'channel_id',sources:'source_instance_id',effects:'effect_id',attentions:'attention_id',inputs:'input_id',outbox:'message_id',events:'trigger_id',evaluations:'evaluation_id'}
+  devices:'device_id',leases:'mission_id',audit:'event_id',mandates:'mandate_id',channels:'channel_id',sources:'source_instance_id',effects:'effect_id',attentions:'attention_id',inputs:'input_id',outbox:'message_id',events:'trigger_id',evaluations:'evaluation_id'}
 export async function page(item: Connection, resource: string, mission?: string, cursor?: string, signal?: AbortSignal): Promise<Page> {
   const value = await read(item, resource, {...(mission ? {mission_id:mission} : {}),...(cursor ? {cursor} : {}),limit:32}, signal)
   if (value.resource !== resource || value.mission_id !== (mission ?? null) || !Array.isArray(value.items) || value.items.length > 32
@@ -134,7 +134,7 @@ export const mediaUrl = (item: Connection, mediaId: string) => {
 }
 
 export const STATE_LABELS: Record<string,string> = {
-  planning:'ui.sg.state.planning',running:'ui.sg.state.running',integrating:'ui.sg.state.integrating',reviewing:'ui.sg.state.reviewing',
+  active:'ui.sg.state.active',planning:'ui.sg.state.planning',running:'ui.sg.state.running',integrating:'ui.sg.state.integrating',reviewing:'ui.sg.state.reviewing',
   cancelling:'ui.sg.state.cancelling',completed:'ui.sg.state.completed',blocked:'ui.sg.state.blocked',unknown:'ui.sg.state.unknown',
   rejected:'ui.sg.state.rejected',suppressed:'ui.sg.state.suppressed',cancelled:'ui.sg.state.cancelled',pending:'ui.sg.state.pending',
   accepted:'ui.sg.state.accepted',ready:'ui.sg.state.ready',checkpointed:'ui.sg.state.checkpointed',done:'ui.sg.state.done',

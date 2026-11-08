@@ -43,9 +43,10 @@ class WorktreeService:
         return self.run_git(cwd, *args, input=input).stdout
 
     def run_git(self, cwd: Path, *args: str, input: bytes | None = None,
-                env: dict[str, str] | None = None, allowed_returncodes: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[bytes]:
+                env: dict[str, str] | None = None, allowed_returncodes: tuple[int, ...] = (0,),
+                output_limit: int | None = None) -> subprocess.CompletedProcess[bytes]:
         """宿主 Git 共用隔离环境；特殊退出码和环境覆盖由内部调用方明确声明。"""
-        proc = run_git_process(cwd, *args, input=input, env=env)
+        proc = run_git_process(cwd, *args, input=input, env=env, output_limit=output_limit)
         if proc.returncode not in allowed_returncodes:
             raise HarnessError(diagnostic_text(proc.stderr).strip(), code="git/failed")
         return proc

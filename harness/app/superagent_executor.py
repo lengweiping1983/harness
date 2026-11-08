@@ -82,8 +82,12 @@ class WorkerProfile:
 
     @property
     def fingerprint(self) -> str:
+        return self.fingerprint_for_repo(self.repo)
+
+    def fingerprint_for_repo(self, repo: str) -> str:
+        """设备路径映射不改变其余 Profile 授权；逻辑仓库身份仍由原宿主固定。"""
         return _hash(_json({
-            "profile_id": self.profile_id, "repo": self.repo, "description": self.description,
+            "profile_id": self.profile_id, "repo": repo, "description": self.description,
             "source_instance_ids": list(self.source_instance_ids), "actions": list(self.actions),
             "tools": list(self.tools), "model": self.model,
             "max_turns": self.max_turns, "max_seconds": self.max_seconds,
@@ -270,6 +274,13 @@ class HarnessExecutorAdapter:
         """只提供宿主配置允许的模板；来源默认模板不限制多角色选择。"""
         return tuple(self.profiles[identity] for identity in self._source_profiles.get(source_instance_id, ()))
 
+    def runtime_manifest(self):
+        """只暴露执行约束，不包含模型凭据、会话内容或运行中的资源。"""
+        return {'model':self.harness.config.model,'language':self.harness.config.language,'provider_root':self.harness.config.base_url,
+            'permission_policy':self.harness.config.permission_policy,'max_workers':self.max_workers,
+            'default_profiles':dict(self._default_profiles),
+            'tool_effects':{key:self.tool_effects(profile) for key,profile in self.profiles.items()}}
+
     def snapshot_workspace(self, worker):
         """核对所属工作树并读取含未提交文件的真实树身份。"""
         from .worktree_delivery import snapshot_tree
@@ -297,7 +308,7 @@ class HarnessExecutorAdapter:
                 or manager.git(target, "rev-parse", "--verify", receipt["ref"] + "^{commit}").strip() != receipt["commit"]):
             raise HarnessError(tr("superagent.corrupt"), code="superagent/artifact-corrupt")
         def bounded(*args, limit):
-            result = run_git(target, *args, output_limit=limit)
+            result = manager.run_git(target, *args, output_limit=limit)
             if result.returncode != 0:
                 raise HarnessError(diagnostic_text(result.stderr).strip(), code="git/failed")
             if len(result.stdout) > limit:

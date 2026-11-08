@@ -210,3 +210,33 @@ it('consumes English Chinese English labels in the same panel without refetching
   expect(reads).toHaveLength(count)
   expect(writes).toHaveLength(0)
 })
+
+it('shows device ownership and the original lease without exposing credentials',async () => {
+  await loaded()
+  delayed=(resource,key) => resource==='devices' ? Promise.resolve(onePage(key,resource,{device_id:'worker-a',endpoint:'https://worker.invalid',capacity:2,identity_hash:'bound-identity'}))
+    : resource==='leases' ? Promise.resolve(onePage(key,resource,{mission_id:'original-mission',device_id:'worker-a',state:'expired',generation:1,expires_at:1})) : undefined
+  button('ui.sg.devices').props.onClick();render()
+  await vi.waitFor(() => expect(text(render())).toContain('worker-a'))
+  expect(text(render())).toContain('https://worker.invalid')
+  button('ui.sg.leases').props.onClick();render()
+  await vi.waitFor(() => expect(text(render())).toContain('original-mission'))
+  expect(text(render())).toContain(t('ui.sg.state.expired'))
+  const count=reads.length,labels=[]
+  for (const locale of ['en','zh-CN','en'] as const) {await setLocale(locale);labels.push(text(render()))}
+  expect(labels[0]).toBe(labels[2]);expect(labels[0]).not.toBe(labels[1]);expect(reads).toHaveLength(count)
+  expect(writes).toHaveLength(0)
+})
+
+it('reads a mission lease only within the selected mission detail',async () => {
+  await loaded()
+  delayed=(resource,key,url) => {
+    const mission=url.searchParams.get('mission_id')
+    if (resource==='mission') return Promise.resolve(Response.json(envelope(key,resource,{mission:{mission_id:mission,title:'Selected mission'},counts:{},plan:null,control:null,watchdog:null})))
+    if (mission) return Promise.resolve(Response.json(envelope(key,resource,{resource,mission_id:mission,items:resource==='leases' ? [{mission_id:mission,device_id:'owned-device',state:'active',generation:1}] : [],total:resource==='leases' ? 1 : 0,has_more:false,next_cursor:null})))
+  }
+  button('ui.sg.details').props.onClick();render()
+  button('ui.sg.leases').props.onClick();render()
+  await vi.waitFor(() => expect(text(render())).toContain('owned-device'))
+  expect(reads.some(path => {const url=new URL(path,'http://fixture');return url.searchParams.get('resource')==='leases' && url.searchParams.get('mission_id')==='a-0'})).toBe(true)
+  expect(writes).toHaveLength(0)
+})

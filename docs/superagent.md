@@ -36,6 +36,7 @@ python -m harness.cli --superagent /path/to/config.json --superagent-status
 | `secrets` | Secret 名称到显式环境变量名的映射，只保存引用，不把凭据值写入协调账本 |
 | `interval`、`once_timeout`、`max_workers` | 可选轮询间隔、批次等待上限和资源总量上限；统一 Scheduler 保持有界并发与背压 |
 | `watchdog` | 可选 `stale_after`、`max_stale_ticks`、`action`；只支持 `attention` 或 `block`，不授权自动重放 |
+| `execution` | 可选远程设备与租约配置；省略时仍使用本机原生 Executor，显式配置后 Worker 只走登记设备，详见下文 |
 
 `policy.sources.<id>.scope.thread_ids: ["$current"]` 表示在研判时绑定当前来源的确切 Thread。它不是进入 Mandate 的通配权限：Gate、创建及后续重验均解析为实际 Thread ID，不能据此订阅另一个 Thread。需要跨来源协作时，可信宿主须先显式授权确切 Source / Thread Scope，再调用 Subscription API；自动推断跨来源关联与动态重规划仍属后续产品能力。
 
@@ -75,7 +76,72 @@ Gate 先确定 Actor、是否明确指向、来源修订和 Thread 范围；Asse
 
 Profile 可用 `max_work_turns` 显式启用有限阶段协议：`continue` 冻结当前交付，新 Assignment 使用独立资源并导入原产物；`ready` 才允许解锁下游。阶段和总 Assignment 预算、非法报告、重复检查点、未确认工具及后台作业都会参与门禁。只有当前计划已确认 applied 的节点指令进入有界阶段上下文，不向新 Run 重放旧指令。
 
-运行、工具和文件事实仍归 Harness 原生 Session / Run / Worktree / Background Job。协调账本保存引用、回执和决策，不复制另一套执行器，也不构成操作系统沙箱。
+运行、工具和文件事实仍归 Harness 原生 Session / Run / Worktree / Background Job。协调账本保存引用、回执和决策，不复制另一套执行器。本机 Worktree 本身不构成操作系统沙箱；远程隔离入口见下一节。
+
+## 隔离与远程 Worker
+
+远程模式仍由同一个 SuperagentService 执行授权、计划、调度、质量门与交付；只将 Executor Port 接到登记设备。Assessor / Planner 继续在协调端运行，Worker 的 Session、Run、工具和文件原件位于所属设备。每个 Mission 首次创建工作树时按设备当前未结束 Mission 数／容量选择设备，同一 Mission 的所有 Work / Integrator / Reviewer 固定在同一设备，沿原 Artifact / Delivery 协议交接。当前不做跨设备 DAG 文件传输，也不把失联任务迁到另一设备。
+
+在统一配置中显式加入以下字段，并保留其他必需字段：
+
+```json
+{
+  "secrets": {"worker-a": "PROJECT_WORKER_A_KEY", "worker-b": "PROJECT_WORKER_B_KEY"},
+  "execution": {
+    "lease_seconds": 60,
+    "devices": [
+      {"device_id": "worker-a", "url": "https://worker-a.example", "key_ref": "secret://worker-a", "capacity": 2},
+      {"device_id": "worker-b", "url": "https://worker-b.example", "key_ref": "secret://worker-b", "capacity": 2}
+    ]
+  }
+}
+```
+
+设备最多 32 个，容量为 1–256 个未结束 Mission；租约为 15–300 秒。每台设备使用独立且至少 32 字节的签名密钥、独立根 URL 和 Secret 引用；不同引用解析成相同密钥也拒绝启动。跨主机必须 HTTPS，证书由系统信任库验证，禁止重定向；HTTP 仅限回环地址。URL 不带路径，端点固定为 `/executor/v1`。请求和回执都签名，绑定实例、设备、配置哈希、原操作号及 nonce，请求时钟容差 60 秒；设备与协调端须同步时钟。独立协议源与产物为 `superagent_remote_protocol.worker_openapi()` 和 [Worker OpenAPI](openapi-worker-v1.json)。
+
+`execution` 纳入配置身份。给已有配置加入设备会改变身份，必须显式使用新的专用协调目录；不迁移旧 Mission，也不改写旧账本。设备的 Profile、模型、语言、权限策略、默认 Profile、原生工具效果和资源上限须匹配协调端握手；仓库物理路径通过导出模板映射，不改变逻辑 Profile。此握手信任持有设备密钥的操作者，不是硬件或镜像远程证明。
+
+### 设备准备与启动
+
+生产 Worker 入口要求 Linux、非 root 宿主用户、本机 Unix Socket 上的 Rootless Docker，以及生效的 cgroup v2 CPU／内存／进程／禁用 Swap 边界。macOS／Windows 本机执行仍使用原入口，不能将其默认为 Linux 隔离 Worker；协调端通过 HTTP 协议连接设备，跨平台实机验收尚未完成。缺少 Docker、Rootless 身份、实际配额或固定镜像时明确失败，不回退到宿主 Shell。
+
+先在明确授权构建的环境准备镜像。Dockerfile 需要操作者提供经核对的 Debian 系 Python 3.14 基础镜像摘要；构建上下文仅含打包源码，不包含 Git、运行目录、凭据或 research。以下为部署命令，未在当前无 Docker 的开发环境执行：
+
+```sh
+docker build --build-arg PYTHON_IMAGE='python:3.14-slim@sha256:经核对的摘要' -f docker/superagent-worker.Dockerfile -t harness-worker:local .
+docker image inspect harness-worker:local --format '{{.Id}}'
+python -m harness.superagent_worker --export-config /path/to/config.json --device worker-a --output /path/to/worker-a.json
+```
+
+导出只创建不存在的模板文件，不创建状态、不读取或导出凭据值。将模板送到该设备，显式填写：
+
+- `host_state`：已存在的专用设备数据目录；与其他设备、实例及用户项目分开。
+- `profiles.*.repo`：设备上明确允许只读挂载的 Git 副本，须包含冻结基线提交；同一逻辑仓库的 Profile 指向同一副本。运行期间可由操作者更新副本，内核只从该副本取得指定提交，不自动联网抓取仓库。
+- `sandbox.image`：上一步实际取得的本地 `sha256:…` 镜像 ID，或 `仓库@sha256:…`；其余字段为 `memory_mb`、`cpus`、`pids`、`disk_bytes`。启动禁止自动拉取镜像。
+- `listen`：明确 IP 和端口；非回环监听同时填写 `cert` 与 `key` 的证书文件路径，并使协调端 URL 和证书匹配。
+- `key_env`、`api_key_env`：设备签名密钥及模型凭据的环境变量名。前者与协调端该设备映射相同，后者默认 `HARNESS_WORKER_MODEL_API_KEY`；凭据值由设备环境提供。
+
+模板中的 `coordinator_profiles`、`coordinator_repos`、`identity_hash` 和执行约束保持导出值。启动命令为：
+
+```sh
+python -m harness.superagent_worker --config /path/to/worker-a.json
+```
+
+网关与 Secret Broker 在设备宿主运行，原生内核位于固定 Docker 容器。容器只挂载自己的状态、独立工作树／Git 视图、Broker Socket 目录及登记仓库副本；不挂载宿主 Home 或 Docker Socket。Rootless 命名空间内的受信内核以 UID 0 管理原生记录，限定保留身份切换、文件归属和终止所需能力；每个不可信 Worker 的 Shell／文件辅助进程使用独立非 root UID、清空附加组、无长期凭据。文件辅助进程不可被同 UID Shell 调试。命令使用独立 Git 视图；内核收集产物始终使用受保护的原生 Git 元数据，忽略用户可替换的 `.git` 入口。
+
+容器禁用网络，根文件系统只读，禁止提权，固定内存、CPU、进程数、文件句柄、单文件大小及临时盘上限。原生启动核对实际 cgroup 文件，不能仅凭 Docker 参数认定配额生效。`disk_bytes` 另外以周期扫描统计专用状态内普通文件的逻辑总大小，超限或观察失败结束容器并保留未知回执；这是采样限制，不能保证瞬间总磁盘用量不超限。当前远程工具只允许 read／write／edit／glob／grep／bash 及所属后台作业管理，其他工具在启动前拒绝。
+
+长期模型密钥留在宿主 Broker，容器只获得与原 Mission／租约代次／模型／请求预算绑定的短期能力。Unix Socket 权限阻止不可信 UID 直接读取；代理仅向固定模型根地址的 `/chat/completions` 转发，不采纳 Worker URL 或鉴权头，不重试未知请求。当前仅提供兼容 Chat Completions 的模型传输，不承诺其他模型协议。`model-proxy-audit.jsonl` 只追加身份、时间和请求摘要，不记录密钥或能力值；原生运行内容仍按原 Harness 机制保存。
+
+### 租约、断线与原回执
+
+协调账本保存不可变设备身份与 Mission 的原设备／代次，设备只保存原生资源引用、租约和操作回执，不复制 Mission 状态机。原生写入先记录 pending，再调用一次原操作；完成回执只可按相同操作身份和冻结参数读取。连接丢失、pending、原生未确认或后台进程仍在时保留 unknown；恢复只查询原资源，不能用新 Run、另一设备或本机执行替代。
+
+Tick 重新核验 Mandate 后才续租。来源停用或范围收窄导致授权失效时，协调端撤销原租约并向设备提交一次固定 revoke；设备持久零到期值阻止旧心跳恢复授权。撤销回执表示停止准入，不能当作原 Run 已停止的证明；失联时等待原租约自然到期。设备到期后按当前拥有的原 Run 和进程句柄发起停止；停止失败保留未知及原错误，不使用历史 PID。过期／未知 Mission 继续占用其设备容量，不能借过期分配给替代设备；已撤销租约不能续期，迟到结果不能结算成当前成功。
+
+`remote_lease_errors` 保存本轮续租／撤销传输错误，协调服务继续提供查询与原操作恢复；一次模式将其作为未完成条件。关闭停止新准入，按确切原运行提交停止并只读等待实际收尾；无法确认时明确失败，保留原账本与租约。设备退出等待所属请求、内核和代理收尾；相同设备状态的第二个内核因进程锁拒绝接管。正常结束后将自己的工作树／Git 视图归还宿主映射身份，不删除文件；异常结束可能保留 Rootless 映射 UID，产品不自动清理或迁移。
+
+CLI 的 `--superagent-list devices` 与 `--superagent-list leases`、工作台的设备／租约分页及 Mission 详情显示原设备、代次、状态和到期观察，不返回凭据。设备列表表示登记事实，不能当作设备当前在线证明。
 
 ## 持续协作、指令与控制
 
@@ -126,7 +192,7 @@ python -m harness.cli --superagent /path/to/config.json --superagent-list review
 
 任务详情返回 Mission、当前冻结计划的 Hash／验收条件、控制、监督摘要和各类关联记录数量。冻结计划复用既有完整 Hash、Job 物化和依赖校验，损坏原件明确拒绝，不修复或重建。分页与详情不读取运行观察文件、凭据，不启动宿主，不执行恢复或 Schema 升级。
 
-可信 SDK 使用 `CoordinatorHost.queries.page(resource, mission_id=..., limit=..., cursor=...)` 和 `.mission(mission_id)`；查询持有同一 Host 操作租约，缓存句柄在关闭后同样拒绝。工作台与 CLI 使用相同 CoordinatorQueries；全局资源还包括 sources、channels、mandates、audit、effects、attentions、events、evaluations。effects 只列出 unknown；inputs 和 outbox 必须指定 Mission，展示其所属 Ticket 的输入与回复，因此同一 Ticket 的多个 Mission 可看到相同记录。
+可信 SDK 使用 `CoordinatorHost.queries.page(resource, mission_id=..., limit=..., cursor=...)` 和 `.mission(mission_id)`；查询持有同一 Host 操作租约，缓存句柄在关闭后同样拒绝。工作台与 CLI 使用相同 CoordinatorQueries；全局资源还包括 devices、leases、sources、channels、mandates、audit、effects、attentions、events、evaluations；leases 也可指定 Mission 范围。effects 只列出 unknown；inputs 和 outbox 必须指定 Mission，展示其所属 Ticket 的输入与回复，因此同一 Ticket 的多个 Mission 可看到相同记录。
 
 ## 统一工作台
 
@@ -152,4 +218,6 @@ python -m harness.cli --superagent /path/to/config.json --superagent-list review
 
 Phase 4 的 CLI 切换、统一配置、持续协作、质量门、信道发送和旧编排退役沿同一服务实现。旧 Router、Dispatcher、MissionStore、Worker / Results 编排、独立信道／控制账本、生产 Shadow 和旧来源映射 API 已删除。已有 Coordinator Schema 历史继续受校验和保护；不导入、清理或迁移旧 Superagent 运行目录。
 
-Phase 5 的本机统一工作台、人工只读核实、来源与策略管理、GitHub Review／CI 上下文和飞书媒体接收／呈现已实现。多人审批、自动跨来源关联、目标与依赖变更、动态重规划、远程 Worker、多设备恢复及操作系统 Sandbox 仍属于后续扩展。当前业务证据来自隔离数据、确定性模型、真实本机 Harness / Git 和回环 HTTP；不代表在线模型质量、外部账号部署、跨平台实机或长期负载验收。定向验证与历史问题依据见[协调审查](superagent-review.md)，执行规则见[开发与测试](development.md)。
+Phase 5 的本机统一工作台、人工只读核实、来源与策略管理、GitHub Review／CI 上下文和飞书媒体接收／呈现已实现。Phase 6 已接通上述远程端口、租约、代理与隔离启动路径，本机定向证据包括真实 Harness / Git、签名回环 HTTP、两个逻辑设备及独立原生进程。当前环境没有 Docker，未构建 Worker 镜像，也未取得真实 Linux Rootless 隔离、双机断网、跨平台和 Sandbox 越权验收，不能据此宣称 Phase 6 严格验收完成或生产级不可信执行已获证明。
+
+多人审批、自动跨来源关联、目标与依赖变更、动态重规划、跨设备 DAG 和自动故障转移仍未实现。本机测试也不代表在线模型质量、外部账号部署或长期负载验收。定向验证与历史问题依据见[协调审查](superagent-review.md)，执行规则见[开发与测试](development.md)。

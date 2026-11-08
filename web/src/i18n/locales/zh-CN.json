@@ -5133,5 +5133,8 @@
   "ui.sg.state.waiting": "等待中",
   "ui.sg.state.read": "已读",
   "ui.sg.state.delivered": "已投递",
-  "ui.sg.state.handed_back": "已归还"
+  "ui.sg.state.handed_back": "已归还",
+  "ui.sg.devices": "Worker 设备",
+  "ui.sg.leases": "设备租约",
+  "ui.sg.state.active": "有效"
 }

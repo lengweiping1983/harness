@@ -5133,5 +5133,8 @@
   "ui.sg.state.waiting": "Waiting",
   "ui.sg.state.read": "Read",
   "ui.sg.state.delivered": "Delivered",
-  "ui.sg.state.handed_back": "Handed back"
+  "ui.sg.state.handed_back": "Handed back",
+  "ui.sg.devices": "Worker devices",
+  "ui.sg.leases": "Device leases",
+  "ui.sg.state.active": "Active"
 }
