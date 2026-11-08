@@ -49,6 +49,26 @@ class AcpIoBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(str(caught.exception), tr('acp.client.65516b50779b'))
                 self.assertTrue(client._closed)
 
+    async def test_non_finite_json_numbers_reject_frame_and_close_process(self):
+        for language in ('en', 'zh-CN', 'en'):
+            with self.subTest(language=language), current_language.set(language):
+                for constant in ('NaN', 'Infinity', '-Infinity'):
+                    client = AcpClient(AcpRunnerConfig('fixture'))
+                    reader = asyncio.StreamReader()
+                    reader.feed_data((f'{{"jsonrpc":"2.0","id":1,"result":{{"value":{constant}}}}}\n').encode())
+                    reader.feed_eof()
+                    process = SimpleNamespace(stdout=reader, stdin=SimpleNamespace(close=Mock()))
+                    client._proc = process
+                    pending = asyncio.get_running_loop().create_future()
+                    client._requests[1] = pending
+                    with patch('harness.acp.client.stop_process', new_callable=AsyncMock) as stop:
+                        await client._read()
+                        stop.assert_awaited_once_with(process)
+                    with self.assertRaises(AcpError) as caught:
+                        await pending
+                    self.assertEqual(str(caught.exception), tr('acp.client.761c95d5aa14'))
+                    self.assertTrue(client._closed)
+
     async def test_valid_send_keeps_original_utf8_frame(self):
         client = AcpClient(AcpRunnerConfig('fixture'))
         writer = SimpleNamespace(write=Mock(), drain=AsyncMock())

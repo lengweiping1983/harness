@@ -329,7 +329,7 @@ Ralph工具注册前要求部署轮次上限为正整数，每轮超时和计算
 
 ### 外部智能体（ACP）
 
-外部智能体使用 ACP v1 的独立 stdio 进程，按 UTF-8 JSON 行交换消息。预设为 OpenCode（`opencode acp`）、Codex（`codex-acp`）和 Claude Code（`claude-agent-acp`）。`list_external_agents` 只检查 PATH 中的适配器和底层 CLI，`available` 表示适配器可找到，登录状态为 `not_checked`；检测不启动进程、不读取登录凭据、不自动安装。
+外部智能体使用 ACP v1 的独立 stdio 进程，按 UTF-8 JSON 行交换消息；解析遵循严格 JSON 数字语法，拒绝 NaN、Infinity 和 -Infinity 等非标准数值。预设为 OpenCode（`opencode acp`）、Codex（`codex-acp`）和 Claude Code（`claude-agent-acp`）。`list_external_agents` 只检查 PATH 中的适配器和底层 CLI，`available` 表示适配器可找到，登录状态为 `not_checked`；检测不启动进程、不读取登录凭据、不自动安装。
 
 `delegate_agent` 仅在宿主同时开启文件与命令能力时注册，属于需要审批的执行工具，只能选择预设智能体；只读权限拒绝委派。每次委派创建独立外部对话，外部权限选择前后再次检查当前准入条件，只认可本次请求中的选项。只有 `stopReason=end_turn` 且没有拒绝权限才标记完成；正文流保留末尾 32768 字符并报告丢弃数量，外部正文与工具标题保持原文。
 
