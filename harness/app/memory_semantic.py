@@ -33,12 +33,16 @@ def candidate_window(store, cwd, rows: list[dict], offset: int, snapshot: str | 
 
 def fuse_candidates(rows: list[dict], query: str, similarities, limit: int) -> list[tuple[dict, dict]]:
     """保留每个排序来源的名次；相似度与融合得分都不是事实置信度。"""
-    if len(similarities) != len(rows) or any(not math.isfinite(float(value)) for value in similarities):
+    try:
+        scores = tuple(float(value) for value in similarities)
+    except (OverflowError, TypeError, ValueError):
+        raise ValueError(tr('python.memory.semantic.similarities')) from None
+    if len(scores) != len(rows) or not all(math.isfinite(value) for value in scores):
         raise ValueError(tr('python.memory.semantic.similarities'))
     lexical = {row['id']: index for index, row in enumerate(rank(rows, query), start=1)}
-    order = sorted(range(len(rows)), key=lambda index: float(similarities[index]), reverse=True)
+    order = sorted(range(len(rows)), key=lambda index: scores[index], reverse=True)
     dense = {rows[index]['id']: position for position, index in enumerate(order, start=1)
-             if similarities[index] >= 0.3}
+             if scores[index] >= 0.3}
     candidates = []
     for row in rows:
         identifier = row['id']
@@ -95,7 +99,10 @@ class LocalMemoryCandidates:
             raise ValueError(tr('python.memory.semantic.document_count'))
         validated = []
         for vector in generated:
-            value = tuple(float(item) for item in vector)
+            try:
+                value = tuple(float(item) for item in vector)
+            except (OverflowError, TypeError, ValueError):
+                raise ValueError(tr('python.memory.semantic.document_vector')) from None
             if len(value) != 384 or not all(math.isfinite(item) for item in value) or not 0 < math.hypot(*value) < math.inf:
                 raise ValueError(tr('python.memory.semantic.document_vector'))
             compact = array('f', value)

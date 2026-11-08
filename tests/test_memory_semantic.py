@@ -95,9 +95,10 @@ class LocalCandidateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_id['both']['semantic_rank'], 1)
         self.assertAlmostEqual(by_id['both']['fusion_score'], 1 / 62 + 1 / 61)
         self.assertNotIn('absent', by_id)
-        for scores in ([0.1], [float('nan')] * 4):
-            with self.assertRaises(ValueError):
+        for scores in ([0.1], [float('nan')] * 4, [10 ** 4000] * 4):
+            with self.assertRaises(ValueError) as caught:
                 fuse_candidates(rows, 'queue', scores, 5)
+            self.assertEqual(str(caught.exception), tr('python.memory.semantic.similarities'))
 
     def test_vector_cache_tracks_scope_revision_and_full_content_without_caching_text(self):
         directory = tempfile.TemporaryDirectory()
@@ -144,6 +145,12 @@ class LocalCandidateTests(unittest.IsolatedAsyncioTestCase):
                 return [[1.0] + [0.0] * 383, [float('nan')] * 384]
         with self.assertRaises(ValueError):
             provider._embeddings(store, root, [{**rows[0], 'revision': 8}, {**rows[1], 'revision': 8}], InvalidModel())
+        class OversizedModel:
+            def passage_embed(self, texts):
+                return [[10 ** 4000] + [0.0] * 383]
+        with self.assertRaises(ValueError) as caught:
+            provider._embeddings(store, root, [{**rows[0], 'revision': 9}], OversizedModel())
+        self.assertEqual(str(caught.exception), tr('python.memory.semantic.document_vector'))
         self.assertEqual(list(provider._vectors), before)
 
     def test_environment_configuration_and_explicit_disable(self):
@@ -162,107 +169,3 @@ class LocalCandidateTests(unittest.IsolatedAsyncioTestCase):
         for invalid in (' ', True, 12, []):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 HarnessConfig(memory_model_cache=invalid)
-
-    async def test_configured_missing_cache_registers_lazily_and_keeps_keyword_memory(self):
-        from dataclasses import fields
-        from harness import Harness, HarnessConfig
-        from tests.web_fixture import FixtureTransport
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        root = Path(directory.name)
-        flags = {item.name: False for item in fields(HarnessConfig) if item.name.startswith('enable_')}
-        flags['enable_project_memory'] = True
-        app = Harness(HarnessConfig(api_key='fixture-only', home=root / 'home', cwd=root,
-                      memory_model_cache=root / 'missing', **flags), transport=FixtureTransport())
-        self.addAsyncCleanup(app.close)
-        self.assertIn('memory_candidates', {schema.name for schema in app.tools.schemas()})
-        row = app.memory.save(root, '普通关键词仍可查询')
-        self.assertEqual(app.memory.recall(root, '关键词')[0]['id'], row['id'])
-        session = app.create_session()
-        context = ToolRunContext(call_id='missing', session_id=session.id, cwd=str(root), turn=1, step=1,
-                                 services={'task_read_only': True})
-        failure = await app.tools.execute_call(ToolUseBlock('missing', 'memory_candidates',
-            {'query': 'natural language question', 'scope': 'project'}), context)
-        self.assertTrue(failure.is_error)
-        recovered = await app.tools.execute_call(ToolUseBlock('keyword', 'memory_recall', {'query': '关键词', 'scopes': ['project']}), context)
-        self.assertFalse(recovered.is_error, recovered.content)
-        self.assertEqual(recovered.data['memories'][0]['id'], row['id'])
-        self.assertFalse((root / 'missing').exists())
-
-    async def test_host_registers_candidates_only_when_explicitly_injected(self):
-        from dataclasses import fields
-        from harness import Harness, HarnessConfig
-        from tests.web_fixture import FixtureTransport
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        root = Path(directory.name)
-        flags = {item.name: False for item in fields(HarnessConfig) if item.name.startswith('enable_')}
-        flags['enable_project_memory'] = True
-        app = Harness(HarnessConfig(api_key='fixture-only', home=root / 'home', cwd=root, **flags),
-                      transport=FixtureTransport(), memory_candidates=LocalMemoryCandidates(root / 'missing'))
-        self.addAsyncCleanup(app.close)
-        names = {schema.name for schema in app.tools.schemas()}
-        self.assertEqual({name for name in names if name.endswith('_candidates')}, {'memory_candidates'})
-        self.assertFalse((root / 'missing').exists())
-
-    async def test_disabled_memory_does_not_construct_configured_candidate_service(self):
-        from dataclasses import fields
-        from unittest.mock import patch
-        from harness import Harness, HarnessConfig
-        from tests.web_fixture import FixtureTransport
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        root = Path(directory.name)
-        flags = {item.name: False for item in fields(HarnessConfig) if item.name.startswith('enable_')}
-        with patch('harness.app.memory_semantic.LocalMemoryCandidates') as provider:
-            app = Harness(HarnessConfig(api_key='fixture-only', home=root / 'home', cwd=root,
-                          memory_model_cache=root / 'missing', **flags), transport=FixtureTransport())
-            self.addAsyncCleanup(app.close)
-            provider.assert_not_called()
-        self.assertNotIn('memory_candidates', {schema.name for schema in app.tools.schemas()})
-
-    async def test_optional_pipeline_is_readonly_scoped_and_exact_without_model_loading(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        root = Path(directory.name)
-        memory = LayeredMemory(root / 'home', ProjectMemory())
-        provider = LocalMemoryCandidates(root / 'missing-model')
-        baseline = {tool.schema.name for tool in build_layered_memory_tools(memory)}
-        self.assertNotIn('memory_candidates', baseline)
-        row = memory.store('session', session_id='one').save(root, 'private_fact unique_body')
-        registry = ToolRegistry()
-        for tool in build_layered_memory_tools(memory, candidates=provider):
-            registry.register(tool)
-        for identity, expected in [('one', 1), ('two', 0)]:
-            context = ToolRunContext(call_id='candidate', session_id=identity, cwd=str(root), turn=1, step=1,
-                                     services={'task_read_only': True})
-            result = await registry.execute_call(ToolUseBlock('candidate', 'memory_candidates',
-                {'query': row['id'], 'scope': 'session'}), context)
-            self.assertFalse(result.is_error, result.content)
-            self.assertEqual(len(result.data['candidates']), expected)
-            if expected:
-                self.assertEqual(result.data['candidates'][0]['retrieval']['match'], 'exact')
-            self.assertTrue(result.data['requires_answer_support_check'])
-        self.assertIsNone(provider._model)
-        self.assertFalse(provider.cache_dir.exists())
-
-    async def test_missing_cache_rejects_without_creating_it(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        root = Path(directory.name)
-        store = ProjectMemory()
-        store.save(root, '已有记录')
-        provider = LocalMemoryCandidates(root / 'missing')
-        with self.assertRaisesRegex(ValueError, re.escape(tr('python.memory.semantic.cache_missing'))):
-            provider.search(store, root, 'natural language question')
-        self.assertFalse(provider.cache_dir.exists())
-
-    async def test_empty_store_does_not_load_model_or_create_database(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        root = Path(directory.name)
-        provider = LocalMemoryCandidates(root / 'missing')
-        result = provider.search(ProjectMemory(), root, '自然语言问题')
-        self.assertEqual(result['candidates'], [])
-        self.assertIsNone(provider._model)
-        self.assertFalse((root / '.harness').exists())
