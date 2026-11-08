@@ -17,9 +17,16 @@ def invalid(message: str) -> HarnessError:
 
 
 def number(value: Any, label: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-        raise invalid(tr('python.schedules.6689fe82d3b1', p0=f'{label}'))
-    return float(value)
+    message = tr('python.schedules.6689fe82d3b1', p0=f'{label}')
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise invalid(message)
+    try:
+        numeric = float(value)
+    except OverflowError:
+        raise invalid(message) from None
+    if not math.isfinite(numeric):
+        raise invalid(message)
+    return numeric
 
 
 def zone(name: str):

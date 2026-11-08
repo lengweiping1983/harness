@@ -42,6 +42,19 @@ class ScheduleCurrentContractTests(unittest.TestCase):
                             self.assertEqual(caught.exception.message,
                                 ('执行时间' if kind == 'once' else '周期') + '必须是有限数值')
 
+    def test_oversized_integers_are_rejected_as_invalid_schedule_values(self):
+        oversized = 10 ** 4000
+        for language in ('en', 'zh-CN', 'en'):
+            with current_language.set(language):
+                for kind, field, label in (('once', 'at', 'Execution time'), ('interval', 'seconds', 'Cycle')):
+                    with self.subTest(language=language, kind=kind):
+                        with self.assertRaises(HarnessError) as caught:
+                            validate_schedule({'schedule': {'kind': kind, field: oversized}})
+                        self.assertEqual(caught.exception.code, 'automation/invalid')
+                        expected = (label + ' must be a finite number' if language == 'en'
+                                    else ('执行时间' if kind == 'once' else '周期') + '必须是有限数值')
+                        self.assertEqual(caught.exception.message, expected)
+
     def test_current_schedule_kinds_keep_explicit_values_and_persist(self):
         with tempfile.TemporaryDirectory() as directory:
             service = AutomationService(Path(directory) / 'automations.db', SimpleNamespace(get_session=Mock()))
