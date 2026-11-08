@@ -96,16 +96,25 @@ export async function tick() {
     const stops = ['pairing_required', 'pairing_denied', 'bridge_response_invalid', 'bridge_request_failed'];
     await status(stops.includes(error.message) ? error.message : 'bridge_unavailable', stops.includes(error.message) ? false : undefined);
   }
-  finally {running = false;}
+  finally {
+    try {await scheduleNextCheck();}
+    finally {running = false;}
+  }
+}
+
+function scheduleNextCheck() {
+  const seconds = 120 + Math.floor(Math.random() * 61);
+  return chrome.alarms.create(ALARM, {delayInMinutes: seconds / 60});
 }
 
 async function ensureAlarm() {
-  if (!await chrome.alarms.get(ALARM)) await chrome.alarms.create(ALARM, {periodInMinutes: 0.5});
+  const alarm = await chrome.alarms.get(ALARM);
+  if (!alarm || alarm.periodInMinutes !== undefined) await scheduleNextCheck();
 }
 void ensureAlarm();
 chrome.runtime.onStartup.addListener(ensureAlarm);
 chrome.runtime.onInstalled.addListener(ensureAlarm);
-chrome.alarms.onAlarm.addListener(alarm => {if (alarm.name === ALARM) void tick();});
+chrome.alarms.onAlarm.addListener(async alarm => {if (alarm.name === ALARM) await tick();});
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) return;
   if (message.type === 'start') {

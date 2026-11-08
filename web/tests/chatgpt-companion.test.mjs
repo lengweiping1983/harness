@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-let saved, state, page, claims, sends, mode, claimedPhase
+let saved, state, page, claims, sends, mode, claimedPhase, alarm, alarmCreates
+const listeners={}
 const url='https://chatgpt.com/c/00000000-0000-0000-0000-000000000001'
 const clone=value=>structuredClone(value)
 const reset=()=>{
@@ -9,12 +10,13 @@ const reset=()=>{
  state={state:'continue',milestone:'m1',url,pending:null,sent_phases:[]}
  page={ready:true,assistantKey:'a',hasAssistant:true,hasImage:false,userMessages:[]}
  claims=0;sends=0;mode='confirmed';claimedPhase=undefined
+ alarm=undefined;alarmCreates=[]
 }
 reset()
 globalThis.chrome={
  storage:{local:{setAccessLevel:async()=>{},get:async keys=>Object.fromEntries((typeof keys==='string'?[keys]:keys).map(key=>[key,clone(saved[key])])),set:async value=>Object.assign(saved,clone(value)),remove:async key=>{delete saved[key]}}},
- alarms:{get:async()=>({}),create:async()=>{},onAlarm:{addListener(){}}},
- runtime:{id:'fixture',onStartup:{addListener(){}},onInstalled:{addListener(){}},onMessage:{addListener(){}}},
+ alarms:{get:async()=>clone(alarm),create:async(name,options)=>{alarm={name,...options};alarmCreates.push(clone(alarm))},onAlarm:{addListener(callback){listeners.alarm=callback}}},
+ runtime:{id:'fixture',getURL:path=>'chrome-extension://fixture/'+path,onStartup:{addListener(callback){listeners.startup=callback}},onInstalled:{addListener(callback){listeners.installed=callback}},onMessage:{addListener(callback){listeners.message=callback}}},
  action:{setBadgeText:async()=>{}},tabs:{get:async()=>({url}),sendMessage:async(_id,message)=>{
   if(message.type==='probe')return clone(page)
   sends++
@@ -39,6 +41,87 @@ globalThis.fetch=async(raw,options)=>{
  return {ok:true,json:async()=>result}
 }
 const {tick}=await import('../../extensions/chatgpt-companion/background.mjs')
+
+test('successive automatic checks draw fresh one-shot delays from 120 through 180 seconds',async t=>{
+ reset();state.state='working'
+ const samples=[0,0.5,1-Number.EPSILON]
+ t.mock.method(Math,'random',()=>{assert.ok(samples.length);return samples.shift()})
+ await listeners.startup()
+ assert.deepEqual(alarm,{name:'harness-companion',delayInMinutes:2})
+ await listeners.alarm({name:'unrelated'})
+ assert.equal(alarmCreates.length,1);assert.equal(saved.binding.checkedAt,undefined)
+ for(const expected of [2.5,3]){
+  alarm=undefined
+  await listeners.alarm({name:'harness-companion'})
+  assert.deepEqual(alarm,{name:'harness-companion',delayInMinutes:expected})
+  assert.equal(saved.binding.reason,'waiting_executor')
+ }
+ assert.equal(alarmCreates.length,3);assert.equal(samples.length,0)
+ assert.equal(claims,0);assert.equal(sends,0)
+})
+
+test('worker startup preserves a scheduled one-shot alarm and replaces a periodic alarm',async t=>{
+ reset();t.mock.method(Math,'random',()=>0.5)
+ alarm={name:'harness-companion',scheduledTime:Date.now()+150000}
+ const scheduled=clone(alarm)
+ await listeners.startup();await listeners.installed()
+ assert.deepEqual(alarm,scheduled);assert.equal(alarmCreates.length,0)
+ alarm={name:'harness-companion',periodInMinutes:0.5}
+ await listeners.installed()
+ assert.deepEqual(alarm,{name:'harness-companion',delayInMinutes:2.5})
+ alarm=undefined
+ await listeners.startup()
+ assert.equal(alarmCreates.length,2)
+})
+
+test('an in-flight check schedules only after completion and overlapping ticks do not add checks',async t=>{
+ reset();state.state='working';t.mock.method(Math,'random',()=>0)
+ let release,accepted
+ const held=new Promise(resolve=>{release=resolve})
+ const started=new Promise(resolve=>{accepted=resolve})
+ const original=globalThis.fetch
+ t.mock.method(globalThis,'fetch',async(...args)=>{accepted();await held;return original(...args)})
+ const checking=tick()
+ try{
+  await started
+  await tick()
+  assert.equal(alarmCreates.length,0)
+ }finally{release();await checking}
+ assert.deepEqual(alarmCreates,[{name:'harness-companion',delayInMinutes:2}])
+})
+
+test('bridge failures still schedule a randomized read check and alarm failures release the tick lock',async t=>{
+ reset();state.state='working';t.mock.method(Math,'random',()=>1-Number.EPSILON)
+ const fetchMock=t.mock.method(globalThis,'fetch',async()=>{throw TypeError('offline')})
+ await tick()
+ assert.equal(saved.binding.reason,'bridge_unavailable');assert.equal(saved.binding.enabled,true)
+ assert.deepEqual(alarm,{name:'harness-companion',delayInMinutes:3})
+ fetchMock.mock.restore()
+ const failure=Error('alarm unavailable')
+ const createMock=t.mock.method(chrome.alarms,'create',async()=>{throw failure})
+ await assert.rejects(tick(),error=>error===failure)
+ createMock.mock.restore()
+ await tick()
+ assert.equal(saved.binding.reason,'waiting_executor');assert.equal(alarmCreates.length,2)
+ assert.equal(claims,0);assert.equal(sends,0)
+})
+
+test('enabling continuation still checks immediately and schedules the next randomized check',{timeout:1000},async t=>{
+ reset();state.state='working';t.mock.method(Math,'random',()=>0.5)
+ let scheduled
+ const finished=new Promise(resolve=>{scheduled=resolve})
+ const original=chrome.alarms.create
+ t.mock.method(chrome.alarms,'create',async(...args)=>{await original(...args);scheduled()})
+ const binding=clone(saved.binding)
+ saved.binding.enabled=false
+ const response=await new Promise(resolve=>{
+  assert.equal(listeners.message({type:'start',binding},{id:chrome.runtime.id,url:chrome.runtime.getURL('popup.html')},resolve),true)
+ })
+ assert.deepEqual(response,{ok:true})
+ await finished
+ assert.equal(saved.binding.reason,'waiting_executor')
+ assert.deepEqual(alarm,{name:'harness-companion',delayInMinutes:2.5})
+})
 
 test('a confirmed continuation is not sent again without new durable progress',async()=>{
  reset();await tick();await tick();assert.equal(sends,1);assert.equal(claims,1)

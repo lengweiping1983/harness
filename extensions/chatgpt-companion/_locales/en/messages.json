@@ -75,7 +75,7 @@
     "message": "Reply recognized. Confirming that the page stays idle before continuation."
   },
   "timing": {
-    "message": "Checks roughly every 30 seconds. After a reply ends and the page stays idle, continuation usually takes 30–60 seconds; browser sleep or scheduling delays can take longer."
+    "message": "Checks immediately when enabled, then waits a newly randomized 120–180 seconds after each check. Once a reply ends and the page stays idle, continuation usually takes one or two checks (about 2–6 minutes); browser sleep or scheduling delays can take longer."
   },
   "last_checked": {
     "message": "Last check: {time}"

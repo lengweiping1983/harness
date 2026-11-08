@@ -74,7 +74,7 @@ try{
    assert.equal(await popup.locator('label[for="token"]').textContent(),language==='en'?'Pairing token':'配对码')
    assert.equal(await popup.locator('#language').getAttribute('aria-label'),language==='en'?'Language':'语言')
    assert.equal(await popup.locator('#version').textContent(),'1.0.0')
-   assert.match(await popup.locator('[data-key="timing"]').textContent(),/30/)
+   assert.match(await popup.locator('[data-key="timing"]').textContent(),/120[–～]180/)
    assert.equal(await popup.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
    assert.equal(await popup.evaluate(()=>document.documentElement.scrollHeight<=innerHeight),true)
    assert.equal(await popup.evaluate(()=>document.querySelector('.panels').getBoundingClientRect().height<330),true)
