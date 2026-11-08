@@ -18,6 +18,20 @@ from harness.app.superagent_executor import HarnessExecutorAdapter, WorkerProfil
 from harness.core.errors import HarnessError
 
 
+def _advance_watchdog_activity(snapshot: dict) -> dict:
+    assignments = []
+    for item in snapshot.get("assignments", []):
+        updated = dict(item)
+        last = item.get("last_activity")
+        event = dict(last) if isinstance(last, dict) else {
+            "time": "2026-11-07T00:00:01Z", "type": "assistant_message",
+        }
+        event["seq"] = (-1 if last is None else last["seq"]) + 1
+        updated["last_activity"] = event
+        assignments.append(updated)
+    return {**snapshot, "assignments": assignments}
+
+
 class FakeExecutionAdapter:
     def __init__(self, instance_id: str, profile: WorkerProfile, shared: dict | None = None):
         self.instance_id = instance_id
@@ -599,19 +613,20 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         artifacts = self.host._artifacts_service
         original_begin = artifacts._begin
         blocked_once = [False]
+        activity_snapshot = [None]
 
         def block_after_lease(kind, key, payload):
             effect, fresh = original_begin(kind, key, payload)
             if kind == "artifact.capture" and fresh and not blocked_once[0]:
                 blocked_once[0] = True
+                activity_snapshot[0] = self.host._execution_service.watchdog_activity(mission_id)
+                self.assertTrue(activity_snapshot[0]["assignments"])
                 healthy = watchdog.observe(
-                    mission_id, activity={"run_status": "completed", "event_seq": 1},
-                    now="2026-11-07T00:00:00Z",
+                    mission_id, activity=activity_snapshot[0], now="2026-11-07T00:00:00Z",
                 )
                 self.assertEqual(healthy["state"], "healthy")
                 blocked = watchdog.observe(
-                    mission_id, activity={"run_status": "completed", "event_seq": 1},
-                    now="2026-11-07T00:00:02Z",
+                    mission_id, activity=activity_snapshot[0], now="2026-11-07T00:00:02Z",
                 )
                 self.assertEqual(blocked["state"], "blocked")
             return effect, fresh
@@ -641,9 +656,9 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         still_paused = await self.host.execution.reconcile(assignment_id)
         self.assertEqual(still_paused["state"], "capturing")
         self.assertEqual(self.shared["artifact_capture_calls"], [])
+        progressed_activity = _advance_watchdog_activity(activity_snapshot[0])
         progressed = scheduler._watchdog.observe(
-            mission_id, activity={"run_status": "completed", "event_seq": 2},
-            now="2026-11-07T00:00:03Z",
+            mission_id, activity=progressed_activity, now="2026-11-07T00:00:03Z",
         )
         self.assertEqual(progressed["state"], "healthy")
         recovered = await self.host.execution.reconcile(assignment_id)
@@ -673,18 +688,19 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         artifacts = self.host._artifacts_service
         original_begin = artifacts._begin
         blocked_once = [False]
+        activity_snapshot = [None]
 
         def block_after_lease(kind, key, payload):
             effect, fresh = original_begin(kind, key, payload)
             if kind == "artifact.import" and fresh and not blocked_once[0]:
                 blocked_once[0] = True
+                activity_snapshot[0] = self.host._execution_service.watchdog_activity(mission_id)
+                self.assertTrue(activity_snapshot[0]["assignments"])
                 watchdog.observe(
-                    mission_id, activity={"run_status": "waiting", "event_seq": 1},
-                    now="2026-11-07T00:00:00Z",
+                    mission_id, activity=activity_snapshot[0], now="2026-11-07T00:00:00Z",
                 )
                 blocked = watchdog.observe(
-                    mission_id, activity={"run_status": "waiting", "event_seq": 1},
-                    now="2026-11-07T00:00:02Z",
+                    mission_id, activity=activity_snapshot[0], now="2026-11-07T00:00:02Z",
                 )
                 self.assertEqual(blocked["state"], "blocked")
             return effect, fresh
@@ -712,7 +728,7 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(blocked_again["errors"])
         self.assertEqual(self.shared["artifact_import_calls"], [])
         progressed = watchdog.observe(
-            mission_id, activity={"run_status": "ready", "event_seq": 2},
+            mission_id, activity=_advance_watchdog_activity(activity_snapshot[0]),
             now="2026-11-07T00:00:03Z",
         )
         self.assertEqual(progressed["state"], "healthy")
@@ -1280,19 +1296,20 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         scheduler._watchdog = watchdog
         original = scheduler._prepare_review
         blocked_once = [False]
+        activity_snapshot = [None]
 
         def watchdog_after_preflight(*args):
             prepared = original(*args)
             if not blocked_once[0]:
                 blocked_once[0] = True
+                activity_snapshot[0] = self.host._execution_service.watchdog_activity(mission_id)
+                self.assertTrue(activity_snapshot[0]["assignments"])
                 healthy = watchdog.observe(
-                    mission_id, activity={"run_status": "running", "event_seq": 1},
-                    now="2026-11-07T00:00:00Z",
+                    mission_id, activity=activity_snapshot[0], now="2026-11-07T00:00:00Z",
                 )
                 self.assertEqual(healthy["state"], "healthy")
                 blocked = watchdog.observe(
-                    mission_id, activity={"run_status": "running", "event_seq": 1},
-                    now="2026-11-07T00:00:02Z",
+                    mission_id, activity=activity_snapshot[0], now="2026-11-07T00:00:02Z",
                 )
                 self.assertEqual(blocked["state"], "blocked")
             return prepared
@@ -1304,9 +1321,9 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 db.execute("SELECT COUNT(*) FROM reviews WHERE mission_id=?", (mission_id,)).fetchone()[0], 0,
             )
+        progressed_activity = _advance_watchdog_activity(activity_snapshot[0])
         progressed = watchdog.observe(
-            mission_id, activity={"run_status": "completed", "event_seq": 2},
-            now="2026-11-07T00:00:03Z",
+            mission_id, activity=progressed_activity, now="2026-11-07T00:00:03Z",
         )
         self.assertEqual(progressed["state"], "healthy")
         recovered = await self.host.execution.reconcile(reviewer_id)

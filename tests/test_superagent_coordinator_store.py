@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from harness.app.superagent_coordinator_store import CoordinatorStore, MIGRATIONS, _APPLICATION_ID
+from harness.app.superagent_watchdog import CoordinatorWatchdog
 from harness.app.superagent_outbox import OutboxEffectService
 from harness.core.errors import HarnessError
 
@@ -154,6 +155,35 @@ class CoordinatorStoreTests(unittest.TestCase):
                 self.assertIsNone(events[1]["correlation_id"])
                 self.assertEqual(final["state"], "completed")
                 self.assertEqual(final["last_event_id"], events[-1]["event_id"])
+
+    def test_migration17_preserves_blocked_watchdog_baseline_as_untrusted(self):
+        path = Path(self.temp.name) / "schema-v16-watchdog.sqlite3"
+        instance_id, identity, _ = self._create_legacy_schema_with_effect(path, 16)
+        stamp = "2026-01-01T00:00:00.000Z"
+        with closing(sqlite3.connect(path)) as db:
+            db.executescript("""
+                INSERT INTO tickets(ticket_id,mandate_id,origin_trigger_id,title,state,created_at,updated_at,aggregate_revision)
+                VALUES('ticket-wd-migration','mandate-wd-migration','trigger-wd-migration','Watchdog migration','open',
+                '2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',1);
+                INSERT INTO missions(mission_id,ticket_id,sequence,state,repo,base_commit,budgets_json,created_at,updated_at,aggregate_revision)
+                VALUES('mission-wd-migration','ticket-wd-migration',1,'planning','D:/repo','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','{}',
+                '2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',1);
+                INSERT INTO watchdog_snapshots(mission_id,fingerprint,state,last_progress_at,observed_at,aggregate_revision)
+                VALUES('mission-wd-migration','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','healthy',
+                '2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',1);
+                UPDATE watchdog_snapshots SET state='stalled',observed_at='2026-01-01T00:15:00.000Z',aggregate_revision=2;
+                UPDATE watchdog_snapshots SET state='blocked',observed_at='2026-01-01T00:30:00.000Z',aggregate_revision=3;
+            """)
+        upgraded = CoordinatorStore(path, instance_id=instance_id, identity=identity)
+        with closing(sqlite3.connect(path)) as db:
+            row = db.execute("SELECT state,last_progress_at,activity_baseline_trusted FROM watchdog_snapshots").fetchone()
+        self.assertEqual(tuple(row), ("blocked", stamp, 0))
+        result = CoordinatorWatchdog(upgraded, limits={
+            "stale_after": 1.0, "max_stale_ticks": 2, "action": "block",
+        }).observe("mission-wd-migration", activity={}, now="2026-01-01T00:30:01.000Z")
+        self.assertEqual(result["state"], "blocked")
+        self.assertEqual(result["last_progress_at"], stamp)
+        self.assertTrue(result["activity_baseline_trusted"])
 
     def test_migration7_unique_index_failure_rolls_back_entire_upgrade(self):
         path = Path(self.temp.name) / "schema-v6-duplicate-assignments.sqlite3"
@@ -677,6 +707,9 @@ class CoordinatorStoreTests(unittest.TestCase):
                 "input_deliveries", "artifacts", "deliveries", "reviews", "mission_controls",
                 "control_commands", "mission_instructions", "watchdog_snapshots",
             } <= names)
+            self.assertIn("activity_baseline_trusted", {
+                row[1] for row in db.execute("PRAGMA table_info(watchdog_snapshots)")
+            })
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], len(MIGRATIONS))
             self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], len(MIGRATIONS))
             self.assertIn("updated_at", {row[1] for row in db.execute("PRAGMA table_info(workers)")})
@@ -794,8 +827,8 @@ class CoordinatorStoreTests(unittest.TestCase):
 
         with self.store.transaction(write=True) as db:
             db.execute(
-                "INSERT INTO watchdog_snapshots(mission_id,fingerprint,state,last_progress_at,observed_at,aggregate_revision) "
-                "VALUES(?,?,'healthy',?,?,1)",
+                "INSERT INTO watchdog_snapshots(mission_id,fingerprint,state,last_progress_at,observed_at,"
+                "aggregate_revision,activity_baseline_trusted) VALUES(?,?,'healthy',?,?,1,1)",
                 (mission["mission_id"], "a" * 64, stamp, stamp),
             )
             db.execute(
@@ -814,6 +847,13 @@ class CoordinatorStoreTests(unittest.TestCase):
                 "aggregate_revision=3 WHERE mission_id=?",
                 ("b" * 64, "2026-11-06T00:20:00.000Z", "2026-11-06T00:20:00.000Z", mission["mission_id"]),
             )
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.transaction(write=True) as db:
+                db.execute(
+                    "UPDATE watchdog_snapshots SET activity_baseline_trusted=0,observed_at=?,aggregate_revision=4 "
+                    "WHERE mission_id=?",
+                    ("2026-11-06T00:21:00.000Z", mission["mission_id"]),
+                )
         with self.assertRaises(sqlite3.IntegrityError):
             with self.store.transaction(write=True) as db:
                 db.execute("DELETE FROM watchdog_snapshots WHERE mission_id=?", (mission["mission_id"],))

@@ -316,7 +316,7 @@ Draft、模型报告或 send() 已调用均不等于消息 Sent；只有 Provide
 
 **ControlCommand** 保存 pause | resume | cancel 的独立命令、期望修订、提交身份和原回执。MissionControl 是 Mission 当前控制投影，不取代原 Run / Background Job 的真实状态。
 
-**WatchdogSnapshot** 保存 mission_id, fingerprint, state, revision, first_seen, last_progress, last_seen, stagnant_ticks, reason。Watchdog 观察活性，不自行重放 Assignment 或 Effect。
+**WatchdogSnapshot** 持久保存 mission_id、fingerprint、ledger_fingerprint、activity_baseline_trusted、state、aggregate_revision、last_progress_at、observed_at；**WatchdogAssignmentCursor** 按原 Assignment / Run / Session 记录 last_event_seq、last_event_time、last_event_type、aggregate_revision、last_progress_revision。Schema v18 仅以已确认账本进度或完整且单调的原生 Run 活动观察恢复 stalled / blocked；全部活跃 Run 的身份、游标须先完整核验，单个 Run 缺失、倒退、同序号内容冲突时不得提前消耗其他 Run 的新回执。Schema v17 的首次可信观察仍只建立基线，不刷新进度或解除阻断。Watchdog 仅观察活性，不自行重放 Assignment 或 Effect；此保守策略可能推迟其他已进展 Run 的状态恢复，须在下一次完整观察后重新确认。
 
 **AuditEvent** 追加记录状态转移、授权、提交、回执、人工控制、策略变更、未知结果和恢复操作。至少包括：
 
@@ -363,7 +363,8 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 | Outbox | outbox_messages | message_id；Provider Key 按 Provider 作用域唯一 | 外部发送意图与回执 |
 | Control | control_commands | command_id；唯一 idempotency_key | 控制命令及回执 |
 | Control | mission_controls | mission_id | 当前控制投影和 generation |
-| Watchdog | watchdog_snapshots | mission_id | 活性指纹与停滞观察 |
+| Watchdog | watchdog_snapshots | mission_id | 原生活动与账本进度指纹、可信基线与停滞状态 |
+| Watchdog | watchdog_assignment_cursors | (mission_id, assignment_id)；assignment_id 唯一 | 绑定原 Run / Session 的持久单调事件游标 |
 | Audit | audit_events | seq、唯一 event_id | 追加式审计 |
 | API | idempotency_keys | (scope, operation_key) | API / CLI 操作幂等身份 |
 | Schema | schema_migrations | version | DDL 迁移版本和 checksum |

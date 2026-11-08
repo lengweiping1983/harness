@@ -1110,6 +1110,7 @@ class CoordinatorExecutionService:
             activity.append({
                 "assignment_id": assignment["assignment_id"],
                 "run_id": snapshot.get("run_id"),
+                "session_id": worker["session_id"],
                 "status": snapshot.get("status"),
                 "settled": snapshot.get("settled"),
                 "turn": snapshot.get("turn", reference.get("turn")),

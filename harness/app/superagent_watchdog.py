@@ -264,6 +264,8 @@ class CoordinatorWatchdog:
             state = row["state"]
             fingerprint = row["fingerprint"]
             revision = row["aggregate_revision"]
+            baseline_trusted = row["activity_baseline_trusted"]
+            ledger_fingerprint = row["ledger_fingerprint"]
             observed = _coordinator_time(row["observed_at"], "observed_at")
             progress = _coordinator_time(row["last_progress_at"], "last_progress_at")
             if (
@@ -271,6 +273,11 @@ class CoordinatorWatchdog:
                 or not isinstance(fingerprint, str) or len(fingerprint) != 64
                 or any(char not in "0123456789abcdef" for char in fingerprint)
                 or type(revision) is not int or revision < 1
+                or type(baseline_trusted) is not int or baseline_trusted not in (0, 1)
+                or (ledger_fingerprint is not None and (
+                    not isinstance(ledger_fingerprint, str) or len(ledger_fingerprint) != 64
+                    or any(char not in "0123456789abcdef" for char in ledger_fingerprint)
+                ))
                 or observed != row["observed_at"] or progress != row["last_progress_at"]
                 or progress > observed
             ):
@@ -283,6 +290,8 @@ class CoordinatorWatchdog:
                 "state": state, "last_progress_at": progress, "observed_at": observed,
                 "aggregate_revision": revision, "stagnant_seconds": stagnant_seconds,
                 "stagnant_ticks": int(stagnant_seconds // limits["stale_after"]),
+                "activity_baseline_trusted": bool(baseline_trusted),
+                "ledger_fingerprint": ledger_fingerprint,
             }
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             raise _error("corrupt") from exc
@@ -300,6 +309,61 @@ class CoordinatorWatchdog:
         if len(encoded) > CoordinatorWatchdog._ACTIVITY_LIMIT:
             raise _error("invalid", field="watchdog.activity")
         return json.loads(encoded)
+
+    @staticmethod
+    def _activity_observations(
+        activity: dict[str, Any], active_assignments: dict[str, dict[str, str | None]],
+    ) -> tuple[bool, dict[str, dict[str, Any]]]:
+        """逐项核验活动身份；不完整或异常快照不能消费本轮任一 Run 的进度。"""
+        if "assignments" not in activity:
+            return not active_assignments, {}
+        inspections = activity.get("assignments")
+        if type(inspections) is not list:
+            return False, {}
+        seen: set[str] = set()
+        observations: dict[str, dict[str, Any]] = {}
+        for item in inspections:
+            if type(item) is not dict:
+                return False, {}
+            assignment_id = item.get("assignment_id")
+            if (
+                not isinstance(assignment_id, str) or not assignment_id
+                or assignment_id not in active_assignments or assignment_id in seen
+            ):
+                return False, {}
+            seen.add(assignment_id)
+            if item.get("inspection") != "confirmed":
+                continue
+            identity = active_assignments[assignment_id]
+            if (
+                item.get("run_id") != identity["run_id"]
+                or item.get("session_id") != identity["session_id"]
+                or not isinstance(item.get("status"), str) or not item["status"]
+                or type(item.get("settled")) is not bool
+            ):
+                continue
+            last = item.get("last_activity")
+            if last is None:
+                sequence, event_time, event_type = -1, None, None
+            elif type(last) is dict:
+                sequence = last.get("seq")
+                event_time = last.get("time")
+                event_type = last.get("type")
+                if (
+                    type(sequence) is not int or sequence < 0
+                    or not isinstance(event_time, str) or not event_time
+                    or not isinstance(event_type, str) or not event_type
+                ):
+                    continue
+            else:
+                continue
+            observations[assignment_id] = {
+                "run_id": identity["run_id"], "session_id": identity["session_id"],
+                "last_event_seq": sequence, "last_event_time": event_time,
+                "last_event_type": event_type,
+            }
+        complete = seen == set(active_assignments) and len(observations) == len(active_assignments)
+        return complete, observations
 
     @staticmethod
     def _fingerprint(mission, jobs, assignments, activity: dict[str, Any]) -> str:
@@ -333,6 +397,74 @@ class CoordinatorWatchdog:
         }
         return _coordinator_hash(_coordinator_json(payload))
 
+    @staticmethod
+    def _ledger_fingerprint(mission, jobs, assignments) -> str:
+        """只将账本中已开始的原生运行和冻结结果视为可追溯进度。"""
+        payload = {
+            "mission": {
+                "mission_id": mission["mission_id"],
+                "plan_revision": mission["plan_revision"],
+                "round_no": mission["round_no"],
+            },
+            "jobs": [
+                {"job_id": row["job_id"], "state": row["state"], "result_hash": row["result_hash"]}
+                for row in jobs
+                if row["state"] in {"done", "checkpointed"} or row["result_hash"] is not None
+            ],
+            "assignments": [
+                {"assignment_id": row["assignment_id"], "run_id": row["run_id"],
+                 "started_at": row["started_at"], "ended_at": row["ended_at"]}
+                for row in assignments if row["started_at"] is not None
+            ],
+        }
+        return _coordinator_hash(_coordinator_json(payload))
+
+    @staticmethod
+    def _persist_activity_cursors(db, mission_id, observations, next_revision):
+        """先核验全部原生 Run 游标，再在同一事务内统一保存；异常快照不部分消费进度。"""
+        changes = []
+        inserts = []
+        for aid, item in observations.items():
+            row = db.execute(
+                "SELECT * FROM watchdog_assignment_cursors WHERE mission_id=? AND assignment_id=?",
+                (mission_id, aid),
+            ).fetchone()
+            if row is None:
+                inserts.append((aid, item))
+                continue
+            if (row["run_id"], row["session_id"]) != (item["run_id"], item["session_id"]):
+                return False, False
+            seq = item["last_event_seq"]
+            old = row["last_event_seq"]
+            if seq < old or (seq == old and (
+                item["last_event_time"] != row["last_event_time"]
+                or item["last_event_type"] != row["last_event_type"]
+            )):
+                return False, False
+            if seq > old:
+                changes.append((aid, item, row["aggregate_revision"]))
+
+        # 全部校验通过后才允许推进任一原生游标，避免部分可信快照误解锁 Mission。
+        for aid, item in inserts:
+            db.execute(
+                "INSERT INTO watchdog_assignment_cursors(mission_id,assignment_id,run_id,session_id,"
+                "last_event_seq,last_event_time,last_event_type,aggregate_revision,last_progress_revision) "
+                "VALUES(?,?,?,?,?,?,?,1,0)",
+                (mission_id, aid, item["run_id"], item["session_id"], item["last_event_seq"],
+                 item["last_event_time"], item["last_event_type"]),
+            )
+        for aid, item, revision in changes:
+            result = db.execute(
+                "UPDATE watchdog_assignment_cursors SET last_event_seq=?,last_event_time=?,last_event_type=?,"
+                "aggregate_revision=aggregate_revision+1,last_progress_revision=? "
+                "WHERE mission_id=? AND assignment_id=? AND aggregate_revision=?",
+                (item["last_event_seq"], item["last_event_time"], item["last_event_type"],
+                 next_revision, mission_id, aid, revision),
+            )
+            if result.rowcount != 1:
+                raise RuntimeError("Watchdog cursor revision changed")
+        return bool(changes), True
+
     def observe(
         self, mission_id: str, *, activity: dict[str, Any] | None = None,
         now: str | None = None,
@@ -358,38 +490,84 @@ class CoordinatorWatchdog:
             ).fetchall()
             assignments = db.execute(
                 "SELECT assignment.assignment_id,assignment.aggregate_revision,assignment.state,"
-                "assignment.attempt_no,assignment.run_id,assignment.started_at,assignment.ended_at "
+                "assignment.attempt_no,assignment.run_id,assignment.session_id,assignment.started_at,assignment.ended_at "
                 "FROM assignments AS assignment JOIN jobs AS job ON job.job_id=assignment.job_id "
                 "WHERE job.mission_id=? ORDER BY assignment.assignment_id",
                 (mission_id,),
             ).fetchall()
+            active_assignments = {
+                row["assignment_id"]: {"run_id": row["run_id"], "session_id": row["session_id"]}
+                for row in assignments
+                if row["state"] in {"submitting", "accepted", "running", "capturing", "stopping", "unknown"}
+            }
+            activity_complete, activity_observations = self._activity_observations(
+                activity_value, active_assignments,
+            )
             fingerprint = self._fingerprint(mission, jobs, assignments, activity_value)
+            ledger_fingerprint = self._ledger_fingerprint(mission, jobs, assignments)
             previous = db.execute(
                 "SELECT * FROM watchdog_snapshots WHERE mission_id=?",
                 (mission_id,),
             ).fetchone()
             if previous is None:
                 db.execute(
-                    "INSERT INTO watchdog_snapshots(mission_id,fingerprint,state,last_progress_at,observed_at,aggregate_revision) "
-                    "VALUES(?,?,'healthy',?,?,1)",
-                    (mission_id, fingerprint, observed_at, observed_at),
+                    "INSERT INTO watchdog_snapshots(mission_id,fingerprint,state,last_progress_at,observed_at,"
+                    "aggregate_revision,activity_baseline_trusted,ledger_fingerprint) "
+                    "VALUES(?,?,'healthy',?,?,1,?,?)",
+                    (mission_id, fingerprint, observed_at, observed_at, int(activity_complete), ledger_fingerprint),
                 )
+                if activity_complete:
+                    self._persist_activity_cursors(
+                        db, mission_id, activity_observations, next_revision=1,
+                    )
             else:
                 current = self._decode(previous, self.limits)
                 observed_at = max(observed_at, current["observed_at"])
-                if fingerprint == current["fingerprint"] and observed_at == current["observed_at"]:
+                if (
+                    fingerprint == current["fingerprint"]
+                    and ledger_fingerprint == current["ledger_fingerprint"]
+                    and observed_at == current["observed_at"]
+                    and (current["activity_baseline_trusted"] or not activity_complete)
+                ):
                     return current
-                # 原生观察异常仅表示检查不可用，不能作为解除持久 blocked 的真实进度。
-                inspections = activity_value.get("assignments")
-                if (current["state"] == "blocked" and isinstance(inspections, list)
-                        and any(type(item) is not dict or item.get("inspection") != "confirmed"
-                                for item in inspections)):
-                    fingerprint = current["fingerprint"]
-                progressed = fingerprint != current["fingerprint"]
+                baseline_trusted = current["activity_baseline_trusted"]
+                cursor_progress = False
+                cursor_complete = True
+                next_revision = current["aggregate_revision"] + 1
+                if baseline_trusted:
+                    if activity_complete:
+                        cursor_progress, cursor_complete = self._persist_activity_cursors(
+                            db, mission_id, activity_observations, next_revision,
+                        )
+                    else:
+                        cursor_complete = False
+                elif activity_complete:
+                    _, cursor_complete = self._persist_activity_cursors(
+                        db, mission_id, activity_observations, next_revision,
+                    )
+                    baseline_trusted = cursor_complete
+                complete_snapshot = activity_complete and cursor_complete
+                old_ledger_fingerprint = current["ledger_fingerprint"]
+                if old_ledger_fingerprint is None:
+                    next_ledger_fingerprint = ledger_fingerprint
+                    ledger_progress = False
+                elif complete_snapshot:
+                    next_ledger_fingerprint = ledger_fingerprint
+                    ledger_progress = ledger_fingerprint != old_ledger_fingerprint
+                else:
+                    next_ledger_fingerprint = old_ledger_fingerprint
+                    ledger_progress = False
+                opaque_progress = (
+                    baseline_trusted and old_ledger_fingerprint is not None
+                    and not active_assignments and "assignments" not in activity_value
+                    and fingerprint != current["fingerprint"]
+                )
+                progressed = ledger_progress or cursor_progress or opaque_progress
                 if progressed:
                     state = "healthy"
                     last_progress_at = observed_at
                 else:
+                    fingerprint = current["fingerprint"]
                     last_progress_at = current["last_progress_at"]
                     stagnant_seconds = max(
                         0.0, self._seconds(observed_at) - self._seconds(last_progress_at),
@@ -405,11 +583,11 @@ class CoordinatorWatchdog:
                         )
                 changed = db.execute(
                     "UPDATE watchdog_snapshots SET fingerprint=?,state=?,last_progress_at=?,observed_at=?,"
-                    "aggregate_revision=aggregate_revision+1 "
+                    "activity_baseline_trusted=?,ledger_fingerprint=?,aggregate_revision=aggregate_revision+1 "
                     "WHERE mission_id=? AND aggregate_revision=?",
                     (
-                        fingerprint, state, last_progress_at, observed_at,
-                        mission_id, current["aggregate_revision"],
+                        fingerprint, state, last_progress_at, observed_at, int(baseline_trusted),
+                        next_ledger_fingerprint, mission_id, current["aggregate_revision"],
                     ),
                 )
                 if changed.rowcount != 1:

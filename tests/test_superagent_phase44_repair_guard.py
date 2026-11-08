@@ -52,7 +52,7 @@ class Phase44RepairGuardTests(unittest.TestCase):
         )
 
     def _fixture(self, uow, suffix, *, budget=1, round_no=0, corruption=None,
-                 verdict_state="failed"):
+                 verdict_state="failed", multi_work=False):
         """独立数据库中物化当前 Plan、Integrator 产物和 Reviewer 冻结记录。"""
         uow.tickets.create({
             "ticket_id": f"ticket-{suffix}",
@@ -67,9 +67,11 @@ class Phase44RepairGuardTests(unittest.TestCase):
         mission_id = f"mission-{suffix}"
         uow.plans.create(
             mission_id, expected_mission_revision=1,
-            plan={"nodes": [
-                {"node_id": "work", "role": "work", "profile_id": "coder"},
-            ]},
+            plan={"nodes": (
+                [{"node_id": "work", "role": "work", "profile_id": "coder"}]
+                + ([{"node_id": "work-secondary", "role": "work", "profile_id": "coder"}]
+                   if multi_work else [])
+            )},
             acceptance={"criteria": ["result verified"], "max_repair_rounds": budget},
             created_by_kind="human", created_by_ref="actor:test",
             system_profiles={"integrate": "integrator", "review": "reviewer"},
@@ -498,23 +500,49 @@ class Phase44RepairGuardTests(unittest.TestCase):
             }, {"integrate": "checkpointed", "review": "checkpointed"})
 
 
+    @staticmethod
+    def _watchdog_active_assignment(uow, mission_id, suffix):
+        """在实际账本中创建与 Watchdog 活动观察对应的执行中 Assignment。"""
+        job = uow.db.execute(
+            "SELECT job_id FROM jobs WHERE mission_id=? AND node_id='work'", (mission_id,),
+        ).fetchone()
+        identity = f"active-{suffix}"
+        uow.assignments.create({
+            "assignment_id": identity, "job_id": job["job_id"], "attempt_no": 1,
+            "submission_key": f"submission-{suffix}", "state": "running",
+            "run_id": f"run-{suffix}", "workspace_id": f"workspace-{suffix}",
+            "session_id": f"session-{suffix}", "started_at": "2026-11-07T00:00:00Z",
+        })
+        return identity
+
+    @staticmethod
+    def _watchdog_activity_item(assignment_id, suffix, sequence):
+        return {
+            "assignment_id": assignment_id, "run_id": f"run-{suffix}",
+            "session_id": f"session-{suffix}", "inspection": "confirmed",
+            "status": "running", "settled": False,
+            "last_activity": {
+                "seq": sequence, "time": f"2026-11-07T00:00:0{sequence}Z",
+                "type": "assistant_message",
+            },
+        }
+
     def test_watchdog_inspection_failure_does_not_clear_block_after_restart(self):
         """原生 Run 检查失败或结果缺失不能解除持久 blocked。"""
         with self.store.unit_of_work(actor={"kind": "system"}) as uow:
             mission = self._fixture(uow, "watchdog-observe")
-            self._complete_fixture_jobs(uow, mission["mission_id"])
+            active = self._watchdog_active_assignment(uow, mission["mission_id"], "watchdog-observe")
         identity = mission["mission_id"]
         limits = {"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"}
         watchdog = CoordinatorWatchdog(self.store, limits=limits)
-        original = {"assignments": [{"assignment_id": "reviewer-watchdog-observe",
-                    "inspection": "confirmed", "run_id": "run-original", "turn": 1}]}
+        original = {"assignments": [self._watchdog_activity_item(active, "watchdog-observe", 1)]}
         watchdog.observe(identity, activity=original, now="2026-11-07T00:00:00Z")
         blocked = watchdog.observe(identity, activity=original, now="2026-11-07T00:00:02Z")
         self.assertEqual(blocked["state"], "blocked")
         restarted = CoordinatorWatchdog(self.store, limits=limits)
         for inspection, second in (("unknown", "03"), ("invalid", "04"), ("not_found", "05")):
             with self.subTest(inspection=inspection):
-                failed = {"assignments": [{"assignment_id": "reviewer-watchdog-observe",
+                failed = {"assignments": [{"assignment_id": active,
                            "inspection": inspection, "error_type": "TimeoutError"}]}
                 state = restarted.observe(identity, activity=failed,
                                           now=f"2026-11-07T00:00:{second}Z")
@@ -522,9 +550,205 @@ class Phase44RepairGuardTests(unittest.TestCase):
                 self.assertEqual(state["last_progress_at"], blocked["last_progress_at"])
         self.assertEqual(restarted.observe(identity, activity=original,
                          now="2026-11-07T00:00:06Z")["state"], "blocked")
-        advanced = {"assignments": [{**original["assignments"][0], "turn": 2}]}
+        advanced = {"assignments": [self._watchdog_activity_item(active, "watchdog-observe", 2)]}
         self.assertEqual(restarted.observe(identity, activity=advanced,
                          now="2026-11-07T00:00:07Z")["state"], "healthy")
+
+    def test_repeated_unconfirmed_ticks_do_not_refresh_stagnation(self):
+        """检查异常与原状态交替出现，不能伪造活性、回拨时间或解除阻断。"""
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            mission = self._fixture(uow, "watchdog-flapping")
+            active = self._watchdog_active_assignment(uow, mission["mission_id"], "watchdog-flapping")
+        mission_id = mission["mission_id"]
+        limits = {"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"}
+        watchdog = CoordinatorWatchdog(self.store, limits=limits)
+        confirmed = {"assignments": [self._watchdog_activity_item(active, "watchdog-flapping", 1)]}
+        invalid = {"assignments": [{"assignment_id": active, "inspection": "unknown"}]}
+        baseline = watchdog.observe(mission_id, activity=confirmed, now="2026-11-07T00:00:00Z")
+        for stamp, activity in (("00.500", invalid), ("00.800", confirmed),
+                                ("01.100", {"assignments": {"inspection": "unknown"}}), ("01.200", confirmed),
+                                ("01.400", {"assignments": [{"inspection": "confirmed"}]}), ("01.500", confirmed)):
+            current = watchdog.observe(mission_id, activity=activity,
+                                       now=f"2026-11-07T00:00:{stamp}Z")
+            self.assertEqual(current["last_progress_at"], baseline["last_progress_at"])
+        self.assertEqual(current["state"], "stalled")
+        restarted = CoordinatorWatchdog(self.store, limits=limits)
+        older = restarted.observe(mission_id, activity=invalid, now="2026-11-07T00:00:01.300Z")
+        self.assertEqual(older["observed_at"], current["observed_at"])
+        self.assertEqual(older["last_progress_at"], baseline["last_progress_at"])
+        blocked = restarted.observe(mission_id, activity=confirmed, now="2026-11-07T00:00:02Z")
+        self.assertEqual(blocked["state"], "blocked")
+        advanced = {"assignments": [self._watchdog_activity_item(active, "watchdog-flapping", 2)]}
+        self.assertEqual(restarted.observe(mission_id, activity=advanced,
+                         now="2026-11-07T00:00:02.100Z")["state"], "healthy")
+
+    def test_watchdog_incomplete_active_assignment_snapshot_never_unblocks(self):
+        """活动快照漏采仍运行的 Assignment 时，不能误报进度恢复。"""
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            mission = self._fixture(uow, "watchdog-active-coverage")
+            active = self._watchdog_active_assignment(uow, mission["mission_id"], "watchdog-coverage")
+        mission_id = mission["mission_id"]
+        watchdog = CoordinatorWatchdog(self.store, limits={
+            "stale_after": 1.0, "max_stale_ticks": 2, "action": "block",
+        })
+        confirmed = {"assignments": [self._watchdog_activity_item(active, "watchdog-coverage", 1)]}
+        watchdog.observe(mission_id, activity=confirmed, now="2026-11-07T00:00:00Z")
+        blocked = watchdog.observe(mission_id, activity=confirmed, now="2026-11-07T00:00:02Z")
+        self.assertEqual(blocked["state"], "blocked")
+        for i, snapshot in enumerate((
+            {"assignments": []},
+            {"assignments": [{"assignment_id": "other-assignment", "inspection": "confirmed"}]},
+            {"assignments": confirmed["assignments"] * 2},
+            {"run_status": "running"},
+        ), start=3):
+            with self.subTest(snapshot=snapshot):
+                current = watchdog.observe(mission_id, activity=snapshot,
+                                           now=f"2026-11-07T00:00:0{i}Z")
+                self.assertEqual(current["state"], "blocked")
+                self.assertEqual(current["last_progress_at"], blocked["last_progress_at"])
+        real = {"assignments": [self._watchdog_activity_item(active, "watchdog-coverage", 2)]}
+        self.assertEqual(watchdog.observe(mission_id, activity=real,
+                         now="2026-11-07T00:00:07Z")["state"], "healthy")
+        self.assertEqual(watchdog.observe(mission_id, activity=real,
+                         now="2026-11-07T00:00:09Z")["state"], "blocked")
+        # 账本确实完成时，先收到过期 Run 快照仍需阻断，补采新快照后才恢复。
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            current = uow.assignments.get(active)
+            uow.assignments._transition(
+                active, expected_revision=current["aggregate_revision"],
+                changes={"state": "succeeded", "ended_at": "2026-11-07T00:00:09Z"},
+                event_type="assignment.fixture.succeeded",
+            )
+        self.assertEqual(watchdog.observe(mission_id, activity=real,
+                         now="2026-11-07T00:00:10Z")["state"], "blocked")
+        self.assertEqual(watchdog.observe(mission_id, activity={"assignments": []},
+                         now="2026-11-07T00:00:11Z")["state"], "healthy")
+
+    def test_watchdog_first_trusted_snapshot_after_untrusted_baseline_does_not_unblock(self):
+        """首次观察不可信时，首个可信快照只建立基线，不伪造进度。"""
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            mission = self._fixture(uow, "watchdog-untrusted-baseline")
+            active = self._watchdog_active_assignment(
+                uow, mission["mission_id"], "watchdog-untrusted-baseline",
+            )
+        identity = mission["mission_id"]
+        limits = {"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"}
+        watchdog = CoordinatorWatchdog(self.store, limits=limits)
+        invalid = {"assignments": [{"assignment_id": active, "inspection": "unknown"}]}
+        first = watchdog.observe(identity, activity=invalid, now="2026-11-07T00:00:00Z")
+        self.assertFalse(first["activity_baseline_trusted"])
+        blocked = watchdog.observe(identity, activity=invalid, now="2026-11-07T00:00:02Z")
+        self.assertEqual(blocked["state"], "blocked")
+        self.assertFalse(blocked["activity_baseline_trusted"])
+
+        restarted = CoordinatorWatchdog(self.store, limits=limits)
+        confirmed = {"assignments": [
+            self._watchdog_activity_item(active, "watchdog-untrusted-baseline", 1),
+        ]}
+        baseline = restarted.observe(
+            identity, activity=confirmed, now="2026-11-07T00:00:03Z",
+        )
+        self.assertTrue(baseline["activity_baseline_trusted"])
+        self.assertEqual(baseline["state"], "blocked")
+        self.assertEqual(baseline["last_progress_at"], first["last_progress_at"])
+        self.assertEqual(restarted.observe(
+            identity, activity=confirmed, now="2026-11-07T00:00:04Z",
+        )["state"], "blocked")
+        advanced = {"assignments": [
+            self._watchdog_activity_item(active, "watchdog-untrusted-baseline", 2),
+        ]}
+        self.assertEqual(restarted.observe(
+            identity, activity=advanced, now="2026-11-07T00:00:05Z",
+        )["state"], "healthy")
+
+    def test_watchdog_recovers_verified_ledger_progress_before_activity_baseline(self):
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            mission = self._fixture(uow, "watchdog-ledger-recovery")
+            active = self._watchdog_active_assignment(uow, mission["mission_id"], "watchdog-ledger-recovery")
+        mid = mission["mission_id"]
+        limits = {"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"}
+        watchdog = CoordinatorWatchdog(self.store, limits=limits)
+        invalid = {"assignments": [{"assignment_id": active, "inspection": "unknown"}]}
+        watchdog.observe(mid, activity=invalid, now="2026-11-07T00:00:00Z")
+        self.assertEqual(watchdog.observe(mid, activity=invalid,
+            now="2026-11-07T00:00:02Z")["state"], "blocked")
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            current = uow.assignments.get(active)
+            uow.assignments._transition(
+                active, expected_revision=current["aggregate_revision"],
+                changes={"state": "succeeded", "ended_at": "2026-11-07T00:00:02Z"},
+                event_type="assignment.fixture.succeeded",
+            )
+        recovered = CoordinatorWatchdog(self.store, limits=limits).observe(
+            mid, activity={"assignments": []}, now="2026-11-07T00:00:03Z",
+        )
+        self.assertEqual(recovered["state"], "healthy")
+        self.assertTrue(recovered["activity_baseline_trusted"])
+        self.assertEqual(recovered["last_progress_at"], "2026-11-07T00:00:03.000Z")
+
+    def test_watchdog_tracks_interleaved_run_cursors_across_restart(self):
+        with self.store.unit_of_work(actor={"kind": "system"}) as uow:
+            mission = self._fixture(uow, "watchdog-multi-run", multi_work=True)
+            first = self._watchdog_active_assignment(uow, mission["mission_id"], "watchdog-multi-a")
+            second_job = uow.db.execute(
+                "SELECT job_id FROM jobs WHERE mission_id=? AND node_id='work-secondary'",
+                (mission["mission_id"],),
+            ).fetchone()["job_id"]
+            second = "active-watchdog-multi-b"
+            uow.assignments.create({
+                "assignment_id": second, "job_id": second_job, "attempt_no": 1,
+                "submission_key": "submission-watchdog-multi-b", "state": "running",
+                "run_id": "run-watchdog-multi-b", "workspace_id": "workspace-watchdog-multi-b",
+                "session_id": "session-watchdog-multi-b", "started_at": "2026-11-07T00:00:00Z",
+            })
+        mid = mission["mission_id"]
+        limits = {"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"}
+        watchdog = CoordinatorWatchdog(self.store, limits=limits)
+        snap = lambda a, b: {"assignments": [
+            self._watchdog_activity_item(first, "watchdog-multi-a", a),
+            self._watchdog_activity_item(second, "watchdog-multi-b", b),
+        ]}
+        watchdog.observe(mid, activity=snap(2, 5), now="2026-11-07T00:00:00Z")
+        # 两个 Run 必须整体通过原生身份与单调游标核验；B 倒退时不得认可 A 的新进度。
+        self.assertEqual(watchdog.observe(mid, activity=snap(3, 4),
+            now="2026-11-07T00:00:02Z")["state"], "blocked")
+        with self.store.transaction() as db:
+            cursors = {
+                row["assignment_id"]: row["last_event_seq"]
+                for row in db.execute(
+                    "SELECT assignment_id,last_event_seq FROM watchdog_assignment_cursors WHERE mission_id=?",
+                    (mid,),
+                )
+            }
+        self.assertEqual(cursors, {first: 2, second: 5})
+        # B 虽保留原序号但篡改原始事件类型，不能借 A 的有效序号重置阻断。
+        altered = snap(3, 5)
+        altered["assignments"][1]["last_activity"]["type"] = "inconsistent-event"
+        self.assertEqual(watchdog.observe(
+            mid, activity=altered, now="2026-11-07T00:00:02.500Z",
+        )["state"], "blocked")
+        restarted = CoordinatorWatchdog(self.store, limits=limits)
+        # 漏采 B 时同样不得提前消耗 A 的原生进度，重建后仍必须 blocked。
+        self.assertEqual(restarted.observe(
+            mid, activity={"assignments": [
+                self._watchdog_activity_item(first, "watchdog-multi-a", 4),
+            ]}, now="2026-11-07T00:00:03Z",
+        )["state"], "blocked")
+        with self.store.transaction() as db:
+            cursors = {
+                row["assignment_id"]: row["last_event_seq"]
+                for row in db.execute(
+                    "SELECT assignment_id,last_event_seq FROM watchdog_assignment_cursors WHERE mission_id=?",
+                    (mid,),
+                )
+            }
+        self.assertEqual(cursors, {first: 2, second: 5})
+        self.assertEqual(restarted.observe(mid, activity=snap(3, 5),
+            now="2026-11-07T00:00:04Z")["state"], "healthy")
+        self.assertEqual(restarted.observe(mid, activity=snap(3, 5),
+            now="2026-11-07T00:00:06Z")["state"], "blocked")
+        self.assertEqual(restarted.observe(mid, activity=snap(3, 6),
+            now="2026-11-07T00:00:07Z")["state"], "healthy")
 
     def test_blocking_watchdog_prevents_review_settlement_until_true_progress(self):
         """Watchdog 已确认 blocked 时不推进质量门，新真实进度恢复后才解锁。"""
