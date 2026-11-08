@@ -55,6 +55,11 @@ def chat_url(value):
     return 'https://chatgpt.com' + parsed.path
 
 
+def image_resume_milestone(milestone, reply_key):
+    """图片恢复消息按被打断的回复隔离，不重复登记生成或交付意图。"""
+    return hashlib.sha256(f'{milestone}:resume:{reply_key}'.encode()).hexdigest()
+
+
 class Companion:
     """浏览器负责页面确认，桥只读执行事实并持久保存单次发送意图。"""
 
@@ -247,6 +252,10 @@ class Companion:
         with self.database() as db:
             pending = db.execute("SELECT id,prompt,status FROM dispatches WHERE binding_id=? AND status='dispatching' ORDER BY created LIMIT 1", (binding,)).fetchone()
             sent = [row[0] for row in db.execute("SELECT phase FROM dispatches WHERE binding_id=? AND milestone=? AND status='confirmed'", (binding, key))]
+            if state == 'image' and reply_key is not None:
+                sent.extend(row[0] for row in db.execute(
+                    "SELECT phase FROM dispatches WHERE binding_id=? AND milestone=? AND phase='resume' AND status='confirmed'",
+                    (binding, image_resume_milestone(key, reply_key))))
         return {'session_id': sid, 'url': url, 'state': state, 'milestone': key, 'sent_phases': sent,
                 'activity': {'running_jobs': len(jobs), 'running_calls': running, 'pipeline_status': pipelines[-1]['status'] if pipelines else ''},
                 'pending': {'id': pending[0], 'prompt': pending[1]} if pending else None,
@@ -255,12 +264,16 @@ class Companion:
     def claim(self, binding, milestone, phase, reply_key=None):
         with self.lock:
             state = self.state(binding, reply_key) if reply_key is not None else self.state(binding)
-            phases = {'continue': {'continue'}, 'image': {'generate', 'deliver'},
+            phases = {'continue': {'continue'}, 'image': {'generate', 'deliver', 'resume'},
                       'complete': {'next_task'}, 'interrupted': {'resume'}}
             if state['pending'] or state['milestone'] != milestone or state['state'] not in phases:
                 raise ValueError(tr('execution.companion.changed'))
             if phase not in phases[state['state']]:
                 raise ValueError(tr('execution.companion.invalid'))
+            if phase == 'resume' and state['state'] == 'image':
+                if reply_key is None or 'generate' not in state['sent_phases']:
+                    raise ValueError(tr('execution.companion.invalid'))
+                milestone = image_resume_milestone(milestone, reply_key)
             dispatch = secrets.token_hex(16)
             # 接续正文是固定载荷，英中资源均保持“继续”，不随界面语言改写。
             prompt = tr('execution.companion.prompt')

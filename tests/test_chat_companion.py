@@ -282,6 +282,26 @@ class ChatCompanionTests(unittest.IsolatedAsyncioTestCase):
             self.bridge.claim(self.binding, second['milestone'], 'generate', 'b' * 16)
         self.assertEqual(self.bridge.claim(self.binding, second['milestone'], 'deliver', 'b' * 16)['prompt'], '继续')
 
+    async def test_interrupted_image_recovery_is_per_reply_and_does_not_repeat_generation(self):
+        await self.runtime.call('local', 'harness_image_request', {'session_id': self.sid, 'request_id': 'image',
+            'prompt': 'fixture', 'path': 'asset.png'})
+        state = self.bridge.state(self.binding, 'a' * 16)
+        with self.assertRaises(ValueError):
+            self.bridge.claim(self.binding, state['milestone'], 'resume', 'a' * 16)
+        generate = self.bridge.claim(self.binding, state['milestone'], 'generate', 'a' * 16)
+        self.bridge.receipt(self.binding, generate['id'], 'confirmed')
+        state = self.bridge.state(self.binding, 'b' * 16)
+        with self.assertRaises(ValueError):
+            self.bridge.claim(self.binding, state['milestone'], 'resume')
+        recovery = self.bridge.claim(self.binding, state['milestone'], 'resume', 'b' * 16)
+        self.bridge.receipt(self.binding, recovery['id'], 'confirmed')
+        self.assertEqual(Companion(self.config).state(self.binding, 'b' * 16)['sent_phases'], ['generate', 'resume'])
+        with self.assertRaises(ValueError):
+            self.bridge.claim(self.binding, state['milestone'], 'resume', 'b' * 16)
+        fresh = self.bridge.state(self.binding, 'c' * 16)
+        self.assertEqual(fresh['sent_phases'], ['generate'])
+        self.assertEqual(self.bridge.claim(self.binding, fresh['milestone'], 'resume', 'c' * 16)['prompt'], '继续')
+
     async def test_offline_and_unknown_commands_are_not_automatically_replayed(self):
         self.assertTrue(self.bridge.executor_alive())
         self.runtime.store.begin('local', self.sid, 'harness_exec', 'uncertain', 'fingerprint')

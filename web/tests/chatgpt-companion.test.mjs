@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-let saved, state, page, claims, sends, mode, claimedPhase, alarm, alarmCreates, replyPhases, claimedReplyKey, claimInputs
+let saved, state, page, claims, sends, mode, claimedPhase, alarm, alarmCreates, replyPhases, claimedReplyKey, claimInputs, pageMessages
 const listeners={}
 const url='https://chatgpt.com/c/00000000-0000-0000-0000-000000000001'
 const clone=value=>structuredClone(value)
@@ -12,6 +12,7 @@ const reset=()=>{
  claims=0;sends=0;mode='confirmed';claimedPhase=undefined
  alarm=undefined;alarmCreates=[]
  replyPhases=new Map();claimedReplyKey=undefined;claimInputs=[]
+ pageMessages=[]
 }
 reset()
 globalThis.chrome={
@@ -19,6 +20,7 @@ globalThis.chrome={
  alarms:{get:async()=>clone(alarm),create:async(name,options)=>{alarm={name,...options};alarmCreates.push(clone(alarm))},onAlarm:{addListener(callback){listeners.alarm=callback}}},
  runtime:{id:'fixture',getURL:path=>'chrome-extension://fixture/'+path,onStartup:{addListener(callback){listeners.startup=callback}},onInstalled:{addListener(callback){listeners.installed=callback}},onMessage:{addListener(callback){listeners.message=callback}}},
  action:{setBadgeText:async()=>{}},tabs:{get:async()=>({url}),sendMessage:async(_id,message)=>{
+  pageMessages.push(message)
   if(message.type==='probe')return clone(page)
   sends++
   if(mode==='confirmed')page.userMessages.push(message.prompt)
@@ -33,10 +35,11 @@ globalThis.fetch=async(raw,options)=>{
   result=clone(state)
   const replyKey=new URL(raw).searchParams.get('reply_key')
   if(replyKey&&state.state!=='image')result.sent_phases=clone(replyPhases.get(state.milestone+':'+replyKey)||[])
+  if(replyKey&&state.state==='image')result.sent_phases.push(...(replyPhases.get(state.milestone+':'+replyKey)||[]))
  }
  if(path==='/claim'){
   claimedPhase=input.phase
-  claimedReplyKey=input.reply_key&&state.state!=='image'?state.milestone+':'+input.reply_key:undefined
+  claimedReplyKey=input.reply_key&&(state.state!=='image'||input.phase==='resume')?state.milestone+':'+input.reply_key:undefined
   claimInputs.push(input)
   claims++;state.pending={id:'intent',prompt:'继续'};result=clone(state.pending)
  }
@@ -210,6 +213,20 @@ test('continuous mode can continue a new idle reply even while the same executor
  await tick();assert.equal(sends,2);assert.equal(saved.binding.reason,'waiting_next_task')
 })
 
+test('a ChatGPT turn cancelled before assistant text can continue once with explicit page permission',async()=>{
+ reset();saved.binding.continueAfterTerminal=true
+ page.hasAssistant=false;page.interrupted=true;page.assistantKey='c'.repeat(16)
+ saved.binding.idleKey=page.assistantKey
+ await tick();assert.equal(sends,1)
+ assert.equal(pageMessages.find(message=>message.type==='probe').allowInterrupted,true)
+ const dispatch=pageMessages.find(message=>message.type==='dispatch')
+ assert.equal(dispatch.allowInterrupted,true);assert.equal(dispatch.assistantKey,page.assistantKey)
+ await tick();assert.equal(sends,1)
+ reset();page.hasAssistant=false;page.interrupted=true;page.assistantKey='c'.repeat(16)
+ await tick();assert.equal(sends,0)
+ assert.equal(pageMessages[0].allowInterrupted,false)
+})
+
 test('continuous image tasks keep generation and delivery deduplicated across replies',async()=>{
  reset();saved.binding.continueAfterTerminal=true;state.state='image'
  page.assistantKey='a'.repeat(16);saved.binding.idleKey=page.assistantKey
@@ -218,6 +235,26 @@ test('continuous image tasks keep generation and delivery deduplicated across re
  saved.binding.idleKey=page.assistantKey;saved.binding.idleSince=Date.now()-4000
  await tick();assert.deepEqual(state.sent_phases,['generate','deliver'])
  await tick();assert.equal(sends,2)
+})
+
+test('a cancelled image reply requests recovery once without repeating the generation phase',async()=>{
+ reset();saved.binding.continueAfterTerminal=true;state.state='image'
+ page.assistantKey='a'.repeat(16);saved.binding.idleKey=page.assistantKey
+ await tick();assert.deepEqual(state.sent_phases,['generate'])
+ page.assistantKey='b'.repeat(16);page.interrupted=true
+ saved.binding.idleKey=page.assistantKey;saved.binding.idleSince=Date.now()-4000
+ await tick();assert.equal(claimedPhase,'resume');assert.equal(sends,2)
+ assert.deepEqual(state.sent_phases,['generate'])
+ await tick();assert.equal(sends,2)
+ page.assistantKey='c'.repeat(16);page.hasImage=true;page.interrupted=false
+ saved.binding.idleKey=page.assistantKey;saved.binding.idleSince=Date.now()-4000
+ await tick();assert.equal(claimedPhase,'deliver');assert.equal(sends,3)
+ assert.deepEqual(state.sent_phases,['generate','deliver'])
+  page.assistantKey='d'.repeat(16);page.interrupted=true
+  saved.binding.idleKey=page.assistantKey;saved.binding.idleSince=Date.now()-4000
+  await tick();assert.equal(claimedPhase,'resume');assert.equal(sends,4)
+  await tick();assert.equal(sends,4)
+  assert.deepEqual(state.sent_phases,['generate','deliver'])
 })
 
 test('terminal continuation requires explicit boolean selection and still respects stops and unknown outcomes',async()=>{

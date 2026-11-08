@@ -57,7 +57,7 @@
     "message": "Continue after completion or interruption"
   },
   "continuous_help": {
-    "message": "Applies when you enable continuation. Once a reply ends and the page stays idle, send “继续” so the AI can handle recovery or the next task, including after verified completion or confirmed task interruption. Each reply and execution milestone is requested only once. Unknown results and manual stops still pause continuation; the 8-hour and 100-message limits still apply."
+    "message": "Applies when you enable continuation. Once a reply ends or ChatGPT marks it as cancelled and the page stays idle, send “继续” so the AI can handle recovery or the next task, including after verified completion or confirmed task interruption. Each reply and execution milestone is requested only once. To stop automation, use Stop continuation in this extension. Unknown results and the 8-hour and 100-message limits still pause continuation."
   },
   "waiting_next_task": {
     "message": "Continuation requested. Waiting for the next task or new execution progress."

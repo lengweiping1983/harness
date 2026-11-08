@@ -16,7 +16,7 @@
     if (message.type === 'stop') {generation++; respond({ok: true}); return;}
     (async () => {
       const {inspectPage, sendOnce} = await adapter;
-      const probe = () => inspectPage(document, message.url, location.href, composing, Date.now() - activeAt < 3000);
+      const probe = () => inspectPage(document, message.url, location.href, composing, Date.now() - activeAt < 3000, message.allowInterrupted === true);
       if (message.type === 'probe') return probe();
       if (sending) return {outcome: 'not_sent', reason: 'busy'};
       sending = true;
@@ -30,7 +30,7 @@
         }, fill => {
           inserting = true;
           try {return fill();} finally {inserting = false;}
-        });
+        }, message.allowInterrupted === true);
       } finally {sending = false;}
     })().then(respond, () => respond({outcome: 'unknown', reason: 'unsupported_page', ready: false}));
     return true;

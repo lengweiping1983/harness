@@ -54,11 +54,16 @@ function hasAttachments(form) {
     || [...(form?.querySelectorAll('input[type="file"]') || [])].some(input => input.files.length);
 }
 
-function busy(doc, form) {
+function latestTurnState(doc) {
+  return [...doc.querySelectorAll('[data-turn-key] [data-talvt-turn-state]')].at(-1);
+}
+
+function busy(doc, form, allowInterrupted = false) {
   const legacyStop = [...doc.querySelectorAll('[data-testid="stop-button"]')].some(visible);
   const modernStop = [...(form?.querySelectorAll('[data-composer-stop-icon], [data-composer-loading-icon]') || [])].some(visible);
-  const turnState = [...doc.querySelectorAll('[data-turn-key] [data-talvt-turn-state]')].at(-1);
-  const unfinishedTurn = !!turnState && turnState.getAttribute('data-talvt-turn-state') !== 'complete';
+  const turnState = latestTurnState(doc);
+  const state = turnState?.getAttribute('data-talvt-turn-state');
+  const unfinishedTurn = !!turnState && state !== 'complete' && !(allowInterrupted && state === 'cancelled');
   const dialog = [...doc.querySelectorAll('[role="dialog"]')].some(visible);
   return legacyStop || modernStop || unfinishedTurn || dialog;
 }
@@ -102,34 +107,39 @@ function messageBody(node) {
   return body.textContent.trim();
 }
 
-export function inspectPage(doc, expectedUrl, currentUrl, composing = false, recentlyActive = false) {
+export function inspectPage(doc, expectedUrl, currentUrl, composing = false, recentlyActive = false, allowInterrupted = false) {
   if (canonicalChat(currentUrl) !== expectedUrl) return {ready: false, reason: 'wrong_chat'};
   const messages = userMessages(doc);
   const assistants = messageNodes(doc, 'assistant');
-  const last = assistants.at(-1);
+  const turnState = latestTurnState(doc);
+  const interrupted = turnState?.getAttribute('data-talvt-turn-state') === 'cancelled';
+  const interruptedRoot = allowInterrupted && interrupted ? turnState.closest('[data-turn-key]') : null;
+  const interruptedTurn = interruptedRoot?.getAttribute('data-turn-key') || '';
+  const candidate = assistants.at(-1);
+  const last = interruptedRoot && (!candidate || !interruptedRoot.contains(candidate)) ? undefined : candidate;
   const images = [...(last?.querySelectorAll('img') || [])].filter(node => node.complete && node.naturalWidth > 0);
-  const identity = last?.getAttribute('data-message-id') || last?.closest('[data-message-id]')?.getAttribute('data-message-id')
+  const identity = interruptedTurn || last?.getAttribute('data-message-id') || last?.closest('[data-message-id]')?.getAttribute('data-message-id')
     || last?.closest('[data-turn-key]')?.getAttribute('data-turn-key') || '';
-  const assistantKey = last ? observationKey(JSON.stringify([identity, last.textContent.slice(-200),
+  const assistantKey = last || interruptedTurn ? observationKey(JSON.stringify([identity, last?.textContent.slice(-200) || '',
     images.map(node => node.getAttribute('data-file-id') || node.currentSrc || node.getAttribute('src'))])) : '';
   const currentEditor = editor(doc);
   const form = composer(currentEditor);
   const draft = currentEditor ? textOf(currentEditor).trim() : '';
   const attachments = hasAttachments(form);
-  const isBusy = busy(doc, form);
+  const isBusy = busy(doc, form, allowInterrupted);
   const ready = !!currentEditor && !!form && !attachments && !draft && !composing && !recentlyActive && !isBusy;
   return {ready, reason: !currentEditor || !form ? 'unsupported_page' : attachments ? 'draft' : draft ? 'draft' : composing ? 'composing' : recentlyActive ? 'user_active' : isBusy ? 'busy' : ready ? '' : 'busy',
     userMessages: messages.map(node => node.textContent),
-    assistantKey, hasImage: images.length > 0, hasAssistant: !!last};
+    assistantKey, hasImage: images.length > 0, hasAssistant: !!last, interrupted};
 }
 
-export async function sendOnce(doc, expectedUrl, getUrl, prompt, guard, insert = fill => fill()) {
+export async function sendOnce(doc, expectedUrl, getUrl, prompt, guard, insert = fill => fill(), allowInterrupted = false) {
   if (!guard()) return {outcome: 'not_sent', reason: 'page_changed'};
   const currentEditor = editor(doc);
   const form = composer(currentEditor);
   if (!currentEditor || !form) return {outcome: 'not_sent', reason: 'unsupported_page'};
   if (canonicalChat(getUrl()) !== expectedUrl) return {outcome: 'not_sent', reason: 'wrong_chat'};
-  if (hasAttachments(form) || busy(doc, form)) return {outcome: 'not_sent', reason: 'busy'};
+  if (hasAttachments(form) || busy(doc, form, allowInterrupted)) return {outcome: 'not_sent', reason: 'busy'};
   const before = userMessages(doc);
   const previousMatches = before.filter(node => messageBody(node) === prompt).length;
   const inserted = insert(() => {
@@ -146,10 +156,10 @@ export async function sendOnce(doc, expectedUrl, getUrl, prompt, guard, insert =
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     if (canonicalChat(getUrl()) !== expectedUrl || editor(doc) !== currentEditor || composer(currentEditor) !== form || text() !== prompt) return {outcome: 'unknown', reason: 'page_changed'};
-    if (hasAttachments(form) || busy(doc, form)) return {outcome: 'unknown', reason: 'user_active'};
+    if (hasAttachments(form) || busy(doc, form, allowInterrupted)) return {outcome: 'unknown', reason: 'user_active'};
     const button = sendButton(form);
     if (button && !button.disabled) {
-      if (!guard(true) || hasAttachments(form) || busy(doc, form)) return {outcome: 'unknown', reason: 'user_active'};
+      if (!guard(true) || hasAttachments(form) || busy(doc, form, allowInterrupted)) return {outcome: 'unknown', reason: 'user_active'};
       button.click();
       const confirmUntil = Date.now() + 10000;
       while (Date.now() < confirmUntil) {
