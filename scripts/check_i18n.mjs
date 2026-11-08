@@ -9,10 +9,12 @@ const errors = []
 const browserCatalogs = ['zh-CN', 'en'].map(language => read(`web/src/i18n/locales/${language}.json`))
 const placeholders = text => [...text.matchAll(/(?<!\{)\{[A-Za-z_]\w*\}(?!\})|\{\{[A-Za-z_]\w*\}\}/g)].map(match => match[0]).sort().join('|')
 if (Object.keys(zh).sort().join('|') !== Object.keys(en).sort().join('|')) errors.push('Catalog keys differ')
+// 固定载荷键按设计不随界面语言改写：接续正文中英均保持“继续”，见 harness/mcp_server/companion.py。
+const fixedPayloadKeys = new Set(['execution.companion.prompt'])
 for (const [key, source] of Object.entries(zh)) {
   if (typeof en[key] !== 'string') { errors.push(`Missing English resource: ${key}`); continue }
   if (placeholders(source) !== placeholders(en[key])) errors.push(`Placeholder mismatch: ${key}`)
-  if (/\p{Script=Han}/u.test(en[key])) errors.push(`Untranslated English prose: ${key}`)
+  if (!fixedPayloadKeys.has(key) && /\p{Script=Han}/u.test(en[key])) errors.push(`Untranslated English prose: ${key}`)
 }
 for (const [language, catalog] of [['zh-CN', zh], ['en', en]]) {
   const expected = Object.fromEntries(Object.entries(catalog).filter(([key]) => /^(ui\.|settings\.language\.|files\.open\.|browser\.)/.test(key)))
