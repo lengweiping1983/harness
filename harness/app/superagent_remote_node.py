@@ -141,7 +141,7 @@ class NativeWorkerNode:
                 if params:raise _error('remote.frame')
                 runtime=self.adapter.runtime_manifest()
                 if self.provider_root is not None:runtime['provider_root']=self.provider_root
-                return {'protocol':1,'profiles':self.profiles,'sandbox':self.sandbox,'runtime':runtime}
+                return {'protocol':1,'profiles':self.profiles,'runner':'docker' if self.sandbox=='docker' else 'native','sandbox':self.sandbox,'runtime':runtime}
             if operation=='operation_receipt':
                 if set(params)!={'operation_id'}: raise _error('remote.frame')
                 with self.ledger.transaction() as db: row=db.execute('SELECT * FROM operations WHERE operation_id=?',(params['operation_id'],)).fetchone()

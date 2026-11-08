@@ -56,7 +56,13 @@ class RemoteExecutionAdapter(HarnessExecutorAdapter):
         self.leases=RemoteLeases(store,config['devices'],identity_hash,config['lease_seconds'])
         self.clients={item['device_id']:RemoteClient(url=item['url'],key=keys[item['device_id']],
             instance_id=self.instance_id,device_id=item['device_id'],identity_hash=identity_hash) for item in config['devices']}
+        self.runners={item['device_id']:item.get('runner','docker') for item in config['devices']}
         self.verified=set()
+
+    def reserve_mission(self,mission_id):
+        """设备满载时在创建 Worker 前背压，不能把未发出的创建误记为未知。"""
+        self._open()
+        self.leases.for_mission(mission_id,allocate=True)
 
     def _request(self,operation,worker,params=None,*,write=False):
         self._open()
@@ -75,8 +81,10 @@ class RemoteExecutionAdapter(HarnessExecutorAdapter):
         if client.device_id not in self.verified:
             identity=client.request('identity',{})
             expected={key:profile.fingerprint for key,profile in self.profiles.items()}
-            if (not isinstance(identity,dict) or identity.get('profiles')!=expected or identity.get('protocol')!=1
-                    or identity.get('sandbox')!='docker' or identity.get('runtime')!=self.runtime_manifest()):
+            if (not isinstance(identity,dict) or identity.get('profiles')!=expected or type(identity.get('protocol')) is not int or identity.get('protocol')!=1
+                    or identity.get('runner')!=self.runners[client.device_id]
+                    or identity.get('sandbox')!=('docker' if self.runners[client.device_id]=='docker' else 'none')
+                    or identity.get('runtime')!=self.runtime_manifest()):
                 raise _error('remote.identity')
             self.verified.add(client.device_id)
 

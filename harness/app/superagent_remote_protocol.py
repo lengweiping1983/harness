@@ -70,7 +70,9 @@ def execution_config(value, secrets):
     if not isinstance(value['devices'],list) or not 1<=len(value['devices'])<=32: raise _error('invalid',field='devices')
     seen=set();keys=set();endpoints=set()
     for device in value['devices']:
-        if not isinstance(device,dict) or set(device)!={'device_id','url','key_ref','capacity'}: raise _error('invalid',field='device')
+        if (not isinstance(device,dict) or set(device)-{'device_id','url','key_ref','capacity','runner'}
+            or not {'device_id','url','key_ref','capacity'}<=set(device)
+            or device.get('runner','docker') not in ('native','docker')): raise _error('invalid',field='device')
         _text(device['device_id'],'device_id',limit=128)
         if device['device_id'] in seen: raise _error('invalid',field='device_id')
         seen.add(device['device_id']); device['url']=api_root(device['url'])
@@ -102,10 +104,14 @@ def worker_openapi():
     receipt={'type':'object','additionalProperties':False,'properties':{
         'version':{'type':'integer','const':1},'device_id':text,'nonce':text,'operation_id':text,
         'result':{},'error':{'type':['string','null']}},'required':['version','device_id','nonce','operation_id','result','error']}
+    identity={'type':'object','additionalProperties':False,'properties':{
+        'protocol':{'type':'integer','const':1},'profiles':{'type':'object','additionalProperties':text},
+        'runner':{'type':'string','enum':['native','docker']},'sandbox':{'type':'string','enum':['none','docker']},
+        'runtime':{'type':'object','additionalProperties':True}},'required':['protocol','profiles','runner','sandbox','runtime']}
     return {'openapi':'3.1.0','info':{'title':'Harness Worker Executor','version':'1'},'paths':{'/executor/v1':{'post':{
         'parameters':[{'in':'header','name':'X-Harness-Signature','required':True,'schema':text}],
         'requestBody':{'required':True,'content':{'application/json':{'schema':{'$ref':'#/components/schemas/WorkerFrame'}}}},
         'responses':{'200':{'description':'Signed receipt','headers':{'X-Harness-Signature':{'schema':text}},
             'content':{'application/json':{'schema':{'$ref':'#/components/schemas/WorkerReceipt'}}}},
             'default':{'description':'Request rejected before admission','content':{'text/html':{'schema':text}}}}}}},
-        'components':{'schemas':{'WorkerFrame':request,'WorkerReceipt':receipt}}}
+        'components':{'schemas':{'WorkerFrame':request,'WorkerReceipt':receipt,'WorkerIdentity':identity}}}

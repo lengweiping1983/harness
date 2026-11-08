@@ -8751,7 +8751,7 @@
   "superagent.remote.sandbox-unavailable": "The required Docker sandbox is unavailable; host execution is refused.",
   "superagent.remote.quota": "The Worker storage budget was exceeded; inspect the original execution.",
   "superagent.remote.listening": "Worker device {device} is listening on port {port}.",
-  "superagent.remote.cli": "Run an explicitly configured isolated Superagent Worker device.",
+  "superagent.remote.cli": "Run an explicitly configured Superagent Worker device.",
   "ui.sg.devices": "Worker devices",
   "ui.sg.leases": "Device leases",
   "ui.sg.state.active": "Active",

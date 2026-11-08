@@ -1,4 +1,4 @@
-"""隔离 Worker 的短期模型能力代理；长期凭据不进入容器、帧或原生事件。"""
+"""Worker 的短期模型能力服务；长期凭据不进入协议帧或原生事件。"""
 from __future__ import annotations
 
 import asyncio
@@ -25,11 +25,11 @@ from .superagent_coordinator_store import _hash
 BROKER_SCOPE=ContextVar('superagent_broker_scope',default=None)
 
 
-class SecretBroker:
-    def __init__(self,path,*,upstream,api_key,models,lease_valid,forward=None,audit_path=None):
-        self.path=Path(path);self.upstream,self.api_key,self.models,self.lease_valid=upstream,api_key,set(models),lease_valid
-        if self.path.exists() or self.path.is_symlink():raise _error('conflict')
-        if not hasattr(socketserver,'ThreadingUnixStreamServer'):raise _error('remote.sandbox-unavailable')
+class ModelBroker:
+    """共享能力与审计规则；原生执行不需要 Docker 或 Unix Socket。"""
+    def __init__(self,*,upstream,api_key,models,lease_valid,forward=None,audit_path=None):
+        self.upstream,self.api_key,self.models,self.lease_valid=upstream,api_key,set(models),lease_valid
+        self.closed=False
         self.capabilities={};self.lock=threading.Lock();self._audit=deque(maxlen=256);self.forward=forward or self._forward
         self.audit_stream=None
         if audit_path is not None:
@@ -41,28 +41,8 @@ class SecretBroker:
                         try:
                             if len(line)>8192 or not isinstance(json.loads(line),dict):raise ValueError
                         except (ValueError,UnicodeError) as exc:raise _error('corrupt') from exc
-            descriptor=os.open(path,os.O_WRONLY|os.O_APPEND|os.O_CREAT|os.O_NOFOLLOW,0o600)
+            descriptor=os.open(path,os.O_WRONLY|os.O_APPEND|os.O_CREAT|getattr(os,'O_NOFOLLOW',0),0o600)
             self.audit_stream=os.fdopen(descriptor,'ab',buffering=0)
-        outer=self
-        class Handler(StreamRequestHandler):
-            def handle(self):
-                self.request.settimeout(65)
-                raw=self.rfile.readline(MAX_FRAME+1)
-                try:result=outer.request(decode(raw))
-                except Exception as exc:result={'error':getattr(exc,'code','broker/operation')}
-                self.wfile.write(encode(result)+b'\n')
-        class Server(socketserver.ThreadingUnixStreamServer):
-            daemon_threads=False
-            block_on_close=True
-        self.closed=False;self._close_task=None;self.server=None;self.identity=None
-        try:
-            self.server=Server(str(self.path),Handler);self.identity=self.path.stat();os.chmod(self.path,0o600)
-            self.thread=threading.Thread(target=self.server.serve_forever,name='superagent-secret-broker',daemon=False);self.thread.start()
-        except BaseException:
-            if self.server is not None:self.server.server_close()
-            if self.identity is not None and self.path.exists() and self.path.stat().st_ino==self.identity.st_ino:self.path.unlink()
-            if self.audit_stream is not None:self.audit_stream.close()
-            raise
 
     @property
     def audit(self):
@@ -113,6 +93,40 @@ class SecretBroker:
             return raw
 
     async def close(self):
+        with self.lock:
+            self.closed=True;self.capabilities.clear()
+            if self.audit_stream is not None:self.audit_stream.close()
+
+
+class SecretBroker(ModelBroker):
+    """容器模式在共享能力服务外持有所属 Unix Socket。"""
+    def __init__(self,path,*,upstream,api_key,models,lease_valid,forward=None,audit_path=None):
+        self.path=Path(path)
+        if self.path.exists() or self.path.is_symlink():raise _error('conflict')
+        if not hasattr(socketserver,'ThreadingUnixStreamServer'):raise _error('remote.sandbox-unavailable')
+        super().__init__(upstream=upstream,api_key=api_key,models=models,lease_valid=lease_valid,forward=forward,audit_path=audit_path)
+        outer=self
+        class Handler(StreamRequestHandler):
+            def handle(self):
+                self.request.settimeout(65)
+                raw=self.rfile.readline(MAX_FRAME+1)
+                try:result=outer.request(decode(raw))
+                except Exception as exc:result={'error':getattr(exc,'code','broker/operation')}
+                self.wfile.write(encode(result)+b'\n')
+        class Server(socketserver.ThreadingUnixStreamServer):
+            daemon_threads=False
+            block_on_close=True
+        self.closed=False;self._close_task=None;self.server=None;self.identity=None
+        try:
+            self.server=Server(str(self.path),Handler);self.identity=self.path.stat();os.chmod(self.path,0o600)
+            self.thread=threading.Thread(target=self.server.serve_forever,name='superagent-secret-broker',daemon=False);self.thread.start()
+        except BaseException:
+            if self.server is not None:self.server.server_close()
+            if self.identity is not None and self.path.exists() and self.path.stat().st_ino==self.identity.st_ino:self.path.unlink()
+            if self.audit_stream is not None:self.audit_stream.close()
+            raise
+
+    async def close(self):
         if self._close_task is None:self._close_task=asyncio.create_task(self._close())
         await join_cleanup(self._close_task)
 
@@ -139,3 +153,12 @@ class BrokerTransport(Transport):
             return base64.b64decode(value['data'],validate=True)
         raw=await join_cleanup(asyncio.create_task(asyncio.to_thread(invoke)))
         yield raw
+
+
+class NativeBrokerTransport(Transport):
+    """可信宿主内复用同一短期能力服务，不创建本机网络监听或 Unix Socket。"""
+    def __init__(self,broker):self.broker=broker
+    async def post_stream(self,url,*,headers,body,timeout):
+        value={'token':BROKER_SCOPE.get(),'body':decode(body)}
+        result=await join_cleanup(asyncio.create_task(asyncio.to_thread(self.broker.request,value)))
+        yield base64.b64decode(result['data'],validate=True)

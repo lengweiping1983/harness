@@ -30,6 +30,9 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
         token=self.grant();transport=BrokerTransport(self.root/'broker.sock')
         context=BROKER_SCOPE.set(token)
         try:
+            with self.assertRaises(HarnessError):
+                _=[chunk async for chunk in transport.post_stream('https://arbitrary.invalid',headers={},body=b'{"model":"foreign"}',timeout=5)]
+            self.assertEqual(self.calls,[])
             chunks=[chunk async for chunk in transport.post_stream('https://arbitrary.invalid',headers={'Authorization':'attacker'},body=b'{"model":"fixture","messages":[]}',timeout=5)]
         finally:BROKER_SCOPE.reset(context)
         self.assertEqual(chunks,[b'data: [DONE]\n\n'])

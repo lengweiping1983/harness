@@ -37,14 +37,14 @@ class RemoteFixture(unittest.IsolatedAsyncioTestCase):
         with socket.socket() as selected:selected.bind(('127.0.0.1',0));port=selected.getsockname()[1]
         self.key=b'fixture-device-key-32-bytes-or-more'
         self.multi=getattr(self,'multi_devices',False)
+        if self.multi or getattr(self,'multiple_threads',False):self.raw['sources']['local']['threads']=['work','work-b']
         if self.multi:
             with socket.socket() as selected:selected.bind(('127.0.0.1',0));port_b=selected.getsockname()[1]
             self.remote_repo_b=self.root/'device-repo-b';run_git(self.root,'clone',str(self.root/'repo'),str(self.remote_repo_b))
-            self.raw['sources']['local']['threads']=['work','work-b']
-        self.raw.update(execution={'devices':[{'device_id':'device-a','url':'http://127.0.0.1:'+str(port),'key_ref':'secret://device','capacity':1}],
+        self.raw.update(execution={'devices':[{'device_id':'device-a','url':'http://127.0.0.1:'+str(port),'key_ref':'secret://device','capacity':1,'runner':'native'}],
             'lease_seconds':30},secrets={'device':'FIXTURE_DEVICE_KEY'})
         if self.multi:
-            self.raw['execution']['devices'].append({'device_id':'device-b','url':'http://127.0.0.1:'+str(port_b),'key_ref':'secret://device-b','capacity':1})
+            self.raw['execution']['devices'].append({'device_id':'device-b','url':'http://127.0.0.1:'+str(port_b),'key_ref':'secret://device-b','capacity':1,'runner':'native'})
             self.raw['secrets']['device-b']='FIXTURE_DEVICE_KEY_B'
         self.path.write_text(json.dumps(self.raw));self.spec=read_config(self.path)
         self.identity_hash=_hash(_json(config_identity(self.spec)))
@@ -191,6 +191,14 @@ class RemoteExecutionTests(RemoteFixture):
     async def test_runtime_policy_mismatch_fails_handshake_before_worker_creation(self):
         self.node.adapter.harness.config.permission_policy='read_only'
         executor=self.service.coordinator._execution_service._executor
+        with self.assertRaises(HarnessError):
+            await asyncio.to_thread(executor._verify,executor.clients['device-a'])
+        self.assertEqual(self.node.adapter.harness.worktrees.list(),[])
+        self.assertEqual(len(self.work.requests),0)
+
+    async def test_native_device_cannot_satisfy_an_explicit_docker_runner_requirement(self):
+        executor=self.service.coordinator._execution_service._executor
+        executor.runners['device-a']='docker'
         with self.assertRaises(HarnessError):
             await asyncio.to_thread(executor._verify,executor.clients['device-a'])
         self.assertEqual(self.node.adapter.harness.worktrees.list(),[])
@@ -345,3 +353,32 @@ class MultiDeviceExecutionTests(RemoteFixture):
         for node in (self.node,self.node_b):
             with node.ledger.transaction() as db:self.assertEqual(db.execute('SELECT count(*) FROM workers').fetchone()[0],1)
         self.assertEqual(self.rows("SELECT count(*) AS count FROM outbox_messages WHERE state='sent'")[0]['count'],2)
+
+
+class SingleDeviceQueueTests(RemoteFixture):
+    multiple_threads=True
+
+    async def test_one_capacity_device_queues_another_mission_without_unknown_worker_or_duplicate_run(self):
+        async def hold():self.work.gate=asyncio.Event();self.work.entered=asyncio.Event()
+        await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(hold(),self.device_loop))
+        submit_local(self.path,'Fix the typo.',thread_id='work',request_id='first')
+        submit_local(self.path,'Fix another typo.',thread_id='work-b',request_id='second')
+        try:
+            for _ in range(8):
+                await self.service.tick()
+                if len(self.rows('SELECT * FROM missions'))==2 and len(self.work.requests)==1:break
+            self.assertEqual(len(self.rows('SELECT * FROM missions')),2)
+            self.assertEqual(len(self.rows('SELECT * FROM remote_devices')),1)
+            self.assertEqual(len(self.rows('SELECT * FROM remote_mission_leases')),1)
+            self.assertEqual(len(self.rows('SELECT * FROM workers')),1)
+            self.assertEqual(len(self.work.requests),1)
+            self.assertEqual(self.rows("SELECT count(*) AS n FROM workers WHERE state='unknown'")[0]['n'],0)
+        finally:self.device_loop.call_soon_threadsafe(self.work.gate.set)
+        for _ in range(30):
+            await self.service.tick()
+            if self.rows("SELECT count(*) AS n FROM missions WHERE state='completed'")[0]['n']==2:break
+            await asyncio.sleep(.02)
+        self.assertEqual(self.rows("SELECT count(*) AS n FROM missions WHERE state='completed'")[0]['n'],2)
+        self.assertEqual({row['device_id'] for row in self.rows('SELECT * FROM remote_mission_leases')},{'device-a'})
+        self.assertEqual(len(self.work.requests),2)
+        self.assertEqual(len({row['run_id'] for row in self.rows('SELECT * FROM assignments')}),2)

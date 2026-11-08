@@ -26,6 +26,7 @@ class RemoteProtocolTests(unittest.TestCase):
         spec=read_config(self.path)
         self.assertEqual(value['identity_hash'],_hash(_json(config_identity(spec))))
         self.assertEqual(value['key_env'],'FIXTURE_DEVICE_KEY')
+        self.assertEqual(value['runner'],'docker')
         self.assertIn('REQUIRED_DIGEST',value['sandbox']['image'])
         self.assertFalse((self.root/'state').exists())
         original=output.read_bytes()
@@ -51,6 +52,25 @@ class RemoteProtocolTests(unittest.TestCase):
         value=frame(instance_id='instance',device_id='device',identity_hash='a'*64,operation='identity',params={})
         self.assertEqual(validate_schema(decode(encode(value)),document['components']['schemas']['WorkerFrame']),[])
         self.assertIn('reconcile_instruction',document['components']['schemas']['WorkerFrame']['properties']['operation']['enum'])
+        self.assertEqual(document['components']['schemas']['WorkerIdentity']['properties']['runner']['enum'],['native','docker'])
+
+    def test_single_native_device_export_has_no_docker_requirement_and_rejects_invalid_runner_or_empty_devices(self):
+        from harness.superagent_worker import read_worker_config
+        example=read_config(Path(__file__).resolve().parents[1]/'examples/superagent-native.json')
+        self.assertEqual(len(example['execution']['devices']),1)
+        self.assertEqual(example['execution']['devices'][0]['runner'],'native')
+        self.raw['execution']['devices'][0]['runner']='native'
+        self.path.write_text(json.dumps(self.raw))
+        output=self.root/'native.json';value=export_worker_config(self.path,'a',output)
+        self.assertEqual(value['runner'],'native');self.assertIsNone(value['sandbox'])
+        value['host_state']=str(self.root)
+        for profile in value['profiles'].values():profile['repo']=str(self.root/'repo')
+        output.write_text(json.dumps(value))
+        self.assertEqual(read_worker_config(output)['runner'],'native')
+        for change in ({'devices':[]},{'devices':[{**self.raw['execution']['devices'][0],'runner':'automatic'}]},
+                       {'devices':[{**self.raw['execution']['devices'][0],'runner':{}}]}):
+            self.path.write_text(json.dumps({**self.raw,'execution':{**self.raw['execution'],**change}}))
+            with self.subTest(change=change),self.assertRaises(HarnessError):read_config(self.path)
 
     def test_different_device_secret_references_cannot_resolve_to_the_same_signing_key(self):
         from harness.app.superagent_remote_client import RemoteExecutionAdapter

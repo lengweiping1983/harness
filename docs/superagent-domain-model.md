@@ -422,7 +422,7 @@ Phase 5 已提供同库分页／任务详情、本机工作台、人工原操作
 
 Phase 6 的 Schema v23 增加不可变 remote_devices 和 remote_mission_leases，Mission 的原设备、代次和撤销状态进入同一协调账本。设备仅保存原生资源及操作回执；Session / Run / 工具 / 工作树仍归该设备的 Harness。远程适配复用同一 Executor Port，固定 Mission 的设备，未知或租约过期不产生替代执行；来源失效停止续租并撤销设备准入。隔离、代理、握手、部署和恢复完整说明见[产品页](superagent.md#隔离与远程-worker)。
 
-当前仍限单实例和单仓库 Mission；多设备分配以 Mission 为单位，不支持跨设备 DAG、自动故障转移或跨设备数据迁移。动态 Source Plugin、自动跨来源关联、动态重规划和多人工作台属后续扩展。远程回环与独立原生进程回归已通过，Linux Rootless Sandbox、真实双机及跨平台实机验收待环境，不能把接口或替身当作 OS 隔离证明。离线回归也不代表在线模型质量、外部账号或长期负载验收。
+当前仍限单实例和单仓库 Mission；多设备分配以 Mission 为单位，不支持跨设备 DAG、自动故障转移或跨设备数据迁移。动态 Source Plugin、自动跨来源关联、动态重规划和多人工作台属后续扩展。支持 1–32 台设备，显式 native 可信宿主方式不依赖 Docker，单台真实 CLI 已验证完成及重启原 Run 回查。设备满载在创建 Worker 前准入；Docker／物理多机／跨平台按所选场景单独验收，不能把原生执行或替身当作 OS 隔离证明。离线回归也不代表在线模型质量、外部账号或长期负载验收。
 
 ## 10. 源码依据
 
@@ -432,7 +432,7 @@ Phase 6 的 Schema v23 增加不可变 remote_devices 和 remote_mission_leases�
 - `superagent_source_registry.py`、`superagent_authorization.py`：来源原文、身份、Gate、授权、Ticket 和 Subscription。
 - `superagent_models.py`：无工具原生 Assessor / Planner、冻结提案与原提交恢复。
 - `superagent_execution.py`、`superagent_dag_scheduler.py`、`superagent_executor.py`：Mission、调度、独立资源和原 Run 证据。
-- `superagent_remote_client.py`、`superagent_remote_gateway.py`、`superagent_remote_node.py`、`superagent_remote_leases.py`：同端口远程传输、原生回执、设备归属及撤销；`harness/superagent_worker.py` 为设备入口，`superagent_sandbox.py`、`superagent_process_isolation.py`、`superagent_secret_broker.py` 持有隔离与凭据生命周期。
+- `superagent_remote_client.py`、`superagent_remote_gateway.py`、`superagent_remote_node.py`、`superagent_remote_leases.py`：同端口远程传输、原生回执、设备归属及撤销；`harness/superagent_worker.py` 为设备入口，`superagent_native_runner.py` 持有可信宿主原生入口，`superagent_sandbox.py`、`superagent_process_isolation.py`、`superagent_secret_broker.py` 持有所选执行方式及凭据生命周期。
 - `superagent_artifacts.py`、`superagent_quality_gate.py`、`superagent_checkpoints.py`：文件交付、独立 Review 和阶段协议。
 - `superagent_coordination.py`、`superagent_input_delivery.py`、`superagent_mission_instruction.py`、`superagent_watchdog.py`：控制、逐执行输入、指令和持久监督。
 - `superagent_delivery_runtime.py`、`superagent_provider_adapters.py`、`superagent_outbox.py`、`superagent_effect_recovery.py`：发送准入、原回复目标、确认及未知效果只读恢复。

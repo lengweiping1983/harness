@@ -625,6 +625,8 @@ class CoordinatorExecutionService:
     async def _ensure_worker(self, ticket_id: str, profile: WorkerProfile, mandate_valid: bool,
                              *, mission: dict, job: dict, stage: int = 1) -> dict:
         self._admit_mission(mission["mission_id"])
+        reserve=getattr(self._executor,'reserve_mission',None)
+        if callable(reserve):reserve(mission['mission_id'])
 
         base_commit = mission["base_commit"]
         worker_id, identity_hash = self._worker_identity(ticket_id, profile, base_commit,

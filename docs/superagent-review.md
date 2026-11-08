@@ -230,9 +230,26 @@ Phase 5.2–5.6 增量从只读查询提交 `146b202` 接续。`SuperagentServic
 | 设备迁移冲突、配置重复字段、旧数据被覆盖 | 仅新增迁移，失败整笔回滚；原件及迁移校验和保留，模板独占创建，设备配置明确报错 | `test_migration_preserves_v22_effects_and_creates_no_fake_devices_or_leases`、`test_conflicting_lease_table_preserves_original_and_rolls_back_device_migration`、`test_invalid_worker_config_uses_explicit_error_and_preserves_original_bytes`及模板／协议回归 |
 | 工作台错看另一 Mission 租约或语言切换重新执行 | 相同查询端口按 Mission 范围读取，不暴露凭据，页面仍复用原异步隔离；双语资源实际消费 | 修改的工作台 API 用例、远程任务查询断言，以及组件 `shows device ownership and the original lease without exposing credentials`、`reads a mission lease only within the selected mission detail` |
 
-五个新增 Phase 6 测试文件和修改的工作台 API 方法共 42 个后端定向用例通过；随后补充的真实回环 TLS 握手阻塞用例单独通过，共 43 个不同用例。原任务租约查询、文件排队撤权和固定 Engine 收尾均有对应当前断言。两个新增／修改组件用例通过，同文件其他 10 项因精确选择器未执行；此前旧组件输入的整文件结果不作为最终新增场景的替代证据。协议与语言从正式源正常生成，未手工编辑生成文件。
+提交 `5df36cd` 中，五个新增 Phase 6 测试文件和修改的工作台 API 方法共 42 个后端定向用例通过；随后补充的真实回环 TLS 握手阻塞用例单独通过，共 43 个不同用例。原任务租约查询、文件排队撤权和固定 Engine 收尾均有对应当前断言。两个新增／修改组件用例通过，同文件其他 10 项因精确选择器未执行；此前旧组件输入的整文件结果不作为最终新增场景的替代证据。协议与语言从正式源正常生成，未手工编辑生成文件。
 
-本轮没有运行全量回归、lint／类型检查、生成全套检查、生产构建或桌面／浏览器专项，没有使用在线模型、外部账号、部署或发布。两个设备用例是独立 Harness／Git 副本／密钥／网关的回环逻辑设备；独立进程用例显式注入原生子进程，仅验证 stdio 与 Unix 代理。当前宿主无 Docker，未构建／运行镜像，Linux Rootless 的真实 UID、PID、网络、文件、凭据、资源越权及跨平台双机断网／迟到回执仍未验收。采样磁盘预算不是硬性总盘配额；设备密钥握手不是硬件证明。不将本轮代码和本机证据计作 Phase 6 总出口完成。
+本轮没有运行全量回归、lint／类型检查、生成全套检查、生产构建或桌面／浏览器专项，没有使用在线模型、外部账号、部署或发布。两个设备用例是独立 Harness／Git 副本／密钥／网关的回环逻辑设备；独立进程用例显式注入原生子进程，仅验证 stdio 与 Unix 代理。当前宿主无 Docker，未构建／运行镜像，Linux Rootless 的真实 UID、PID、网络、文件、凭据、资源越权及跨平台双机断网／迟到回执仍未验收。采样磁盘预算不是硬性总盘配额；设备密钥握手不是硬件证明。这段为 `5df36cd` 的隔离基线记录；后续验收按下节的单设备／原生／可选隔离范围分别核对。
+
+### Phase 6：单设备与无 Docker 原生入口
+
+本次增量基线为 `5df36cd`。设备数量原本允许 1–32 台，但生产 `serve` 固定构造 SandboxNode，且 RemoteExecutionAdapter 的握手强制 `sandbox=docker`，导致单设备配置仍无法在没有 Docker 的环境启动。当前同一设备配置增加显式 `runner=native`：`serve` → `open_worker_node` → NativeRunner → 原 NativeWorkerNode／HarnessExecutorAdapter；同一 ModelBroker 提供原生进程内传输与 Docker Unix Socket 传输。`runner=docker` 或省略 runner 的固定 Docker 配置继续拒绝自动降级。原生方式使用宿主权限，不宣称 OS 隔离。
+
+| 触发条件 | 当前源码措施 | 对应定向回归 |
+|---|---|---|
+| 单台设备没有 Docker、Rootless／cgroup 或 Unix Socket | native 分支不调用 sandbox_command、SandboxNode 或 SecretBroker Socket，导出 `sandbox:null`；设备列表下限保持 1 | `test_one_native_worker_opens_without_docker_unix_socket_or_container_configuration`、`test_single_native_device_export_has_no_docker_requirement_and_rejects_invalid_runner_or_empty_devices` |
+| 原生设备被当作 Docker 设备，或 Docker 不可用时隐式在宿主执行 | 协调配置、导出及握手固定 runner，响应明确 `sandbox=none`；Docker 启动错误继续向上传播 | `test_native_device_cannot_satisfy_an_explicit_docker_runner_requirement`、`test_native_config_rejects_sandbox_limits_and_docker_failure_never_selects_native` |
+| 单设备满载时第二任务提前进入工作树创建，缺少租约而卡在未确认状态 | `_ensure_worker` 在创建协调 Worker 前调用可选 reserve_mission 准入，设备满载明确背压，原任务完成后同设备继续 | `test_one_capacity_device_queues_another_mission_without_unknown_worker_or_duplicate_run` |
+| 原生模型传输绕开能力或重试撤权请求，线程丢语言 | NativeBrokerTransport 复用 ModelBroker，原 ContextVar 能力／当前语言经 to_thread 传递；错误消费英文→中文→英文不再次转发 | `test_native_transport_consumes_shared_capability_and_actual_bilingual_errors`；修改的 Unix Transport 用例同时核对错误模型不消耗有效能力 |
+| 单设备只接通内部类，真实入口无法闭环或重启产生新 Run | 真正启动 `python -m harness.superagent_worker --config` 子进程，签名 HTTP、固定模型端点、统一协调任务和 Outbox；停止后重新启动只查原 Run | `test_single_native_cli_device_completes_and_reopens_original_run_without_docker` |
+| 原生文件任务未经过真实工具和质量门 | 同一 CLI 子进程执行写／读工具，Work → Artifact／Delivery → Integrator → 独立 Reviewer，保留三份工作树及原始 Run；仓库原文件不改写 | `test_native_cli_file_task_passes_artifact_integration_and_independent_review`，断言两份产物、两次应用交付及通过的独立 Review |
+
+本次 16 个新增或修改输入的定向用例已通过。单台原生方式已在本机 macOS 取得上述真实 CLI 证据，模型端点仍为受控回环提供方，不代表在线模型质量。单设备任务排队、Runner 身份、协议源／生成产物、模板和完整示例均有对应验证；断线、撤权、丢回执、文件质量门及可选多逻辑设备保留原业务断言，按本次实际修改的夹具定向复核。验证结果按本次实际执行记录维护，不以基线的旧计数代表当前输入。
+
+没有构建 Docker 镜像、运行全量回归、lint／类型检查、桌面／浏览器专项或访问外部账号。物理多机、其他操作系统及可选 Docker 越权／配额仍属于各自未验收专项，不能记作通过；它们不再是单设备无 Docker 原生方式的启动或完成前提。生产使用、完整配置与原生权限边界只维护在[产品页](superagent.md#隔离与远程-worker)。
 
 ## 待验证风险与产品缺口
 

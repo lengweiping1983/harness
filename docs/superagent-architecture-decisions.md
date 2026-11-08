@@ -231,7 +231,7 @@ Phase 2 先实现静态 SourceRegistry 和内置 GitHub / Feishu / Local Adapter
 - Tool Profile 和 Source Admission 仍由 Harness 宿主控制。
 - Worktree 是文件隔离和交付机制，不等于 OS 进程或凭证隔离。
 - 在 Sandbox Runner / Secret Broker / egress policy 完成并通过实机验证前，不对不可信外部写任务宣称生产级 OS 隔离。
-- Phase 6 采用同一 Executor Port 的设备网关、持久原生回执、Rootless Docker Runner 与宿主 Secret Broker；一个 Mission 固定一个设备。具体约束和支持范围见[产品页](superagent.md#隔离与远程-worker)。真实隔离、双机及跨平台验收仍待完成。
+- Phase 6 采用同一 Executor Port 的设备网关与持久原生回执；1–32 台设备显式选择 native 可信宿主或 docker 隔离，原生复用进程内 Broker，容器使用 Unix Broker；一个 Mission 固定一个设备。具体约束和支持范围见[产品页](superagent.md#隔离与远程-worker)。单台无 Docker 的真实 CLI 已验证；可选隔离、物理多机及跨平台专项仍待完成，不作为原生单设备的使用前提。
 
 **替代方案**
 
@@ -271,7 +271,7 @@ flowchart TB
 
 领域模型、状态机及 Ports 在协调账本实现之前冻结；后续实现同步维护契约、调用方、生成源及有效测试。Phase 1–3 基础已经交付，该历史顺序不构成重新启动 Phase 0 或等待旧评审清单的要求。
 
-当前 Phase 6 开发路径及本机定向证据已具备，实机出口待验收；具体顺序和完成门禁只维护在总体开发计划。Schema 的正常演进不等于旧 Superagent 运行数据导入，也不允许重新引入双轨运行。
+当前 Phase 6 单设备原生真实 CLI 已验证，可选隔离／多机／跨平台专项独立验收；具体顺序和完成门禁只维护在总体开发计划。Schema 的正常演进不等于旧 Superagent 运行数据导入，也不允许重新引入双轨运行。
 
 ## 4. 目标 Ports 接口契约
 
@@ -404,7 +404,7 @@ UnitOfWork 暴露 Ticket、Mission、Job、Assignment 等有类型的 Repository
 
 ## 8. 后续开发准入与完成门禁
 
-[唯一开发计划第 11 节](superagent-next-generation-architecture.md#11-分阶段实施计划)记录 Phase 6 已落地路径与待完成的真实设备／隔离验收。Phase 0 的原始评审清单不再作为当前待执行任务。
+[唯一开发计划第 11 节](superagent-next-generation-architecture.md#11-分阶段实施计划)记录 Phase 6 单台无 Docker 原生路径，以及可选设备／隔离专项验收。Phase 0 的原始评审清单不再作为当前待执行任务。
 
 验收必须通过统一应用服务的实际消费者、原始回执和业务断言取得证据；旧默认路由保持、旧服务仍可启动或只读 Shadow 比较不属于新架构的验收门禁。当前已实现与缺口以领域模型第 9 节为准，不以本页 ADR 状态代替实现证明。
 

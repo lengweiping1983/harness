@@ -1,9 +1,10 @@
-"""远程 Worker 设备入口；只装配隔离的原生 Executor，不运行第二个协调器。"""
+"""远程 Worker 设备入口；装配明确选择的原生 Executor，不运行第二个协调器。"""
 from __future__ import annotations
 
 import argparse
 import asyncio
 from dataclasses import fields
+from contextlib import asynccontextmanager
 import os
 import stat
 from pathlib import Path
@@ -20,7 +21,10 @@ def _read_worker_config(path):
     value=decode(Path(path).expanduser().resolve(strict=True).read_bytes())
     required={'version','instance_id','device_id','identity_hash','host_state','model','base_url','language','permission_policy',
         'profiles','coordinator_profiles','coordinator_repos','default_profiles','max_workers','key_env','api_key_env','sandbox','listen'}
-    if set(value)!=required or type(value['version']) is not int or value['version']!=1:raise _error('remote.config')
+    if (set(value)-required-{'runner'} or not required<=set(value) or type(value['version']) is not int
+        or value['version']!=1 or value.get('runner','docker') not in ('native','docker')):raise _error('remote.config')
+    if value.get('runner','docker')=='native' and value['sandbox'] is not None:raise _error('remote.config')
+    if value.get('runner','docker')=='docker' and not isinstance(value['sandbox'],dict):raise _error('remote.config')
     import re
     from .app.superagent_executor import WorkerProfile
     from .app.superagent_http import api_root
@@ -127,7 +131,7 @@ async def _native_node(config,*,transport=None,runtime_stack=None):
         ledger=NodeLedger(root/'worker-native.sqlite3',{'instance_id':config['instance_id'],'device_id':config['device_id'],
             'identity_hash':config['identity_hash'],'runtime':adapter.runtime_manifest(),
             'profiles':{key:profile.fingerprint for key,profile in adapter.profiles.items()}})
-        return NativeWorkerNode(adapter,ledger,coordinator_profiles=config['coordinator_profiles'],coordinator_repos=config['coordinator_repos'],runtime_stack=runtime_stack,broker_scope=BROKER_SCOPE,provider_root=config.get('provider_root',config.get('base_url')),isolated_processes=config.get('isolated_processes',False),repository_sources={profile['repo']:next(seed for seed in config.get('seed_repos',{}).values() if seed.rsplit('/',1)[1]==Path(profile['repo']).name) for profile in config['profiles'].values()} if config.get('isolated_processes') else {})
+        return NativeWorkerNode(adapter,ledger,coordinator_profiles=config['coordinator_profiles'],coordinator_repos=config['coordinator_repos'],sandbox='docker' if config.get('isolated_processes') else 'none',runtime_stack=runtime_stack,broker_scope=BROKER_SCOPE,provider_root=config.get('provider_root',config.get('base_url')),isolated_processes=config.get('isolated_processes',False),repository_sources={profile['repo']:next(seed for seed in config.get('seed_repos',{}).values() if seed.rsplit('/',1)[1]==Path(profile['repo']).name) for profile in config['profiles'].values()} if config.get('isolated_processes') else {})
     except BaseException as original:
         try:await harness.close()
         except BaseException as cleanup:
@@ -177,49 +181,70 @@ async def stdio():
         await node.close()
 
 
-async def serve(path):
+@asynccontextmanager
+async def open_worker_node(config,*,api_key,broker_forward=None):
+    """只启动显式选择的后端；可信宿主路径不探测或启动 Docker。"""
     from .app.superagent_sandbox import SandboxNode,sandbox_command
-    from .app.superagent_secret_broker import SecretBroker
+    from .app.superagent_secret_broker import SecretBroker,ModelBroker,NativeBrokerTransport
+    from .app.superagent_native_runner import NativeRunner
+    from contextlib import nullcontext
+    runner=config.get('runner','docker')
+    if runner not in ('native','docker'):raise _error('remote.config')
+    if runner=='native' and config['sandbox'] is not None:raise _error('remote.config')
+    context=tempfile.TemporaryDirectory(prefix='harness-worker-broker-') if runner=='docker' else nullcontext(None)
+    with context as temporary:
+        node=None
+        if runner=='docker':
+            (Path(config['host_state'])/'workspaces').mkdir(mode=0o711,exist_ok=True)
+            (Path(config['host_state'])/'gitviews').mkdir(mode=0o711,exist_ok=True)
+            sandbox_command(config['sandbox'],broker_dir=temporary,runtime_config=config)
+        options=dict(upstream=config['base_url'],api_key=api_key,
+            models={config['model'],*(value.get('model') or config['model'] for value in config['profiles'].values())},
+            audit_path=Path(config['host_state'])/'model-proxy-audit.jsonl',forward=broker_forward,
+            lease_valid=lambda mission,generation:bool(node and node.lease_valid(mission,generation)))
+        broker=SecretBroker(Path(temporary)/'model.sock',**options) if runner=='docker' else ModelBroker(**options)
+        try:
+            if runner=='docker':node=await SandboxNode.open(config,broker)
+            else:
+                native=await native_node({**config,'state_dir':config['host_state']},transport=NativeBrokerTransport(broker))
+                node=NativeRunner(native,config,broker)
+            yield node
+        finally:
+            from .core.cleanup import raise_cleanup_errors
+            errors=[]
+            if node:
+                try:await node.close()
+                except BaseException as exc:errors.append(exc)
+            try:await broker.close()
+            except BaseException as exc:errors.append(exc)
+            raise_cleanup_errors(errors)
+
+
+async def serve(path):
     from .app.superagent_remote_gateway import WorkerGateway
     config=read_worker_config(path)
     from .core.language import current_language
     current_language.set(config['language'])
     key=os.environ.get(config['key_env'],'').encode();api_key=os.environ.get(config['api_key_env'],'')
     if len(key)<32 or not api_key:raise _error('credentials-required')
-    # 启动前验证隔离后端，不能先打开网络端口或降级到宿主执行。
-    with tempfile.TemporaryDirectory(prefix='harness-worker-broker-') as temporary:
-        (Path(config['host_state'])/'workspaces').mkdir(mode=0o711,exist_ok=True)
-        (Path(config['host_state'])/'gitviews').mkdir(mode=0o711,exist_ok=True)
-        sandbox_command(config['sandbox'],broker_dir=temporary,runtime_config=config)
-        node=None;gateway=None
-        broker=SecretBroker(Path(temporary)/'model.sock',upstream=config['base_url'],api_key=api_key,
-            models={config['model'],*(value.get('model') or config['model'] for value in config['profiles'].values())},audit_path=Path(config['host_state'])/'model-proxy-audit.jsonl',
-            lease_valid=lambda mission,generation:bool(node and node.lease_valid(mission,generation)))
+    tls=None;listen=config['listen']
+    if 'cert' in listen or 'key' in listen:
+        tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);tls.minimum_version=ssl.TLSVersion.TLSv1_2
+        tls.load_cert_chain(listen['cert'],listen['key'])
+    async with open_worker_node(config,api_key=api_key) as node:
+        gateway=WorkerGateway(node,instance_id=config['instance_id'],device_id=config['device_id'],identity_hash=config['identity_hash'],
+            key=key,host=listen['host'],port=listen['port'],tls=tls)
+        previous={};stop=asyncio.Event();loop=asyncio.get_running_loop()
         try:
-            tls=None;listen=config['listen']
-            if 'cert' in listen or 'key' in listen:
-                tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);tls.minimum_version=ssl.TLSVersion.TLSv1_2
-                tls.load_cert_chain(listen['cert'],listen['key'])
-            node=await SandboxNode.open(config,broker)
-            gateway=WorkerGateway(node,instance_id=config['instance_id'],device_id=config['device_id'],identity_hash=config['identity_hash'],
-                key=key,host=listen['host'],port=listen['port'],tls=tls)
-            stop=asyncio.Event();loop=asyncio.get_running_loop()
-            for sig in (signal.SIGINT,signal.SIGTERM):loop.add_signal_handler(sig,stop.set)
+            # 同步信号入口适用于本机各事件循环；关闭后恢复原宿主处理器。
+            for sig in (signal.SIGINT,signal.SIGTERM):
+                previous[sig]=signal.signal(sig,lambda *args:loop.call_soon_threadsafe(stop.set))
             from .i18n import tr
             print(tr('superagent.remote.listening',device=config['device_id'],port=gateway.port),flush=True)
             await stop.wait()
         finally:
-            from .core.cleanup import raise_cleanup_errors
-            errors=[]
-            if gateway:
-                try:await gateway.close()
-                except BaseException as exc:errors.append(exc)
-            elif node:
-                try:await node.close()
-                except BaseException as exc:errors.append(exc)
-            try:await broker.close()
-            except BaseException as exc:errors.append(exc)
-            raise_cleanup_errors(errors)
+            for sig,handler in previous.items():signal.signal(sig,handler)
+            await gateway.close()
 
 
 def export_worker_config(config_path,device_id,output):
@@ -237,7 +262,8 @@ def export_worker_config(config_path,device_id,output):
         'coordinator_profiles':{key:WorkerProfile(profile_id=key,**profile).fingerprint for key,profile in spec['profiles'].items()},
         'coordinator_repos':{key:profile['repo'] for key,profile in spec['profiles'].items()},'default_profiles':spec['default_profiles'],
         'max_workers':spec['max_workers'],'key_env':spec['secrets'][device['key_ref'][9:]],'api_key_env':'HARNESS_WORKER_MODEL_API_KEY',
-        'sandbox':{'image':'REQUIRED_IMAGE@sha256:REQUIRED_DIGEST','memory_mb':2048,'cpus':2,'pids':128,'disk_bytes':10737418240},
+        'runner':device.get('runner','docker'),
+        'sandbox':None if device.get('runner','docker')=='native' else {'image':'REQUIRED_IMAGE@sha256:REQUIRED_DIGEST','memory_mb':2048,'cpus':2,'pids':128,'disk_bytes':10737418240},
         'listen':{'host':'127.0.0.1','port':urlsplit(device['url']).port or 443}}
     with Path(output).expanduser().open('xb') as stream:stream.write(encode(value)+b'\n')
     return value

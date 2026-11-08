@@ -193,6 +193,47 @@
           "result",
           "error"
         ]
+      },
+      "WorkerIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol": {
+            "type": "integer",
+            "const": 1
+          },
+          "profiles": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "runner": {
+            "type": "string",
+            "enum": [
+              "native",
+              "docker"
+            ]
+          },
+          "sandbox": {
+            "type": "string",
+            "enum": [
+              "none",
+              "docker"
+            ]
+          },
+          "runtime": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "protocol",
+          "profiles",
+          "runner",
+          "sandbox",
+          "runtime"
+        ]
       }
     }
   }
