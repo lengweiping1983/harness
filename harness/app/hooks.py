@@ -84,7 +84,7 @@ def validate_document(document: Any) -> list[dict[str, Any]]:
                     if event == 'SessionEnd':
                         raise ValueError(tr('hook.feedback.e81bdd56ff1d'))
                 timeout = handler.get('timeout', 1 if kind == 'command' and event in ('Interrupt', 'SessionEnd') else 600)
-                if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or not .05 <= timeout <= 3600:
+                if type(timeout) not in (int, float) or not .05 <= timeout <= 3600 or not math.isfinite(float(timeout)):
                     raise ValueError(tr('python.hooks.ca99c86f0997'))
                 if kind == 'command' and event in ('Interrupt', 'SessionEnd'):
                     timeout = max(1, min(3, timeout))
