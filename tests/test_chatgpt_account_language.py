@@ -41,6 +41,34 @@ class ChatGPTAccountLanguageTests(unittest.TestCase):
                 with current_language.set(language):
                     self.assertEqual(account.status()['error'], tr('chatgpt.http_failed', status=429))
 
+    def test_oversized_expiry_is_rejected_or_defaulted_without_leaking_overflow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'chatgpt-account.json'
+            original = json.dumps({
+                'version': 1,
+                'credentials': {
+                    'access': 'fixture', 'refresh': 'fixture', 'account_id': 'fixture',
+                    'email': 'fixture@example.invalid', 'expires': 10 ** 4000,
+                },
+                'models': [], 'selected': '',
+            })
+            path.write_text(original, encoding='utf-8')
+            with self.assertRaises(ChatGPTAccountError) as caught:
+                ChatGPTAccount(Path(directory))
+            self.assertEqual(str(caught.exception), tr('chatgpt.file_invalid'))
+            self.assertEqual(path.read_text(encoding='utf-8'), original)
+
+        with tempfile.TemporaryDirectory() as directory:
+            token = 'fixture.' + base64.urlsafe_b64encode(
+                json.dumps({'chatgpt_account_id': 'fixture'}).encode()
+            ).decode().rstrip('=') + '.fixture'
+            account = ChatGPTAccount(Path(directory), request=Mock(return_value={
+                'access_token': token, 'refresh_token': 'fixture', 'expires_in': 10 ** 4000,
+            }))
+            with patch('harness.llm.chatgpt_auth.time.time', return_value=1000):
+                credentials = account._token({'grant_type': 'authorization_code'})
+            self.assertEqual(credentials['expires'], 4600)
+
     def test_owned_response_errors_are_localized_without_exposing_response_data(self):
         for language in ('en', 'zh-CN'):
             with current_language.set(language):

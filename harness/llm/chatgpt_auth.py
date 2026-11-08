@@ -141,7 +141,7 @@ class ChatGPTAccount:
                 if not isinstance(raw['selected'], str) or (raw['selected'] and raw['selected'] not in {m['id'] for m in raw['models']}):
                     raise ValueError()
                 self.credentials, self.models, self.selected = credential, raw['models'], raw['selected']
-            except (ValueError, TypeError, KeyError):
+            except (ValueError, TypeError, KeyError, OverflowError):
                 raise ChatGPTAccountError('chatgpt.file_invalid') from None
 
     @property
@@ -180,7 +180,7 @@ class ChatGPTAccount:
         if not account_id or any(c in account_id for c in '\r\n'):
             raise ChatGPTAccountError('chatgpt.identity_missing')
         expiry = data.get('expires_in', 3600)
-        if type(expiry) not in (int, float) or not math.isfinite(expiry) or not 0 <= expiry <= 365 * 86400:
+        if type(expiry) not in (int, float) or not 0 <= expiry <= 365 * 86400 or not math.isfinite(expiry):
             expiry = 3600
         refresh = data.get('refresh_token', old.get('refresh', ''))
         if not isinstance(refresh, str):
