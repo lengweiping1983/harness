@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import json
 from collections.abc import Mapping
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from harness.i18n import tr
@@ -451,6 +452,13 @@ class CoordinatorExecutionService:
         }
 
     def _build_prompt(self, ticket: dict, trigger: dict, mandate: dict) -> tuple[str, list[str]]:
+        event, input_ids = self._build_work_input(ticket, trigger, mandate)
+        prompt = tr("superagent.worker_input", event=_json(event))
+        prompt += "\n\n" + tr("superagent.worker_report_contract")
+        return prompt, input_ids
+
+    def _build_work_input(self, ticket: dict, trigger: dict, mandate: dict) -> tuple[dict, list[str]]:
+        """冻结结构化任务数据，让新阶段按当前语言重新解析产品提示。"""
         inputs = self._read_all(
             "SELECT input_id,trigger_id,context_only,state,created_at FROM ticket_inputs "
             "WHERE ticket_id=? ORDER BY created_at,input_id", (ticket["ticket_id"],),
@@ -491,9 +499,7 @@ class CoordinatorExecutionService:
                 "tools": mandate["scope"].get("tools", []),
             },
         }
-        prompt = tr("superagent.worker_input", event=_json(event))
-        prompt += "\n\n" + tr("superagent.worker_report_contract")
-        return prompt, input_ids
+        return event, input_ids
 
     def _mark_input_db(self, db, input_id: str, target: str, *,
                        assignment_id: str | None = None, delivery_key: str | None = None) -> dict:
@@ -747,6 +753,7 @@ class CoordinatorExecutionService:
                     isinstance(acceptance, dict) and acceptance.get("kind") == "single_worker_report"
                     and type(acceptance.get("schema_version")) is int
                     and acceptance.get("schema_version") == 1 and len(planned_nodes) == 1
+                    and node_profiles[0].max_work_turns is None
                     and all(effect == "read" for effect in self._profile_tool_effects(node_profiles[0]).values())
                 )
 
@@ -793,9 +800,21 @@ class CoordinatorExecutionService:
                                 or not set(system_profile.tools) <= set(scope.get("tools", []))):
                             raise PermissionError(f"Host-owned {role} profile exceeds the frozen Mission repository or Mandate scope")
                     system_profiles = self._system_profiles
+                work_input = self._build_work_input(ticket, trigger, mandate)[0] if any(
+                    selected.max_work_turns is not None for selected in node_profiles
+                ) else None
+                work_nodes = []
+                for node, selected in zip(planned_nodes, node_profiles, strict=True):
+                    if selected.max_work_turns is not None:
+                        self._dag_scheduler._node_prompt(prompt, node)
+                    work_nodes.append({
+                        **node, "max_work_turns": selected.max_work_turns,
+                        "work_instruction": ({"request": work_input, "node_instruction": node.get("instruction")}
+                                             if selected.max_work_turns is not None else None),
+                    })
                 plan = uow.plans.create(
                     mission_id, expected_mission_revision=mission["aggregate_revision"],
-                    plan=frozen_plan["plan"], acceptance=acceptance,
+                    plan={**frozen_plan["plan"], "nodes": work_nodes}, acceptance=acceptance,
                     created_by_kind="host", created_by_ref="host-planner",
                     system_profiles=system_profiles,
                 )
@@ -1107,6 +1126,19 @@ class CoordinatorExecutionService:
                     "assignment_id": assignment["assignment_id"], "inspection": "invalid",
                 })
                 continue
+            last_activity = reference.get("last_activity")
+            if isinstance(last_activity, dict) and type(last_activity.get("time")) is int:
+                # Harness 原生日志使用 Unix 毫秒；监督游标使用规范 UTC 文本，不改写原证据。
+                try:
+                    stamp = last_activity["time"]
+                    if stamp < 0:
+                        raise ValueError
+                    event_time = (datetime(1970, 1, 1, tzinfo=timezone.utc)
+                                  + timedelta(milliseconds=stamp)).isoformat(timespec="milliseconds")
+                except (ValueError, OverflowError):
+                    activity.append({"assignment_id": assignment["assignment_id"], "inspection": "invalid"})
+                    continue
+                last_activity = {**last_activity, "time": event_time}
             activity.append({
                 "assignment_id": assignment["assignment_id"],
                 "run_id": snapshot.get("run_id"),
@@ -1114,7 +1146,7 @@ class CoordinatorExecutionService:
                 "status": snapshot.get("status"),
                 "settled": snapshot.get("settled"),
                 "turn": snapshot.get("turn", reference.get("turn")),
-                "last_activity": reference.get("last_activity"),
+                "last_activity": last_activity,
                 "unconfirmed_tools": snapshot.get("unconfirmed_tools", 0),
                 "unsettled_background": snapshot.get("unsettled_background", 0),
                 "inspection": "confirmed" if snapshot.get("found", True) else "not_found",

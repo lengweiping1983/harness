@@ -48,6 +48,7 @@ class WorkerProfile:
     model: str | None = None
     max_turns: int = 1
     max_seconds: int = 900
+    max_work_turns: int | None = None
 
     def __post_init__(self) -> None:
         profile_id = _text(self.profile_id, "profile_id", limit=128)
@@ -68,6 +69,10 @@ class WorkerProfile:
             raise ValueError("WorkerProfile max_turns must be between 1 and 100")
         if type(self.max_seconds) is not int or not 1 <= self.max_seconds <= 86400:
             raise ValueError("WorkerProfile max_seconds must be between 1 and 86400")
+        if self.max_work_turns is not None and (
+            type(self.max_work_turns) is not int or not 1 <= self.max_work_turns <= 32
+        ):
+            raise ValueError(tr("superagent.invalid", field="WorkerProfile.max_work_turns"))
         object.__setattr__(self, "profile_id", profile_id)
         object.__setattr__(self, "repo", repo)
         object.__setattr__(self, "description", description)
@@ -82,6 +87,7 @@ class WorkerProfile:
             "source_instance_ids": list(self.source_instance_ids), "actions": list(self.actions),
             "tools": list(self.tools), "model": self.model,
             "max_turns": self.max_turns, "max_seconds": self.max_seconds,
+            "max_work_turns": self.max_work_turns,
         }))
 
 

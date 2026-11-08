@@ -535,6 +535,10 @@ Watchdog 仍不是跨设备租约、操作系统级进程监督或业务验收�
 
 当前 `--superagent CONFIG` 仍启动前述事件路由或自主目标服务。统一协调账本、来源授权与单 Worker 执行基础已通过显式 CoordinatorHost API 提供；这不等于生产入口已经替换。
 
-Phase 4 已增加执行资源作用域、宿主系统节点物化、逐 Assignment 输入投递记录、持久暂停准入，以及经原生 Run 核验的真实文件捕获和导入适配。Artifact / Delivery 服务当前仅能显式内部调用，尚未接入统一 Scheduler；取消意图也尚未接入统一目标停止 Runtime。完整已实现边界和缺口统一见[领域模型](superagent-domain-model.md#9-phase-14-当前实现边界)。
+Phase 4.1–4.4 已在显式 `SuperagentService.open_coordinator` / `CoordinatorHost` 内接通统一生命周期、持久暂停及目标停止、单多节点 DAG、真实 Artifact / Delivery、独立 Review、有限修正和 Watchdog。完整已实现边界和剩余缺口见[领域模型](superagent-domain-model.md#9-phase-14-当前实现边界)；生产信道和 CLI 切换仍未完成。
+
+统一链路通过宿主 `WorkerProfile(max_work_turns=3, ...)` 显式启用长 Work 节点的三阶段预算（合法整数 1–32，None 使用普通报告协议）。宿主将阶段预算和结构化任务数据冻结到 PlanRevision，Planner 不能覆盖；此字段与单次 Run 的 `max_turns`、Mission 全局 Assignment 预算分别约束。每阶段使用前文的严格 `status/summary/next_steps` 检查点协议，阶段提示按当前调用语言解析。continue 冻结原输出及 Artifact，以同一 Job 的新 Assignment、新会话和新工作树导入累计文件与必需依赖；ready 才解锁下游，之后仍须集成及独立复核。blocked、非法报告、阶段／总预算耗尽或与任意旧阶段相同的检查点及文件树均阻断。未知 Capture / Import / Submit 仅回查原身份，不能重新执行。原 Task 数据是冻结输入，后续指令上下文接线按 Phase 4.5 推进，不改变冻结 DAG 或验收条件。
+
+`CoordinatorExecutionService.watchdog_activity` 将 Harness 原生 Unix 毫秒时间转换为监督用 UTC 文本，原事件和 Evidence 保留原值。监督器重建、长期检查失败或不完整快照均不解除 blocked；原 Run 的新事件或经过核验的账本进度才可恢复。真实文件跨阶段、Host 重启及受控时钟 24 小时检查失败恢复由 `tests/test_superagent_unified_dag_artifact_integration.py` 的阶段接续用例验证；它不代表真实长期负载或在线模型判断质量。
 
 [总体实施计划](superagent-next-generation-architecture.md#phase-4完整-superagent-整合与替换)要求 Phase 4 结束时完成唯一入口、完整业务能力接线及旧编排退役。当前没有旧版运行数据，不开发旧任务导入或历史协议兼容工具；意外发现的旧目录保留原件并明确拒绝混用。工作台、远程执行及跨平台 Sandbox 分别在同一系统上扩展和验收。

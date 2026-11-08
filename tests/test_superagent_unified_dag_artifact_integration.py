@@ -578,6 +578,12 @@ class DagSchedulerArtifactIntegrationTests(unittest.IsolatedAsyncioTestCase):
             mission = self.rows("SELECT * FROM missions WHERE mission_id=?", (mission_id,))[0]
             self.assertEqual(mission["state"], "completed")
             self.assertEqual(mission["round_no"], 1)
+            frozen_plan = json.loads(self.rows(
+                "SELECT plan_json FROM mission_plans WHERE mission_id=?", (mission_id,),
+            )[0]["plan_json"])
+            # 普通 Work 不启用检查点；有限修正仍只推进系统 Job 的尝试，不重建计划。
+            self.assertTrue(all(node.get("max_work_turns") is None for node in frozen_plan["nodes"]))
+            self.assertEqual(len(self.rows("SELECT * FROM mission_plans WHERE mission_id=?", (mission_id,))), 1)
             self.assertFalse(review_verdicts)
             review_rows = self.rows(
                 "SELECT review_id,state,candidate_artifact_id,reviewer_assignment_id "
@@ -614,3 +620,152 @@ class DagSchedulerArtifactIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual({row["state"] for row in reviewer_attempts}, {"succeeded"})
         finally:
             self.transport.post_stream = original_post_stream
+
+    async def test_staged_work_survives_restart_and_reaches_independent_quality_gate(self):
+        """真实文件跨阶段保留，重启后只派新阶段，最终经过独立质量门。"""
+        from dataclasses import replace
+
+        await self.host.aclose()
+        self.profile = replace(self.profile, max_work_turns=2)
+        self.adapter = HarnessExecutorAdapter(
+            self.harness, instance_id="dag-artifact-integration", owner_session_id=self.owner_session_id,
+            profiles=[self.profile, self.integrator_profile, self.reviewer_profile],
+            default_profiles={"local-source": "builder"},
+        )
+
+        class Planner:
+            def plan(inner, **kwargs):
+                value = _TwoRootJoinPlanner().plan(**kwargs)
+                value["plan"]["nodes"] = value["plan"]["nodes"][:1]
+                return value
+
+        def open_host():
+            return CoordinatorHost.open(
+                self.root / "state", instance_id="dag-artifact-integration",
+                identity={"project": "harness", "suite": "dag-artifact-integration"},
+                local_identity_verifier=self._local_identity, executor_adapter=self.adapter,
+                planner=Planner(), system_profiles={"integrate": "integrator", "review": "reviewer"},
+                watchdog_limits={"stale_after": 1.0, "max_stale_ticks": 2, "action": "block"},
+            )
+
+        self.host = open_host()
+        async def close_current_host():
+            await self.host.aclose()
+        self.addAsyncCleanup(close_current_host)
+        seen = []
+        reviewer_entered = asyncio.Event()
+        release_reviewer = asyncio.Event()
+
+        async def stream(url, *, headers, body, timeout):
+            request = json.loads(body)
+            self.transport.requests.append(request)
+            messages = [m["content"] for m in request["messages"] if isinstance(m.get("content"), str)]
+            staged = next((m for m in messages if '"max_work_turns":2' in m), None)
+            review = next((m for m in messages if "Host-owned independent Reviewer:" in m), None)
+            if staged:
+                frame, _ = json.JSONDecoder().raw_decode(staged[staged.index('{"attempt":'):])
+                seen.append(("work", frame["attempt"]))
+                output = {"status": "continue" if frame["attempt"] == 1 else "ready",
+                          "summary": "Preserved first change" if frame["attempt"] == 1 else "Both changes ready",
+                          "next_steps": ["Finish second file"] if frame["attempt"] == 1 else []}
+            elif review:
+                reviewer_entered.set()
+                await release_reviewer.wait()
+                contract_text = review.split("Host-owned independent Reviewer:", 1)[1].split("\n", 1)[1]
+                contract, _ = json.JSONDecoder().raw_decode(contract_text.lstrip())
+                seen.append(("review", 1))
+                evidence = contract["available_evidence"][0]["evidence_id"]
+                output = {"schema_version": 1, "candidate_artifact_id": contract["candidate_artifact_id"],
+                          "acceptance_hash": contract["acceptance_hash"], "verdict": "passed",
+                          "criteria": [{"id": c["id"], "status": "passed", "reason": "Files inspected",
+                                        "evidence_ids": [evidence]} for c in contract["criteria"]]}
+            else:
+                seen.append(("integrate", 1))
+                output = {"summary": "Integrated frozen work"}
+            chunks = [
+                {"choices": [{"delta": {"role": "assistant", "content": json.dumps(output)}, "finish_reason": None}]},
+                {"choices": [{"delta": {}, "finish_reason": "stop"}],
+                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            ]
+            for chunk in chunks:
+                yield ("data: " + json.dumps(chunk) + "\n\n").encode()
+            yield b"data: [DONE]\n\n"
+
+        self.transport.post_stream = stream
+        received, accepted = self.accept_event()
+        await self.host.execution.route_trigger(accepted["ticket_id"], received["trigger_id"])
+        mission_id = self.rows("SELECT mission_id FROM missions")[0]["mission_id"]
+
+        def assignment(role, attempt):
+            return self.rows(
+                "SELECT a.* FROM assignments a JOIN jobs j ON j.job_id=a.job_id "
+                "WHERE j.mission_id=? AND j.role=? AND a.attempt_no=?", (mission_id, role, attempt),
+            )[0]
+
+        first = assignment("work", 1)
+        await self.wait_for_run(first)
+        first_path = Path(self.harness.worktrees.get(first["workspace_id"])["path"])
+        (first_path / "first.bin").write_bytes(b"\x00\xff\x01")
+        await self.host.execution.reconcile(first["assignment_id"])
+        self.assertEqual(self.rows("SELECT state FROM jobs WHERE role='work'")[0]["state"], "checkpointed")
+        await self.host.aclose()
+        self.adapter = HarnessExecutorAdapter(
+            self.harness, instance_id="dag-artifact-integration", owner_session_id=self.owner_session_id,
+            profiles=[self.profile, self.integrator_profile, self.reviewer_profile],
+            default_profiles={"local-source": "builder"},
+        )
+        self.host = open_host()
+        result = await self.host.execution.schedule_dag_missions()
+        self.assertFalse(result["errors"], result)
+        second = assignment("work", 2)
+        self.assertNotEqual(first["session_id"], second["session_id"])
+        self.assertNotEqual(first["workspace_id"], second["workspace_id"])
+        second_path = Path(self.harness.worktrees.get(second["workspace_id"])["path"])
+        self.assertEqual((second_path / "first.bin").read_bytes(), b"\x00\xff\x01")
+        await self.wait_for_run(second)
+        (second_path / "second.txt").write_text("complete\n", encoding="utf-8")
+        await self.host.execution.reconcile(second["assignment_id"])
+        for role in ("integrate", "review"):
+            result = await self.host.execution.schedule_dag_missions()
+            self.assertFalse(result["errors"], result)
+            current = assignment(role, 1)
+            path = Path(self.harness.worktrees.get(current["workspace_id"])["path"])
+            self.assertEqual((path / "first.bin").read_bytes(), b"\x00\xff\x01")
+            self.assertEqual((path / "second.txt").read_text(encoding="utf-8"), "complete\n")
+            if role == "review":
+                from datetime import datetime, timedelta, timezone
+                from harness.app.superagent_watchdog import CoordinatorWatchdog
+
+                await asyncio.wait_for(reviewer_entered.wait(), 15)
+                watchdog = self.host._watchdog_service
+                activity = self.host.execution.watchdog_activity(mission_id)
+                watchdog.observe(mission_id, activity=activity, now="2026-11-08T00:00:00Z")
+                self.assertEqual(watchdog.observe(
+                    mission_id, activity=activity, now="2026-11-08T00:00:02Z",
+                )["state"], "blocked")
+                # 用受控时钟跨越一天，每次重建监督器；检查失败不能解锁质量门。
+                base = datetime(2026, 11, 8, tzinfo=timezone.utc)
+                for hour in range(1, 25):
+                    watchdog = CoordinatorWatchdog(self.host._store, limits=watchdog.limits)
+                    unavailable = {"assignments": [{"assignment_id": current["assignment_id"], "inspection": "unknown"}]}
+                    observed = watchdog.observe(mission_id, activity=unavailable, now=(base + timedelta(hours=hour)).isoformat())
+                    self.assertEqual(observed["state"], "blocked")
+                blocked = await self.host.execution.reconcile(current["assignment_id"])
+                self.assertEqual(blocked["state"], "running")
+                self.assertFalse(self.rows("SELECT * FROM reviews"))
+                release_reviewer.set()
+                await self.wait_for_run(current)
+                # 原 Run 的新事件才允许恢复，不能重新派 Reviewer。
+                recovered = watchdog.observe(
+                    mission_id, activity=self.host.execution.watchdog_activity(mission_id),
+                    now="2026-11-09T00:00:01Z",
+                )
+                self.assertEqual(recovered["state"], "healthy")
+            else:
+                await self.wait_for_run(current)
+            await self.host.execution.reconcile(current["assignment_id"])
+        self.assertEqual(seen, [("work", 1), ("work", 2), ("integrate", 1), ("review", 1)])
+        self.assertEqual(self.rows("SELECT state FROM missions")[0]["state"], "completed")
+        self.assertEqual(self.rows("SELECT state FROM reviews")[0]["state"], "passed")
+        self.assertEqual(len(self.rows("SELECT * FROM mission_plans")), 1)
+        self.assertEqual(len(self.rows("SELECT * FROM artifacts")), 3)

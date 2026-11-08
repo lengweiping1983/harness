@@ -28,10 +28,14 @@
 
 ## Phase 4 协调模型与文件适配审查
 
-本节相对于整合改造前 `5f1c3b7` 核对当前增量，覆盖统一模型、显式内部适配入口、Phase 4.2 唯一服务生命周期、Phase 4.3 DAG Scheduler 真实交付闭环，以及 Phase 4.4 已验证的独立质量门与有限修正核心路径。Phase 4.4 的异常与停滞分支尚未整体验收；生产 CLI、生产 Sender、默认路由切换和旧生产链退役仍未交付。当前不切换生产默认路由。
+本节相对于整合改造前 `5f1c3b7` 核对当前增量，覆盖统一模型、显式内部适配入口、Phase 4.2 唯一服务生命周期、Phase 4.3 DAG Scheduler 真实交付闭环，以及 Phase 4.4 的独立质量门、有限修正、阶段接续与故障恢复。2026-11-08 已完成统一内部链路的定向验收；生产 CLI、生产 Sender、默认路由切换和旧生产链退役仍未交付。当前不切换生产默认路由。
 
 | 触发条件 | 源码措施 | 对应回归 |
 |---|---|---|
+| Work 阶段结束被当作节点完成，或重启重放旧阶段 | 宿主 Profile 阶段预算与结构化任务封存到 PlanRevision；continue 冻结原 Run 输出、Evidence 及 Artifact，新阶段独立资源且逐条导入；只有最终 ready 才 done | `test_continuation_uses_new_resources_and_unlocks_join_only_after_ready`、`test_restart_and_lost_import_receipt_reconcile_original_stage_once`、`test_dependent_node_continuation_retains_each_required_delivery` |
+| 预算耗尽、停滞循环、非法检查点、未知工具或篡改冻结报告 | 阶段及总 Assignment 预算独立核验，与所有已成功阶段比较检查点和树；冻结报告重算并关联原 Run Evidence；失败／未知不解锁下游 | `test_final_stage_budget_preserves_checkpoint_and_does_not_claim_ready`、`test_repeated_earlier_checkpoint_cannot_cycle_through_a_different_stage`、`test_invalid_checkpoint_and_unconfirmed_tools_never_start_continuation`、`test_corrupt_frozen_checkpoint_is_preserved_and_refused` |
+| 真实 Harness 活动有新事件，Watchdog 仍永久 blocked | 原生 `SessionEvent.time` 是 Unix 毫秒整数，`CoordinatorExecutionService.watchdog_activity` 在监督投影中规范成 UTC 文本；溢出和负时间拒绝，原 Evidence 保持原值 | `test_native_millisecond_activity_advances_watchdog_and_invalid_time_stays_blocked`、`test_staged_work_survives_restart_and_reaches_independent_quality_gate` |
+| 重启后经历长期原生检查故障，或语言切换污染后续阶段 | 原 Reviewer Run 在受控 24 小时时间窗与反复重建监督器后仍被阻断，仅真实新活动解锁并完成；阶段数据与当前语言提示分离 | `test_staged_work_survives_restart_and_reaches_independent_quality_gate`、`test_language_round_trip_is_consumed_by_each_actual_stage_submission` |
 | 同一模板承接多个节点或阶段 | 迁移及执行服务按 Mission / Job / stage 绑定 Worker，工作树共同组采用 Mission | `test_same_profile_has_independent_node_and_continuation_resources`、`test_worker_scope_and_input_receipt_bind_the_original_assignment` |
 | 模型提出系统角色，或封存后改写节点 | Planner 只接收 work，宿主 system_profiles 物化 integrate / review 后整体封存并回查 | `test_planner_cannot_propose_system_roles`、`test_host_materializes_system_roles_and_seals_the_complete_plan` |
 | 工作树创建等待期间暂停 | 执行服务在下一资源边界核验持久控制，恢复复用原工作树 | `test_pause_during_workspace_creation_prevents_session_and_submission` |

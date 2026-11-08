@@ -4,8 +4,10 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from ..i18n import tr
 
 from .superagent_coordinator_store import CoordinatorUnitOfWork, _hash, _json
+from .superagent_checkpoints import frozen_work_checkpoint
 
 
 _REPOSITORIES = {
@@ -32,7 +34,7 @@ _TRANSITIONS = {
     },
     "job": {
         "pending": {"ready", "blocked", "unknown", "cancelled"},
-        "ready": {"running", "done", "blocked", "unknown", "cancelled"},
+        "ready": {"running", "checkpointed", "done", "blocked", "unknown", "cancelled"},
         "running": {"checkpointed", "done", "blocked", "unknown"},
         "checkpointed": {"running", "blocked", "unknown", "cancelled"},
         "done": {"checkpointed"},
@@ -103,6 +105,7 @@ _REQUIRED_FACTS = {
     ("job", "ready", "running"): ("assignment_accepted", "control_allows"),
     ("job", "ready", "done"): ("role_result_validated", "report_frozen"),
     ("job", "running", "checkpointed"): ("checkpoint_and_capture_frozen",),
+    ("job", "ready", "checkpointed"): ("checkpoint_and_capture_frozen",),
     ("job", "running", "done"): ("role_result_validated",),
     ("job", "checkpointed", "running"): ("new_assignment_created", "checkpoint_and_capture_imported", "control_allows"),
     ("job", "done", "checkpointed"): ("review_failed", "repair_budget_available", "mandate_valid", "control_allows"),
@@ -791,6 +794,12 @@ class CoordinatorApplicationService:
 
     def _validate_job(self, identity: str, current: dict, source: str, target: str,
                       facts: dict[str, bool], changes: dict[str, Any]) -> None:
+        plan = self._uow.plans.get(current["mission_id"], current["plan_revision"]) if current["plan_revision"] else None
+        node = next((item for item in (plan or {}).get("plan_json", {}).get("nodes", [])
+                     if item["node_id"] == current["node_id"]), {})
+        maximum = node.get("max_work_turns")
+        if maximum is not None and (type(maximum) is not int or not 1 <= maximum <= 32):
+            raise PermissionError(tr("superagent.invalid", field="max_work_turns"))
         if target == "ready":
             mission = self._uow.missions.get(current["mission_id"])
             expected_stage = {"work": "running", "integrate": "integrating", "review": "reviewing"}.get(current["role"])
@@ -821,9 +830,25 @@ class CoordinatorApplicationService:
                         or mission["state"] != "reviewing" or review is None or review["state"] != "failed"
                         or type(maximum) is not int or mission["round_no"] >= maximum):
                     raise PermissionError("completed system Jobs can resume only after a failed Review with remaining repair budget")
-            elif source == "running":
+            elif source in {"ready", "running"}:
                 if current["role"] not in {"work", "integrate"}:
                     raise PermissionError("only Work or Integrator Jobs can checkpoint a running Assignment")
+                if current["role"] == "work":
+                    latest = self._uow.db.execute(
+                        "SELECT * FROM assignments WHERE job_id=? ORDER BY attempt_no DESC LIMIT 1",
+                        (identity,),
+                    ).fetchone()
+                    if latest is None or latest["state"] != "succeeded":
+                        raise PermissionError(tr("superagent.corrupt"))
+                    checkpoint = frozen_work_checkpoint(self._uow.db, latest)
+                    if (checkpoint["status"] != "continue" or maximum is None
+                            or latest["attempt_no"] >= maximum):
+                        raise PermissionError(tr("superagent.corrupt"))
+                    report = json.loads(latest["report_json"])
+                    if changes.get("result_hash") != report["report_hash"]:
+                        raise PermissionError(tr("superagent.corrupt"))
+                elif source == "ready":
+                    raise PermissionError(tr("superagent.corrupt"))
             else:
                 raise PermissionError("Job checkpoint source state is invalid")
             active_assignments = self._uow.db.execute(
@@ -835,7 +860,7 @@ class CoordinatorApplicationService:
                 raise PermissionError("checkpointed requires the original Assignment to be settled")
         if source == "checkpointed" and target == "running":
             mission = self._uow.missions.get(current["mission_id"])
-            stage = {"integrate": "integrating", "review": "reviewing"}.get(current["role"])
+            stage = {"work": "running", "integrate": "integrating", "review": "reviewing"}.get(current["role"])
             if mission is None or stage is None or mission["state"] != stage:
                 raise PermissionError("checkpoint resume requires the Job's role-specific Mission stage")
             assignment = self._uow.db.execute(
@@ -843,7 +868,7 @@ class CoordinatorApplicationService:
                 "ORDER BY attempt_no DESC LIMIT 1", (identity,),
             ).fetchone()
             previous = self._uow.db.execute(
-                "SELECT assignment_id,state FROM assignments WHERE job_id=? "
+                "SELECT * FROM assignments WHERE job_id=? "
                 "ORDER BY attempt_no DESC LIMIT 1 OFFSET 1", (identity,),
             ).fetchone()
             if (assignment is None or previous is None
@@ -853,7 +878,7 @@ class CoordinatorApplicationService:
                 raise PermissionError("checkpoint resume requires a new Assignment bound to its original Run")
             if assignment["state"] == "succeeded":
                 # 原生 Run 可在首次 running 观察前完成；必须先有持久的角色产物。
-                if current["role"] == "integrate":
+                if current["role"] in {"work", "integrate"}:
                     frozen = self._uow.db.execute(
                         "SELECT 1 FROM artifacts WHERE assignment_id=?",
                         (assignment["assignment_id"],),
@@ -869,7 +894,11 @@ class CoordinatorApplicationService:
                         current["mission_id"], current, assignment["assignment_id"], report,
                     ):
                         raise PermissionError("settled checkpoint resume requires the frozen Review Verdict")
-            if current["role"] == "integrate":
+            if current["role"] == "work":
+                if (maximum is None or assignment["attempt_no"] > maximum
+                        or frozen_work_checkpoint(self._uow.db, previous)["status"] != "continue"):
+                    raise PermissionError(tr("superagent.corrupt"))
+            if current["role"] in {"work", "integrate"}:
                 source_artifact = self._uow.db.execute(
                     "SELECT artifact_id FROM artifacts WHERE assignment_id=?", (previous["assignment_id"],),
                 ).fetchone()
@@ -898,6 +927,15 @@ class CoordinatorApplicationService:
                 raise PermissionError("terminal Job transition requires every Assignment to be settled")
         if target == "done":
             self._require_digest(changes.get("result_hash"), "result_hash")
+            if current["role"] == "work":
+                if maximum is not None:
+                    latest = self._uow.db.execute(
+                        "SELECT * FROM assignments WHERE job_id=? ORDER BY attempt_no DESC LIMIT 1",
+                        (identity,),
+                    ).fetchone()
+                    if (latest is None or latest["state"] != "succeeded"
+                            or frozen_work_checkpoint(self._uow.db, latest)["status"] != "ready"):
+                        raise PermissionError(tr("superagent.corrupt"))
             single_report = current["role"] == "work" and self._single_node_report_job(current)
             role_fact = ("report_frozen" if single_report else {
                 "plan": "plan_revision_frozen", "work": "artifact_frozen",

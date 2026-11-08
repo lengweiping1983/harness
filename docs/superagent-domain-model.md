@@ -444,32 +444,33 @@ Phase 3 已实现的单 Worker 执行闭环：
 - Worker Report 先冻结并校验内容哈希，再幂等完成 Mission、Attention、Handback 和 Outbox Candidate；进程中断后可从冻结 Report 恢复后续效果。Outbox Candidate 创建时再次检查 Ticket 状态、Mandate 和 reply Scope，不把 Candidate 误报为已发送。
 - Schema v13 为 Worker 与 Attention 聚合补齐 `updated_at`，并将旧行回填为 `created_at`；迁移覆盖 v1–v12 的升级路径。`tests/test_superagent_execution.py` 覆盖原 Run 恢复、报告效果幂等、后续输入 Handback、Mandate 撤销、预算 Watchdog、排队 Run 停止和并发去重。
 
-后续阶段仍未实现或尚未验收：
+Phase 3 范围之外的后续接线：
 
-- DAG 的统一调度消费尚未接通。已有真实 Artifact / Delivery 适配见下节，但多 Worker 依赖解锁、集成与 Review 的完整生命周期仍未接线，不能把适配器用例当作调度闭环。
+- Phase 4.2–4.4 已接通统一生命周期、目标停止、DAG 交付、质量门和阶段接续；当前实现见下节。
 - EffectRecoveryService 提供同步与异步只读回查入口；OutboxProviderLookupAdapter 通过宿主注入的 Channel 与正文解析器分发到 GitHubIssueCommentLookupAdapter / FeishuThreadReplyLookupAdapter。两种适配器仅查询 Provider 资源 GET，只有在完整有界扫描中找到唯一、原幂等键标记和发送主体均匹配的远端对象才返回 applied；未找到、重复匹配或分页不完整均保持 indeterminate，不把缺失结果解释为安全重试。GitHub / 飞书列表接口不提供权威的“未执行”回执，因此这两种适配器不会返回 not_applied / permanent_rejection；retry_wait 仍必须由支持原操作状态查询的 Provider 明确证明。
-- Phase 3 只提供单 Worker Report / Attention / Handback / Outbox Candidate 闭环；尚无 V2 Outbox Sender、生产 Channel 注册表 / 正文 Artifact Resolver 接线或周期性恢复 Worker。Outbox Candidate 不等于已发送。
-- CoordinatorHost 的 Source / Authorization / Execution API 仍须显式调用；SuperagentService 尚未改造为统一装配，生产 CLI 的旧编排入口仍待替换。Phase 4 直接接入统一应用服务，不把接入旧 Router / MissionStore / Dispatcher 作为开发目标。
-- 持久 CoordinatorControl 已接入部分实际暂停边界，具体见下节；统一目标取消／停止 Runtime 和所有写入边界的控制代次核验仍未完成。状态观测中的 `control_allows=True` 不能替代新写入前对持久模式及当前授权的实际核验。
+- Phase 3 的单 Worker Report / Attention / Handback / Outbox Candidate 已接通。周期性 Effect 恢复已装配；生产 Outbox Sender、Channel 注册表及正文 Resolver 仍归 Phase 4.5，Candidate 不等于已发送。
+- CoordinatorHost 的 Source / Authorization / Execution API 仍须显式调用；SuperagentService 已提供显式 open_coordinator 统一装配，生产 CLI 的旧编排入口仍待替换。Phase 4 直接接入统一应用服务，不把接入旧 Router / MissionStore / Dispatcher 作为开发目标。
+- CoordinatorControl 已进入实际调度与写入准入，统一目标停止沿原 Run 与所属后台作业回查。状态观测中的 `control_allows=True` 仍不能替代新写入前对持久模式及当前授权的实际核验。
 - 推断自动接受仅在具体 Source 策略显式启用 `auto` 且 Gate、规则、意图与 Scope 全部通过时可用；它不会因此切换生产默认路由。远程 Worker 与 OS Sandbox 尚未启用。
 
-因此，Phase 1 按持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 的来源事实、授权闭环和只读 Shadow 已交付；Phase 3 的单 Worker 执行、原 Run 恢复、冻结 Report 与后续效果恢复已在显式 CoordinatorHost API 中实现；Phase 4.1 的统一协调契约与数据库状态守卫已由 Schema v16 固化，并通过 5 个测试模块的 112 项回归。多 Worker DAG / Artifact Delivery 调度、统一服务生命周期、完整目标停止、质量门、生产 Channel 外发和唯一入口仍待接通；后续只沿统一链路补齐，不回退旧编排。
+因此，Phase 1 按持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 的来源事实、授权闭环和只读 Shadow 已交付；Phase 3 的单 Worker 执行、原 Run 恢复、冻结 Report 与后续效果恢复已在显式 CoordinatorHost API 中实现；Phase 4.1 的统一协调契约与数据库状态守卫已由 Schema v16 固化，并通过 5 个测试模块的 112 项回归。后续 Phase 4.2–4.4 的统一生命周期、目标停止、DAG / Delivery、质量门与阶段接续已接通；生产 Channel 外发与唯一入口仍待后续阶段，不回退旧编排。
 
-### Phase 4 当前模型与适配基础
+### Phase 4 当前统一实现
 
-Phase 4 的实施顺序及出口统一见[总体方案](superagent-next-generation-architecture.md#phase-4完整-superagent-整合与替换)。当前只完成以下基础接线，不能据此宣称 Phase 4 已完成或生产入口已统一：
+实施顺序及出口统一见[总体方案](superagent-next-generation-architecture.md#phase-4完整-superagent-整合与替换)。Phase 4.1–4.4 已接通统一内部链路；生产入口仍待 Phase 4.6 替换。
 
-- 新增协调库迁移，保留已登记迁移及校验和。Worker 增加 Mission / Job / stage 归属，同一 Profile 可用于多个节点或阶段；既有协调记录仅保留原身份，不合成授权或重放运行。
-- PlanRevisionRepository.create 的可信宿主参数 `system_profiles` 在封存前物化 integrate / review 系统节点及依赖；Planner 输入仍只能含 work 节点。读取核对完整封存计划、角色、哈希与依赖。
-- HarnessExecutorAdapter 支持来源允许的多 Profile 集；来源有多个 Profile 时必须显式指定 default_profiles。工作树共同组按 Mission 绑定，每个 Worker 仍有独立成员与 Session 身份。
-- 单 Worker 路径先建立冻结基线、计划及持久控制记录，再创建资源。`execution.control_mission`、`mission_control`、`control_receipt` 仅向可信宿主提供模式及回执；资源创建、后续输入接受、Mission 完成及回复候选遵守暂停。取消目前只记录意图，尚无统一目标停止 Runtime，不能称为真实停止已完成。
-- CoordinatorAssignmentInputDelivery 已接入 CoordinatorHost.execution.deliver_input_to_assignment / reconcile_input_delivery：同一 TicketInput 可分别投递给多个 Job Assignment，不修改 TicketInput 的全局单目标投影；每条投递使用稳定幂等键、Revision 和身份绑定回执。submitting / accepted / unknown 只回查原 request_id，HarnessExecutorAdapter 同时核对 Assignment 的 Worker、Workspace、Session 和原活动 Run；原生回执只持久化 request_id、Turn、status、accepted_seq、applied_seq 等规范证据字段。多节点消费、丢回执恢复、Handback 后回查、受理前 Mandate / Mission 复核、跨 Ticket、错投 Run、畸形回执及并发状态单调性均有针对性回归。该能力仍是显式 Host API，尚未接入统一 Scheduler 或生产默认路由。
-- CoordinatorArtifacts 通过显式内部调用核验持久 Assignment、原 Run、工具及后台收尾后捕获真实文件；通过原生 Worktree 预检和导入交接。Effect 保存稳定操作身份；未知捕获或导入只回查原回执，已确认 Effect 可恢复丢失的 Delivery 投影，不再次执行文件写入。Manifest 含冻结文件内容 SHA-256 和删除项，支持最多 4096 个文件、单文件 16 MiB、总内容 64 MiB，Git 文件列表与删除列表各限 2 MiB；超限明确拒绝并保留原件。
-- CoordinatorMissionInstruction 已接入 CoordinatorHost.execution 的显式 deliver_instruction / reconcile_instruction / instruction_receipt API：指令绑定同 Ticket 的非 context-only Trigger、Source / Thread / Human Actor、Mission / Job / Assignment / 原 Run / Turn；先持久化不可变 payload hash 与 Revision，再在 Harness 原生 steering 锁内复核 Mandate / Mission，并校验原生 accepted / applied 事件序号。unknown 只回查原 request_id，accepted 不因回查失败降级；仅允许 pending 应用回执推进为 applied / unapplied。该能力尚未接入统一 Scheduler 或生产默认路由。
-- Review、WatchdogSnapshot 的协调表已建立，但其统一运行服务尚未接线。Schema v16 增加数据库级守卫：InputDelivery 状态与 Revision 单调、回执身份一致且历史不可删除；Artifact Delivery 插入必须满足同 Mission / PlanRevision 的冻结 DAG 依赖或后续 Checkpoint Assignment，状态转移与历史删除受约束；Review 只能引用封存计划中的 Integrator 候选，并要求 Reviewer 的 Workspace 与 Session 均独立；MissionInstruction 严格校验版本、原生回执类型与状态单调性；MissionControl generation 只能递增且取消后不可恢复，终态 ControlCommand 回执不可改写；WatchdogSnapshot 的时间、指纹和 stalled / blocked 状态只允许单调推进。对应迁移与回归不代表 Review / Watchdog 统一运行服务已经接线。独立 Artifact / Delivery 服务也尚未接入统一 Scheduler 或生产 CLI；当前无默认后台任务调用它们。
-- 通用参数、严格 JSON 和运行进度投影已抽离为无旧账本依赖的组件；旧 Router、MissionStore 及信道仍在生产链上，没有删除有效业务回归。
+- `SuperagentService.open_coordinator` 装配同一 CoordinatorHost、持久控制、来源／授权、DAG Scheduler、Executor、Artifact / Delivery、Review 与 Watchdog。服务从持久输入恢复，取消绑定确切原 Run 与所属后台任务，关闭等待实例操作收尾。
+- PlanRevision 在封存前由宿主物化 integrate / review 节点，Planner 只能提出 work。单节点产物任务仍经过完整质量门；只读单节点报告使用独立接受契约。
+- Scheduler 冻结单仓库基线，按依赖、逐边 applied Delivery、公平轮转和有限并发派发；每次实际执行绑定独立 Worker / Assignment / Session / Workspace。同 Profile 可用于多个节点或阶段。
+- Work 检查点沿同一 Job 创建新 Assignment，宿主预算与结构化任务封存在 PlanRevision。`Job.result_hash` 在 checkpointed 时绑定阶段报告哈希，最终 ready 才绑定最终 Artifact manifest hash。预算、协议、停止条件与恢复行为统一见 [Superagent 模式](superagent.md#统一整合架构与当前边界)。
+- CoordinatorAssignmentInputDelivery 为每个 Input / Assignment 维护稳定原生身份和接受／应用回执；同一 DAG 的多个节点独立消费。unknown 仅回查原 request_id，不能将旧输入投向另一个活动 Run。
+- CoordinatorArtifacts 通过原 Run、工具与后台收尾证据捕获真实文件。Capture / Import 使用持久 Effect 及原生回执，未知只回查原操作；确认尚未开始的失败 Effect 才可获新代次。Manifest 限制为最多 4096 文件、单文件 16 MiB、总内容 64 MiB，Git 文件及删除列表各限 2 MiB，超限保留原件并报错。
+- 独立 Review 绑定当前 Integrator 候选、Acceptance Hash 和原生 Evidence；有限修正保留旧候选和 Verdict，只创建新 Assignment，不改写图。最终结算事务再次核对 Mandate、MissionControl、计划及 Watchdog。
+- WatchdogSnapshot 与逐 Assignment 原 Run 游标持久化；Schema v19 将账本进度绑定 SQLite 实际事实投影。活动不完整、检查失败或重启不解除阻断，真实新事件／账本进度才可恢复。Harness 原生毫秒时间仅在监督投影边界规范化，原始事件与 Evidence 不改写。
+- CoordinatorMissionInstruction 提供显式 `deliver_instruction / reconcile_instruction / instruction_receipt`：绑定同 Ticket 的非 context-only Trigger、来源、Human Actor、Mission / Job / Assignment / 原 Run / Turn；原生接受锁内复核授权，accepted 与 applied 分开，unknown 不重放。生产跟进和阶段间上下文接线按 Phase 4.5 继续。
+- 保留已登记 Schema 迁移及有效业务回归；旧生产 Router / MissionStore / 信道仍待统一入口替换后退役。不开发旧版运行数据导入、隐式兼容、双轨运行或回退工具。
 
-后续仍需完成统一服务生命周期与真实目标停止、单多节点共用 Scheduler、质量门及 Checkpoint / Watchdog、持续协作与生产 Outbox Sender、CLI 切换及旧编排退役。不开发旧版运行数据导入、历史协议兼容或双轨运行工具。
+剩余开发为 Phase 4.5 的持续协作与既有信道 Outbox Sender，以及 Phase 4.6 的 CLI 切换、默认路由与旧编排退役；线上模型质量、外部账号、跨平台实机和长期负载不在当前离线定向验收结论内。
 
 ## 10. 源码依据
 

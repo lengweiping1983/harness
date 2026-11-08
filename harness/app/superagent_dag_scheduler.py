@@ -13,6 +13,9 @@ from ..core.errors import HarnessError
 from .superagent_coordinator_service import CoordinatorApplicationService
 from .superagent_coordinator_store import _hash, _json, _now
 from .superagent_executor import WorkerProfile
+from .superagent_checkpoints import validate_checkpoint, frozen_work_checkpoint
+from .superagent_common import _json as strict_loads, _text
+from ..i18n import tr
 
 
 _ACTOR = {"kind": "host", "component": "superagent-v2-dag-scheduler"}
@@ -347,6 +350,17 @@ class CoordinatorDagScheduler:
 
     def _role_prompt(self, base_prompt, mission, job, attempt_no):
         if job["role"] == "work":
+            _, nodes, _, _ = self._load_plan(mission)
+            maximum = nodes[job["node_id"]].get("max_work_turns")
+            if maximum is not None:
+                frame = {"mission_id": mission["mission_id"], "job_id": job["job_id"],
+                         "instruction": base_prompt, "attempt": attempt_no,
+                         "max_work_turns": maximum}
+                if attempt_no > 1:
+                    previous = self._assignment_for_job(job["job_id"])
+                    with self._execution._store.transaction() as db:
+                        frame["checkpoint"] = frozen_work_checkpoint(db, previous)
+                return tr("superagent.mission.checkpoint", frame=_json(frame))
             return base_prompt
         plan, _, _, _ = self._load_plan(mission)
         acceptance = plan["acceptance"]
@@ -488,6 +502,10 @@ class CoordinatorDagScheduler:
                 assignment = None
             else:
                 return None
+        maximum = node.get("max_work_turns") if job["role"] == "work" else None
+        if maximum is not None and attempt_no > maximum:
+            self._block_job(job, "work-stage-budget-exhausted")
+            return None
         e._admit_mission(mission["mission_id"])
         worker = await e._ensure_worker(
             ticket["ticket_id"], profile, True, mission=mission, job=job, stage=attempt_no,
@@ -504,9 +522,13 @@ class CoordinatorDagScheduler:
             input_ids = list(dict.fromkeys([
                 *input_ids, *(item["input_id"] for item in selected_inputs),
             ]))
-            prompt = self._role_prompt(
-                self._node_prompt(base_prompt, node), mission, job, attempt_no,
-            )
+            if maximum is not None:
+                node_prompt = node.get("work_instruction")
+                if not isinstance(node_prompt, dict):
+                    raise HarnessError(tr("superagent.corrupt"), code="superagent/plan-corrupt")
+            else:
+                node_prompt = self._node_prompt(base_prompt, node)
+            prompt = self._role_prompt(node_prompt, mission, job, attempt_no)
             assignment = self._create_pending_assignment(
                 mission, job, worker, prompt, input_ids, attempt_no=attempt_no,
             )
@@ -660,7 +682,7 @@ class CoordinatorDagScheduler:
             if artifact is None:
                 raise HarnessError("Completed dependency has no frozen Artifact", code="superagent/artifact-missing")
             artifacts.append(artifact)
-        if job["role"] == "integrate" and job["state"] == "checkpointed":
+        if job["role"] in {"work", "integrate"} and job["state"] == "checkpointed":
             # 新轮次 pending Assignment 已可能落库，必须按成功状态查找冻结的旧候选。
             previous = self._execution._read_one(
                 "SELECT assignment_id FROM assignments WHERE job_id=? AND state='succeeded' "
@@ -1281,6 +1303,29 @@ class CoordinatorDagScheduler:
             )
         if current["state"] not in {"capturing", "unknown"}:
             return {"state": current["state"], "assignment_id": current["assignment_id"]}
+        mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
+        _, nodes, _, _ = self._load_plan(mission)
+        checkpoint = None
+        if job["role"] == "work" and nodes[job["node_id"]].get("max_work_turns") is not None:
+            try:
+                raw = snapshot.get("output_text")
+                _text(raw, "checkpoint", limit=65536)
+                checkpoint = validate_checkpoint(strict_loads(raw))
+                if _hash(raw) != snapshot.get("output_hash"):
+                    raise ValueError
+            except (ValueError, TypeError, RecursionError, HarnessError):
+                if current["state"] == "unknown":
+                    effect = self._artifacts._latest_effect("artifact.capture", current["assignment_id"])
+                    if effect is not None and effect["state"] in {"leased", "unknown"}:
+                        return {"state": "unknown", "assignment_id": current["assignment_id"]}
+                    current = e._transition(
+                        "assignment", current["assignment_id"], "capturing",
+                        facts={"reconciliation_verified": True, "original_run_settled": True},
+                        audit_payload={"reconciliation_ref": f"assignment:{current['assignment_id']}:invalid-checkpoint",
+                                       "run_id": current["run_id"]},
+                    )
+                self._fail_capture(current, "work-checkpoint-invalid")
+                return {"state": "failed", "assignment_id": current["assignment_id"]}
         # 状态转换返回原始 Assignment 行；跨 Artifact 边界前恢复可信的 Mission 上下文。
         current = e._assignment(current["assignment_id"])
         if current is None:
@@ -1323,6 +1368,8 @@ class CoordinatorDagScheduler:
             "output_hash": artifact["manifest_hash"], "evidence_ids": list(evidence_ids),
             "run_output_hash": snapshot.get("output_hash"),
         }
+        if checkpoint is not None:
+            report_body.update(checkpoint=checkpoint, checkpoint_output=snapshot["output_text"])
         report_hash = _hash(_json(report_body))
         report = {**report_body, "report_hash": report_hash}
         assignment_facts = {"output_frozen_and_validated": True, "artifact_frozen": True}
@@ -1417,14 +1464,25 @@ class CoordinatorDagScheduler:
         if latest is None or latest["assignment_id"] != current["assignment_id"]:
             return
         if job["state"] == "checkpointed":
-            mission = e._read_one("SELECT round_no FROM missions WHERE mission_id=?", (job["mission_id"],))
-            if mission is None or current["attempt_no"] <= mission["round_no"]:
-                return
+            if job["role"] == "work":
+                if job["result_hash"] == report.get("report_hash"):
+                    return
+            else:
+                mission = e._read_one("SELECT round_no FROM missions WHERE mission_id=?", (job["mission_id"],))
+                if mission is None or current["attempt_no"] <= mission["round_no"]:
+                    return
         artifact = self._artifacts.get(current["assignment_id"])
         if (artifact is None or artifact["artifact_id"] != report.get("artifact_id")
                 or artifact["manifest_hash"] != report.get("manifest_hash")
                 or artifact["tree_hash"] != report.get("tree_hash")):
             raise HarnessError("Succeeded Work Assignment lost its frozen Artifact", code="superagent/artifact-corrupt")
+        mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (job["mission_id"],))
+        _, nodes, _, _ = self._load_plan(mission)
+        maximum = nodes[job["node_id"]].get("max_work_turns") if job["role"] == "work" else None
+        checkpoint = None
+        if maximum is not None:
+            with e._store.transaction() as db:
+                checkpoint = frozen_work_checkpoint(db, current)
         if job["state"] == "checkpointed":
             # 已成功的原 Run 无需重放；仅以冻结 Artifact 和导入回执推进状态。
             e._transition(
@@ -1435,6 +1493,27 @@ class CoordinatorDagScheduler:
             job = e._read_one("SELECT * FROM jobs WHERE job_id=?", (job["job_id"],))
         if job["state"] not in {"ready", "running", "unknown"}:
             raise HarnessError("Succeeded Artifact Assignment has a non-completable Job", code="superagent/job-state-conflict")
+        if checkpoint is not None and checkpoint["status"] != "ready":
+            if checkpoint["status"] == "blocked" or current["attempt_no"] >= maximum:
+                self._block_job(job, "work-stage-budget-exhausted" if checkpoint["status"] == "continue" else "work-checkpoint-blocked")
+                return
+            previous_stages = e._read_all(
+                "SELECT * FROM assignments WHERE job_id=? AND attempt_no<? AND state='succeeded' ORDER BY attempt_no",
+                (job["job_id"], current["attempt_no"]),
+            )
+            for previous in previous_stages:
+                with e._store.transaction() as db:
+                    prior_checkpoint = frozen_work_checkpoint(db, previous)
+                prior_artifact = self._artifacts.get(previous["assignment_id"])
+                if prior_checkpoint == checkpoint and prior_artifact["tree_hash"] == artifact["tree_hash"]:
+                    self._block_job(job, "work-checkpoint-stalled")
+                    return
+            e._transition(
+                "job", job["job_id"], "checkpointed",
+                facts={"checkpoint_and_capture_frozen": True},
+                changes={"result_hash": report["report_hash"]},
+            )
+            return
         facts = {
             "role_result_validated": True, "artifact_frozen": True, "report_frozen": True,
         }
@@ -1462,11 +1541,15 @@ class CoordinatorDagScheduler:
                          "report_json": {"kind": "artifact_capture_failure", "reason": reason}},
             )
         job = e._read_one("SELECT * FROM jobs WHERE job_id=?", (current["job_id"],))
-        if job and job["state"] in {"ready", "running", "unknown"}:
+        if job and job["state"] in {"ready", "running", "checkpointed", "unknown"}:
             facts = {"known_failure_or_human_decision": True}
+            audit = None
             if job["state"] == "unknown":
                 facts["reconciliation_verified"] = True
-            e._transition("job", job["job_id"], "blocked", facts=facts)
+                audit = {"reconciliation_ref": f"job:{job['job_id']}:capture-failed",
+                         "assignment_id": current["assignment_id"], "run_id": current["run_id"],
+                         "failure_ref": reason}
+            e._transition("job", job["job_id"], "blocked", facts=facts, audit_payload=audit)
         if job is not None:
             self._advance_mission_state(job["mission_id"])
 
@@ -1508,7 +1591,7 @@ class CoordinatorDagScheduler:
             ).fetchall()
             for row in owned:
                 e._mark_input_db(uow.db, row["input_id"], "waiting")
-            if current_job and current_job["state"] in {"pending", "ready", "running", "unknown"}:
+            if current_job and current_job["state"] in {"pending", "ready", "running", "checkpointed", "unknown"}:
                 facts = {"authorized": True, "known_failure_or_human_decision": True}
                 if current_job["state"] == "unknown":
                     facts["reconciliation_verified"] = True
@@ -1525,7 +1608,7 @@ class CoordinatorDagScheduler:
             self._block_unstarted_assignment(job, current_assignment, reason)
             return
         current_job = e._read_one("SELECT * FROM jobs WHERE job_id=?", (job["job_id"],))
-        if current_job and current_job["state"] in {"pending", "ready", "running", "unknown"}:
+        if current_job and current_job["state"] in {"pending", "ready", "running", "checkpointed", "unknown"}:
             facts = {"known_failure_or_human_decision": True}
             if current_job["state"] == "unknown":
                 facts["reconciliation_verified"] = True
@@ -1549,10 +1632,15 @@ class CoordinatorDagScheduler:
             if latest is None or latest["assignment_id"] != assignment["assignment_id"]:
                 continue
             if job["state"] == "checkpointed":
-                mission = e._read_one("SELECT round_no FROM missions WHERE mission_id=?", (mission_id,))
-                if (mission is None or assignment["state"] != "succeeded"
-                        or assignment["attempt_no"] <= mission["round_no"]):
-                    continue
+                if job["role"] == "work":
+                    report = _object(assignment.get("report_json"))
+                    if assignment["state"] == "succeeded" and job["result_hash"] == report.get("report_hash"):
+                        continue
+                else:
+                    mission = e._read_one("SELECT round_no FROM missions WHERE mission_id=?", (mission_id,))
+                    if (mission is None or assignment["state"] != "succeeded"
+                            or assignment["attempt_no"] <= mission["round_no"]):
+                        continue
             if assignment["state"] == "succeeded":
                 if job["state"] in {"blocked", "cancelled"}:
                     continue
@@ -1569,7 +1657,7 @@ class CoordinatorDagScheduler:
                 facts = {"known_failure_or_human_decision": True}
                 if job["state"] == "unknown":
                     facts["reconciliation_verified"] = True
-                if job["state"] in {"pending", "ready", "running", "unknown"}:
+                if job["state"] in {"pending", "ready", "running", "checkpointed", "unknown"}:
                     e._transition("job", job["job_id"], "blocked", facts=facts)
             elif assignment["state"] == "cancelled":
                 mission = e._read_one("SELECT state FROM missions WHERE mission_id=?", (mission_id,))

@@ -448,7 +448,7 @@ class CoordinatorApplicationServiceTests(unittest.TestCase):
                     facts={"authorized": True, "operation_outcome_uncertain": True},
                 )
 
-    def test_work_checkpoint_cannot_resume_without_a_frozen_integration_candidate(self):
+    def test_interrupted_work_cannot_checkpoint_or_resume_without_frozen_artifacts(self):
         with self.store.unit_of_work(actor={"kind": "system"}) as uow:
             mission = self._create_mission(uow, "checkpoint")
             self._create_plan(uow, mission["mission_id"])
@@ -503,9 +503,15 @@ class CoordinatorApplicationServiceTests(unittest.TestCase):
                 target_state="interrupted",
                 facts={"authorized": True, "original_run_interruption_confirmed": True},
             )
-            checkpointed = service.transition(
-                "job", job_id, expected_revision=3, target_state="checkpointed",
-                facts={"authorized": True, "checkpoint_and_capture_frozen": True},
+            with self.assertRaises(PermissionError):
+                service.transition(
+                    "job", job_id, expected_revision=3, target_state="checkpointed",
+                    facts={"authorized": True, "checkpoint_and_capture_frozen": True},
+                )
+            # 模拟持久状态被绕过守卫改写，恢复仍须拒绝没有原成功产物的续跑。
+            checkpointed = uow.jobs._transition(
+                job_id, expected_revision=3, changes={"state": "checkpointed"},
+                event_type="job.fixture.invalid_checkpoint",
             )
             self.assertEqual(checkpointed["state"], "checkpointed")
             uow.assignments.create({

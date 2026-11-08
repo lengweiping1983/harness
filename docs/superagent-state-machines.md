@@ -230,10 +230,10 @@ completed / blocked / rejected / suppressed / cancelled 对自动调度是终态
 |---|---|---|
 | pending → ready | 所有依赖 Job done；requires_delivery=true 的依赖边对应 Delivery 均 applied 并核验目标树；Mandate 有效且控制允许 | 可领取调度槽位 |
 | ready → running | 新 Assignment 已受理并确认开始 | Assignment 保存原 Run 身份 |
-| running → checkpointed | 可续跑的 work / integrate Job：原 Assignment 已确切结束，Checkpoint 和 Artifact Capture 均确认；节点尚需下一阶段 | 不允许仍活动或 unknown 的 Assignment 悬挂在 checkpointed Job 上 |
+| ready/running → checkpointed | 可续跑的 work / integrate Job：原 Assignment 已确切结束，Checkpoint 和 Artifact Capture 均确认；节点尚需下一阶段。Work 的 ready 路径只用于原 Run 已在首次 running 观察前完成，仍须相同冻结证据 | 不允许仍活动或 unknown 的 Assignment 悬挂在 checkpointed Job 上 |
 | checkpointed → running | 创建新 Assignment，attempt_no + 1，原检查点和累计 Artifact 已导入 | 同一个逻辑 Job 的续跑 |
 | running → done | 角色最终结果冻结并通过宿主校验：plan = PlanRevision；work / integrate = Artifact；review = Review / Verdict + Evidence Set | 标记逻辑 Job 完成；下游仍须等待 requires_delivery 对应 Delivery applied |
-| pending/ready/running → blocked | 已知不可继续错误或需要人工 | 不自动伪造成功 |
+| pending/ready/running/checkpointed → blocked | 已知不可继续错误或需要人工 | 不自动伪造成功 |
 | pending/ready/running/checkpointed → unknown | 原操作结果不确定 | 停止自动调度 |
 | unknown → running | 回查证明原 Assignment 和原 Run 仍处于活动状态 | 不创建替代 Assignment |
 | unknown → done | 回查证明原角色结果已冻结、哈希有效且宿主校验通过 | 不重复执行原 Job |
