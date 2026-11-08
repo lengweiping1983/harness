@@ -17,6 +17,7 @@ from .query import QUERY_SCHEMAS, query_parameters
 from .input_schemas import SESSION_PATCH, TITLE
 from .request_contracts import request_body
 from ..academy.protocol import SCHEMAS as ACADEMY_SCHEMAS, ENDPOINTS as ACADEMY_ENDPOINTS
+from .superagent_protocol import SCHEMAS as SUPERAGENT_SCHEMAS, ENDPOINTS as SUPERAGENT_ENDPOINTS
 
 PERSONALITY_CODE = {'anyOf': [{'type': 'string', 'enum': list(STYLE_CODES)}, {'type': 'null'}]}
 
@@ -918,6 +919,7 @@ SCHEMAS.update({
 
 
 SCHEMAS.update(ACADEMY_SCHEMAS)
+SCHEMAS.update(SUPERAGENT_SCHEMAS)
 
 # 说明文案只在读取协议时解析，避免模块导入语言冻结整个目录。
 _SCHEMA_DESCRIPTION_KEYS = {
@@ -1519,6 +1521,14 @@ def openapi(templates: list[str]) -> dict[str, Any]:
         # 公共 HTTP 边界可在业务处理前拒绝请求，也可能返回结果未知的等待超时。
         operation['responses']['default'] = {'description': tr('python.audit.http_error'),
             'content': {'application/json': {'schema': {'$ref': '#/components/schemas/ApiError'}}}}
+        if (method,path) in SUPERAGENT_ENDPOINTS:
+            input_name,response_name = SUPERAGENT_ENDPOINTS[(method,path)]
+            operation['responses']['200']['content'] = {'application/json':{'schema':{'$ref':'#/components/schemas/'+response_name}}}
+            if input_name:
+                operation['requestBody'] = {'required':True,'content':{'application/json':{'schema':{'$ref':'#/components/schemas/'+input_name}}}}
+        if path.startswith('/api/v1/superagents/') and path.endswith('/media/{media_id}'):
+            operation['responses']['200']['content'] = {mime:{'schema':{'type':'string','format':'binary'}}
+                for mime in ('application/octet-stream','image/png','image/jpeg','image/webp','image/gif')}
         if (method, path) in ACADEMY_ENDPOINTS:
             input_name, response = ACADEMY_ENDPOINTS[(method, path)]
             operation['responses']['200']['content'] = {'application/json': {'schema': response}}

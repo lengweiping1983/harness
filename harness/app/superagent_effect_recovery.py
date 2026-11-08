@@ -164,6 +164,14 @@ class EffectRecoveryService:
                 )
         return state if changed else "stale"
 
+    async def lookup_original(self, effect):
+        """显式人工核实只读取指定原操作，不扫描其他目标或提交写入。"""
+        adapter = self._adapters.get(effect['kind'])
+        if adapter is None:
+            return EffectLookupResult('indeterminate',detail='lookup_unavailable')
+        result = adapter.lookup(effect=effect)
+        return await result if inspect.isawaitable(result) else result
+
     def _record_observation(self, effect: dict, event_type: str, payload: dict) -> str:
         return "left_unknown" if self._record_unknown_lookup_event(
             effect["effect_id"], effect["generation"],

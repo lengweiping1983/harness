@@ -34,6 +34,7 @@ import { Button, Kbd, Overlay } from '@/components/ui/primitives'
 import { HOTKEY_ROWS, formatHotkey } from '@/lib/hotkeyCatalog'
 
 const pageModules = {
+  SuperagentPanel: () => import('./SuperagentPanel').then(module => ({default: module.SuperagentPanel})),
   VoiceInputPage: () => import('./VoiceInputPage').then(module => ({default: module.VoiceInputPage})),
   CapabilitiesPanel: () => import('./CapabilitiesPanel').then(module => ({default: module.CapabilitiesPanel})),
   BuiltinToolsPage: () => import('./BuiltinToolsPage').then(module => ({default: module.BuiltinToolsPage})),
@@ -60,6 +61,7 @@ const MemoryPanel = lazy(pageModules.MemoryPanel)
 const PersonalityPanel = lazy(pageModules.PersonalityPanel)
 const AgentsPanel = lazy(pageModules.AgentsPanel)
 const McpServicePanel = lazy(pageModules.McpServicePanel)
+const SuperagentPanel = lazy(pageModules.SuperagentPanel)
 const EscPanel = lazy(pageModules.EscPanel)
 const SkillsPage = lazy(pageModules.SkillsPage)
 const ConnectorsPage = lazy(pageModules.ConnectorsPage)
@@ -88,7 +90,7 @@ const pagePreloads: Partial<Record<Page, () => Promise<unknown>>> = {
   automations: pageModules.AutomationsPage, hooks: pageModules.ProjectHooksPage,
   memory: pageModules.MemoryPanel, personality: pageModules.PersonalityPanel,
   agents: () => Promise.all([pageModules.EscPanel(), pageModules.AgentsPanel()]),
-  mcpServer: pageModules.McpServicePanel, skills: pageModules.SkillsPage, connectors: pageModules.ConnectorsPage,
+  superagent: pageModules.SuperagentPanel, mcpServer: pageModules.McpServicePanel, skills: pageModules.SkillsPage, connectors: pageModules.ConnectorsPage,
 }
 function preloadPage(page: Page) {void pagePreloads[page]?.().catch(() => { /* 所属加载边界呈现错误。 */ })}
 
@@ -248,6 +250,7 @@ export function SettingsDialog() {
           {page === 'connectors' ? <ConnectorsPage /> : null}
           {page === 'plugins' ? <PluginsPage /> : null}
           {page === 'mcpServer' ? <McpServicePanel /> : null}
+          {page === 'superagent' ? <SuperagentPanel /> : null}
           {page === 'permissions' ? <CapabilitiesPanel /> : null}
           </Suspense></SettingsPageBoundary>
         </section>

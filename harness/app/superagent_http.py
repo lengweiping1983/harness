@@ -45,6 +45,16 @@ class JSONClient:
 
     async def request(self, method, path, data=None, *, token=None, headers=None, expected_status=200,
                       before_request=None):
+        return await self._request(method,path,data,token=token,headers=headers,expected_status=expected_status,before_request=before_request)
+
+    async def request_bytes(self, path, *, token=None, headers=None, before_request=None, maximum=33554432):
+        """有界只读二进制传输，与 JSON 共用来源、重定向和所属线程边界。"""
+        if type(maximum) is not int or not 1<=maximum<=33554432:
+            raise _error('invalid',field='maximum')
+        return await self._request('GET',path,token=token,headers=headers,before_request=before_request,binary=True,maximum=maximum)
+
+    async def _request(self,method,path,data=None,*,token=None,headers=None,expected_status=200,
+                       before_request=None,binary=False,maximum=4194304):
         def invoke():
             control = RequestControl(threading.Event())
             timer = threading.Timer(self.timeout,control.close)
@@ -66,9 +76,11 @@ class JSONClient:
                         headers={'Content-Type':'application/json','User-Agent':'Harness-Superagent',
                                  **({'Authorization':'Bearer '+token} if token is not None else {}),
                                  **(headers or {})},timeout=self.timeout,url_validator=no_redirect) as response:
-                    raw = response.read(4194305)
-                    if len(raw) > 4194304 or response.status != expected_status:
+                    raw = response.read(maximum+1)
+                    if len(raw) > maximum or response.status != expected_status:
                         raise _error(self.prefix + '-response')
+                    if binary:
+                        return {'data':raw,'content_type':response.headers.get('Content-Type','application/octet-stream').split(';',1)[0].strip().lower()}
                     return _json(raw.decode('utf-8'))
             except urllib.error.HTTPError as exc:
                 code = exc.code

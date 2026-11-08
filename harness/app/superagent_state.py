@@ -39,11 +39,11 @@ def configure(store, spec, *, secret_resolver=None):
                 sources.create_instance(source_id, kind=source['kind'], config=source['config'], enabled=source['enabled'])
             except sqlite3.IntegrityError:
                 current = sources.get_instance(source_id)
-                if current.kind != source['kind'] or current.config != source['config']:
+                if current.kind != source['kind'] or sources._kinds[current.kind].identity(current.config) != sources._kinds[current.kind].identity(source['config']):
                     raise _error('conflict')
         else:
             current = sources.get_instance(source_id)
-            if current.kind != source['kind'] or current.config != source['config']:
+            if current.kind != source['kind'] or sources._kinds[current.kind].identity(current.config) != sources._kinds[current.kind].identity(source['config']):
                 raise _error('conflict')
     if auth.current_policy() is None:
         auth.publish_policy(spec['policy'], actor={'kind': 'human', 'id': 'local-config'})

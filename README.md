@@ -65,7 +65,7 @@ python -m harness.cli --cwd /path/to/project --memory-import archive.jsonl
 
 默认作用域为 project；user 使用 `--memory-scope user`，session 还须同时指定 `--memory-scope session --memory-session SESSION_ID`。导出不覆盖已有文件，导入会写入选定作用域，归档约束见 [存储与恢复](docs/storage.md)。
 
-显式 Superagent 模式使用 `python -m harness.cli --superagent /path/to/config.json`，可加 `--superagent-once` 处理当前批次后退出。只接受[当前统一配置](examples/superagent.json)，普通问答与复杂 DAG 共用授权、协调账本、调度及恢复链路；代码和文件交付经过真实产物交接、集成、独立复核与有限修正。使用 `--superagent-submit "目标"` 提交，`--superagent-status` 只读查看状态；GitHub／飞书在显式授权后接收事件并核实原来源回复，飞书加密回调需安装 `.[superagent]`。配置和限制见 [Superagent 模式](docs/superagent.md)，后续开发只按[统一开发计划](docs/superagent-next-generation-architecture.md#开发执行规则)推进。
+显式 Superagent 模式使用 `python -m harness.cli --superagent /path/to/config.json`，可加 `--superagent-once` 处理当前批次后退出。只接受[当前统一配置](examples/superagent.json)，普通问答与复杂 DAG 共用授权、协调账本、调度及恢复链路；代码和文件交付经过真实产物交接、集成、独立复核与有限修正。使用 `--superagent-submit "目标"` 提交，`--superagent-status` 只读查看状态；GitHub／飞书在显式授权后接收事件并核实原来源回复，飞书加密回调需安装 `.[superagent]`。配置和限制见 [Superagent 模式](docs/superagent.md)，本机界面在设置 → 智能体 → Superagent 连接相同配置，支持分页浏览、运行控制、来源／策略管理和原操作核实；后续开发只按[统一开发计划](docs/superagent-next-generation-architecture.md#开发执行规则)推进。
 
 持久控制使用 `--superagent-pause/--superagent-resume/--superagent-cancel --superagent-mission MISSION_ID`，运行中节点指令使用 `--superagent-steer "指令" --superagent-job JOB_ID`。这些请求写入同一协调账本，固定请求身份及原 Run；控制意图已应用与实际运行已停止分别核验。状态附带最后一次运行观察，不作为进程仍存活的证明。 完整历史可用 `--superagent-list missions` 分页浏览，`--superagent-show MISSION_ID` 查看任务详情；当前查询范围和限制见[产品页](docs/superagent.md#分页浏览与任务详情)。
 

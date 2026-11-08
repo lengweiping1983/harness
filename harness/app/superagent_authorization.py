@@ -191,6 +191,10 @@ class Gate:
             return {"admissible": False, "reason": "outside_policy_scope"}
         actor_id = actor["actor_id"]
         actor_kind = actor["actor_kind"]
+        if metadata.get('context_event') is True:
+            listed = {item['id'] for item in part.get('bots' if actor_kind=='bot' else 'allowed',[])}
+            return {'admissible':actor_kind in {'human','bot'} and actor_id in listed,'strength':'inferred',
+                'reason':'context_event','basis':{'source_instance_id':source_id,'source_revision':trigger['source_revision'],'via':'context_event'}}
         addressed = trigger["addressed"] in {"mention", "direct"}
         row = trigger["metadata"].get("scope_row", "default")
         if not isinstance(row, str) or not row:
@@ -455,70 +459,74 @@ class CoordinatorAuthorizationEngine:
         }
 
     def publish_policy(self, policy: object, *, actor: object, expected_revision: int | None = None) -> dict[str, Any]:
+        with self._store.transaction(write=True) as db:
+            return self.publish_policy_in_transaction(db, policy, actor=actor, expected_revision=expected_revision)
+
+    def publish_policy_in_transaction(self, db, policy: object, *, actor: object, expected_revision: int | None = None):
+        """在所属操作事务中发布策略，修订、授权影响和回执可原子提交。"""
         parsed = validate_policy(policy)
         encoded = _json(parsed)
         if len(encoded.encode("utf-8")) > 262_144:
             raise ValueError("policy snapshot is too large")
         digest = _hash(encoded)
-        with self._store.transaction(write=True) as db:
-            source_ids = {row[0] for row in db.execute("SELECT source_instance_id FROM source_instances")}
-            unknown = set(parsed["sources"]) - source_ids
-            if unknown:
-                raise LookupError(f"policy references unknown SourceInstances: {sorted(unknown)}")
-            current = db.execute(
-                """SELECT c.revision AS current_revision,v.* FROM policy_current c
-                   JOIN policy_versions v ON v.policy_version=c.policy_version WHERE c.singleton=1"""
-            ).fetchone()
-            current_revision = 0 if current is None else current["current_revision"]
-            if expected_revision is not None and (
-                type(expected_revision) is not int or expected_revision != current_revision
-            ):
-                raise RuntimeError("policy revision conflict")
-            if current is not None and current["policy_hash"] == digest:
-                return self._policy_view(current)
-            revision = current_revision + 1
-            version = f"policy_{revision}_{digest}"
+        source_ids = {row[0] for row in db.execute("SELECT source_instance_id FROM source_instances")}
+        unknown = set(parsed["sources"]) - source_ids
+        if unknown:
+            raise LookupError(f"policy references unknown SourceInstances: {sorted(unknown)}")
+        current = db.execute(
+            """SELECT c.revision AS current_revision,v.* FROM policy_current c
+               JOIN policy_versions v ON v.policy_version=c.policy_version WHERE c.singleton=1"""
+        ).fetchone()
+        current_revision = 0 if current is None else current["current_revision"]
+        if expected_revision is not None and (
+            type(expected_revision) is not int or expected_revision != current_revision
+        ):
+            raise RuntimeError("policy revision conflict")
+        if current is not None and current["policy_hash"] == digest:
+            return self._policy_view(current)
+        revision = current_revision + 1
+        version = f"policy_{revision}_{digest}"
+        db.execute(
+            """INSERT INTO policy_versions(policy_version,revision,mode,policy_json,policy_hash,created_at,created_by_json)
+               VALUES(?,?,?,?,?,?,?)""",
+            (version, revision, parsed["mode"], encoded, digest, _now(), _json(actor)),
+        )
+        for rule in parsed["rules"]:
             db.execute(
-                """INSERT INTO policy_versions(policy_version,revision,mode,policy_json,policy_hash,created_at,created_by_json)
-                   VALUES(?,?,?,?,?,?,?)""",
-                (version, revision, parsed["mode"], encoded, digest, _now(), _json(actor)),
+                "INSERT INTO policy_rules(policy_version,rule_id,rule_json) VALUES(?,?,?)",
+                (version, rule["id"], _json(rule)),
             )
-            for rule in parsed["rules"]:
-                db.execute(
-                    "INSERT INTO policy_rules(policy_version,rule_id,rule_json) VALUES(?,?,?)",
-                    (version, rule["id"], _json(rule)),
-                )
-            for source_id, source_policy in parsed["sources"].items():
-                db.execute(
-                    "INSERT INTO source_policies(policy_version,source_instance_id,policy_json) VALUES(?,?,?)",
-                    (version, source_id, _json(source_policy)),
-                )
+        for source_id, source_policy in parsed["sources"].items():
             db.execute(
-                """INSERT INTO policy_current(singleton,policy_version,revision) VALUES(1,?,?)
-                   ON CONFLICT(singleton) DO UPDATE SET policy_version=excluded.policy_version,revision=excluded.revision""",
-                (version, revision),
+                "INSERT INTO source_policies(policy_version,source_instance_id,policy_json) VALUES(?,?,?)",
+                (version, source_id, _json(source_policy)),
             )
-            CoordinatorStore.append_audit(
-                db, aggregate_type="policy", aggregate_id=version, event_type="policy_revision.created",
-                payload={"revision": revision, "mode": parsed["mode"], "policy_hash": digest}, actor=actor,
-            )
-            if current is not None:
-                active = db.execute(
-                    """SELECT m.mandate_id FROM mandates m JOIN tickets t ON t.ticket_id=m.ticket_id
-                       WHERE t.state='open' AND m.policy_version<>?
-                         AND NOT EXISTS (
-                           SELECT 1 FROM mandate_events e
-                           WHERE e.mandate_id=m.mandate_id AND e.event_type IN ('revoked','expired')
-                         )""",
-                    (version,)
-                ).fetchall()
-                for mandate in active:
-                    self._append_mandate_event(
-                        db, mandate_id=mandate["mandate_id"], event_type="affected",
-                        payload={"policy_version": version, "reason": "policy_revision_changed"}, actor=actor,
-                    )
-            row = db.execute("SELECT * FROM policy_versions WHERE policy_version=?", (version,)).fetchone()
-            return self._policy_view(row)
+        db.execute(
+            """INSERT INTO policy_current(singleton,policy_version,revision) VALUES(1,?,?)
+               ON CONFLICT(singleton) DO UPDATE SET policy_version=excluded.policy_version,revision=excluded.revision""",
+            (version, revision),
+        )
+        CoordinatorStore.append_audit(
+            db, aggregate_type="policy", aggregate_id=version, event_type="policy_revision.created",
+            payload={"revision": revision, "mode": parsed["mode"], "policy_hash": digest}, actor=actor,
+        )
+        if current is not None:
+            active = db.execute(
+                """SELECT m.mandate_id FROM mandates m JOIN tickets t ON t.ticket_id=m.ticket_id
+                   WHERE t.state='open' AND m.policy_version<>?
+                     AND NOT EXISTS (
+                       SELECT 1 FROM mandate_events e
+                       WHERE e.mandate_id=m.mandate_id AND e.event_type IN ('revoked','expired')
+                     )""",
+                (version,)
+            ).fetchall()
+            for mandate in active:
+                self._append_mandate_event(
+                    db, mandate_id=mandate["mandate_id"], event_type="affected",
+                    payload={"policy_version": version, "reason": "policy_revision_changed"}, actor=actor,
+                )
+        row = db.execute("SELECT * FROM policy_versions WHERE policy_version=?", (version,)).fetchone()
+        return self._policy_view(row)
 
     @staticmethod
     def _policy_view(row) -> dict[str, Any]:
@@ -846,7 +854,7 @@ class CoordinatorAuthorizationEngine:
                 )
                 if followup_gate.get("admissible"):
                     followup_fanout_allowed = (
-                        followup_gate.get("strength") != "inferred" or followup_policy["mode"] == "auto"
+                        trigger.metadata.get('context_event') is True or followup_gate.get("strength") != "inferred" or followup_policy["mode"] == "auto"
                     )
             fanout: dict[str, bool] = {}
             mandate_statuses: dict[str, str] = {}
@@ -872,6 +880,7 @@ class CoordinatorAuthorizationEngine:
                         work = (
                             subscription["mode"] == "work"
                             and actor_kind == "human"
+                            and trigger.metadata.get('context_event') is not True
                             and thread_id == thread_ids_by_external[primary_external_thread_id]
                         )
                         if subscription["ticket_state"] == "ended" and not work:
@@ -906,16 +915,17 @@ class CoordinatorAuthorizationEngine:
                     payload={"trigger_id": trigger_id, "context_only": not work}, actor={"kind": "source", "source_instance_id": source_instance_id},
                 )
             has_work_owner = any(fanout.values())
-            disposition_state = "ticket.fanout" if has_work_owner else "evaluation.queued"
+            context_event = trigger.metadata.get('context_event') is True
+            disposition_state = ('ticket.context_only' if context_ids else 'filtered') if context_event else "ticket.fanout" if has_work_owner else "evaluation.queued"
             self._append_disposition(
                 db, trigger_id=trigger_id, state=disposition_state,
                 event_type=(
-                    "ticket.fanout" if has_work_owner else "ticket.context_only" if context_ids else "evaluation.queued"
+                    disposition_state if context_event else "ticket.fanout" if has_work_owner else "ticket.context_only" if context_ids else "evaluation.queued"
                 ),
                 payload={
                     "fanout_ticket_ids": fanout_ids,
                     "context_ticket_ids": context_ids,
-                    "evaluation_queued": not has_work_owner,
+                    "evaluation_queued": not has_work_owner and not context_event,
                     "gate": followup_gate,
                     "policy_version": None if current_policy_row is None else current_policy_row["policy_version"],
                 },
@@ -1598,55 +1608,59 @@ class CoordinatorAuthorizationEngine:
             )
 
     def requeue_unavailable(self, evaluation_id: str, *, actor: object) -> bool:
-        evaluation_id = _text(evaluation_id, "evaluation_id")
         with self._store.transaction(write=True) as db:
-            row = db.execute("SELECT * FROM evaluations WHERE evaluation_id=?", (evaluation_id,)).fetchone()
-            if row is None:
-                raise LookupError("evaluation does not exist")
-            if row["state"] != "unavailable" or row["retry_count"] >= 2:
-                return False
-            current = db.execute("SELECT policy_version FROM policy_current WHERE singleton=1").fetchone()
-            thread = db.execute("SELECT lifecycle_revision FROM threads WHERE thread_id=?", (row["thread_id"],)).fetchone()
-            if current is None or current["policy_version"] != row["policy_version"] or thread is None or thread["lifecycle_revision"] != row["thread_lifecycle_revision"]:
-                return False
-            trigger_rows = db.execute(
-                "SELECT trigger_id,gate_json FROM evaluation_triggers WHERE evaluation_id=? ORDER BY ordinal",
-                (evaluation_id,),
-            ).fetchall()
-            for item in trigger_rows:
-                if not json.loads(item["gate_json"]).get("admissible"):
-                    disposition = db.execute(
-                        "SELECT state FROM trigger_dispositions WHERE trigger_id=?", (item["trigger_id"],)
-                    ).fetchone()
-                    if disposition is None or disposition["state"] != "filtered":
-                        self._append_disposition(
-                            db, trigger_id=item["trigger_id"], state="filtered",
-                            event_type="filtered",
-                            payload={"evaluation_id": evaluation_id, "reason": "gate_denied"},
-                            actor=actor,
-                        )
-                    continue
+            return self.requeue_unavailable_in_transaction(db, evaluation_id, actor=actor)
+
+    def requeue_unavailable_in_transaction(self, db, evaluation_id: str, *, actor: object) -> bool:
+        """显式重新排队与操作者回执共用事务，不自动重试未知原生调用。"""
+        evaluation_id = _text(evaluation_id, 'evaluation_id')
+        row = db.execute("SELECT * FROM evaluations WHERE evaluation_id=?", (evaluation_id,)).fetchone()
+        if row is None:
+            raise LookupError("evaluation does not exist")
+        if row["state"] != "unavailable" or row["retry_count"] >= 2:
+            return False
+        current = db.execute("SELECT policy_version FROM policy_current WHERE singleton=1").fetchone()
+        thread = db.execute("SELECT lifecycle_revision FROM threads WHERE thread_id=?", (row["thread_id"],)).fetchone()
+        if current is None or current["policy_version"] != row["policy_version"] or thread is None or thread["lifecycle_revision"] != row["thread_lifecycle_revision"]:
+            return False
+        trigger_rows = db.execute(
+            "SELECT trigger_id,gate_json FROM evaluation_triggers WHERE evaluation_id=? ORDER BY ordinal",
+            (evaluation_id,),
+        ).fetchall()
+        for item in trigger_rows:
+            if not json.loads(item["gate_json"]).get("admissible"):
                 disposition = db.execute(
                     "SELECT state FROM trigger_dispositions WHERE trigger_id=?", (item["trigger_id"],)
                 ).fetchone()
-                if disposition is not None and disposition["state"] == "evaluation.queued":
-                    continue
-                self._append_disposition(
-                    db, trigger_id=item["trigger_id"], state="evaluation.queued",
-                    event_type="evaluation.requeued", payload={"evaluation_id": evaluation_id},
-                    actor=actor,
-                )
-            # 不复用已经结束的 Evaluation 身份；调用方再次 begin_evaluation 会冻结新尝试。
-            db.execute(
-                "UPDATE evaluations SET retry_count=retry_count+1 WHERE evaluation_id=?",
-                (evaluation_id,),
-            )
-            CoordinatorStore.append_audit(
-                db, aggregate_type="evaluation", aggregate_id=evaluation_id,
-                event_type="evaluation.retry_queued", payload={"retry_count": row["retry_count"] + 1},
+                if disposition is None or disposition["state"] != "filtered":
+                    self._append_disposition(
+                        db, trigger_id=item["trigger_id"], state="filtered",
+                        event_type="filtered",
+                        payload={"evaluation_id": evaluation_id, "reason": "gate_denied"},
+                        actor=actor,
+                    )
+                continue
+            disposition = db.execute(
+                "SELECT state FROM trigger_dispositions WHERE trigger_id=?", (item["trigger_id"],)
+            ).fetchone()
+            if disposition is not None and disposition["state"] == "evaluation.queued":
+                continue
+            self._append_disposition(
+                db, trigger_id=item["trigger_id"], state="evaluation.queued",
+                event_type="evaluation.requeued", payload={"evaluation_id": evaluation_id},
                 actor=actor,
             )
-            return True
+        # 不复用已经结束的 Evaluation 身份；调用方再次 begin_evaluation 会冻结新尝试。
+        db.execute(
+            "UPDATE evaluations SET retry_count=retry_count+1 WHERE evaluation_id=?",
+            (evaluation_id,),
+        )
+        CoordinatorStore.append_audit(
+            db, aggregate_type="evaluation", aggregate_id=evaluation_id,
+            event_type="evaluation.retry_queued", payload={"retry_count": row["retry_count"] + 1},
+            actor=actor,
+        )
+        return True
 
     def subscribe(
         self, ticket_id: str, thread_id: str, *, mode: str, owns_thread: bool = False, actor: object,

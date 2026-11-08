@@ -17,6 +17,7 @@ export const SETTINGS_PAGES = [
   {id: 'agents', group: 'agents', labelKey: 'ui.agents.directory', keywordsKey: 'ui.settings.keywords.agents', icon: 'Users'},
   {id: 'skills', group: 'agents', labelKey: 'ui.extensions.skills', keywordsKey: 'ui.extensions.skillsKeywords', icon: 'Blocks'},
   {id: 'tools', group: 'agents', labelKey: 'ui.settings.tools.title', keywordsKey: 'ui.settings.tools.keywords', icon: 'Wrench'},
+  {id: 'superagent', group: 'agents', labelKey: 'ui.sg.title', keywordsKey: 'ui.sg.keywords', icon: 'GitBranch'},
   {id: 'memory', group: 'agents', labelKey: 'ui.memory.heading', keywordsKey: 'ui.settings.keywords.memory', icon: 'Layers3'},
   {id: 'connectors', group: 'connections', labelKey: 'ui.extensions.connectors', keywordsKey: 'ui.extensions.connectorsKeywords', icon: 'Plug'},
   {id: 'plugins', group: 'connections', labelKey: 'ui.extensions.plugins', keywordsKey: 'ui.extensions.pluginsKeywords', icon: 'Package'},

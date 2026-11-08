@@ -30,13 +30,21 @@ class FeishuClient(JSONClient):
         self.expires = time.monotonic() + result['expire'] - min(60, result['expire'] / 10)
 
     async def request(self, method, path, data=None, *, before_request=None):
-        if time.monotonic() >= self.expires:
-            if self.refresh is None or self.refresh.done():
-                self.refresh = asyncio.create_task(self._refresh())
-            await join_cleanup(self.refresh)
+        await self._ready_token()
         value = await super().request(method, path, data, token=self.token, before_request=before_request)
         if not isinstance(value, dict) or type(value.get('code')) is not int:
             raise _error('feishu-response')
         if value['code'] != 0:
             raise _error('feishu-api', status=value['code'])
         return value
+
+    async def _ready_token(self):
+        """JSON 和资源读取共用同一所属令牌刷新任务。"""
+        if time.monotonic() >= self.expires:
+            if self.refresh is None or self.refresh.done():
+                self.refresh = asyncio.create_task(self._refresh())
+            await join_cleanup(self.refresh)
+
+    async def request_bytes(self,path,*,before_request=None,maximum=33554432):
+        await self._ready_token()
+        return await super().request_bytes(path,token=self.token,before_request=before_request,maximum=maximum)

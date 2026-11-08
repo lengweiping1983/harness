@@ -23,6 +23,7 @@ from .superagent_coordinator_migration_18 import MIGRATION_18
 from .superagent_coordinator_migration_19 import MIGRATION_19
 from .superagent_coordinator_migration_20 import MIGRATION_20
 from .superagent_coordinator_migration_21 import MIGRATION_21
+from .superagent_coordinator_migration_22 import MIGRATION_22
 
 _APPLICATION_ID = int.from_bytes(b"SUPA", "big")
 _MAX_EFFECT_BATCH = 100
@@ -815,6 +816,7 @@ MIGRATIONS = (
     (19, MIGRATION_19),
     (20, MIGRATION_20),
     (21, MIGRATION_21),
+    (22, MIGRATION_22),
 )
 
 class CoordinatorStore:

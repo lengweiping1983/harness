@@ -517,10 +517,10 @@ class CoordinatorExecutionService:
             "WHERE attention.ticket_id=? AND attention.state='open' AND mission.state='blocked' ORDER BY attention.created_at",
             (ticket_id,),
         )
-        if not rows:
-            return None
         trigger = self._sources.get_trigger(trigger_id)
         selected = (trigger or {}).get("metadata", {}).get("attention_id")
+        if not rows and selected is None:
+            return None
         if selected is not None:
             rows = [row for row in rows if row["attention_id"] == selected]
         if len(rows) != 1:

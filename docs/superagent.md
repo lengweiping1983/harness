@@ -1,6 +1,6 @@
 # Superagent 模式
 
-Superagent 只有一条运行链路：Source → Gate / Evaluation → Ticket / Mandate → Mission / PlanRevision → Scheduler → Harness Run → Report / Artifact / Review → Outbox。CLI 与可信 SDK 宿主使用同一个 `SuperagentService` 和 `superagent.sqlite3`；任务复杂度只影响冻结计划与验收契约，不选择另一套协调器。
+Superagent 只有一条运行链路：Source → Gate / Evaluation → Ticket / Mandate → Mission / PlanRevision → Scheduler → Harness Run → Report / Artifact / Review → Outbox。CLI、本机工作台与可信 SDK 宿主使用同一个 `SuperagentService` 和 `superagent.sqlite3`；任务复杂度只影响冻结计划与验收契约，不选择另一套协调器。
 
 ## 启动与本机操作
 
@@ -52,6 +52,18 @@ GitHub 来源配置包含 `repository`、`repository_id`、`bot_login`、`bot_us
 飞书来源配置包含 `app_id`、`tenant_key`、`bot_open_id`、`chats`、`verification_token_ref`、`encrypt_key_ref`；`transport` 字段与 GitHub 相同，发言凭据引用应用 Secret。启用来源前加载 `.[superagent]` 的 cryptography 依赖与所需显式凭据，失败不创建运行宿主。普通事件必须通过签名、AES 解密、Token、App、Tenant 和 Chat 核验；无签名只允许解密且 Token 正确的 `url_verification` challenge，不接受普通事件。
 
 例如引用 `secret://github-webhook` 时，配置 `secrets: {"github-webhook": "PROJECT_GITHUB_WEBHOOK_SECRET"}`，凭据只从该环境变量读取。未配置发言 `credential_ref` 时不读取发言凭据，也不自动取得回复能力。已接收内容、冻结 Report / Artifact 和当前交付状态仍在统一账本中。
+
+### GitHub Review 与 CI 上下文
+
+除原 Issue／PR 开关和评论入口外，接收 Review 的 submitted／edited／dismissed、Review Comment 的 created／edited／deleted、PR 的 synchronize／ready_for_review／converted_to_draft／edited／labeled／unlabeled，以及 Check Run、Check Suite 和 Workflow Run 的受支持进度事件。Review 保留原提交 Hash 并标识是否落后于事件中的 PR Head；这些外部 Review 不等于 Harness 的独立质量门。
+
+这些事件只作为已授权 Ticket 的 context-only 输入；不因提及机器人、检查成功或评论删除创建 Evaluation、Mission、原生运行或恢复旧任务。Review 作者仍受来源白名单约束；CI 一律使用明确列入 bots 的身份。CI 必须给出唯一 PR、匹配 Head SHA 和当前配置的 Base Repo；缺少唯一目标的检查被忽略，不通过 SHA 猜测归属。原回复目标仍是确切仓库和 Issue／PR，不接受事件中的任意 URL。
+
+### 飞书媒体
+
+已验证消息支持 text、image、file、audio、media 和 post。富文本保留用户文字和资源引用；只有附件的消息保留空正文。Webhook 接收不下载资源，工作台在操作者明确获取后才读取原消息及资源。获取前核对当前来源、机器人账号、Chat、原消息和 Root、资源引用；令牌刷新后、落盘前和登记时再次核对来源修订。
+
+单资源有界读取，最多 32 MiB。图片验证实际 PNG／JPEG／WebP／GIF 格式并限制像素及帧数；其他文件作为二进制附件下载，不内联执行提供方 HTML。文件与摘要登记在同一实例的媒体资源记录，重复获取复用原件；原件损坏或路径冲突明确拒绝，保留原数据。禁用来源或移除 Chat 后不能通过缓存接口继续读取。工作台仅在可见页面显示已获取的图片；本阶段未将附件自动注入模型视觉输入，也不自动转写音视频或清理历史文件。
 
 ## 授权、工作与独立质量门
 
@@ -114,10 +126,30 @@ python -m harness.cli --superagent /path/to/config.json --superagent-list review
 
 任务详情返回 Mission、当前冻结计划的 Hash／验收条件、控制、监督摘要和各类关联记录数量。冻结计划复用既有完整 Hash、Job 物化和依赖校验，损坏原件明确拒绝，不修复或重建。分页与详情不读取运行观察文件、凭据，不启动宿主，不执行恢复或 Schema 升级。
 
-可信 SDK 使用 `CoordinatorHost.queries.page(resource, mission_id=..., limit=..., cursor=...)` 和 `.mission(mission_id)`；查询持有同一 Host 操作租约，缓存句柄在关闭后同样拒绝。该端口供后续工作台复用，目前没有新增 HTTP 管理入口。
+可信 SDK 使用 `CoordinatorHost.queries.page(resource, mission_id=..., limit=..., cursor=...)` 和 `.mission(mission_id)`；查询持有同一 Host 操作租约，缓存句柄在关闭后同样拒绝。工作台与 CLI 使用相同 CoordinatorQueries；全局资源还包括 sources、channels、mandates、audit、effects、attentions、events、evaluations。effects 只列出 unknown；inputs 和 outbox 必须指定 Mission，展示其所属 Ticket 的输入与回复，因此同一 Ticket 的多个 Mission 可看到相同记录。
+
+## 统一工作台
+
+在设置的智能体分组打开 Superagent，输入明确的配置文件路径并连接实例。连接只登记当前主宿主的本机连接，不创建运行目录或模型宿主；已有账本可直接浏览。启动复用 `SuperagentService.open` 和同一实例锁；工作台只停止自己拥有的运行。界面中的运行状态指工作台拥有的句柄，不能据此判断另一个 CLI 进程是否存活。
+
+工作台提供目标及冻结验收条件、Job／Assignment 执行引用、Artifact／Review 交付摘要、输入／回复、人工待决和未知效果分页。支持明确本机 Source／Actor／Thread 的目标提交、Mission 暂停／继续／取消和活动节点指令；所有操作沿现有控制、授权与原生执行端口。人工待决答案绑定确切 attention_id 和原本机来源及线程，仍经 Gate／Mandate 核验，沿新的有界活动继续；远端问题须在原通道由已授权账号回答，不冒充远端用户。
+
+读请求绑定实例、查询范围和页面代次，切换实例、离开或隐藏页面后拒绝迟到结果；没有后台自动轮询。用户目标草稿按实例保留在当前界面会话中。已经受理的写入由主宿主等待收尾，关闭设置不撤销写入；网络失败后保留原请求号，使用“查回原请求”读取回执，不能自动重复 POST。主宿主和自有 Web 循环关闭前等待工作台及其运行收尾。连接目录和界面草稿不作为跨进程持久账户目录。
+
+### 来源、策略与授权影响
+
+来源启停和可变配置沿原 SourceRegistry 修订检查；来源身份、配置文件及凭据映射不由编辑器改写。配置中的来源与初始策略用于首次登记，已有账本的当前修订在重启后继续生效；本机操作者／线程白名单和传输入口仍由明确配置固定。Secret 只能引用该配置已经声明的环境变量映射，不能从 UI 提交凭据值。运行中的服务同步当前凭据和所属监听器，来源修订并不自动重授回复能力。
+
+策略发布沿同一授权引擎及预期修订，重验受影响的 Mandate；工作台可查看授权影响和不可变审计。回复通道单独显示原地址，操作者须按当前 Source 修订显式授权或撤销回复；此传输能力不代替每次发送的 Mandate。研判不可用的冻结批次可显式重新排队，仍受原策略／Thread 修订和尝试预算限制。来源、策略、回复授权及重新排队与操作者固定请求回执在同一事务提交；过期修订失败且不留伪造成功回执。
+
+### 人工未知结果核实
+
+未知效果列表先读取原 effect_id、generation、冻结参数和已有回执。操作者填写核实说明后，只通过当前运行的原 Adapter 查回原操作，不接受操作者提供的成功证明，不提供重发按钮。证明一致的 Outbox 结果沿原领域服务结算；无查回端口、结果不确定或证明不充分时保留 unknown，其他原生效果交由对应恢复流程结算。查回完成时再次核对原代次及状态，记录操作者、请求、证据和结论，不能覆盖后来已结算的事实。
+
+工作台 HTTP 面仅限本机连接与本机 Host，拒绝共享主体和跨站请求。入口位于 `/api/v1/superagents`：连接、只读查询、固定请求号命令及按当前来源复核的媒体读取；准确字段与响应见[生成协议](openapi-v1.json)。这些检查不认证本机进程，不构成远端管理或多人审批系统。
 
 ## 当前边界
 
 Phase 4 的 CLI 切换、统一配置、持续协作、质量门、信道发送和旧编排退役沿同一服务实现。旧 Router、Dispatcher、MissionStore、Worker / Results 编排、独立信道／控制账本、生产 Shadow 和旧来源映射 API 已删除。已有 Coordinator Schema 历史继续受校验和保护；不导入、清理或迁移旧 Superagent 运行目录。
 
-工作台、多人审批、人工未知结果核实界面、自动跨来源关联、目标与依赖变更、动态重规划、远程 Worker、多设备恢复及操作系统 Sandbox 仍属于后续扩展。当前业务证据来自隔离数据、确定性模型、真实本机 Harness / Git 和回环 HTTP；不代表在线模型质量、外部账号部署、跨平台实机或长期负载验收。定向验证与历史问题依据见[协调审查](superagent-review.md)，执行规则见[开发与测试](development.md)。
+Phase 5 的本机统一工作台、人工只读核实、来源与策略管理、GitHub Review／CI 上下文和飞书媒体接收／呈现已实现。多人审批、自动跨来源关联、目标与依赖变更、动态重规划、远程 Worker、多设备恢复及操作系统 Sandbox 仍属于后续扩展。当前业务证据来自隔离数据、确定性模型、真实本机 Harness / Git 和回环 HTTP；不代表在线模型质量、外部账号部署、跨平台实机或长期负载验收。定向验证与历史问题依据见[协调审查](superagent-review.md)，执行规则见[开发与测试](development.md)。

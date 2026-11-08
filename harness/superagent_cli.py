@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .app.superagent_service import SuperagentService
+from .app.superagent_queries import QUERY_RESOURCES,GLOBAL_RESOURCES
 from .core.cleanup import raise_cleanup_errors
 from .i18n import tr
 
@@ -17,7 +18,7 @@ def add_arguments(parser):
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument('--superagent-submit', metavar='TEXT', help=tr('superagent.cli.submit'))
     actions.add_argument('--superagent-status', action='store_true', help=tr('superagent.cli.status'))
-    actions.add_argument('--superagent-list', choices=('missions','jobs','assignments','artifacts','reviews'), help=tr('superagent.cli.list'))
+    actions.add_argument('--superagent-list', choices=QUERY_RESOURCES, help=tr('superagent.cli.list'))
     actions.add_argument('--superagent-show', metavar='MISSION_ID', help=tr('superagent.cli.show'))
     actions.add_argument('--superagent-steer', metavar='TEXT', help=tr('superagent.cli.steer'))
     actions.add_argument('--superagent-receipt', metavar='REQUEST_ID', help=tr('superagent.cli.receipt'))
@@ -52,7 +53,7 @@ def handle(args, parser):
             or args.superagent_job is not None and args.superagent_steer is None
             or args.superagent_mission is not None and control_action is None and args.superagent_list is None
             or (args.superagent_limit is not None or args.superagent_cursor is not None) and args.superagent_list is None
-            or args.superagent_list not in (None, 'missions') and args.superagent_mission is None
+            or args.superagent_list is not None and args.superagent_list not in GLOBAL_RESOURCES and args.superagent_mission is None
             or args.superagent_limit is not None and not 1 <= args.superagent_limit <= 100
             or control_action is not None and (args.superagent_mission is None or args.superagent_job is not None
                                                or any(value is not None for value in (selectors['source'], selectors['actor'], selectors['thread'])))):

@@ -410,7 +410,7 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 
 旧实现仅用于提取可复用原语、识别待改调用方并迁接有效业务回归。新增能力只进入统一协调账本、应用服务和原生 Harness 执行边界；接线缺失不能通过调用旧编排补足。
 
-## 9. Phase 1–4 当前实现边界
+## 9. Phase 1–5 当前实现边界
 
 Phase 4.1–4.6 的统一链路已接通：CLI 和嵌入端口装配同一个 SuperagentService，SourceRegistry、Gate / Evaluation、Mandate / Ticket、Mission / PlanRevision、CoordinatorDagScheduler、原生 Executor、Artifact / Delivery / Review、控制及 Outbox 共用单实例协调账本。生产默认入口不再选择旧 Router / Autonomy，也不装配 Shadow 或旧来源映射。
 
@@ -418,9 +418,9 @@ Phase 4.1–4.6 的统一链路已接通：CLI 和嵌入端口装配同一个 Su
 
 Schema v21 为原生协调模型调用、本机事件身份、本机指令请求和原回复目标增加同库记录。原生调用使用固定 Session / Run / prompt hash，丢回执后只查原提交；本机指令固定 Assignment / Run / Turn，不经普通跟进广播。只读 CLI 使用现有 Schema 和实例身份，不初始化、迁移或修复用户状态。已有迁移及原件保持完整；意外发现旧运行目录时拒绝混用，不导入、转换或清理。
 
-Phase 5.1 已提供同库分页查询与任务详情，CLI 和 `CoordinatorHost.queries` 使用同一消费者；完整字段及读取边界见[产品页](superagent.md#分页浏览与任务详情)。本项是后续工作台的查询基础，不代表整个 Phase 5 完成。
+Phase 5 已提供同库分页／任务详情、本机工作台、人工原操作只读核实、来源／策略／回复授权管理，以及 GitHub Review／CI 上下文和飞书媒体接收／呈现。操作者请求回执与媒体摘要进入同一协调账本，固定请求身份及原消息来源，不复制业务状态。CLI、工作台与可信宿主使用相同查询和领域操作；完整行为与限制见[产品页](superagent.md#统一工作台)。
 
-当前仍限单实例、本机执行和单仓库 Mission。动态 Source Plugin、自动跨来源关联、动态重规划、人工未知结果核实界面、远程 Worker、操作系统 Sandbox 和多人工作台属后续扩展；显式授权的 Subscription 已可跨来源参与同一活动。离线回归不代表在线模型质量、外部账号、跨平台实机或长期负载验收。
+当前仍限单实例、本机执行和单仓库 Mission。动态 Source Plugin、自动跨来源关联、动态重规划、远程 Worker、操作系统 Sandbox 和多人工作台属后续扩展；显式授权的 Subscription 已可跨来源参与同一活动。离线回归不代表在线模型质量、外部账号、跨平台实机或长期负载验收。
 
 ## 10. 源码依据
 
@@ -434,5 +434,7 @@ Phase 5.1 已提供同库分页查询与任务详情，CLI 和 `CoordinatorHost.
 - `superagent_coordination.py`、`superagent_input_delivery.py`、`superagent_mission_instruction.py`、`superagent_watchdog.py`：控制、逐执行输入、指令和持久监督。
 - `superagent_delivery_runtime.py`、`superagent_provider_adapters.py`、`superagent_outbox.py`、`superagent_effect_recovery.py`：发送准入、原回复目标、确认及未知效果只读恢复。
 - `superagent_local.py`、`superagent_state.py`、`superagent_status.py`、`superagent_queries.py`：同库本机操作、运行摘要、分页查询和任务详情。
+- `superagent_workbench.py`、`superagent_operator.py`：主宿主持有的工作台运行、固定操作回执和原效果核实；HTTP／UI 消费者分别位于 `harness/web/api/superagent.py` 与 `web/src/components/overlays/SuperagentPanel.tsx`。
+- `superagent_github_events.py`、`superagent_media_content.py`、`superagent_media.py`：来源上下文、媒体引用与当前来源复核的资源生命周期。
 
-除首项 CLI 外，以上 Python 模块均在 `harness/app/`；语言源在 `harness/i18n/locales/`，原生 Session / Run / Worktree 事实仍归各自模块。
+除明确标出的 CLI、HTTP 和 UI 消费者外，以上 Python 模块均在 `harness/app/`；语言源在 `harness/i18n/locales/`，原生 Session / Run / Worktree 事实仍归各自模块。

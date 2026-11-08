@@ -124,7 +124,7 @@ lint 检查 Python 语法与未使用导入；语言、协议、UI 规范和发�
 
 ## 默认开发验证
 
-Superagent 开发先读取[唯一开发计划](superagent-next-generation-architecture.md#开发执行规则)，从现有统一基础层接续 Phase 4；当前实现边界见[领域模型第 9 节](superagent-domain-model.md#9-phase-14-当前实现边界)。不沿旧 Router / Autonomy 增加功能，也不以旧链路作为新能力的回退或验收路径。
+Superagent 开发先读取[唯一开发计划](superagent-next-generation-architecture.md#开发执行规则)，从已完成的 Phase 5 接续 Phase 6；当前实现边界见[领域模型第 9 节](superagent-domain-model.md#9-phase-15-当前实现边界)。不沿旧 Router / Autonomy 增加功能，也不以旧链路作为新能力的回退或验收路径。
 
 默认开发和普通交付仅执行本次新增或修改的验证用例。先列出本次行为变更与对应测试，再使用精确选择器运行；优先选择具体测试方法／用例，无法独立选择时运行所在的最小测试文件。实现变更应补充或调整针对性验证，保留本次行为所需的状态矩阵和业务断言；纯文档修改只核对内容与差异。没有可执行测试时说明未验证内容，不能把空发现或未执行报告为通过。
 

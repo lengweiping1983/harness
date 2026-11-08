@@ -80,8 +80,8 @@ class WebShutdownFailureTests(unittest.TestCase):
         thread.start()
         failure = OSError('Original MCP failure')
         server, calls, expected = self.fixture({'mcp':failure})
-        services = [SimpleNamespace(close=AsyncMock()) for _ in range(3)]
-        server._harness_ctx.harness = SimpleNamespace(runtime=services[0], automations=services[1], browser=services[2])
+        services = [SimpleNamespace(close=AsyncMock()) for _ in range(4)]
+        server._harness_ctx.harness = SimpleNamespace(_superagent_workbench=services[0], runtime=services[1], automations=services[2], browser=services[3])
         server._harness_loop = loop
         server._harness_loop_thread = thread
         try:

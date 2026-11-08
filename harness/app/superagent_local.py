@@ -27,7 +27,11 @@ def _choose(value, choices, field):
 
 def _event(spec, text, source_id, actor_id, thread_id, request_id, *, instruction=False):
     _text(text, 'text', limit=65536)
-    source_id = _choose(source_id, {k for k, s in spec['sources'].items() if s['kind'] == 'local' and s['enabled']}, 'source_id')
+    enabled = {key:source['enabled'] for key,source in spec['sources'].items()}
+    if (Path(spec['state_dir'])/'superagent.sqlite3').exists():
+        with open_state(spec,read_only=True).transaction() as db:
+            enabled.update({row[0]:bool(row[1]) for row in db.execute('SELECT source_instance_id,enabled FROM source_instances')})
+    source_id = _choose(source_id, {k for k, s in spec['sources'].items() if s['kind'] == 'local' and enabled[k]}, 'source_id')
     source = spec['sources'][source_id]
     actor_id = _choose(actor_id, source['actors'], 'actor_id')
     thread_id = _choose(thread_id, source['threads'], 'thread_id')
@@ -62,6 +66,28 @@ def submit_local(config_path, text, *, source_id=None, actor_id=None, thread_id=
     store = open_state(spec, initialize=True)
     result = _receive(store, spec, source_id, event)
     return {'request_id': request_id, **result, 'queued': True}
+
+
+def answer_local(config_path, text, *, attention_id, source_id=None, actor_id=None, thread_id=None, request_id=None):
+    """本机人工答案仍经原来源身份、Thread 与 Mandate 核验，不冒充远端账号。"""
+    _text(attention_id, 'attention_id')
+    spec = read_config(config_path)
+    source_id, request_id, event = _event(spec,text,source_id,actor_id,thread_id,request_id)
+    event['metadata']['attention_id'] = attention_id
+    store = open_state(spec)
+    with store.transaction() as db:
+        prior = db.execute('SELECT event_id FROM coordinator_local_events WHERE source_id=? AND event_id=?',
+            (source_id,event['event_id'])).fetchone()
+        target = db.execute("SELECT a.state,m.state AS mission_state,t.source_instance_id,t.primary_thread_id "
+            "FROM attentions a JOIN missions m ON m.mission_id=a.mission_id JOIN triggers t ON t.trigger_id=m.goal_ref "
+            "WHERE a.attention_id=?",(attention_id,)).fetchone()
+    expected = 'thr_' + _hash(_json([source_id,'local/'+spec['sources'][source_id]['config']['namespace']+'/'+event['thread_id']]))
+    if target is None or target['source_instance_id']!=source_id or target['primary_thread_id']!=expected:
+        raise _error('guidance-unauthorized')
+    if prior is None and (target['state']!='open' or target['mission_state']!='blocked'):
+        raise _error('conflict')
+    result = _receive(store,spec,source_id,event)
+    return {'request_id':request_id,**result,'queued':True,'attention_id':attention_id}
 
 
 def _runtime(spec):

@@ -20732,6 +20732,440 @@
           }
         ]
       }
+    },
+    "/api/v1/superagents": {
+      "get": {
+        "operationId": "get_api_v1_superagents",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuperagentConnections"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/superagents/connect": {
+      "post": {
+        "operationId": "post_api_v1_superagents_connect",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuperagentConnection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuperagentConnect"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/superagents/{connection_id}": {
+      "get": {
+        "operationId": "get_api_v1_superagents_connection_id",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuperagentConnection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/superagents/{connection_id}/read": {
+      "get": {
+        "operationId": "get_api_v1_superagents_connection_id_read",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuperagentRead"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "查询参数无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "description": "每个已声明查询参数只接受一个值，未知、重复或无效值返回 request/invalid-query。只有省略 session_id 才选择全局汇总或唯一终端拥有者；空值无效。",
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resource",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "audit",
+                "mandates",
+                "events",
+                "evaluations",
+                "channels",
+                "sources",
+                "effects",
+                "attentions",
+                "inputs",
+                "outbox",
+                "missions",
+                "jobs",
+                "assignments",
+                "artifacts",
+                "reviews",
+                "mission",
+                "policy",
+                "status",
+                "receipt",
+                "effect",
+                "local_options"
+              ]
+            }
+          },
+          {
+            "name": "mission_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 32
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          {
+            "name": "identifier",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/superagents/{connection_id}/commands": {
+      "post": {
+        "operationId": "post_api_v1_superagents_connection_id_commands",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuperagentWrite"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuperagentCommand"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/superagents/{connection_id}/media/{media_id}": {
+      "get": {
+        "operationId": "get_api_v1_superagents_connection_id_media_media_id",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/gif": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "media_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -30571,6 +31005,159 @@
           "allow_execution",
           "require_execution"
         ]
+      },
+      "SuperagentConnection": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "config_path": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string",
+            "enum": [
+              "running",
+              "stopped",
+              "failed",
+              "unavailable"
+            ]
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "connection_id",
+          "instance_id",
+          "config_path",
+          "runtime",
+          "error_code"
+        ],
+        "additionalProperties": false
+      },
+      "SuperagentConnections": {
+        "type": "object",
+        "properties": {
+          "connections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SuperagentConnection"
+            }
+          }
+        },
+        "required": [
+          "connections"
+        ],
+        "additionalProperties": false
+      },
+      "SuperagentConnect": {
+        "type": "object",
+        "properties": {
+          "config_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "config_path"
+        ],
+        "additionalProperties": false
+      },
+      "SuperagentRead": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "connection_id",
+          "instance_id",
+          "resource",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "SuperagentCommand": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "stop",
+              "submit",
+              "control",
+              "steer",
+              "source",
+              "policy",
+              "requeue",
+              "verify",
+              "media",
+              "reply",
+              "answer"
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "request_id",
+          "action",
+          "payload"
+        ],
+        "additionalProperties": false
+      },
+      "SuperagentWrite": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "receipt": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "connection_id",
+          "instance_id",
+          "request_id",
+          "receipt"
+        ],
+        "additionalProperties": false
       },
       "ProviderAuth": {
         "type": "object",

@@ -186,6 +186,10 @@ class _HostEffectRecoveryService:
         with self.__host._operation():
             return await self.__service.recover_async(limit=limit)
 
+    async def lookup_original(self, effect):
+        with self.__host._operation():
+            return await self.__service.lookup_original(effect)
+
 
 class _HostSourceRegistry:
     """每次来源注册、配置或验收都持有宿主活动租约。"""

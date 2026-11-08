@@ -23,18 +23,24 @@ from .superagent_models import CoordinatorModels
 from .superagent_state import configure
 
 
-async def open_service(cls, config_path, *, worker_transport=None, coordinator_transport=None):
-    spec = read_config(config_path)
-    root = Path(spec['state_dir'])
-    if _legacy_state_present(root):
-        raise _error('conflict')
-    database = root / 'superagent.sqlite3'
-    if database.exists() or database.is_symlink():
-        CoordinatorStore.open_existing(database, instance_id=spec['instance_id'], identity=config_identity(spec),
-                                       read_only=True, current_schema=False)
-    api_key = os.environ.get('HARNESS_API_KEY') or os.environ.get('OPENROUTER_API_KEY', '')
-    if not api_key:
-        raise _error('credentials-required')
+def provider_configuration(spec, store):
+    """使用账本当前来源配置解析显式凭据；不创建原生运行宿主。"""
+    from .superagent_source_registry import LocalSourceKind, GitHubSourceKind, FeishuSourceKind, SourceRegistry
+    from .superagent_coordinator_store import _hash, _json
+    kinds = {kind.kind:kind for kind in (LocalSourceKind(), GitHubSourceKind(), FeishuSourceKind())}
+    effective = {key:dict(source) for key,source in spec['sources'].items()}
+    with store.transaction() as db:
+        for row in db.execute('SELECT * FROM source_instances'):
+            source_id = row['source_instance_id']
+            if source_id not in effective or row['kind'] != effective[source_id]['kind']:
+                raise _error('conflict')
+            kind = kinds[row['kind']]
+            current = SourceRegistry._view(row,installed=kind.api_version == row['kind_api_version'])
+            parsed = kind.validate_config(dict(current.config))
+            if (not current.installed or _hash(_json(kind.identity(parsed))) != current.identity_hash
+                    or kind.identity(parsed) != kind.identity(effective[source_id]['config'])):
+                raise _error('conflict')
+            effective[source_id].update(config=parsed,enabled=current.enabled)
     def secret(reference):
         if not isinstance(reference, str) or not reference.startswith('secret://'):
             raise _error('invalid', field='secret_ref')
@@ -45,7 +51,7 @@ async def open_service(cls, config_path, *, worker_transport=None, coordinator_t
         return value.encode('utf-8')
     # 在创建宿主前读取所有已启用信道需要的显式凭据。
     clients = {}
-    for source_id, source in spec['sources'].items():
+    for source_id, source in effective.items():
         if not source['enabled'] or source['kind'] == 'local':
             continue
         if source['kind'] == 'feishu':
@@ -63,6 +69,21 @@ async def open_service(cls, config_path, *, worker_transport=None, coordinator_t
             value = secret(credential).decode('utf-8')
             clients[source_id] = (GitHubClient(transport['api_url'], value) if source['kind'] == 'github'
                 else FeishuClient({'api_url': transport['api_url'], 'app_id': source['config']['app_id']}, value))
+    return clients,secret
+
+
+async def open_service(cls, config_path, *, worker_transport=None, coordinator_transport=None):
+    spec = read_config(config_path)
+    root = Path(spec['state_dir'])
+    if _legacy_state_present(root):
+        raise _error('conflict')
+    database = root / 'superagent.sqlite3'
+    if database.exists() or database.is_symlink():
+        CoordinatorStore.open_existing(database, instance_id=spec['instance_id'], identity=config_identity(spec),
+                                       read_only=True, current_schema=False)
+    api_key = os.environ.get('HARNESS_API_KEY') or os.environ.get('OPENROUTER_API_KEY', '')
+    if not api_key:
+        raise _error('credentials-required')
     profiles = [WorkerProfile(profile_id=key, **profile) for key, profile in spec['profiles'].items()]
     owned, service = [], None
     stack = ExitStack()
@@ -72,7 +93,9 @@ async def open_service(cls, config_path, *, worker_transport=None, coordinator_t
             stack.enter_context(event_write_lock(root / 'superagent-runtime'))
         except OSError as exc:
             raise _error('runtime-busy') from exc
-        CoordinatorStore(database, instance_id=spec['instance_id'], identity=config_identity(spec))
+        store = CoordinatorStore(database, instance_id=spec['instance_id'], identity=config_identity(spec))
+        clients,secret = provider_configuration(spec,store)
+        configure(store,spec,secret_resolver=secret)
         for name, transport in (('runtime', worker_transport), ('coordinator-runtime', coordinator_transport)):
             flags = {item.name: False for item in fields(HarnessConfig) if item.name.startswith('enable_')}
             if name == 'runtime':

@@ -81,6 +81,8 @@ class SuperagentService:
             service.listeners = []
             service._owned_harnesses = []
             service._production_config = None
+            service._source_config_marker = None
+            service._source_refresh_lock = asyncio.Lock()
             service.closed = False
             service._close_task = None
             service._tick_task = None
@@ -171,6 +173,11 @@ class SuperagentService:
 
     async def _tick_coordinator(self):
         host = self._coordinator_host
+        if self._production_config is not None:
+            marker = tuple((source.source_instance_id,source.config_revision) for source in host.sources.list_instances())
+            if marker != self._source_config_marker:
+                await self.refresh_sources()
+                self._source_config_marker = marker
         for listener in self.listeners:
             if listener['server'].errors:
                 raise listener['server'].errors[0]
@@ -394,6 +401,8 @@ class SuperagentService:
 
     async def _close_coordinator(self):
         errors = []
+        async with self._source_refresh_lock:
+            pass
         for listener in reversed(self.listeners):
             try:
                 await listener['server'].aclose()
@@ -429,6 +438,37 @@ class SuperagentService:
 
     async def serve(self, stop: asyncio.Event, *, once=False):
         return await self._serve_coordinator(stop, once=once)
+
+    async def refresh_sources(self):
+        """显式来源编辑后同步当前凭据和所属监听器，不重授回复权或重放输入。"""
+        async with self._source_refresh_lock:
+            return await self._refresh_sources()
+
+    async def _refresh_sources(self):
+        """来源监听器的创建、撤销与关闭串行化，避免并发重复绑定。"""
+        if self.closed or self._production_config is None:
+            raise _error('closed')
+        from .superagent_bootstrap import provider_configuration
+        from .superagent_http import WebhookServer
+        spec = self._production_config
+        clients,_ = provider_configuration(spec,self._coordinator_host._store)
+        self._coordinator_delivery.clients = clients
+        for listener in tuple(self.listeners):
+            if not self.coordinator.sources.get_instance(listener['source_id']).enabled:
+                await listener['server'].aclose()
+                self.listeners.remove(listener)
+        for source_id,source in spec['sources'].items():
+            if source['kind']=='local' or not self.coordinator.sources.get_instance(source_id).enabled:
+                continue
+            if any(listener['source_id']==source_id for listener in self.listeners):
+                continue
+            server = WebhookServer(self.source_ingress(source_id),source['transport']['webhook_port'],spec['language'],
+                path='/'+source['kind']+'/'+source_id,prefix=source['kind'],success_status=202 if source['kind']=='github' else 200)
+            self.listeners.append({'source_id':source_id,'kind':source['kind'],'server':server})
+            await server.start()
+            if self.closed:
+                await server.aclose()
+                raise _error('closed')
 
     async def aclose(self):
         await self._aclose_coordinator()

@@ -10,6 +10,22 @@ from .superagent_coordinator_store import PlanRevisionRepository, _hash, _json
 
 # 关系、列与排序均由宿主固定；外部参数只作为绑定值传入。
 _PAGES = {
+    'audit': ('audit_events a','a','a.aggregate_id','a.event_id,a.aggregate_type,a.aggregate_id,a.event_type,a.payload_json,a.actor_json,a.occurred_at'),
+    'mandates': ('mandates d JOIN tickets t ON t.ticket_id=d.ticket_id','d','d.ticket_id',
+        'd.mandate_id,d.ticket_id,d.source_instance_id,d.policy_version,d.strength,d.scope_json,t.state AS ticket_state,'
+        "coalesce((SELECT event_type FROM mandate_events e WHERE e.mandate_id=d.mandate_id ORDER BY e.rowid DESC LIMIT 1),'granted') AS state"),
+    'events': ('triggers t','t','t.primary_thread_id','t.trigger_id,t.source_instance_id,t.external_event_id,t.event_kind,t.actor_json,t.occurred_at,t.body_json,t.metadata_json'),
+    'evaluations': ('evaluations e','e','e.thread_id','e.evaluation_id,e.thread_id,e.state,e.retry_count,e.started_at,e.outcome_json'),
+    'channels': ('channels c JOIN source_instances s ON s.source_instance_id=c.source_instance_id LEFT JOIN channel_reply_bindings b ON b.channel_id=c.channel_id',
+        'c','c.source_instance_id','c.channel_id,c.source_instance_id,c.thread_id,s.kind,c.address_json,s.config_revision AS source_revision,'
+        "CASE WHEN s.enabled=1 AND ((b.enabled=1 AND b.source_revision=s.config_revision) OR (b.channel_id IS NULL AND json_extract(c.capabilities_json,'$.reply')=1)) THEN 1 ELSE 0 END AS reply_enabled"),
+    'sources': ('source_instances s','s','s.source_instance_id','s.source_instance_id,s.kind,s.enabled,s.config_revision,s.config_json,s.health_json'),
+    'effects': ('effects e','e','e.aggregate_id','e.effect_id,e.kind,e.aggregate_id,e.idempotency_key,e.state,e.generation,e.attempts,e.created_at,e.last_error'),
+    'attentions': ('attentions a','a','a.mission_id','a.*'),
+    'inputs': ('ticket_inputs i JOIN triggers t ON t.trigger_id=i.trigger_id JOIN missions m ON m.ticket_id=i.ticket_id','i','m.mission_id',
+        'i.input_id,i.trigger_id,i.state,i.context_only,t.source_instance_id,t.event_kind,t.body_json,t.metadata_json'),
+    'outbox': ('outbox_messages o JOIN missions m ON m.ticket_id=o.ticket_id','o','m.mission_id',
+        'o.message_id,o.ticket_id,o.channel_id,o.kind,o.state,o.attempts,o.body_hash,o.sent_at'),
     'missions': ('missions m JOIN tickets t ON t.ticket_id=m.ticket_id', 'm', 'm.mission_id',
         'm.*,t.title AS title'),
     'jobs': ('jobs j', 'j', 'j.mission_id', 'j.*'),
@@ -23,6 +39,8 @@ _PAGES = {
         'r.review_id,r.mission_id,r.reviewer_assignment_id,r.candidate_artifact_id,r.plan_revision,'
         'r.acceptance_hash,r.evidence_set_hash,r.state,r.created_at'),
 }
+GLOBAL_RESOURCES = ('missions','audit','mandates','channels','sources','effects','attentions','events','evaluations')
+QUERY_RESOURCES = tuple(_PAGES)
 
 
 class CoordinatorQueries:
@@ -68,11 +86,15 @@ class CoordinatorQueries:
         _page(0, limit)
         if mission_id is not None:
             _text(mission_id, 'mission_id')
-        elif resource != 'missions':
+            if resource in {'audit','mandates','channels','sources','effects','events','evaluations'}:
+                raise _error('invalid', field='mission_id')
+        elif resource not in GLOBAL_RESOURCES:
             raise _error('invalid', field='mission_id')
         continuation = self._cursor(resource, mission_id, cursor)
         relation, alias, scope, columns = _PAGES[resource]
         where, params = (scope + '=?', [mission_id]) if mission_id is not None else ('1=1', [])
+        if resource == 'effects':
+            where += " AND e.state='unknown'"
         with self._store.transaction() as db:
             if mission_id is not None:
                 self._mission(db, mission_id)
@@ -105,7 +127,7 @@ class CoordinatorQueries:
                 raise _error('corrupt')
             counts = {}
             for resource, (relation, _, scope, _) in _PAGES.items():
-                if resource != 'missions':
+                if resource in {'jobs','assignments','artifacts','reviews'}:
                     counts[resource] = db.execute(f'SELECT count(*) FROM {relation} WHERE {scope}=?', (mission_id,)).fetchone()[0]
             control = db.execute('SELECT * FROM mission_controls WHERE mission_id=?', (mission_id,)).fetchone()
             watchdog = db.execute('SELECT mission_id,state,last_progress_at,observed_at FROM watchdog_snapshots WHERE mission_id=?', (mission_id,)).fetchone()

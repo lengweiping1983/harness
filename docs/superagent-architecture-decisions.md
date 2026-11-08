@@ -1,7 +1,7 @@
 # Harness Superagent 统一架构决策与接口协议
 
 > 文档状态：统一 Superagent 开发约束；与[唯一开发计划](superagent-next-generation-architecture.md#开发执行规则)配套。
-> Accepted 表示架构取舍已确认，不代表目标接口已实现或业务验收已通过；实际交付见[领域模型第 9 节](superagent-domain-model.md#9-phase-14-当前实现边界)。
+> Accepted 表示架构取舍已确认，不代表目标接口已实现或业务验收已通过；实际交付见[领域模型第 9 节](superagent-domain-model.md#9-phase-15-当前实现边界)。
 > 关联：[领域模型与数据契约](superagent-domain-model.md) · [状态机与合法转移](superagent-state-machines.md)。
 
 ## 1. 决策记录规则
@@ -271,7 +271,7 @@ flowchart TB
 
 领域模型、状态机及 Ports 在协调账本实现之前冻结；后续实现同步维护契约、调用方、生成源及有效测试。Phase 1–3 基础已经交付，该历史顺序不构成重新启动 Phase 0 或等待旧评审清单的要求。
 
-当前从已有统一基础层接续 Phase 4；具体顺序和完成门禁只维护在总体开发计划。Schema 的正常演进不等于旧 Superagent 运行数据导入，也不允许重新引入双轨运行。
+当前从已完成的 Phase 5 接续 Phase 6；具体顺序和完成门禁只维护在总体开发计划。Schema 的正常演进不等于旧 Superagent 运行数据导入，也不允许重新引入双轨运行。
 
 ## 4. 目标 Ports 接口契约
 
@@ -400,11 +400,11 @@ UnitOfWork 暴露 Ticket、Mission、Job、Assignment 等有类型的 Repository
 
 ## 7. 后续扩展决策
 
-统一开发路线、单实例 SQLite、静态 SourceRegistry、独立 Session / Workspace 复核及 unknown 不重放已经确定，不再作为 Phase 4 启动前待重新选择的事项。多人授权、完整人工核实工作台、跨仓库协作及具体 Sandbox / 远程设备方案，在 Phase 5 / 6 对应能力实施前按当前需求细化；不能为等待这些扩展而保留旧运行链路。
+统一开发路线、单实例 SQLite、静态 SourceRegistry、独立 Session / Workspace 复核及 unknown 不重放已经确定，不再作为 Phase 4 启动前待重新选择的事项。本机人工核实工作台已在 Phase 5 实现；多人授权、跨仓库协作及具体 Sandbox / 远程设备方案，在后续对应能力实施前按当前需求细化；不能为等待这些扩展而保留旧运行链路。
 
 ## 8. 后续开发准入与完成门禁
 
-从[唯一开发计划第 11 节](superagent-next-generation-architecture.md#11-分阶段实施计划)接续已完成的 Phase 4 统一链路，进入 Phase 5 的产品协作完善。Phase 0 的原始评审清单不再作为当前待执行任务。
+从[唯一开发计划第 11 节](superagent-next-generation-architecture.md#11-分阶段实施计划)接续已完成的 Phase 5 本机产品协作，进入 Phase 6 的隔离与远程执行。Phase 0 的原始评审清单不再作为当前待执行任务。
 
 验收必须通过统一应用服务的实际消费者、原始回执和业务断言取得证据；旧默认路由保持、旧服务仍可启动或只读 Shadow 比较不属于新架构的验收门禁。当前已实现与缺口以领域模型第 9 节为准，不以本页 ADR 状态代替实现证明。
 

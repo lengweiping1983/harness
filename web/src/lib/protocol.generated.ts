@@ -2051,6 +2051,36 @@ export interface AcademyTutorRequest {
   proposal_path?: string
   comparison_run_id?: string
 }
+export interface SuperagentConnection {
+  connection_id: string
+  instance_id: string
+  config_path: string
+  runtime: 'running' | 'stopped' | 'failed' | 'unavailable'
+  error_code: string | null
+}
+export interface SuperagentConnections {
+  connections: Array<SuperagentConnection>
+}
+export interface SuperagentConnect {
+  config_path: string
+}
+export interface SuperagentRead {
+  connection_id: string
+  instance_id: string
+  resource: string
+  data: Record<string, unknown>
+}
+export interface SuperagentCommand {
+  request_id: string
+  action: 'start' | 'stop' | 'submit' | 'control' | 'steer' | 'source' | 'policy' | 'requeue' | 'verify' | 'media' | 'reply' | 'answer'
+  payload: Record<string, unknown>
+}
+export interface SuperagentWrite {
+  connection_id: string
+  instance_id: string
+  request_id: string
+  receipt: Record<string, unknown>
+}
 export interface ProviderAuth {
   type: 'api_key' | 'oauth' | 'environment' | 'opencode_local' | 'anonymous'
   env: Record<string, string>

@@ -205,6 +205,10 @@ class GitHubSourceKind:
                 raise ValueError("webhook payload must be an object")
             if event_kind == "ping":
                 return SourceIgnored("github_ping")
+            if (event_kind in {'pull_request_review','pull_request_review_comment','check_run','check_suite','workflow_run'}
+                    or event_kind=='pull_request' and data.get('action') not in {'opened','closed','reopened'}):
+                from .superagent_github_events import activity
+                return activity(data,event_kind,data.get('action'),delivery,config,received_at)
             supported = {
                 ("issues", "opened"), ("issues", "closed"), ("issues", "reopened"),
                 ("issue_comment", "created"),
@@ -396,7 +400,7 @@ class FeishuSourceKind:
             message, sender = data["event"]["message"], data["event"]["sender"]
             if sender["tenant_key"] != config["tenant_key"] or message["chat_id"] not in config["chats"]:
                 raise PermissionError("Feishu tenant or chat is outside the configured source")
-            if message["message_type"] != "text":
+            if message["message_type"] not in {'text','image','file','audio','media','post'}:
                 return SourceIgnored("unsupported_feishu_message_type")
             if message["chat_type"] not in {"group", "p2p"} or sender["sender_type"] not in {"user", "app"}:
                 raise ValueError("Feishu message or sender type is invalid")
@@ -408,13 +412,15 @@ class FeishuSourceKind:
             if not chat_id.startswith("oc_") or not message_id.startswith("om_") or not root_id.startswith("om_") or not actor.startswith("ou_"):
                 raise ValueError("Feishu identifiers are invalid")
             content = _strict_json(_bounded_text(message["content"], "message.content", limit=524_288))
-            text = _bounded_text(content.get("text"), "message.text", limit=_MAX_EVENT_TEXT_BYTES, empty=True)
+            from .superagent_media_content import feishu_content
+            body,rich_mention = feishu_content(message['message_type'],content,bot_id=config['bot_open_id'])
+            text = body['text']
             actor_kind = "human" if sender["sender_type"] == "user" and actor != config["bot_open_id"] else "bot"
             mentions = message.get("mentions", [])
             if not isinstance(mentions, list) or len(mentions) > 64:
                 raise ValueError("Feishu mentions are invalid")
             first = next((line.strip() for line in text.splitlines() if line.strip()), "")
-            mentioned = False
+            mentioned = rich_mention
             for mention in mentions:
                 key = _bounded_text(mention["key"], "mention.key", limit=64)
                 if (
@@ -438,7 +444,7 @@ class FeishuSourceKind:
                 addressed=("direct" if message["chat_type"] == "p2p" else "mention" if mentioned and actor_kind == "human" else "none"),
                 threads=(NormalizedThread(thread_id, "primary", {"chat_id": chat_id, "root_id": root_id}),),
                 primary_thread_id=thread_id,
-                body={"text": text},
+                body=body,
                 metadata={
                     "app_id": config["app_id"], "tenant_key": config["tenant_key"],
                     "chat_id": chat_id, "chat_type": message["chat_type"],
@@ -688,58 +694,62 @@ class SourceRegistry:
             )
         return self.get_instance(source_instance_id)
 
-    def update_instance(
-        self, source_instance_id: str, *, expected_revision: int,
-        config: object | None = None, enabled: bool | None = None,
-        actor: object | None = None,
-    ) -> SourceInstance:
+    def update_instance(self, source_instance_id: str, *, expected_revision: int,
+                        config: object | None = None, enabled: bool | None = None, actor: object | None = None) -> SourceInstance:
+        with self._store.transaction(write=True) as db:
+            return self.update_instance_in_transaction(db, source_instance_id, expected_revision=expected_revision,
+                                                       config=config, enabled=enabled, actor=actor)
+
+    def update_instance_in_transaction(self, db, source_instance_id: str, *, expected_revision: int,
+                                      config: object | None = None, enabled: bool | None = None, actor: object | None = None):
+        """来源修订、撤权及工作台操作回执共用原事务。"""
         source_instance_id = _bounded_text(source_instance_id, "source_instance_id", limit=128)
         if type(expected_revision) is not int or expected_revision < 1:
             raise ValueError("expected_revision must be a positive integer")
-        with self._store.transaction(write=True) as db:
-            row = db.execute(
-                "SELECT * FROM source_instances WHERE source_instance_id=?", (source_instance_id,)
-            ).fetchone()
-            if row is None:
-                raise LookupError("source instance does not exist")
-            if row["config_revision"] != expected_revision:
-                raise RuntimeError("source instance revision conflict")
-            plugin = self._kinds.get(row["kind"])
-            if plugin is None:
-                raise LookupError("SourceKind is not installed")
-            if plugin.api_version != row["kind_api_version"]:
-                raise RuntimeError("SourceKind API version mismatch")
-            old_config = json.loads(row["config_json"])
-            parsed = plugin.validate_config(old_config if config is None else config)
-            identity_json = _json(dict(plugin.identity(parsed)))
-            if _hash(identity_json) != row["identity_hash"] or identity_json != row["identity_json"]:
-                raise PermissionError("SourceInstance identity is immutable; create a new instance")
-            target_enabled = bool(row["enabled"]) if enabled is None else enabled
-            if type(target_enabled) is not bool:
-                raise ValueError("enabled must be a boolean")
-            changed = _json(parsed) != row["config_json"] or int(target_enabled) != row["enabled"]
-            if changed:
-                new_revision = expected_revision + 1
-                now = _now()
-                db.execute(
-                    """UPDATE source_instances SET config_json=?,enabled=?,config_revision=?,
-                       updated_at=? WHERE source_instance_id=? AND config_revision=?""",
-                    (_json(parsed), int(target_enabled), new_revision, now,
-                     source_instance_id, expected_revision),
-                )
-                CoordinatorStore.append_audit(
-                    db, aggregate_type="source_instance", aggregate_id=source_instance_id,
-                    event_type="source_instance.configured",
-                    payload={"config_revision": new_revision, "enabled": target_enabled,
-                             "config_hash": _hash(_json(parsed))},
+        row = db.execute(
+            "SELECT * FROM source_instances WHERE source_instance_id=?", (source_instance_id,)
+        ).fetchone()
+        if row is None:
+            raise LookupError("source instance does not exist")
+        if row["config_revision"] != expected_revision:
+            raise RuntimeError("source instance revision conflict")
+        plugin = self._kinds.get(row["kind"])
+        if plugin is None:
+            raise LookupError("SourceKind is not installed")
+        if plugin.api_version != row["kind_api_version"]:
+            raise RuntimeError("SourceKind API version mismatch")
+        old_config = json.loads(row["config_json"])
+        parsed = plugin.validate_config(old_config if config is None else config)
+        identity_json = _json(dict(plugin.identity(parsed)))
+        if _hash(identity_json) != row["identity_hash"] or identity_json != row["identity_json"]:
+            raise PermissionError("SourceInstance identity is immutable; create a new instance")
+        target_enabled = bool(row["enabled"]) if enabled is None else enabled
+        if type(target_enabled) is not bool:
+            raise ValueError("enabled must be a boolean")
+        changed = _json(parsed) != row["config_json"] or int(target_enabled) != row["enabled"]
+        if changed:
+            new_revision = expected_revision + 1
+            now = _now()
+            db.execute(
+                """UPDATE source_instances SET config_json=?,enabled=?,config_revision=?,
+                   updated_at=? WHERE source_instance_id=? AND config_revision=?""",
+                (_json(parsed), int(target_enabled), new_revision, now,
+                 source_instance_id, expected_revision),
+            )
+            CoordinatorStore.append_audit(
+                db, aggregate_type="source_instance", aggregate_id=source_instance_id,
+                event_type="source_instance.configured",
+                payload={"config_revision": new_revision, "enabled": target_enabled,
+                         "config_hash": _hash(_json(parsed))},
+                actor={"kind": "host"} if actor is None else actor,
+            )
+            if self._on_config_changed is not None:
+                self._on_config_changed(
+                    db, source_instance_id,
                     actor={"kind": "host"} if actor is None else actor,
                 )
-                if self._on_config_changed is not None:
-                    self._on_config_changed(
-                        db, source_instance_id,
-                        actor={"kind": "host"} if actor is None else actor,
-                    )
-        return self.get_instance(source_instance_id)
+        current = db.execute('SELECT * FROM source_instances WHERE source_instance_id=?', (source_instance_id,)).fetchone()
+        return self._view(current, installed=plugin.api_version == current['kind_api_version'])
 
     def get_instance(self, source_instance_id: str) -> SourceInstance:
         row = self._row(source_instance_id)
@@ -957,26 +967,31 @@ class SourceRegistry:
 
     def set_channel_reply(self, channel_id: str, *, expected_source_revision: int, enabled: bool, actor: object):
         """可信宿主登记传输能力；能力不代替每次发送的 Mandate 授权。"""
+        with self._store.transaction(write=True) as db:
+            return self.set_channel_reply_in_transaction(db, channel_id,
+                expected_source_revision=expected_source_revision, enabled=enabled, actor=actor)
+
+    def set_channel_reply_in_transaction(self, db, channel_id, *, expected_source_revision, enabled, actor):
+        """回复能力修订与操作者请求回执共享原子事务。"""
         if type(enabled) is not bool or type(expected_source_revision) is not int:
             raise ValueError(tr("superagent.invalid", field="channel.reply"))
-        with self._store.transaction(write=True) as db:
-            row = db.execute("SELECT * FROM channels WHERE channel_id=?", (channel_id,)).fetchone()
-            if row is None:
-                raise LookupError(tr("superagent.corrupt"))
-            source = db.execute("SELECT * FROM source_instances WHERE source_instance_id=?", (row["source_instance_id"],)).fetchone()
-            if source is None or source["config_revision"] != expected_source_revision or enabled and not source["enabled"]:
-                raise PermissionError(tr("superagent.mandate.unavailable"))
-            binding = db.execute("SELECT * FROM channel_reply_bindings WHERE channel_id=?", (channel_id,)).fetchone()
-            if binding is not None and bool(binding["enabled"]) is enabled and binding["source_revision"] == expected_source_revision:
-                return self._channel_view(row, db)
-            db.execute(
-                "INSERT INTO channel_reply_bindings VALUES(?,?,?,1,?) ON CONFLICT(channel_id) DO UPDATE SET "
-                "source_revision=excluded.source_revision,enabled=excluded.enabled,aggregate_revision=channel_reply_bindings.aggregate_revision+1,updated_at=excluded.updated_at",
-                (channel_id, expected_source_revision, int(enabled), _now()),
-            )
-            self._store.append_audit(db, aggregate_type="channel", aggregate_id=channel_id,
-                event_type="channel.reply_configured", payload={"reply": enabled, "source_revision": expected_source_revision}, actor=actor)
+        row = db.execute("SELECT * FROM channels WHERE channel_id=?", (channel_id,)).fetchone()
+        if row is None:
+            raise LookupError(tr("superagent.corrupt"))
+        source = db.execute("SELECT * FROM source_instances WHERE source_instance_id=?", (row["source_instance_id"],)).fetchone()
+        if source is None or source["config_revision"] != expected_source_revision or enabled and not source["enabled"]:
+            raise PermissionError(tr("superagent.mandate.unavailable"))
+        binding = db.execute("SELECT * FROM channel_reply_bindings WHERE channel_id=?", (channel_id,)).fetchone()
+        if binding is not None and bool(binding["enabled"]) is enabled and binding["source_revision"] == expected_source_revision:
             return self._channel_view(row, db)
+        db.execute(
+            "INSERT INTO channel_reply_bindings VALUES(?,?,?,1,?) ON CONFLICT(channel_id) DO UPDATE SET "
+            "source_revision=excluded.source_revision,enabled=excluded.enabled,aggregate_revision=channel_reply_bindings.aggregate_revision+1,updated_at=excluded.updated_at",
+            (channel_id, expected_source_revision, int(enabled), _now()),
+        )
+        self._store.append_audit(db, aggregate_type="channel", aggregate_id=channel_id,
+            event_type="channel.reply_configured", payload={"reply": enabled, "source_revision": expected_source_revision}, actor=actor)
+        return self._channel_view(row, db)
 
     def list_channels(
         self, *, source_instance_id: str | None = None, thread_id: str | None = None,

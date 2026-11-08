@@ -123,7 +123,7 @@ def local_identity(spec, event):
     """仅本机显式配置的身份与 Thread 可由可信入口提交。"""
     metadata = event.get('metadata', {})
     source = spec['sources'].get(metadata.get('source_instance_id'))
-    if (source is None or source['kind'] != 'local' or not source['enabled']
+    if (source is None or source['kind'] != 'local'
             or metadata.get('actor_id') not in source['actors'] or event.get('thread_id') not in source['threads']):
         raise _error('source-unavailable')
     return {'actor_id': metadata['actor_id'], 'actor_kind': 'human', 'addressed': 'direct'}

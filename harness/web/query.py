@@ -9,6 +9,7 @@ from harness.tools.schema import validate
 
 from .errors import BadRequest
 from .router import Request
+from .superagent_protocol import READ_QUERY as SUPERAGENT_READ_QUERY
 
 
 RUNTIME_QUERY = {'type': 'object', 'additionalProperties': False, 'properties': {
@@ -31,6 +32,7 @@ SESSION_ACTIVITY_QUERY = {'type': 'object', 'additionalProperties': False, 'prop
     'server_id': {'type': 'string', 'minLength': 1, 'maxLength': 128},
 }}
 QUERY_SCHEMAS = {
+    '/api/v1/superagents/{connection_id}/read':SUPERAGENT_READ_QUERY,
     '/api/v1/sessions': SESSION_LIST_QUERY,
     '/api/v1/sessions/activity': SESSION_ACTIVITY_QUERY,
     '/api/v1/sessions/{session_id}/live-events': LIVE_EVENTS_QUERY,

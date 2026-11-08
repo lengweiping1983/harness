@@ -4,7 +4,7 @@
 
 ## 源码事实与设计选择
 
-当前增量从 Phase 4.5 与入口解耦提交 `d939f8c` 接续。`SuperagentService.open` → `superagent_bootstrap.open_service` → 当前配置 → CoordinatorHost → SourceRegistry / Authorization / Execution / Scheduler / DeliveryRuntime 是唯一生产链。只读本机命令直接打开现有协调账本，不构造模型；没有旧 Router / Autonomy 选择器或 Shadow 入口。
+Phase 5.2–5.6 增量从只读查询提交 `146b202` 接续。`SuperagentService.open` → `superagent_bootstrap.open_service` → 当前配置 → CoordinatorHost → SourceRegistry / Authorization / Execution / Scheduler / DeliveryRuntime 是唯一生产链。只读本机命令直接打开现有协调账本，不构造模型；没有旧 Router / Autonomy 选择器或 Shadow 入口。
 
 `CoordinatorStore` 保存协调事实和原生调用引用，Harness 继续持有原始 Session / Run / Tool / Worktree。`HarnessExecutorAdapter` 的 Worker Lookup 由 CoordinatorExecutionService 注册，`Harness` 的实际运行与 AgentLoop 入口重新核对资源身份和工具范围；关闭由相同实例锁覆盖原生宿主清理和最终状态投影。包发现使用现有 setuptools 规则，CLI 直接引用统一服务；认证客户端和监听器不依赖退役模块。
 
@@ -116,7 +116,7 @@
 | MissionSnapshots / MissionStatus：只读、有界和原 Run 事件 | `superagent_status.snapshot` 在同一读事务读取有界 Mission / Job / Assignment，活动与待关注优先；`test_older_active_and_attention_missions_remain_visible_ahead_of_completed_history`、`test_mission_plan_and_jobs_share_one_read_transaction_during_concurrent_planning` 核对历史不会挤占活动及并发计划不混合快照；`test_superagent_mission_status.py` 保留原工具配对、轮次和隐私断言；生产入口核对状态无宿主／凭据、外来观察拒绝与缺失状态不创建目录 |
 | GitHub / Feishu：验签、身份、原对象和真实 HTTP | 当前 SourceKind + 独立认证客户端；重写后的两个来源测试覆盖真实 Webhook、AES 标准互操作、挑战与错误语言；UnifiedDelivery 保留真实 HTTP POST / GET、刷新后撤权及 unknown 不重发 |
 
-迁接后的当前协议不再保留旧事件目录、旧自动创建模板或旧任务快照格式。旧目标计划的重复实现被统一 PlanRevision / Scheduler 和质量门取代；历史迁移仍保留并验证。自动跨来源关联、动态重规划和人工未知结果核实界面仍是明确的后续产品缺口，不把显式 Subscription API 写成自动能力。
+迁接后的当前协议不再保留旧事件目录、旧自动创建模板或旧任务快照格式。旧目标计划的重复实现被统一 PlanRevision / Scheduler 和质量门取代；历史迁移仍保留并验证。自动跨来源关联和动态重规划仍是明确的后续产品缺口，不把显式 Subscription API 写成自动能力。
 
 ## 账本读取基准
 
@@ -183,17 +183,40 @@
 | 查询期间关闭释放实例租约，或缓存查询句柄在关闭后继续工作 | Host 的相同操作租约覆盖查询全过程，关闭后拒绝缓存句柄 | `test_cached_host_queries_reject_after_close_and_hold_the_operation_lease` |
 | 新 CLI 说明或查询错误固定首次语言 | 在实际呈现和抛错处解析显式双语资源 | `test_new_cli_help_is_consumed_in_english_chinese_english`、`test_same_query_instance_consumes_error_language_english_chinese_english` |
 
-2026-11-08，本项 15 个定向用例通过，包含真实原生文件任务及原冻结计划校验回归，无失败或跳过。该查询提供逐页一致的当前账本视图，跨页不承诺冻结已有条目的状态。插入水位不代替原生运行证据或认证，条目数量限制不构成负载性能结论。验证仅针对本次新增／修改用例、真实隔离 Git 和原生文件质量门；没有运行全量回归、生产构建、桌面／浏览器专项或外部账号验收。统一工作台及 Phase 5 其余项目仍待开发。
+2026-11-08，本项 15 个定向用例通过，包含真实原生文件任务及原冻结计划校验回归，无失败或跳过。该查询提供逐页一致的当前账本视图，跨页不承诺冻结已有条目的状态。插入水位不代替原生运行证据或认证，条目数量限制不构成负载性能结论。验证仅针对本次新增／修改用例、真实隔离 Git 和原生文件质量门；没有运行全量回归、生产构建、桌面／浏览器专项或外部账号验收。该项仅覆盖查询；工作台与后续来源能力的当前证据见下一节。
+
+### Phase 5.2至5.6：统一工作台与来源协作
+
+本次核对 `146b202` 后的实际调用链：SettingsDialog 的 SuperagentPanel → 本机专用 `/api/v1/superagents` → 主 Harness 的 SuperagentWorkbench → 原查询／本机控制／CoordinatorOperator → 同一协调账本和 SuperagentService。工作台管理器不持有第二份 Mission 状态。公共协议由 `harness/web/superagent_protocol.py` 与原查询资源共同生成；双语文案由现有语言源生成，设置目录、路由、关闭入口及实际消费者同步更新。
+
+| 触发条件 | 当前源码措施 | 对应回归 |
+|---|---|---|
+| 工作台重复启动、启动过程中停止或关闭页面 | 固定请求身份，按实例串行启动／停止；所属请求独立于 HTTP 等待，主宿主等待运行收尾 | `test_workbench_submits_starts_and_stops_the_real_unified_service_once`、`test_start_stop_race_waits_for_the_original_factory_and_close_owns_it`、`test_owned_loop_closes_services_after_mcp_failure` |
+| 共享／远端请求读取配置路径，重复 JSON 字段或跨实例连接 | 本机 IP、Host／Origin 和主体边界；严格解析，在业务写入前拒绝 | `test_remote_shared_and_cross_origin_requests_cannot_connect_or_read_paths`、`test_malformed_and_duplicate_parameters_are_rejected_before_business_writes`、`test_changed_config_and_foreign_connection_are_rejected_without_rebinding` |
+| 来源、策略或回复授权修订过期，重启用初始配置覆盖当前设置 | 领域服务与固定操作者回执共用事务；已有来源身份固定、可变配置及启停以账本为准，当前回复能力独立显式重授 | `test_source_and_policy_changes_commit_original_receipts_atomically_and_survive_restart`、`test_explicit_reply_grant_is_revision_bound_atomic_and_preserves_original_address`、`test_stored_enabled_revision_is_authoritative_over_disabled_local_seed` |
+| 来源刷新并发创建监听器，或原来的可变 Chat 配置被误判身份变化 | 监听器刷新串行，使用当前来源配置解析凭据，停用后关闭所属监听器，不重放原输入 | `test_source_refresh_serializes_listener_creation_and_preserves_edited_config` |
+| 人工答案被投向另一问题／线程，或重复点击重放原 Run | 精确 attention_id 与原来源／线程核验，沿已有 Mandate 与新有界 Mission；旧答案不会启动无关活动 | `test_local_attention_answer_uses_original_thread_and_starts_fresh_activity`，实际组件 `answers the exact attention through explicit local identity and thread` |
+| 人工核实被当作成功证明或触发再次发送 | Host 提供原 Adapter 的只读 lookup 端口；先记录核实请求，再按原代次结算领域回执，说明不代替提供方证明 | `test_human_unknown_check_uses_original_provider_proof_and_never_posts_again`，实际组件 `inspects the original effect before checking its exact generation without a replay command` |
+| Review／CI 的提及、成功、过时提交、模糊 PR 或异仓库结果取得执行权 | 新事件仅为受白名单及 Scope 约束的 context-only；CI 强制 Bot 与唯一 PR／Head／Base 绑定，Review 保留原 Commit，回复仍固定原目标 | `test_review_and_check_events_are_scoped_context_and_never_start_or_resume_work`、`test_check_without_unique_original_pull_or_with_foreign_head_never_claims_authority`、`test_github_lifecycle_variants_preserve_original_thread_and_authors` |
+| 飞书接收就下载、任意资源或账号被混用、下载中撤权 | Webhook 仅持久引用；显式获取核验机器人、原消息／Root／Chat／资源，并在刷新令牌后和本地发布前复核来源 | `test_rich_post_preserves_text_resources_and_never_downloads_at_webhook_ack`、`test_media_foreign_owner_resource_and_mid_request_revocation_prevent_local_publication`、`test_guard_after_token_refresh_prevents_resource_get_when_authority_changes` |
+| 文件伪装可执行页面、损坏原件被覆盖、撤权后读取缓存 | 验证真实图片，其他资源强制附件；摘要固定、损坏保留、每次缓存读取重验当前来源；认证 HTTP 有界且禁止重定向 | `test_feishu_image_is_verified_saved_once_and_corruption_never_overwrites_original`、`test_file_audio_video_media_are_opaque_and_cached_reads_respect_source_revocation`、`test_binary_read_uses_refreshed_token_and_enforces_size_and_redirect_boundary`、`test_media_route_binds_existing_connection_and_returns_safe_binary_headers` |
+| 翻页丢历史、A 的回包覆盖 B、页面隐藏仍读取或迟到图片跨页面代次恢复 | 前端验证范围／游标／重复记录，按实例保留草稿与原请求；读绑定页面代次，可见性暂停读取／图片 | Superagent 客户端测试及 SuperagentPanel 的分页、切换、隐藏、unknown 查回、离开再返回同范围的媒体测试 |
+| 语言切换丢用户原文或重新执行操作 | 实际 API 错误与相同组件消费显式资源，英文→中文→英文不重新读写或翻译用户原文 | `test_api_error_keeps_resource_identity_in_english_chinese_english`，客户端和组件的同实例语言测试 |
+| 正常协调 Schema 升级失败覆盖原数据，或固定请求历史被改写 | 新迁移整笔回滚，保留 v21 原 Effect；回执、资源来源和原件不可静默覆盖／删除 | `test_v21_upgrade_preserves_original_effect_and_adds_empty_operator_media_tables`、`test_conflicting_media_table_rolls_back_entire_new_migration_and_retains_original`、`test_completed_receipt_payload_and_history_cannot_be_overwritten_or_deleted` |
+
+上述新增／修改的 Python 和前端定向用例已在隔离数据下通过。开发中发现并修复 Host 查回端口未公开、来源初始禁用标志覆盖当前修订及媒体回包在页面往返后恢复的问题；回归分别对应原操作核实、当前来源修订和页面代次用例。迁移及 Chat 规范排序的夹具预期修正后复测通过，保留有效业务断言。语言和协议已从源重新生成。
+
+本次未执行全量回归、lint／类型检查、完整生产构建或桌面／浏览器专项；组件测试使用实际组件与 HTTP 客户端的受控 Hook 宿主，不能替代真实浏览器视觉验收。GitHub／飞书使用签名事件、受控 Provider 和真实回环 HTTP，没有操作外部账号，也没有取得在线模型、多平台或长期负载证据。媒体只覆盖接收、显式资源获取及操作者呈现，不包含视觉模型或音视频理解。非 Outbox 未知原生效果仍由相应恢复流程结算；操作者说明不补造完成事实。
 
 ## 待验证风险与产品缺口
 
 - 首次原生活动观察不可信时，首次后续可信观察只建立持久基线，不重置停滞时间或解除既有阻断；Schema v17 将历史快照保守标为未建立可信基线。若真实进度发生在可信基线建立前，该变化无法从旧指纹中追溯证明，必须等待后续可核验变化才恢复；这是避免误解锁的保守恢复代价，仍需真实长时运行评估。
 - 完成标准由模型规划，语义覆盖与复核质量需要真实在线任务集、固定模型和人工判定；任意 Shell 正文的语义没有被宿主证明，显式 cwd 检查不是沙箱。
 - 现有测试在本机运行；没有取得 Windows／Linux 实机、多设备、外部账号、长期负载或模型成本对比证据。
-- 统一服务已支持原 Thread 跟进、节点指令、Attention 答案和确切授权的跨来源 Subscription。自动跨来源关联、目标验收或依赖变更、动态重规划及人工未知结果核实界面仍待开发；CLI 已使用统一入口。
+- 统一服务已支持原 Thread 跟进、节点指令、Attention 答案和确切授权的跨来源 Subscription。自动跨来源关联、目标验收或依赖变更、动态重规划仍待开发；CLI 与本机工作台均已使用统一入口。
 - 合并冲突、失败或中断运行、未知操作和资源总容量耗尽保留明确状态；当前不自动解决冲突、迁移配置、清理历史资源或重放任务。
 - 长节点阶段接续为显式协议，真实模型的交接质量、是否过早选择 `ready`、上下文重建成本及长时负载仍需独立在线评估。同树同报告的停止条件不能识别所有语义停滞；新阶段也不能自动带走忽略文件、环境、进程或外部服务状态。
 - 目标控制仅限可信本机操作者，尚未提供远端控制认证或多人权限审批工作台。停止只作用于当前拥有的句柄；重启前外部进程没有确切终态回执时仍需核实，不能根据旧 PID 重放停止。控制历史有明确容量上限，当前不自动归档或迁移。
-- 状态只保存有界摘要；完整复核在账本，原报告、工具与用量在原运行。分页摘要与任务详情已提供可信 SDK／CLI 入口；面向普通用户的工作台及原报告的显式详情呈现仍待开发。
+- 状态只保存有界摘要；完整复核在账本，原报告、工具与用量在原运行。分页摘要与任务详情已提供 SDK／CLI／本机工作台入口；完整原生工具记录与报告仍在所属运行，工作台不复制原生运行浏览器。
 
 尚无统一在线任务集与独立业务判定的比较证据，不记录“世界最强”或“全面超过其他系统”的结论。

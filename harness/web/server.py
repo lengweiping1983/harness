@@ -1204,7 +1204,7 @@ def stop(server: Any, *, timeout: float = 5.0) -> None:
     if loop is not None and not loop.is_closed() and getattr(server, "_harness_owns_loop", True):
         harness = getattr(context, 'harness', None)
         # 所属事件循环排空前，其服务必须释放进程。
-        for service in (getattr(harness, 'runtime', None), getattr(harness, 'automations', None),
+        for service in (getattr(harness, '_superagent_workbench', None), getattr(harness, 'runtime', None), getattr(harness, 'automations', None),
                         getattr(harness, 'browser', None)):
             if service is None or not loop.is_running():
                 continue

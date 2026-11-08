@@ -8,7 +8,7 @@ Superagent 由 `superagent_cli.py`、`app/superagent_config.py` 和 `app/superag
 
 `superagent_source_registry.py` 与 `superagent_authorization.py` 核验来源、Scope、Mandate 和 Subscription。`superagent_input_delivery.py`、`superagent_mission_instruction.py` 将跟进和指令固定到原 Assignment / Run / Turn；`superagent_coordination.py` 与 `superagent_watchdog.py` 保存同库控制和监督事实。未知副作用只回查原操作，暂停或关闭阻止新的准入。
 
-`superagent_delivery_runtime.py` 从冻结结果建立原目标 Outbox，发送前核对账号、资源和当前授权；`superagent_github_http.py`、`superagent_feishu_http.py` 及 `superagent_http.py` 提供认证 HTTP 和本机监听器。`superagent_provider_adapters.py` 与 `superagent_effect_recovery.py` 只读确认未知发送。`superagent_local.py`、`superagent_state.py`、`superagent_status.py` 与 `superagent_queries.py` 提供同库本机操作、状态摘要、分页和任务详情；运行观察文件不承担独立账本。完整配置和实际边界统一见 [Superagent 模式](superagent.md)。
+`superagent_delivery_runtime.py` 从冻结结果建立原目标 Outbox，发送前核对账号、资源和当前授权；`superagent_github_http.py`、`superagent_feishu_http.py` 及 `superagent_http.py` 提供认证 HTTP 和本机监听器。`superagent_provider_adapters.py` 与 `superagent_effect_recovery.py` 只读确认未知发送。`superagent_local.py`、`superagent_state.py`、`superagent_status.py` 与 `superagent_queries.py` 提供同库本机操作、状态摘要、分页和任务详情；运行观察文件不承担独立账本。`superagent_workbench.py` 由主 Harness 持有，Web 设置页经本机专用 HTTP 入口复用相同查询与控制；`superagent_operator.py` 将来源／策略修订及回执原子提交，并仅查回未知原操作。媒体引用与有界获取复用当前来源和消息核验，不自动注入模型。完整配置和实际边界统一见 [Superagent 模式](superagent.md)。
 
 ## 源码与修改入口
 

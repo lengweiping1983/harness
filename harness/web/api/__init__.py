@@ -26,6 +26,7 @@ from . import (
     screenshot,
     voice,
     sessions,
+    superagent,
     settings,
     mcp_service,
     workspace,
@@ -58,6 +59,7 @@ def build_router(ctx: Any) -> Router:
     router.include(plugin_packages.build_router(ctx))
     router.include(v1.build_router(ctx))
     router.include(academy.build_router(ctx))
+    router.include(superagent.build_router(ctx))
     return router
 
 

@@ -390,6 +390,7 @@ class Harness:
         self.runtime = RunController(self)
         self._close_task: asyncio.Task[None] | None = None
         self._superagent_workers: list[Any] = []
+        self._superagent_workbench = None
         from .session_access import SessionAccess
         self.session_access = SessionAccess(self.sessions)
         from .session_credentials import SessionCredentials
@@ -2236,6 +2237,17 @@ class Harness:
             self._close_task = asyncio.create_task(self._close(), name='harness-close')
         await join_cleanup(self._close_task)
 
+    @property
+    def superagent_workbench(self):
+        """工作台惰性绑定当前主宿主，原生运行始终复用统一服务。"""
+        if self._close_task is not None:
+            from .superagent_common import _error
+            raise _error('closed')
+        if self._superagent_workbench is None:
+            from .superagent_workbench import SuperagentWorkbench
+            self._superagent_workbench = SuperagentWorkbench()
+        return self._superagent_workbench
+
     async def _close(self) -> None:
         """按原顺序回收全部资源，再向共享等待者报告原始失败。"""
         errors = []
@@ -2249,6 +2261,8 @@ class Harness:
         if self._start_task is not None and not self._start_task.done():
             self._start_task.cancel()
             await join_cleanup(asyncio.gather(self._start_task, return_exceptions=True))
+        if self._superagent_workbench is not None:
+            await attempt(self._superagent_workbench.close)
         for service in tuple(self._superagent_workers):
             await attempt(service.aclose)
         await attempt(asyncio.to_thread, self.chatgpt.cancel_login)
