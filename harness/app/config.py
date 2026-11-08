@@ -235,11 +235,18 @@ class HarnessConfig:
             if value is not None and (type(value) is not int or value < 1):
                 logging.getLogger(__name__).warning(tr('log.1e037c2b9969'), name)
                 setattr(self, name, None)
-        if self.subagent_job_timeout is not None and (
-                type(self.subagent_job_timeout) not in {int, float}
-                or not math.isfinite(self.subagent_job_timeout) or self.subagent_job_timeout <= 0):
-            logging.getLogger(__name__).warning(tr('log.1e037c2b9969'), "subagent_job_timeout")
-            self.subagent_job_timeout = None
+        if self.subagent_job_timeout is not None:
+            try:
+                valid_timeout = (
+                    type(self.subagent_job_timeout) in {int, float}
+                    and self.subagent_job_timeout > 0
+                    and math.isfinite(float(self.subagent_job_timeout))
+                )
+            except OverflowError:
+                valid_timeout = False
+            if not valid_timeout:
+                logging.getLogger(__name__).warning(tr('log.1e037c2b9969'), "subagent_job_timeout")
+                self.subagent_job_timeout = None
         if self.permission_policy not in {"read_only", "request_approval", "auto_review", "full_access"}:
             raise ValueError(tr('python.config.d0aaa8d658c0'))
         if type(self.network_timeout) not in {int, float} or self.network_timeout <= 0 or (type(self.network_timeout) is float and not math.isfinite(self.network_timeout)):
