@@ -186,12 +186,16 @@ class AutomationService:
             VALUES(?,?,?,'running',?,?,?,?)""", (rid, item["id"], time.time(), item["name"], item["session_id"], item["due"], trigger))
         return {**item, "run_id": rid, "trigger": trigger}
 
+    def _forget_execution(self, aid: str, task: asyncio.Task) -> None:
+        if self.executions.get(aid) is task:
+            self.executions.pop(aid, None)
+
     def _spawn(self, row):
         task = asyncio.create_task(self._execute(row))
         self.tasks.add(task)
         self.executions[row["id"]] = task
         task.add_done_callback(self.tasks.discard)
-        task.add_done_callback(lambda done: self.executions.pop(row["id"], None))
+        task.add_done_callback(lambda done: self._forget_execution(row["id"], done))
 
     async def tick(self, now: float | None = None) -> int:
         self._require_open()

@@ -119,3 +119,63 @@ class AutomationCloseOwnershipTests(unittest.IsolatedAsyncioTestCase):
         with service.db() as db:
             self.assertEqual(db.execute('SELECT owner FROM automation_scheduler').fetchone()[0], service.owner)
         await service.close()
+
+    async def test_old_run_cleanup_keeps_new_runs_stop_handle(self):
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        first_emit_entered, release_first_emit = asyncio.Event(), asyncio.Event()
+        second_run_entered = asyncio.Event()
+        first_run_id = None
+        run_count = 0
+
+        async def emit(_event, payload):
+            if payload["run_id"] == first_run_id:
+                first_emit_entered.set()
+                await release_first_emit.wait()
+
+        async def run_async(_session_id, _prompt, *, source):
+            nonlocal run_count
+            self.assertEqual(source, "automation")
+            run_count += 1
+            if run_count == 2:
+                second_run_entered.set()
+                await asyncio.Future()
+            return SimpleNamespace(reason="completed", to_dict=lambda: {"reason": "completed"})
+
+        harness = SimpleNamespace(
+            runtime=SimpleNamespace(_queue_controls={}, active={}, records={}),
+            bus=SimpleNamespace(emit=emit),
+            get_session=lambda _session_id: SimpleNamespace(header=SimpleNamespace(cwd=Path.cwd())),
+            create_session=lambda **_kwargs: SimpleNamespace(id=f"fresh-{run_count}"),
+            run_async=run_async,
+        )
+        service = AutomationService(Path(root.name) / "automations.db", harness)
+        row = service.save({
+            "creation_id": "c" * 32, "name": "Fresh run", "prompt": "Run",
+            "session_id": "source", "timezone": "UTC", "mode": "fresh",
+            "enabled": True, "schedule": {"kind": "interval", "seconds": 60},
+        })
+        second_task = None
+        try:
+            first_run_id = (await service.run_now(row["id"]))["run_id"]
+            first_task = service.executions[row["id"]]
+            await asyncio.wait_for(first_emit_entered.wait(), 1)
+
+            await service.run_now(row["id"])
+            second_task = service.executions[row["id"]]
+            await asyncio.wait_for(second_run_entered.wait(), 1)
+            self.assertIsNot(first_task, second_task)
+
+            release_first_emit.set()
+            await first_task
+            await asyncio.sleep(0)
+            self.assertIs(service.executions.get(row["id"]), second_task)
+
+            await service.stop(row["id"])
+            self.assertTrue(second_task.done())
+        finally:
+            release_first_emit.set()
+            if second_task is not None and not second_task.done():
+                second_task.cancel()
+                await asyncio.gather(second_task, return_exceptions=True)
+            await service.close()
