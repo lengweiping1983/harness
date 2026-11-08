@@ -11,6 +11,9 @@
   "language": {
     "message": "Language"
   },
+  "open_tab": {
+    "message": "Open in tab"
+  },
   "hero_subtitle": {
     "message": "Keep Harness development moving in an ordinary Chat."
   },
@@ -187,6 +190,9 @@
   },
   "open_chat": {
     "message": "Open an existing conversation at chatgpt.com in this browser, then click this extension from that tab."
+  },
+  "source_chat_unavailable": {
+    "message": "The original ChatGPT tab was closed or changed. Open the extension again from the intended ChatGPT conversation."
   },
   "install_title": {
     "message": "Harness Chat Companion — start here"

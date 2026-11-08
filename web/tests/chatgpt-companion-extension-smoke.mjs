@@ -8,6 +8,7 @@ import {createInterface} from 'node:readline'
 import {chromium} from 'playwright-core'
 import {resolveBrowserExecutable} from './browser-executable.mjs'
 import {fixturePython} from './python-fixture.mjs'
+import {assertCompanionLayout} from './chatgpt-companion-layout.mjs'
 
 const root=fileURLToPath(new URL('../../',import.meta.url))
 const temporary=await mkdtemp(path.join(tmpdir(),'harness-chat-extension-'))
@@ -70,7 +71,8 @@ try{
   await popup.waitForFunction(language=>document.querySelector('#connect').textContent===(language==='en'?'Connect and load projects':'连接并读取项目'),language)
   for(const colorScheme of ['light','dark']){
    await popup.emulateMedia({colorScheme})
-   await popup.setViewportSize({width:640,height:600})
+   await popup.setViewportSize({width:760,height:600})
+   await assertCompanionLayout(popup,'popup')
    assert.equal(await popup.locator('label[for="token"]').textContent(),language==='en'?'Pairing token':'配对码')
    assert.equal(await popup.locator('#language').getAttribute('aria-label'),language==='en'?'Language':'语言')
    assert.equal(await popup.locator('#version').textContent(),'1.0.0')
@@ -168,15 +170,20 @@ try{
   await popup.waitForFunction(language=>document.documentElement.lang===(language==='en'?'en':'zh-CN'),language)
   assert.equal(await popup.evaluate(()=>document.documentElement.scrollHeight<=innerHeight),true)
  }
- await popup.setViewportSize({width:640,height:320})
+ await popup.setViewportSize({width:760,height:320})
  assert.equal(await popup.evaluate(()=>document.documentElement.scrollHeight>innerHeight),true)
  await popup.locator('#start').scrollIntoViewIfNeeded()
+ await popup.goto(`chrome-extension://${id}/popup.html?view=tab&sourceTab=${chatId}&sourceChat=${encodeURIComponent(url)}`)
+ await popup.waitForFunction(()=>!document.querySelector('#connect').disabled)
  await popup.setViewportSize({width:390,height:1400})
+ await assertCompanionLayout(popup,'tab')
  await popup.locator('#help summary').click()
  assert.equal(await popup.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
  assert.equal(await popup.evaluate(()=>document.documentElement.scrollHeight<=innerHeight),true)
  await popup.locator('#help summary').click()
- await popup.setViewportSize({width:640,height:600})
+ await popup.goto(`chrome-extension://${id}/popup.html`)
+ await popup.waitForFunction(()=>!document.querySelector('#connect').disabled)
+ await popup.setViewportSize({width:760,height:600})
  await popup.evaluate(async id=>chrome.tabs.update(id,{active:true}),chatId)
  // 绑定已受理但响应尚未返回时，停止仍须阻止迟到结果开启接续。
  let releaseBind,notifyBind

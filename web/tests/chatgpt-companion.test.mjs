@@ -123,6 +123,23 @@ test('enabling continuation still checks immediately and schedules the next rand
  assert.deepEqual(alarm,{name:'harness-companion',delayInMinutes:2.5})
 })
 
+test('the popup and expanded tab can control checks while other sender pages remain rejected',async()=>{
+ reset();saved.binding.enabled=false
+ for(const suffix of ['', '?view=tab&sourceTab=42&draft=fixture']){
+  const response=await new Promise(resolve=>{
+   assert.equal(listeners.message({type:'tick'},{id:chrome.runtime.id,url:chrome.runtime.getURL('popup.html')+suffix},resolve),true)
+  })
+  assert.deepEqual(response,{ok:true})
+ }
+ for(const sender of [
+  {id:'other',url:chrome.runtime.getURL('popup.html')},
+  {id:chrome.runtime.id,url:'https://example.com/popup.html?view=tab'},
+  {id:chrome.runtime.id,url:chrome.runtime.getURL('popup.html.attacker?view=tab')},
+  {id:chrome.runtime.id,url:chrome.runtime.getURL('page.mjs?view=tab')},
+ ])assert.equal(listeners.message({type:'tick'},sender,()=>assert.fail('untrusted sender')),undefined)
+ assert.equal(claims,0);assert.equal(sends,0)
+})
+
 test('a confirmed continuation is not sent again without new durable progress',async()=>{
  reset();await tick();await tick();assert.equal(sends,1);assert.equal(claims,1)
 })

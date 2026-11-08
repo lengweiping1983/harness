@@ -11,6 +11,9 @@
   "language": {
     "message": "语言"
   },
+  "open_tab": {
+    "message": "在标签页打开"
+  },
   "hero_subtitle": {
     "message": "让 Harness 在普通聊天中稳定衔接开发进度。"
   },
@@ -187,6 +190,9 @@
   },
   "open_chat": {
     "message": "请在此浏览器打开 chatgpt.com 上的已有聊天，再从该标签页点击此扩展。"
+  },
+  "source_chat_unavailable": {
+    "message": "原 ChatGPT 标签页已关闭或聊天地址已变化。请在目标 ChatGPT 对话中重新打开扩展。"
   },
   "install_title": {
     "message": "Harness 聊天接续——从这里开始"

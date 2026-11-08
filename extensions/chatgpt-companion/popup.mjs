@@ -1,10 +1,17 @@
 import {canonicalChat} from './page.mjs';
 import {api} from './client.mjs';
 import {mountSecretInput} from './secret-input.mjs';
+const surface = new URL(location.href);
+const expanded = surface.searchParams.get('view') === 'tab';
+const sourceTab = surface.searchParams.get('sourceTab');
+const sourceChat = surface.searchParams.get('sourceChat');
+const sourceTabId = /^[1-9]\d*$/.test(sourceTab || '') && Number.isSafeInteger(Number(sourceTab)) ? Number(sourceTab) : undefined;
+document.documentElement.dataset.view = expanded ? 'tab' : 'popup';
 let messages = {};
 let busy = false;
 let connected = false;
 let stopping = false;
+let opening = false;
 let localeGeneration = 0;
 let operationGeneration = 0;
 let settingsEdits = Promise.resolve();
@@ -12,6 +19,7 @@ let checkedAt = 0;
 let sessions = [];
 const reasons = {status: 'not_enabled', 'connection-status': 'not_connected'};
 const element = id => document.getElementById(id);
+element('open-tab').hidden = expanded;
 const renderTokenVisibility = mountSecretInput(element('token'), element('token-toggle'), key => messages[key]?.message);
 function renderTarget() {
   const target = sessions.find(session => session.project_id === element('session').value);
@@ -110,12 +118,16 @@ async function loadConnection(settings, current) {
   show(!result.sessions.length ? 'no_sessions' : health.executor === 'offline' ? 'executor_offline' : 'connected', 'connection-status');
 }
 const saved = await chrome.storage.local.get(['settings', 'binding']);
+const draftId = surface.searchParams.get('draft');
+const draftKey = expanded && /^[0-9a-f-]{36}$/.test(draftId || '') ? 'companion-draft:' + draftId : null;
+const draft = draftKey ? (await chrome.storage.session.get(draftKey))[draftKey] : undefined;
+if (draftKey) await chrome.storage.session.remove(draftKey);
 checkedAt = saved.binding?.checkedAt || 0;
 element('version').textContent = chrome.runtime.getManifest().version;
-const language = saved.settings?.language || (navigator.language.startsWith('zh') ? 'zh_CN' : 'en');
+const language = draft?.language || saved.settings?.language || (navigator.language.startsWith('zh') ? 'zh_CN' : 'en');
 element('language').value = language;
-element('endpoint').value = saved.settings?.endpoint || 'http://127.0.0.1:8877/';
-element('token').value = saved.settings?.token || '';
+element('endpoint').value = draft?.endpoint ?? saved.settings?.endpoint ?? 'http://127.0.0.1:8877/';
+element('token').value = draft?.token ?? saved.settings?.token ?? '';
 if (saved.binding?.reason) reasons.status = saved.binding.reason;
 await localize(language);
 
@@ -129,6 +141,28 @@ for (const id of ['endpoint', 'token']) element(id).addEventListener('input', ()
   show('not_connected', 'connection-status'); updateControls();
 });
 element('session').addEventListener('change', () => {updateControls(); renderTarget();});
+element('open-tab').addEventListener('click', async () => {
+  if (opening) return;
+  opening = true;
+  element('open-tab').disabled = true;
+  let draftKey;
+  try {
+    const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+    const target = new URL(chrome.runtime.getURL('popup.html'));
+    target.searchParams.set('view', 'tab');
+    if (tab?.id) target.searchParams.set('sourceTab', String(tab.id));
+    try {target.searchParams.set('sourceChat', canonicalChat(tab?.url));} catch {}
+    const draftId = crypto.randomUUID();
+    draftKey = 'companion-draft:' + draftId;
+    await chrome.storage.session.set({[draftKey]: {endpoint: element('endpoint').value, token: element('token').value, language: element('language').value}});
+    target.searchParams.set('draft', draftId);
+    await chrome.tabs.create({url: target.href});
+  } catch {
+    show('request_failed');
+    if (draftKey) await chrome.storage.session.remove(draftKey);
+  }
+  finally {opening = false; element('open-tab').disabled = false;}
+});
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.binding) {
     show(changes.binding.newValue?.reason || 'not_enabled');
@@ -149,7 +183,14 @@ element('start').addEventListener('click', () => run(async current => {
   const settings = settingsFromFields();
   const sessionId = sessions.find(session => session.project_id === element('session').value)?.session_id;
   if (!connected || !sessionId) throw new Error('choose_session');
-  const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+  let tab;
+  try {
+    if (expanded) {
+      if (!sourceTabId || !sourceChat) throw new Error('open_chat');
+      tab = await chrome.tabs.get(sourceTabId);
+      if (canonicalChat(tab.url) !== sourceChat) throw new Error('open_chat');
+    } else [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+  } catch {throw new Error(expanded ? 'source_chat_unavailable' : 'open_chat');}
   if (!current()) return;
   let url;
   try {url = canonicalChat(tab?.url);} catch {throw new Error('open_chat');}
@@ -176,4 +217,4 @@ element('stop').addEventListener('click', async () => {
   finally {stopping = false; updateControls();}
 });
 updateControls();
-if (saved.settings?.token) void run(current => loadConnection(saved.settings, current), 'connection-status');
+if (saved.settings?.token && (!draft || (draft.endpoint === saved.settings.endpoint && draft.token === saved.settings.token))) void run(current => loadConnection(saved.settings, current), 'connection-status');

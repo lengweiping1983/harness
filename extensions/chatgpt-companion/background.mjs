@@ -116,7 +116,7 @@ chrome.runtime.onStartup.addListener(ensureAlarm);
 chrome.runtime.onInstalled.addListener(ensureAlarm);
 chrome.alarms.onAlarm.addListener(async alarm => {if (alarm.name === ALARM) await tick();});
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
-  if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) return;
+  if (sender.id !== chrome.runtime.id || sender.url?.split(/[?#]/, 1)[0] !== chrome.runtime.getURL('popup.html')) return;
   if (message.type === 'start') {
     editBinding(null, () => message.binding).then(() => {void tick(); respond({ok: true});}, () => respond({ok: false}));
     return true;
