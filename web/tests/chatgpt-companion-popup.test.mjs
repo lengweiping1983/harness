@@ -70,7 +70,7 @@ test('the same popup renders randomized timing help in English, Chinese and Engl
   assert.equal(element('continuous-help').textContent,messages.continuous_help.message)
   assert.match(element('continuous-help').textContent,language==='en'?/ChatGPT marks it as cancelled/:/ChatGPT 已将被打断/)
   assert.equal(element('continuous').checked,false)
-  for(const reason of ['waiting_next_task','interrupted']){
+  for(const reason of ['waiting_next_task','interrupted','send_unconfirmed']){
    calls.onChanged({binding:{newValue:{reason}}},'local')
    assert.equal(element('status').textContent,messages[reason].message)
   }

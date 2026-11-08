@@ -11,7 +11,7 @@ function fixture(){
  const assistant=message('Partial reply')
  assistant.getAttribute=name=>name==='data-message-id'?'assistant-1':null
  assistant.querySelectorAll=selector=>selector==='img'&&!state.currentAssistant?[{complete:true,naturalWidth:1,getAttribute:()=>null,currentSrc:'previous-image'}]:[]
- const root={getAttribute:()=>state.turnId,contains:node=>state.currentAssistant&&node===assistant}
+ const root={getAttribute:()=>state.turnId,contains:node=>state.currentAssistant&&node===assistant,closest:()=>null}
  const turn={getAttribute:()=>state.status,closest:()=>root}
  const editor={value:'',focus(){},closest:()=>form,dispatchEvent(){if(state.changeOnInput)state.status='in_progress'}}
  const button={disabled:false,click(){state.clicks++;users.push(message(editor.value));editor.value=''}}

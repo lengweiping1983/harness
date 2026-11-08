@@ -227,6 +227,26 @@ test('a ChatGPT turn cancelled before assistant text can continue once with expl
  assert.equal(pageMessages[0].allowInterrupted,false)
 })
 
+test('a confirmed continuation can recover from a response error while an unknown receipt remains paused',async()=>{
+ reset();saved.binding.continueAfterTerminal=true
+ page.interrupted=true;page.hasAssistant=false;page.assistantKey='e'.repeat(16)
+ state.pending={id:'previous-intent',prompt:'继续'}
+ saved.pending={...state.pending,outcome:'confirmed'}
+ await tick()
+ assert.equal(state.pending,null);assert.equal(saved.pending,undefined)
+ assert.equal(sends,0);assert.equal(claims,0);assert.equal(saved.binding.enabled,true)
+ await tick();assert.equal(saved.binding.reason,'stabilizing')
+ saved.binding.idleSince=Date.now()-4000
+ await tick();assert.equal(sends,1);assert.equal(claimInputs[0].reply_key,page.assistantKey)
+ reset();saved.binding.continueAfterTerminal=true
+ page.interrupted=true;page.hasAssistant=false;page.assistantKey='e'.repeat(16)
+ state.pending={id:'unconfirmed-intent',prompt:'继续'}
+ saved.pending={...state.pending,outcome:'unknown'}
+ await tick()
+ assert.equal(sends,0);assert.equal(saved.binding.reason,'send_unconfirmed');assert.equal(saved.binding.enabled,false)
+ assert.equal(state.pending.id,'unconfirmed-intent')
+})
+
 test('continuous image tasks keep generation and delivery deduplicated across replies',async()=>{
  reset();saved.binding.continueAfterTerminal=true;state.state='image'
  page.assistantKey='a'.repeat(16);saved.binding.idleKey=page.assistantKey

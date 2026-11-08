@@ -112,6 +112,20 @@ await browserScenario(async({server,browser})=>{
  })
  assert.equal((await page.evaluate(()=>window.send('[Harness protected-fixture] continue'))).outcome,'unknown')
  assert.equal(await page.locator('h4[data-conversation-role="user"]').count(),3)
+ await page.evaluate(()=>{
+  document.body.innerHTML='<main><article data-turn-key="previous"><div data-talvt-turn-state="complete"><div data-message-author-role="user">继续</div><div data-message-author-role="assistant">Earlier reply</div></div></article><form data-chatgpt-composer onsubmit="return false"><textarea id="prompt-textarea"></textarea><button type="submit" data-composer-submit>Send</button></form></main>'
+  const form=document.querySelector('form'),editor=document.querySelector('textarea')
+  form.querySelector('button').onclick=event=>{
+   event.preventDefault()
+   const turn=document.createElement('article');turn.dataset.turnKey='stream-error-turn'
+   turn.innerHTML='<div data-talvt-turn-state="error"><h4 data-conversation-role="user">You said</h4><div class="group/user-message" data-chatgpt-search-message-ids="new-user-message"><div>'+editor.value+'</div><span data-markdown-copy="exclude">17:55</span></div><aside role="alert" class="bg-background-danger-surface/20"><span>消息流中的错误</span><button type="button">重试</button></aside></div>'
+   form.before(turn);editor.value=''
+  }
+ })
+ assert.equal((await page.evaluate(()=>window.send('继续',true))).outcome,'confirmed')
+ assert.equal((await page.evaluate(()=>window.probe(true))).ready,true)
+ await page.locator('aside button').evaluate(node=>{node.disabled=true})
+ assert.equal((await page.evaluate(()=>window.probe(true))).ready,false)
  assert.deepEqual(errors,[])
  console.log('Chat companion: real DOM send receipt, drafts, attachments, IME, user input, wrong chat and changed controls passed')
 },{vite:{plugins:[{name:'chat-companion-fixture',resolveId(id){if(['/__companion_adapter.mjs','/__companion_entry.js'].includes(id))return id},load(id){if(id==='/__companion_adapter.mjs')return adapter;if(id==='/__companion_entry.js')return entry},configureServer(server){server.middlewares.use('/__companion',async(_req,res)=>{res.setHeader('Content-Type','text/html');res.end(html)})}}]}})

@@ -58,14 +58,31 @@ function latestTurnState(doc) {
   return [...doc.querySelectorAll('[data-turn-key] [data-talvt-turn-state]')].at(-1);
 }
 
+function responseError(doc, form) {
+  const turn = latestTurnState(doc)?.closest('[data-turn-key]');
+  const main = turn?.closest('main');
+  if (!turn || !main || !form || !main.contains(form)) return null;
+  return [...main.querySelectorAll('aside[role="alert"]')].find(alert => {
+    if (!visible(alert) || form.contains(alert)) return false;
+    if (!turn.contains(alert) && !(turn.compareDocumentPosition(alert) & 4)) return false;
+    if (!(alert.compareDocumentPosition(form) & 4)) return false;
+    const danger = [...alert.classList].some(name => name.startsWith('bg-background-danger-surface') || name === 'border-border-danger-surface');
+    const buttons = [...alert.querySelectorAll('button')].filter(visible);
+    return danger && buttons.length === 1 && ['Retry', '重试'].includes(buttons[0].textContent.trim());
+  }) || null;
+}
+
 function busy(doc, form, allowInterrupted = false) {
   const legacyStop = [...doc.querySelectorAll('[data-testid="stop-button"]')].some(visible);
   const modernStop = [...(form?.querySelectorAll('[data-composer-stop-icon], [data-composer-loading-icon]') || [])].some(visible);
   const turnState = latestTurnState(doc);
   const state = turnState?.getAttribute('data-talvt-turn-state');
-  const unfinishedTurn = !!turnState && state !== 'complete' && !(allowInterrupted && state === 'cancelled');
+  const failure = responseError(doc, form);
+  const retry = [...(failure?.querySelectorAll('button') || [])].find(visible);
+  const retryPending = !!retry && (retry.disabled || retry.getAttribute('aria-disabled') === 'true');
+  const unfinishedTurn = !!turnState && state !== 'complete' && !(allowInterrupted && (state === 'cancelled' || failure));
   const dialog = [...doc.querySelectorAll('[role="dialog"]')].some(visible);
-  return legacyStop || modernStop || unfinishedTurn || dialog;
+  return legacyStop || modernStop || unfinishedTurn || retryPending || dialog;
 }
 
 function sendButton(form) {
@@ -84,6 +101,8 @@ function messageNodes(doc, role) {
   const modern = headed.map(heading => {
     const turn = heading.closest('[data-turn-key]');
     if (!turn) return null;
+    const content = heading.nextElementSibling;
+    if (role === 'user' && content?.matches('[data-chatgpt-search-message-ids]') && content.classList.contains('group/user-message')) return content;
     // 标题只声明角色，实际正文和纯图片位于同角色的最大消息区域中。
     let region = heading;
     while (region.parentElement && turn.contains(region.parentElement)) {
@@ -103,7 +122,7 @@ function userMessages(doc) {
 
 function messageBody(node) {
   const body = node.cloneNode(true);
-  for (const heading of body.querySelectorAll('h4[data-conversation-role]')) heading.remove();
+  for (const heading of body.querySelectorAll('h4[data-conversation-role], [data-markdown-copy="exclude"]')) heading.remove();
   return body.textContent.trim();
 }
 
@@ -111,8 +130,10 @@ export function inspectPage(doc, expectedUrl, currentUrl, composing = false, rec
   if (canonicalChat(currentUrl) !== expectedUrl) return {ready: false, reason: 'wrong_chat'};
   const messages = userMessages(doc);
   const assistants = messageNodes(doc, 'assistant');
+  const currentEditor = editor(doc);
+  const form = composer(currentEditor);
   const turnState = latestTurnState(doc);
-  const interrupted = turnState?.getAttribute('data-talvt-turn-state') === 'cancelled';
+  const interrupted = turnState?.getAttribute('data-talvt-turn-state') === 'cancelled' || !!responseError(doc, form);
   const interruptedRoot = allowInterrupted && interrupted ? turnState.closest('[data-turn-key]') : null;
   const interruptedTurn = interruptedRoot?.getAttribute('data-turn-key') || '';
   const candidate = assistants.at(-1);
@@ -122,8 +143,6 @@ export function inspectPage(doc, expectedUrl, currentUrl, composing = false, rec
     || last?.closest('[data-turn-key]')?.getAttribute('data-turn-key') || '';
   const assistantKey = last || interruptedTurn ? observationKey(JSON.stringify([identity, last?.textContent.slice(-200) || '',
     images.map(node => node.getAttribute('data-file-id') || node.currentSrc || node.getAttribute('src'))])) : '';
-  const currentEditor = editor(doc);
-  const form = composer(currentEditor);
   const draft = currentEditor ? textOf(currentEditor).trim() : '';
   const attachments = hasAttachments(form);
   const isBusy = busy(doc, form, allowInterrupted);
