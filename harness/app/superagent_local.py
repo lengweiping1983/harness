@@ -87,6 +87,20 @@ def read_status(config_path):
     return snapshot(open_state(spec, read_only=True), runtime=_runtime(spec))
 
 
+def query_local(config_path, resource='missions', *, mission_id=None, limit=32, cursor=None):
+    """分页直接附着现有只读账本，不读取运行观察或构造模型宿主。"""
+    from .superagent_queries import CoordinatorQueries
+    spec = read_config(config_path)
+    return CoordinatorQueries(open_state(spec, read_only=True)).page(resource, mission_id=mission_id, limit=limit, cursor=cursor)
+
+
+def mission_local(config_path, mission_id):
+    """任务详情使用同一查询端口，不触发迁移、执行或恢复。"""
+    from .superagent_queries import CoordinatorQueries
+    spec = read_config(config_path)
+    return CoordinatorQueries(open_state(spec, read_only=True)).mission(mission_id)
+
+
 def control_local(config_path, action, mission_id, *, request_id=None):
     spec = read_config(config_path)
     store = open_state(spec)

@@ -169,6 +169,22 @@
 
 验证使用隔离数据库、确定性模型、原生 Harness / Git 和本机 HTTP，不访问用户运行数据。执行过程中发现的失败先定位修复并重跑相应用例；未运行的全量 Python／Web、生产构建、桌面／浏览器专项、在线模型和外部账号不计为通过。正式使用页、架构、领域、ADR 与示例已同步当前单入口行为。
 
+### Phase 5.1：分页查询与任务详情
+
+从 `599dd88` 接续。当前调用链为 CLI → `query_local / mission_local` → 现有只读 CoordinatorStore → CoordinatorQueries；可信运行宿主通过 `CoordinatorHost.queries` 复用相同查询，操作与关闭共用租约。没有增加业务数据库、Schema 迁移或 HTTP 管理面。`PlanRevisionRepository.read` 与原 `get` 共用完整冻结计划校验，不在只读查询中创建写事务。
+
+| 触发条件 | 当前源码措施 | 对应回归 |
+|---|---|---|
+| 历史超过状态摘要上限，翻页期间仍有新记录插入 | 固定资源插入水位，按唯一行位置前进；每页有界并返回末页标记 | `test_pages_cover_history_once_and_exclude_insertions_after_the_first_watermark` |
+| 其他实例／资源／Mission 的游标被复用，或输入畸形 | 游标绑定账本与查询范围，严格字段、版本和整数边界校验；SQL 关系及列由宿主固定 | `test_cursors_reject_other_ledgers_resources_and_malformed_shapes`、`test_scope_and_projection_keep_other_missions_and_private_reports_out` |
+| 列表泄露原报告或混入其他任务，真实产物和独立 Review 无法定位 | 所属 Mission 显式查询，Assignment／Artifact／Review 仅投影摘要与原身份引用 | `test_scope_and_projection_keep_other_missions_and_private_reports_out`、生产文件任务的真实 Artifact / Review 查询断言 |
+| 并发封存计划造成详情的计划指针与 Job 数量不一致 | 单次详情及其计数共用读事务，计划使用现有完整 Hash／Job／依赖校验 | `test_detail_and_counts_keep_one_snapshot_while_another_connection_freezes_a_plan`、`test_corrupt_frozen_plan_is_refused_without_rewriting_its_original`，以及原计划 Hash／Job 物化拒绝用例 |
+| 本机读取启动模型、迁移、修复或创建缺失状态 | 附着现有只读库；不读取凭据或运行观察；CLI 冲突在数据访问前拒绝 | `test_cli_queries_are_readonly_without_credentials_hosts_or_runtime_projection`、`test_missing_state_and_conflicting_cli_selectors_do_not_create_or_repair_data` |
+| 查询期间关闭释放实例租约，或缓存查询句柄在关闭后继续工作 | Host 的相同操作租约覆盖查询全过程，关闭后拒绝缓存句柄 | `test_cached_host_queries_reject_after_close_and_hold_the_operation_lease` |
+| 新 CLI 说明或查询错误固定首次语言 | 在实际呈现和抛错处解析显式双语资源 | `test_new_cli_help_is_consumed_in_english_chinese_english`、`test_same_query_instance_consumes_error_language_english_chinese_english` |
+
+2026-11-08，本项 15 个定向用例通过，包含真实原生文件任务及原冻结计划校验回归，无失败或跳过。该查询提供逐页一致的当前账本视图，跨页不承诺冻结已有条目的状态。插入水位不代替原生运行证据或认证，条目数量限制不构成负载性能结论。验证仅针对本次新增／修改用例、真实隔离 Git 和原生文件质量门；没有运行全量回归、生产构建、桌面／浏览器专项或外部账号验收。统一工作台及 Phase 5 其余项目仍待开发。
+
 ## 待验证风险与产品缺口
 
 - 首次原生活动观察不可信时，首次后续可信观察只建立持久基线，不重置停滞时间或解除既有阻断；Schema v17 将历史快照保守标为未建立可信基线。若真实进度发生在可信基线建立前，该变化无法从旧指纹中追溯证明，必须等待后续可核验变化才恢复；这是避免误解锁的保守恢复代价，仍需真实长时运行评估。
@@ -178,6 +194,6 @@
 - 合并冲突、失败或中断运行、未知操作和资源总容量耗尽保留明确状态；当前不自动解决冲突、迁移配置、清理历史资源或重放任务。
 - 长节点阶段接续为显式协议，真实模型的交接质量、是否过早选择 `ready`、上下文重建成本及长时负载仍需独立在线评估。同树同报告的停止条件不能识别所有语义停滞；新阶段也不能自动带走忽略文件、环境、进程或外部服务状态。
 - 目标控制仅限可信本机操作者，尚未提供远端控制认证或多人权限审批工作台。停止只作用于当前拥有的句柄；重启前外部进程没有确切终态回执时仍需核实，不能根据旧 PID 重放停止。控制历史有明确容量上限，当前不自动归档或迁移。
-- 状态只保存有界摘要；完整复核在账本，原报告、工具与用量在原运行。仍需要面向普通用户的工作台与分页读取接口。
+- 状态只保存有界摘要；完整复核在账本，原报告、工具与用量在原运行。分页摘要与任务详情已提供可信 SDK／CLI 入口；面向普通用户的工作台及原报告的显式详情呈现仍待开发。
 
 尚无统一在线任务集与独立业务判定的比较证据，不记录“世界最强”或“全面超过其他系统”的结论。

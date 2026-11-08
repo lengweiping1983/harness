@@ -418,6 +418,8 @@ Phase 4.1–4.6 的统一链路已接通：CLI 和嵌入端口装配同一个 Su
 
 Schema v21 为原生协调模型调用、本机事件身份、本机指令请求和原回复目标增加同库记录。原生调用使用固定 Session / Run / prompt hash，丢回执后只查原提交；本机指令固定 Assignment / Run / Turn，不经普通跟进广播。只读 CLI 使用现有 Schema 和实例身份，不初始化、迁移或修复用户状态。已有迁移及原件保持完整；意外发现旧运行目录时拒绝混用，不导入、转换或清理。
 
+Phase 5.1 已提供同库分页查询与任务详情，CLI 和 `CoordinatorHost.queries` 使用同一消费者；完整字段及读取边界见[产品页](superagent.md#分页浏览与任务详情)。本项是后续工作台的查询基础，不代表整个 Phase 5 完成。
+
 当前仍限单实例、本机执行和单仓库 Mission。动态 Source Plugin、自动跨来源关联、动态重规划、人工未知结果核实界面、远程 Worker、操作系统 Sandbox 和多人工作台属后续扩展；显式授权的 Subscription 已可跨来源参与同一活动。离线回归不代表在线模型质量、外部账号、跨平台实机或长期负载验收。
 
 ## 10. 源码依据
@@ -431,6 +433,6 @@ Schema v21 为原生协调模型调用、本机事件身份、本机指令请求
 - `superagent_artifacts.py`、`superagent_quality_gate.py`、`superagent_checkpoints.py`：文件交付、独立 Review 和阶段协议。
 - `superagent_coordination.py`、`superagent_input_delivery.py`、`superagent_mission_instruction.py`、`superagent_watchdog.py`：控制、逐执行输入、指令和持久监督。
 - `superagent_delivery_runtime.py`、`superagent_provider_adapters.py`、`superagent_outbox.py`、`superagent_effect_recovery.py`：发送准入、原回复目标、确认及未知效果只读恢复。
-- `superagent_local.py`、`superagent_state.py`、`superagent_status.py`：同库本机操作与只读投影。
+- `superagent_local.py`、`superagent_state.py`、`superagent_status.py`、`superagent_queries.py`：同库本机操作、运行摘要、分页查询和任务详情。
 
 除首项 CLI 外，以上 Python 模块均在 `harness/app/`；语言源在 `harness/i18n/locales/`，原生 Session / Run / Worktree 事实仍归各自模块。

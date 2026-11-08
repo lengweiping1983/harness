@@ -17,6 +17,8 @@ def add_arguments(parser):
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument('--superagent-submit', metavar='TEXT', help=tr('superagent.cli.submit'))
     actions.add_argument('--superagent-status', action='store_true', help=tr('superagent.cli.status'))
+    actions.add_argument('--superagent-list', choices=('missions','jobs','assignments','artifacts','reviews'), help=tr('superagent.cli.list'))
+    actions.add_argument('--superagent-show', metavar='MISSION_ID', help=tr('superagent.cli.show'))
     actions.add_argument('--superagent-steer', metavar='TEXT', help=tr('superagent.cli.steer'))
     actions.add_argument('--superagent-receipt', metavar='REQUEST_ID', help=tr('superagent.cli.receipt'))
     actions.add_argument('--superagent-control-receipt', metavar='REQUEST_ID', help=tr('superagent.cli.control-receipt'))
@@ -25,6 +27,8 @@ def add_arguments(parser):
     actions.add_argument('--superagent-cancel', action='store_true', help=tr('superagent.cli.cancel'))
     parser.add_argument('--superagent-job', metavar='JOB_ID', help=tr('superagent.cli.job'))
     parser.add_argument('--superagent-mission', metavar='MISSION_ID', help=tr('superagent.cli.mission'))
+    parser.add_argument('--superagent-limit', type=int, help=tr('superagent.cli.limit'))
+    parser.add_argument('--superagent-cursor', help=tr('superagent.cli.cursor'))
     for name in ('source', 'actor', 'thread', 'request-id'):
         parser.add_argument('--superagent-' + name, help=tr('superagent.cli.' + name))
 
@@ -35,16 +39,21 @@ def handle(args, parser):
     control_action = ('pause' if args.superagent_pause else 'resume' if args.superagent_resume else
                       'cancel' if args.superagent_cancel else None)
     local = (args.superagent_submit is not None or args.superagent_status or args.superagent_steer is not None
-             or args.superagent_receipt is not None or args.superagent_control_receipt is not None or control_action is not None)
+             or args.superagent_receipt is not None or args.superagent_control_receipt is not None or control_action is not None
+             or args.superagent_list is not None or args.superagent_show is not None)
     if args.superagent is None:
         if (args.superagent_once or local or args.superagent_job is not None or args.superagent_mission is not None
+                or args.superagent_limit is not None or args.superagent_cursor is not None
                 or any(value is not None for value in selectors.values())):
             parser.error(tr('superagent.cli.config_required'))
         return None
     if ((local and args.superagent_submit is None and control_action is None and args.superagent_once)
             or args.superagent_submit is None and args.superagent_steer is None and control_action is None and any(value is not None for value in selectors.values())
             or args.superagent_job is not None and args.superagent_steer is None
-            or args.superagent_mission is not None and control_action is None
+            or args.superagent_mission is not None and control_action is None and args.superagent_list is None
+            or (args.superagent_limit is not None or args.superagent_cursor is not None) and args.superagent_list is None
+            or args.superagent_list not in (None, 'missions') and args.superagent_mission is None
+            or args.superagent_limit is not None and not 1 <= args.superagent_limit <= 100
             or control_action is not None and (args.superagent_mission is None or args.superagent_job is not None
                                                or any(value is not None for value in (selectors['source'], selectors['actor'], selectors['thread'])))):
         parser.error(tr('superagent.cli.conflict'))
@@ -56,8 +65,13 @@ def handle(args, parser):
         parser.error(tr('superagent.cli.conflict'))
     try:
         if local:
-            from .app.superagent_local import read_guidance_receipt, read_status, steer_local, submit_local
-            if args.superagent_status:
+            from .app.superagent_local import read_guidance_receipt, read_status, steer_local, submit_local, query_local, mission_local
+            if args.superagent_list is not None:
+                result = query_local(Path(args.superagent), args.superagent_list, mission_id=args.superagent_mission,
+                    limit=args.superagent_limit if args.superagent_limit is not None else 32, cursor=args.superagent_cursor)
+            elif args.superagent_show is not None:
+                result = mission_local(Path(args.superagent), args.superagent_show)
+            elif args.superagent_status:
                 result = read_status(Path(args.superagent))
             elif args.superagent_receipt is not None:
                 result = read_guidance_receipt(Path(args.superagent), args.superagent_receipt)

@@ -1441,10 +1441,15 @@ class JobDependencyRepository:
         return [dict(row) for row in rows]
 
     def for_plan(self, mission_id: str, plan_revision: int) -> list[dict]:
+        return self.read_plan(self._uow.db, mission_id, plan_revision)
+
+    @staticmethod
+    def read_plan(db, mission_id: str, plan_revision: int) -> list[dict]:
+        """在调用方持有的读事务中读取依赖，不创建写入工作单元。"""
         mission = _text(mission_id, "mission_id")
         if type(plan_revision) is not int or plan_revision < 1:
             raise ValueError("plan_revision must be a positive integer")
-        rows = self._uow.db.execute(
+        rows = db.execute(
             "SELECT dependency.*, source.node_id AS node_id, target.node_id AS depends_on_node_id "
             "FROM job_dependencies AS dependency "
             "JOIN jobs AS source ON source.job_id=dependency.job_id "
@@ -1462,10 +1467,15 @@ class PlanRevisionRepository:
         self._uow = uow
 
     def get(self, mission_id: str, plan_revision: int) -> dict | None:
+        return self.read(self._uow.db, mission_id, plan_revision)
+
+    @staticmethod
+    def read(db, mission_id: str, plan_revision: int) -> dict | None:
+        """复用完整冻结校验，允许只读消费者在自己的事务中读取。"""
         mission = _text(mission_id, "mission_id")
         if type(plan_revision) is not int or plan_revision < 1:
             raise ValueError("plan_revision must be a positive integer")
-        row = self._uow.db.execute(
+        row = db.execute(
             "SELECT * FROM mission_plans WHERE mission_id=? AND plan_revision=?",
             (mission, plan_revision),
         ).fetchone()
@@ -1485,16 +1495,16 @@ class PlanRevisionRepository:
             or not isinstance(plan_json.get("nodes"), list)
         ):
             raise HarnessError(tr("storage.schema.invalid"), code="superagent/plan-corrupt")
-        mission_row = self._uow.missions.get(mission)
+        mission_row = db.execute('SELECT plan_revision FROM missions WHERE mission_id=?', (mission,)).fetchone()
         if mission_row is None or mission_row["plan_revision"] < plan_revision:
             raise HarnessError(tr("storage.schema.invalid"), code="superagent/plan-corrupt")
         result["plan_json"] = plan_json
         result["acceptance_json"] = acceptance_json
-        result["jobs"] = [dict(job) for job in self._uow.db.execute(
+        result["jobs"] = [dict(job) for job in db.execute(
             "SELECT * FROM jobs WHERE mission_id=? AND plan_revision=? ORDER BY node_id",
             (mission, plan_revision),
         ).fetchall()]
-        result["dependencies"] = self._uow.dependencies.for_plan(mission, plan_revision)
+        result["dependencies"] = JobDependencyRepository.read_plan(db, mission, plan_revision)
         expected_nodes = {}
         for node in plan_json["nodes"]:
             if not isinstance(node, dict) or not isinstance(node.get("node_id"), str):

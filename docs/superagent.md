@@ -94,6 +94,28 @@ Candidate、pending、sent 和 unknown 严格区分。POST 返回后还须只读
 
 本机 `replies/` 只保存结果投影，`runtime-status.json` 只保存运行观察；它们不承担独立业务账本或消费队列职责。关闭立即停止新准入和监听，等待已经受理的所属请求及原生资源收尾；取消等待不等于撤销已接受写入。关闭期间不会继续派生新的模型调用、会话或 Worker 执行。
 
+## 分页浏览与任务详情
+
+`--superagent-status` 保留运行摘要；需要浏览完整历史时使用同一协调账本的分页查询：
+
+```sh
+python -m harness.cli --superagent /path/to/config.json --superagent-list missions --superagent-limit 20
+python -m harness.cli --superagent /path/to/config.json --superagent-list missions --superagent-limit 20 --superagent-cursor NEXT_CURSOR
+python -m harness.cli --superagent /path/to/config.json --superagent-show MISSION_ID
+python -m harness.cli --superagent /path/to/config.json --superagent-list jobs --superagent-mission MISSION_ID
+python -m harness.cli --superagent /path/to/config.json --superagent-list assignments --superagent-mission MISSION_ID
+python -m harness.cli --superagent /path/to/config.json --superagent-list artifacts --superagent-mission MISSION_ID
+python -m harness.cli --superagent /path/to/config.json --superagent-list reviews --superagent-mission MISSION_ID
+```
+
+每页默认 32 条，允许 1–100 条；返回 `instance_id`、`resource`、`mission_id`、`items`、`total`、`has_more` 与 `next_cursor`，末页游标为 `null`。条目按首次入库顺序倒序排列，游标固定账本、资源、Mission 范围及首次插入水位；后续新增记录须从第一页重新查询才能看到。不能把 Mission 列表游标用于 Job、另一 Mission 或另一账本。游标是本机查询参数，不是认证凭据。
+
+每页及单次详情各自使用一个读事务，保证其内部数据一致；跨页期间已有记录的状态仍可更新，不承诺跨页冻结整个运行状态。Job、Assignment、Artifact、Review 查询必须指定 Mission，保留全部计划／执行历史，不只取当前尝试。摘要不返回 Assignment 原始报告、Artifact 完整 Manifest／回执或 Review 完整判定正文；原件仍在所属协调记录和原生运行。
+
+任务详情返回 Mission、当前冻结计划的 Hash／验收条件、控制、监督摘要和各类关联记录数量。冻结计划复用既有完整 Hash、Job 物化和依赖校验，损坏原件明确拒绝，不修复或重建。分页与详情不读取运行观察文件、凭据，不启动宿主，不执行恢复或 Schema 升级。
+
+可信 SDK 使用 `CoordinatorHost.queries.page(resource, mission_id=..., limit=..., cursor=...)` 和 `.mission(mission_id)`；查询持有同一 Host 操作租约，缓存句柄在关闭后同样拒绝。该端口供后续工作台复用，目前没有新增 HTTP 管理入口。
+
 ## 当前边界
 
 Phase 4 的 CLI 切换、统一配置、持续协作、质量门、信道发送和旧编排退役沿同一服务实现。旧 Router、Dispatcher、MissionStore、Worker / Results 编排、独立信道／控制账本、生产 Shadow 和旧来源映射 API 已删除。已有 Coordinator Schema 历史继续受校验和保护；不导入、清理或迁移旧 Superagent 运行目录。

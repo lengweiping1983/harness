@@ -502,6 +502,8 @@ Superagent 生产入口回归位于 `tests/test_superagent_service.py` 与 `test
 
 `tests/test_superagent_unified_loading.py` 在全新解释器中禁止加载已退役编排模块，再执行统一服务装配、Tick、关闭及认证客户端构造；它覆盖真实导入边界，不能替代带任务输入的交付回归。真实 HTTP 回复与令牌刷新后撤权位于 `test_superagent_unified_delivery.py`；签名、AES 互操作、挑战和来源范围位于 `test_superagent_github.py`、`test_superagent_feishu.py`。旧回归迁接与未验证环境见 [协调审查](superagent-review.md)。
 
+Superagent 分页查询回归位于 `tests/test_superagent_queries.py`，覆盖完整历史、首次插入水位、跨账本／资源／Mission 游标拒绝、同事务详情、只读 CLI、损坏冻结计划保留、Host 关闭租约和英→中→英消费；生产文件任务的 Artifact / Review 查询由 `test_superagent_service.py::ProductEntryTests.test_production_file_task_uses_integrator_independent_review_and_frozen_result` 验证。冻结计划只读入口抽取仍保留原有 Hash 和 Job 物化拒绝回归；按具体改动选择用例，不默认运行整个 Superagent 领域。
+
 对话自动标题由 `tests/test_session_titles.py` 经真实事件总线和持久存储核对首次人工输入、独立模型配置、原文保持、后续消息稳定、手动同值改名保护、并发对话隔离、删除后的迟到回包、关闭收尾及同实例英中英提示词。命名追踪回归通过真实适配器和受控 SSE 传输核对归档、失败原因、原件重开、删除后的迟到传输及自定义适配器签名；能力边界回归核对只对支持关闭的模型选择 `off`、能力查询计入超时且不重放，实际提供商桥接与本机 HTTP 回归核对关闭参数进入传输和归档、连接与执行配置不变；纯附件只取文件名，不将附件模型正文发送给命名请求。`test_session_creation_receipt.py` 保留初始请求身份和完成标记断言，并核对无标题创建的自动命名登记；前端 `sessionCreationRecovery.test.ts` 核对创建请求不把用户消息写成显式标题，未知结果仍只回查原创建请求；旧请求确认完成后，更换项目／检出／智能体的同一次发送继续创建当前对话，切换期间不误发。`test_model_readiness.py` 经实际状态路由、提供商凭据存储和标题消费者核对主配置无 Key 时的连接及订阅来源。
 
 

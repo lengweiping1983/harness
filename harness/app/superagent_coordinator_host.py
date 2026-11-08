@@ -23,6 +23,7 @@ from .superagent_source_registry import LocalIdentityVerifier, SecretResolver, S
 from .superagent_input_delivery import CoordinatorAssignmentInputDelivery
 from .superagent_mission_instruction import CoordinatorMissionInstruction
 from .superagent_watchdog import CoordinatorWatchdog
+from .superagent_queries import CoordinatorQueries
 
 
 _LEGACY_STATE_FILES = (
@@ -544,6 +545,21 @@ class _HostWatchdogService:
             return self.__service.status(limit=limit, mission_ids=mission_ids)
 
 
+class _HostQueries:
+    """查询与关闭共用操作租约，缓存的句柄也不能越过宿主生命周期。"""
+
+    def __init__(self, host, service):
+        self.__host, self.__service = host, service
+
+    def page(self, *args, **kwargs):
+        with self.__host._operation():
+            return self.__service.page(*args, **kwargs)
+
+    def mission(self, mission_id):
+        with self.__host._operation():
+            return self.__service.mission(mission_id)
+
+
 class CoordinatorHost:
     """下一代 Superagent 的宿主组合边界。
 
@@ -573,6 +589,7 @@ class CoordinatorHost:
         self._closed = False
         self._close_task = None
         self._outbox = _HostOutboxService(self, OutboxEffectService(store))
+        self._queries = _HostQueries(self, CoordinatorQueries(store))
         self._watchdog_service = CoordinatorWatchdog(store, limits=watchdog_limits)
         self._watchdog = _HostWatchdogService(self, self._watchdog_service)
         self._authorization_service = CoordinatorAuthorizationEngine(store)
@@ -673,6 +690,11 @@ class CoordinatorHost:
     @property
     def database_path(self) -> Path:
         return self._store.path
+
+    @property
+    def queries(self):
+        self._ensure_open()
+        return self._queries
 
     @property
     def outbox(self) -> _HostOutboxService:
