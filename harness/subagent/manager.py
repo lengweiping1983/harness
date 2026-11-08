@@ -126,12 +126,24 @@ class SubagentManager:
         self._closing: dict[str | None, int] = {}
         #: 整棵代理树的并发上限；None 表示不限制名额。后代同样占名额，
         #: 阻塞观察期间通过让渡避免父子互锁（见 :mod:`.admission`）。
-        self.max_concurrent = max_concurrent if isinstance(max_concurrent, int) and max_concurrent > 0 else None
+        # 准入上限交给 AdmissionGate 严格校验；非法值不能静默退化为无限制。
+        self.max_concurrent = max_concurrent
         #: 派生深度上限；None 表示不限制。深度在派生时判定，超限立即失败。
-        self.max_depth = max_depth if isinstance(max_depth, int) and max_depth > 0 else None
-        #: 单个受管运行的墙钟时限（秒）；None 表示不设默认时限，
-        #: 团队等调用方仍可用 ``_timeout_seconds`` 指定更严格的值。
-        self.job_timeout = job_timeout if isinstance(job_timeout, (int, float)) and job_timeout > 0 else None
+        self.max_depth = max_depth
+        #: 单个受管运行的墙钟时限（秒）；None 表示不设时限。
+        #: bool 是 int 的子类，且非有限值不能交给 asyncio 超时调度。
+        if job_timeout is not None:
+            try:
+                valid_job_timeout = (
+                    type(job_timeout) in (int, float)
+                    and job_timeout > 0
+                    and math.isfinite(job_timeout)
+                )
+            except OverflowError:
+                valid_job_timeout = False
+            if not valid_job_timeout:
+                raise ValueError('subagent/invalid-job-timeout')
+        self.job_timeout = job_timeout
         self._gate = AdmissionGate(capacity=self.max_concurrent, max_depth=self.max_depth)
 
         self._states: dict[str, AgentRun] = {}

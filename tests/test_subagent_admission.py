@@ -180,6 +180,37 @@ class SubagentTreeAdmissionTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await manager.shutdown()
 
+    async def test_manager_rejects_invalid_admission_limits_instead_of_disabling_them(self):
+        invalid = (
+            {'max_concurrent': 0},
+            {'max_concurrent': True},
+            {'max_concurrent': 1.5},
+            {'max_depth': -1},
+            {'max_depth': True},
+            {'max_depth': 1.5},
+            {'job_timeout': True},
+            {'job_timeout': False},
+            {'job_timeout': 0},
+            {'job_timeout': -1},
+            {'job_timeout': float('inf')},
+            {'job_timeout': float('nan')},
+            {'job_timeout': '1'},
+        )
+        for options in invalid:
+            with self.subTest(options=options):
+                with self.assertRaises(ValueError):
+                    manager_with(**options)
+
+        manager = manager_with(max_concurrent=2, max_depth=3, job_timeout=0.5)
+        try:
+            self.assertEqual(manager.max_concurrent, 2)
+            self.assertEqual(manager.max_depth, 3)
+            self.assertEqual(manager.job_timeout, 0.5)
+            self.assertEqual(manager._gate.snapshot()['capacity'], 2)
+            self.assertEqual(manager._gate.snapshot()['max_depth'], 3)
+        finally:
+            await manager.shutdown()
+
     async def test_job_timeout_produces_a_truthful_failure_instead_of_a_hung_run(self):
         manager = manager_with(job_timeout=0.05)
 
