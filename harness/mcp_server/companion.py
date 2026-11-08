@@ -35,6 +35,7 @@ CREATE TABLE dispatches(id TEXT PRIMARY KEY, binding_id TEXT NOT NULL, milestone
     UNIQUE(binding_id,milestone,phase));
 """
 CHAT = re.compile(r'^/(?:g/[^/]+/)?c/[0-9a-f-]{36}$')
+PROTOCOL_VERSION = 2
 
 
 def read_pairing_token(home):
@@ -97,7 +98,7 @@ class Companion:
             if (not isinstance(row[0], str) or not re.fullmatch(r'[0-9a-f]{32}', row[0])
                     or db.execute('SELECT 1 FROM bindings WHERE id=?', (row[1],)).fetchone() is None
                     or not isinstance(row[2], str) or not re.fullmatch(r'[0-9a-f]{64}', row[2])
-                    or row[3] not in {'continue', 'generate', 'deliver'}
+                    or row[3] not in {'continue', 'generate', 'deliver', 'next_task', 'resume'}
                     or row[4] not in {'dispatching', 'confirmed', 'not_sent'}
                     or not isinstance(row[5], str) or not row[5]
                     or type(row[6]) not in (int, float) or not math.isfinite(row[6])):
@@ -139,14 +140,14 @@ class Companion:
     def health(self):
         """配对后返回分层诊断，不暴露配对码、配置路径或对话原文。"""
         if not (self.config.home / 'executor.sqlite3').exists():
-            return {'protocol': 'harness-chat-companion', 'protocol_version': 1,
+            return {'protocol': 'harness-chat-companion', 'protocol_version': PROTOCOL_VERSION,
                     'executor': 'missing', 'session_count': 0}
         try:
             count = len(self.sessions()['sessions'])
         except (ValueError, HarnessError, sqlite3.Error, OSError):
-            return {'protocol': 'harness-chat-companion', 'protocol_version': 1,
+            return {'protocol': 'harness-chat-companion', 'protocol_version': PROTOCOL_VERSION,
                     'executor': 'invalid', 'session_count': 0}
-        return {'protocol': 'harness-chat-companion', 'protocol_version': 1,
+        return {'protocol': 'harness-chat-companion', 'protocol_version': PROTOCOL_VERSION,
                 'executor': 'ready' if self.executor_alive() else 'offline', 'session_count': count}
 
     def executor_alive(self):
@@ -190,7 +191,9 @@ class Companion:
             raise ValueError(tr('execution.companion.denied'))
         return row[1], row[2]
 
-    def state(self, binding):
+    def state(self, binding, reply_key=None):
+        if reply_key is not None and (not isinstance(reply_key, str) or not re.fullmatch('[0-9a-f]{16}', reply_key)):
+            raise ValueError(tr('execution.companion.invalid'))
         sid, url = self.binding(binding)
         with self.executor() as db:
             session, store = self.session(db, sid)
@@ -232,9 +235,15 @@ class Companion:
                 latest = pipelines[-1]
                 state = {'queued': 'working', 'running': 'working', 'waiting_image': 'image', 'completed': 'continue',
                          'failed': 'continue', 'interrupted': 'blocked', 'cancelled': 'paused'}[latest['status']]
+                if latest['status'] == 'interrupted' and latest['error_code'] in {'', 'execution/service-interrupted'}:
+                    state = 'interrupted'
             elif any(image['status'] == 'pending' for image in images):
                 state = 'image'
-            key = hashlib.sha256(f'{sid}:{milestone}:{state}'.encode()).hexdigest()
+            progress = final if state == 'complete' else milestone
+            identity = f'{sid}:{progress}:{state}'
+            if reply_key is not None and state != 'image':
+                identity += ':' + reply_key
+            key = hashlib.sha256(identity.encode()).hexdigest()
         with self.database() as db:
             pending = db.execute("SELECT id,prompt,status FROM dispatches WHERE binding_id=? AND status='dispatching' ORDER BY created LIMIT 1", (binding,)).fetchone()
             sent = [row[0] for row in db.execute("SELECT phase FROM dispatches WHERE binding_id=? AND milestone=? AND status='confirmed'", (binding, key))]
@@ -243,14 +252,17 @@ class Companion:
                 'pending': {'id': pending[0], 'prompt': pending[1]} if pending else None,
                 'has_checkpoint': bool(session['external_summary'] or session['next_steps'])}
 
-    def claim(self, binding, milestone, phase):
+    def claim(self, binding, milestone, phase, reply_key=None):
         with self.lock:
-            state = self.state(binding)
-            if state['pending'] or state['milestone'] != milestone or state['state'] not in {'continue', 'image'}:
+            state = self.state(binding, reply_key) if reply_key is not None else self.state(binding)
+            phases = {'continue': {'continue'}, 'image': {'generate', 'deliver'},
+                      'complete': {'next_task'}, 'interrupted': {'resume'}}
+            if state['pending'] or state['milestone'] != milestone or state['state'] not in phases:
                 raise ValueError(tr('execution.companion.changed'))
-            if phase not in {'continue', 'generate', 'deliver'} or (state['state'] == 'image') != (phase in {'generate', 'deliver'}):
+            if phase not in phases[state['state']]:
                 raise ValueError(tr('execution.companion.invalid'))
             dispatch = secrets.token_hex(16)
+            # 接续正文是固定载荷，英中资源均保持“继续”，不随界面语言改写。
             prompt = tr('execution.companion.prompt')
             with self.database() as db, db:
                 count = db.execute('SELECT COUNT(*) FROM dispatches WHERE binding_id=?', (binding,)).fetchone()[0]
@@ -318,7 +330,11 @@ def create_server(config, port=8877, principal='local'):
                 elif self.command == 'GET' and path.path == '/sessions':
                     result = companion.sessions()
                 elif self.command == 'GET' and path.path == '/state':
-                    result = companion.state(parse_qs(path.query)['binding_id'][0])
+                    params = parse_qs(path.query, keep_blank_values=True)
+                    reply_keys = params.get('reply_key')
+                    if reply_keys is not None and len(reply_keys) != 1:
+                        raise ValueError(tr('execution.companion.invalid'))
+                    result = companion.state(params['binding_id'][0], reply_keys[0] if reply_keys is not None else None)
                 elif self.command == 'POST':
                     length = int(self.headers.get('Content-Length', '0'))
                     if not 0 < length <= 16384:
@@ -326,8 +342,10 @@ def create_server(config, port=8877, principal='local'):
                     value = json.loads(self.rfile.read(length).decode('utf-8'))
                     if path.path == '/bind' and set(value) == {'session_id', 'url'}:
                         result = companion.bind(value['session_id'], value['url'])
-                    elif path.path == '/claim' and set(value) == {'binding_id', 'milestone', 'phase'}:
-                        result = companion.claim(value['binding_id'], value['milestone'], value['phase'])
+                    elif path.path == '/claim' and set(value) in ({'binding_id', 'milestone', 'phase'}, {'binding_id', 'milestone', 'phase', 'reply_key'}):
+                        if 'reply_key' in value and value['reply_key'] is None:
+                            raise ValueError(tr('execution.companion.invalid'))
+                        result = companion.claim(value['binding_id'], value['milestone'], value['phase'], value.get('reply_key'))
                     elif path.path == '/receipt' and set(value) == {'binding_id', 'id', 'outcome'}:
                         result = companion.receipt(value['binding_id'], value['id'], value['outcome'])
                     else:

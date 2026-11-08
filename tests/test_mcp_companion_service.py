@@ -5,7 +5,7 @@ import socket
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from harness.app.mcp_service import McpService
 from harness.app.chat_companion import ChatCompanionService
@@ -36,6 +36,15 @@ class ManagedCompanionTests(unittest.IsolatedAsyncioTestCase):
         self.manager._state['status'] = 'running'
         self.manager._process = Mock(poll=Mock(return_value=None), stdout=None)
         self.manager._tunnel = Mock(poll=Mock(return_value=None), stdout=None)
+
+    async def test_probe_reuses_only_the_current_companion_protocol(self):
+        with patch('harness.app.chat_companion.build_opener') as opener:
+            response = opener.return_value.open.return_value.__enter__.return_value
+            for version in (1, 2):
+                value = {'protocol': 'harness-chat-companion', 'protocol_version': version, 'executor': 'ready'}
+                response.read.return_value = json.dumps(value).encode('utf-8')
+                result = self.manager.companion._probe(self.port, 'fixture-token')
+                self.assertEqual(result, value if version == 2 else None)
 
     async def test_apply_starts_owned_bridge_and_stop_releases_listener_without_exposing_secret(self):
         self.running_manager()

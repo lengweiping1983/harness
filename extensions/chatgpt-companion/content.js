@@ -24,7 +24,9 @@
       try {
         return await sendOnce(document, message.url, () => location.href, message.prompt, afterFill => {
           if (acceptedGeneration !== generation || composing || Date.now() - activeAt < 3000 || location.origin + location.pathname !== message.url) return false;
-          return afterFill || probe().ready;
+          const page = probe();
+          if (message.assistantKey && page.assistantKey !== message.assistantKey) return false;
+          return afterFill || page.ready;
         }, fill => {
           inserting = true;
           try {return fill();} finally {inserting = false;}

@@ -53,6 +53,18 @@
   "stop": {
     "message": "Stop continuation"
   },
+  "continuous": {
+    "message": "Continue after completion or interruption"
+  },
+  "continuous_help": {
+    "message": "Applies when you enable continuation. Once a reply ends and the page stays idle, send “继续” so the AI can handle recovery or the next task, including after verified completion or confirmed task interruption. Each reply and execution milestone is requested only once. Unknown results and manual stops still pause continuation; the 8-hour and 100-message limits still apply."
+  },
+  "waiting_next_task": {
+    "message": "Continuation requested. Waiting for the next task or new execution progress."
+  },
+  "interrupted": {
+    "message": "The task was interrupted. Continuation stopped. To continue, select “Continue after completion or interruption” and enable again."
+  },
   "explanation": {
     "message": "Binds the current ChatGPT Chat for 8 hours, up to 100 continuation messages. Protects drafts and stops on uncertain sends. Already accepted messages may finish after stopping."
   },

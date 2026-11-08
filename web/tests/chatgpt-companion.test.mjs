@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-let saved, state, page, claims, sends, mode, claimedPhase, alarm, alarmCreates
+let saved, state, page, claims, sends, mode, claimedPhase, alarm, alarmCreates, replyPhases, claimedReplyKey, claimInputs
 const listeners={}
 const url='https://chatgpt.com/c/00000000-0000-0000-0000-000000000001'
 const clone=value=>structuredClone(value)
@@ -11,6 +11,7 @@ const reset=()=>{
  page={ready:true,assistantKey:'a',hasAssistant:true,hasImage:false,userMessages:[]}
  claims=0;sends=0;mode='confirmed';claimedPhase=undefined
  alarm=undefined;alarmCreates=[]
+ replyPhases=new Map();claimedReplyKey=undefined;claimInputs=[]
 }
 reset()
 globalThis.chrome={
@@ -28,13 +29,23 @@ globalThis.fetch=async(raw,options)=>{
  const path=new URL(raw).pathname
  const input=options.body?JSON.parse(options.body):null
  let result
- if(path==='/state')result=clone(state)
+ if(path==='/state'){
+  result=clone(state)
+  const replyKey=new URL(raw).searchParams.get('reply_key')
+  if(replyKey&&state.state!=='image')result.sent_phases=clone(replyPhases.get(state.milestone+':'+replyKey)||[])
+ }
  if(path==='/claim'){
   claimedPhase=input.phase
+  claimedReplyKey=input.reply_key&&state.state!=='image'?state.milestone+':'+input.reply_key:undefined
+  claimInputs.push(input)
   claims++;state.pending={id:'intent',prompt:'继续'};result=clone(state.pending)
  }
  if(path==='/receipt'){
-  if(input.outcome==='confirmed'){state.pending=null;state.sent_phases.push(claimedPhase)}
+  if(input.outcome==='confirmed'){
+   state.pending=null
+   if(claimedReplyKey)replyPhases.set(claimedReplyKey,[...(replyPhases.get(claimedReplyKey)||[]),claimedPhase])
+   else state.sent_phases.push(claimedPhase)
+  }
   if(input.outcome==='not_sent')state.pending=null
   result={outcome:input.outcome}
  }
@@ -164,6 +175,78 @@ test('a stopped binding, an expired binding and completed work do not create mes
  reset();saved.binding.enabled=false;await tick();assert.equal(claims,0)
  reset();saved.binding.expiresAt=Date.now()-1;await tick();assert.equal(claims,0);assert.equal(saved.binding.enabled,false)
  reset();state.state='complete';await tick();assert.equal(claims,0);assert.equal(saved.binding.enabled,false)
+})
+
+test('continuous mode requests the next task or interrupted recovery once per durable milestone',async()=>{
+ for(const [kind,phase] of [['complete','next_task'],['interrupted','resume']]){
+  reset();saved.binding.continueAfterTerminal=true;state.state=kind
+  page.assistantKey='a'.repeat(16);saved.binding.idleKey=page.assistantKey
+  await tick()
+  assert.equal(claimedPhase,phase);assert.equal(sends,1);assert.equal(saved.binding.enabled,true)
+  await tick();await tick()
+  assert.equal(claims,1);assert.equal(sends,1);assert.equal(saved.binding.reason,'waiting_next_task')
+  state.milestone='m2';state.sent_phases=[];page.assistantKey='b'.repeat(16)
+  await tick()
+  assert.equal(saved.binding.reason,'stabilizing');assert.equal(sends,1)
+  saved.binding.idleSince=Date.now()-4000
+  await tick()
+  assert.equal(sends,2);assert.equal(claimedPhase,phase)
+ }
+})
+
+test('continuous mode can continue a new idle reply even while the same executor completion remains',async()=>{
+ reset();saved.binding.continueAfterTerminal=true;state.state='complete'
+ page.assistantKey='a'.repeat(16);saved.binding.idleKey=page.assistantKey
+ await tick();assert.equal(sends,1)
+ assert.equal(claimInputs[0].reply_key,'a'.repeat(16))
+ page.assistantKey='b'.repeat(16);page.ready=false;page.reason='busy'
+ await tick();assert.equal(sends,1)
+ page.ready=true;page.reason=''
+ await tick();assert.equal(saved.binding.reason,'stabilizing');assert.equal(sends,1)
+ saved.binding.idleSince=Date.now()-4000
+ await tick();assert.equal(sends,2)
+ assert.equal(claimInputs[1].reply_key,'b'.repeat(16))
+ assert.equal(claimInputs[1].phase,'next_task')
+ await tick();assert.equal(sends,2);assert.equal(saved.binding.reason,'waiting_next_task')
+})
+
+test('continuous image tasks keep generation and delivery deduplicated across replies',async()=>{
+ reset();saved.binding.continueAfterTerminal=true;state.state='image'
+ page.assistantKey='a'.repeat(16);saved.binding.idleKey=page.assistantKey
+ await tick();assert.deepEqual(state.sent_phases,['generate'])
+ page.assistantKey='b'.repeat(16);page.hasImage=true
+ saved.binding.idleKey=page.assistantKey;saved.binding.idleSince=Date.now()-4000
+ await tick();assert.deepEqual(state.sent_phases,['generate','deliver'])
+ await tick();assert.equal(sends,2)
+})
+
+test('terminal continuation requires explicit boolean selection and still respects stops and unknown outcomes',async()=>{
+ for(const value of [undefined,false,'true',1])for(const kind of ['complete','interrupted']){
+  reset();saved.binding.continueAfterTerminal=value;state.state=kind
+  await tick();assert.equal(sends,0);assert.equal(saved.binding.enabled,false)
+  assert.equal(saved.binding.reason,kind)
+ }
+ for(const kind of ['blocked','paused']){
+  reset();saved.binding.continueAfterTerminal=true;state.state=kind
+  await tick();assert.equal(sends,0);assert.equal(saved.binding.enabled,false)
+ }
+ reset();saved.binding.continueAfterTerminal=true;saved.binding.enabled=false;state.state='complete'
+ await tick();assert.equal(sends,0)
+ reset();saved.binding.continueAfterTerminal=true;saved.binding.expiresAt=Date.now()-1;state.state='complete'
+ await tick();assert.equal(sends,0);assert.equal(saved.binding.reason,'time_limit')
+})
+
+test('continuous terminal messages protect page input and never replay an uncertain send',async()=>{
+ for(const kind of ['complete','interrupted']){
+  for(const reason of ['draft','composing','busy','user_active']){
+   reset();saved.binding.continueAfterTerminal=true;state.state=kind;page.ready=false;page.reason=reason
+   await tick();assert.equal(claims,0);assert.equal(saved.binding.enabled,true)
+  }
+  reset();saved.binding.continueAfterTerminal=true;state.state=kind;mode='unknown'
+  await tick();assert.equal(sends,1);assert.equal(saved.binding.enabled,false)
+  saved.binding.enabled=true
+  await tick();assert.equal(sends,1);assert.equal(saved.binding.reason,'send_unconfirmed')
+ }
 })
 test('bridge reconnection uses reads and does not replay an unknown dispatch',async()=>{
  reset();state.pending={id:'old',prompt:'继续'};page.userMessages=['继续'];await tick()
