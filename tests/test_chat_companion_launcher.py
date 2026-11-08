@@ -52,7 +52,7 @@ class ChatCompanionLauncherTests(unittest.TestCase):
         with TemporaryDirectory() as folder:
             config = self._config(Path(folder))
             self._key(config)
-            response = _Response(b'{"protocol":"harness-chat-companion","protocol_version":1,"executor":"ready"}')
+            response = _Response(b'{"protocol":"harness-chat-companion","protocol_version":2,"executor":"ready"}')
             with patch.object(start_chat_companion, 'urlopen', return_value=response), patch('harness.mcp_server.companion.serve') as serve:
                 self.assertEqual(start_chat_companion.run(config, 8877, 'local', False, Path(folder) / 'executor.json'), 0)
                 serve.assert_not_called()
@@ -62,6 +62,15 @@ class ChatCompanionLauncherTests(unittest.TestCase):
             config = self._config(Path(folder))
             self._key(config)
             response = _Response(b'{"protocol":"other","protocol_version":1}')
+            with patch.object(start_chat_companion, 'urlopen', return_value=response), patch('harness.mcp_server.companion.serve') as serve:
+                self.assertEqual(start_chat_companion.run(config, 8877, 'local', False, Path(folder) / 'executor.json'), 2)
+                serve.assert_not_called()
+
+    def test_old_protocol_is_not_reused_or_replaced(self):
+        with TemporaryDirectory() as folder:
+            config = self._config(Path(folder))
+            self._key(config)
+            response = _Response(b'{"protocol":"harness-chat-companion","protocol_version":1,"executor":"ready"}')
             with patch.object(start_chat_companion, 'urlopen', return_value=response), patch('harness.mcp_server.companion.serve') as serve:
                 self.assertEqual(start_chat_companion.run(config, 8877, 'local', False, Path(folder) / 'executor.json'), 2)
                 serve.assert_not_called()

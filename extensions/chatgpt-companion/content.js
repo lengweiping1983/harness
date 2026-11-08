@@ -16,7 +16,7 @@
     if (message.type === 'stop') {generation++; respond({ok: true}); return;}
     (async () => {
       const {inspectPage, sendOnce} = await adapter;
-      const probe = () => inspectPage(document, message.url, location.href, composing, Date.now() - activeAt < 3000);
+      const probe = () => inspectPage(document, message.url, location.href, composing, Date.now() - activeAt < 3000, message.allowInterrupted === true);
       if (message.type === 'probe') return probe();
       if (sending) return {outcome: 'not_sent', reason: 'busy'};
       sending = true;
@@ -24,11 +24,13 @@
       try {
         return await sendOnce(document, message.url, () => location.href, message.prompt, afterFill => {
           if (acceptedGeneration !== generation || composing || Date.now() - activeAt < 3000 || location.origin + location.pathname !== message.url) return false;
-          return afterFill || probe().ready;
+          const page = probe();
+          if (message.assistantKey && page.assistantKey !== message.assistantKey) return false;
+          return afterFill || page.ready;
         }, fill => {
           inserting = true;
           try {return fill();} finally {inserting = false;}
-        });
+        }, message.allowInterrupted === true);
       } finally {sending = false;}
     })().then(respond, () => respond({outcome: 'unknown', reason: 'unsupported_page', ready: false}));
     return true;

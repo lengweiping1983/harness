@@ -47,7 +47,7 @@ function updateControls() {
   element('connect').disabled = busy;
   element('start').disabled = busy || !connected || !element('session').value;
   element('stop').disabled = stopping;
-  for (const id of ['endpoint', 'token', 'session']) element(id).disabled = busy;
+  for (const id of ['endpoint', 'token', 'session', 'continuous']) element(id).disabled = busy;
   element('token-toggle').disabled = busy;
 }
 async function localize(language) {
@@ -87,14 +87,14 @@ function settingsFromFields() {
   if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || endpoint.pathname !== '/' || endpoint.search || endpoint.hash || endpoint.username || endpoint.password) throw new Error('invalid_endpoint');
   const token = element('token').value.trim();
   if (!token) throw new Error('pairing_required');
-  return {endpoint: endpoint.href, token, language: element('language').value};
+  return {endpoint: endpoint.href, token, language: element('language').value, continueAfterTerminal: element('continuous').checked === true};
 }
 async function loadConnection(settings, current) {
   connected = false;
   show('checking_connection', 'connection-status');
   const health = await api(settings, '/health');
   if (!current()) return;
-  if (health.protocol !== 'harness-chat-companion' || health.protocol_version !== 1
+  if (health.protocol !== 'harness-chat-companion' || health.protocol_version !== 2
       || !['ready', 'offline', 'missing', 'invalid'].includes(health.executor)) throw new Error('bridge_response_invalid');
   if (health.executor === 'missing') throw new Error('executor_missing');
   if (health.executor === 'invalid') throw new Error('executor_invalid');
@@ -128,6 +128,7 @@ const language = draft?.language || saved.settings?.language || (navigator.langu
 element('language').value = language;
 element('endpoint').value = draft?.endpoint ?? saved.settings?.endpoint ?? 'http://127.0.0.1:8877/';
 element('token').value = draft?.token ?? saved.settings?.token ?? '';
+element('continuous').checked = (draft?.continueAfterTerminal ?? saved.settings?.continueAfterTerminal) === true;
 if (saved.binding?.reason) reasons.status = saved.binding.reason;
 await localize(language);
 
@@ -141,6 +142,10 @@ for (const id of ['endpoint', 'token']) element(id).addEventListener('input', ()
   show('not_connected', 'connection-status'); updateControls();
 });
 element('session').addEventListener('change', () => {updateControls(); renderTarget();});
+element('continuous').addEventListener('change', () => {
+  const selected = element('continuous').checked === true;
+  return saveSettings(settings => ({...settings, continueAfterTerminal: selected})).catch(() => show('request_failed'));
+});
 element('open-tab').addEventListener('click', async () => {
   if (opening) return;
   opening = true;
@@ -154,7 +159,7 @@ element('open-tab').addEventListener('click', async () => {
     try {target.searchParams.set('sourceChat', canonicalChat(tab?.url));} catch {}
     const draftId = crypto.randomUUID();
     draftKey = 'companion-draft:' + draftId;
-    await chrome.storage.session.set({[draftKey]: {endpoint: element('endpoint').value, token: element('token').value, language: element('language').value}});
+    await chrome.storage.session.set({[draftKey]: {endpoint: element('endpoint').value, token: element('token').value, language: element('language').value, continueAfterTerminal: element('continuous').checked === true}});
     target.searchParams.set('draft', draftId);
     await chrome.tabs.create({url: target.href});
   } catch {
@@ -181,6 +186,7 @@ element('connect').addEventListener('click', () => run(async current => {
 }, 'connection-status'));
 element('start').addEventListener('click', () => run(async current => {
   const settings = settingsFromFields();
+  const continueAfterTerminal = element('continuous').checked === true;
   const sessionId = sessions.find(session => session.project_id === element('session').value)?.session_id;
   if (!connected || !sessionId) throw new Error('choose_session');
   let tab;
@@ -203,7 +209,7 @@ element('start').addEventListener('click', () => run(async current => {
   const result = await api(settings, '/bind', {session_id: sessionId, url});
   if (!current()) return;
   if (!/^bind_[0-9a-f]{32}$/.test(result.binding_id) || result.url !== url) throw new Error('bridge_response_invalid');
-  await control({type: 'start', binding: {id: result.binding_id, sessionId, tabId: tab.id, url, enabled: true, expiresAt: Date.now() + 8 * 3600000}});
+  await control({type: 'start', binding: {id: result.binding_id, sessionId, tabId: tab.id, url, enabled: true, continueAfterTerminal, expiresAt: Date.now() + 8 * 3600000}});
   if (current()) show('enabled');
 }));
 element('stop').addEventListener('click', async () => {

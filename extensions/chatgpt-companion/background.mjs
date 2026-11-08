@@ -38,11 +38,13 @@ export async function tick() {
       const tab = await chrome.tabs.get(binding.tabId);
       if (canonicalChat(tab.url) !== binding.url) return await status('wrong_chat', false);
     } catch {return await status('wrong_chat', false);}
-    const state = await api(settings, '/state?binding_id=' + encodeURIComponent(binding.id));
-    if (state.url !== binding.url) return await status('wrong_chat', false);
     let page;
-    try {page = await chrome.tabs.sendMessage(binding.tabId, {type: 'probe', url: binding.url});}
+    try {page = await chrome.tabs.sendMessage(binding.tabId, {type: 'probe', url: binding.url, allowInterrupted: binding.continueAfterTerminal === true});}
     catch {return await status('page_unavailable', false);}
+    const replyKey = binding.continueAfterTerminal === true && (page.hasAssistant || page.interrupted) ? page.assistantKey : null;
+    const state = await api(settings, '/state?binding_id=' + encodeURIComponent(binding.id)
+      + (replyKey ? '&reply_key=' + encodeURIComponent(replyKey) : ''));
+    if (state.url !== binding.url) return await status('wrong_chat', false);
     if (state.pending) {
       const {pending} = await chrome.storage.local.get('pending');
       if (pending?.id === state.pending.id && pending.outcome === 'confirmed') {
@@ -57,26 +59,28 @@ export async function tick() {
       }
       return await status('send_unconfirmed', false);
     }
-    if (state.state === 'complete') return await status('complete', false);
+    if (['complete', 'interrupted'].includes(state.state) && binding.continueAfterTerminal !== true) return await status(state.state, false);
     if (['blocked', 'paused'].includes(state.state)) return await status(state.state, false);
     if (page.reason === 'unsupported_page') return await status('unsupported_page', false);
     if (state.state === 'offline') return await status('offline');
     if (state.state === 'working') return await status('waiting_executor');
     if (!page.ready) return await status(page.reason || 'waiting_reply');
-    if (!page.hasAssistant) return await status('reply_unrecognized');
-    let phase = state.state === 'image' ? 'generate' : 'continue';
+    if (!page.hasAssistant && !(replyKey && page.interrupted)) return await status('reply_unrecognized');
+    let phase = state.state === 'complete' ? 'next_task' : state.state === 'interrupted' ? 'resume' : state.state === 'image' ? 'generate' : 'continue';
     if (phase === 'generate' && state.sent_phases.includes('generate')) {
-      if (page.hasImage && page.assistantKey !== binding.imageBaseline) phase = 'deliver';
+      if (replyKey && page.interrupted && state.sent_phases.includes('deliver')) phase = 'resume';
+      else if (page.hasImage && page.assistantKey !== binding.imageBaseline) phase = 'deliver';
+      else if (replyKey && page.interrupted) phase = 'resume';
       else return await status('waiting_progress');
     }
-    if (state.sent_phases.includes(phase)) return await status('waiting_progress');
+    if (state.sent_phases.includes(phase)) return await status(['next_task', 'resume'].includes(phase) ? 'waiting_next_task' : 'waiting_progress');
     // 页面连续两次空闲才领取发送意图，避免把短暂控件切换当作生成结束。
     if (binding.idleKey !== page.assistantKey || Date.now() - (binding.idleSince || 0) < 3000) {
       await editBinding(binding.id, current => ({...current, idleKey: page.assistantKey,
         idleSince: current.idleKey === page.assistantKey ? current.idleSince : Date.now()}));
       return await status('stabilizing');
     }
-    const dispatch = await api(settings, '/claim', {binding_id: binding.id, milestone: state.milestone, phase});
+    const dispatch = await api(settings, '/claim', {binding_id: binding.id, milestone: state.milestone, phase, ...(replyKey ? {reply_key: replyKey} : {})});
     const {binding: current} = await chrome.storage.local.get('binding');
     if (current?.id !== binding.id || !current.enabled) {
       await api(settings, '/receipt', {binding_id: binding.id, id: dispatch.id, outcome: 'not_sent'});
@@ -85,7 +89,7 @@ export async function tick() {
     await chrome.storage.local.set({pending: dispatch});
     if (phase === 'generate') await editBinding(binding.id, value => ({...value, imageBaseline: page.assistantKey}));
     let result;
-    try {result = await chrome.tabs.sendMessage(binding.tabId, {type: 'dispatch', url: binding.url, prompt: dispatch.prompt});}
+    try {result = await chrome.tabs.sendMessage(binding.tabId, {type: 'dispatch', url: binding.url, prompt: dispatch.prompt, allowInterrupted: binding.continueAfterTerminal === true, ...(replyKey ? {assistantKey: replyKey} : {})});}
     catch {result = {outcome: 'unknown', reason: 'send_unconfirmed'};}
     await chrome.storage.local.set({pending: {...dispatch, outcome: result.outcome || 'unknown'}});
     await api(settings, '/receipt', {binding_id: binding.id, id: dispatch.id, outcome: result.outcome || 'unknown'});

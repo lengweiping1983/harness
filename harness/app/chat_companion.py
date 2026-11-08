@@ -12,7 +12,7 @@ from ..core.language import current_language
 from ..execution.config import ExecutionConfig
 from ..core.errors import HarnessError
 from ..llm.routes import mask_api_key
-from ..mcp_server.companion import create_server
+from ..mcp_server.companion import PROTOCOL_VERSION, create_server
 from .mcp_errors import McpServiceError
 from .mcp_tunnel import _unique
 
@@ -63,7 +63,7 @@ class ChatCompanionService:
         try:
             with build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=.3) as response:
                 value = json.loads(response.read(4096))
-            if (isinstance(value, dict) and value.get('protocol') == 'harness-chat-companion' and value.get('protocol_version') == 1
+            if (isinstance(value, dict) and value.get('protocol') == 'harness-chat-companion' and value.get('protocol_version') == PROTOCOL_VERSION
                     and value.get('executor') in {'ready', 'offline', 'missing', 'invalid'}):
                 return value
         except (HTTPError, URLError, OSError, ValueError, TypeError):

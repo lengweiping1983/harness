@@ -5,8 +5,8 @@ const folder = new URL('../../extensions/chatgpt-companion/', import.meta.url)
 const adapter = await readFile(new URL('page.mjs', folder), 'utf8')
 const entry = `import {inspectPage,sendOnce} from '/__companion_adapter.mjs';
 window.expected='https://chatgpt.com/c/00000000-0000-0000-0000-000000000001';window.current=window.expected;
-window.composing=false;window.active=false;window.probe=()=>inspectPage(document,window.expected,window.current,window.composing,window.active);
-window.send=prompt=>sendOnce(document,window.expected,()=>window.current,prompt,filled=>!window.composing&&!window.active&&(filled||window.probe().ready));
+window.composing=false;window.active=false;window.probe=(allowInterrupted=false)=>inspectPage(document,window.expected,window.current,window.composing,window.active,allowInterrupted);
+window.send=(prompt,allowInterrupted=false)=>sendOnce(document,window.expected,()=>window.current,prompt,filled=>!window.composing&&!window.active&&(filled||window.probe(allowInterrupted).ready),undefined,allowInterrupted);
 document.querySelector('[data-composer-submit]').onclick=event=>{event.preventDefault();const editor=document.querySelector('#mobile-composer-prompt');const node=document.createElement('div');node.dataset.messageAuthorRole='user';node.textContent=editor.value;document.body.append(node);editor.value='';};
 window.ready=true;`
 const html = `<html><body><div data-message-author-role="assistant" data-message-id="assistant-1">Ready.</div><form data-mobile-composer onsubmit="return false"><textarea id="mobile-composer-prompt"></textarea><input type="file" multiple><button type="submit" data-composer-submit><span data-composer-send-icon>Send</span><span data-composer-loading-icon hidden>Loading</span><span data-composer-stop-icon hidden>Stop</span></button></form><script type="module" src="/__companion_entry.js"></script></body></html>`
@@ -100,12 +100,18 @@ await browserScenario(async({server,browser})=>{
  assert.equal((await page.evaluate(()=>window.send('[Harness account-fixture] continue'))).outcome,'confirmed')
  assert.equal(await page.locator('h4[data-conversation-role="user"]').count(),2)
  assert.equal(await page.locator('form[hidden] [role="textbox"]').textContent(),'Hidden draft')
+ await page.locator('[data-talvt-turn-state]').evaluate(node=>node.setAttribute('data-talvt-turn-state','cancelled'))
+ assert.equal((await page.evaluate(()=>window.probe())).ready,false)
+ assert.equal((await page.evaluate(()=>window.probe(true))).ready,true)
+ assert.equal((await page.evaluate(()=>window.send('继续',true))).outcome,'confirmed')
+ assert.equal(await page.locator('h4[data-conversation-role="user"]').count(),3)
+ await page.locator('[data-talvt-turn-state]').evaluate(node=>node.setAttribute('data-talvt-turn-state','complete'))
  await page.evaluate(()=>{
   const editor=document.querySelector('form:not([hidden]) [role="textbox"]')
   editor.addEventListener('input',()=>{const attachment=document.createElement('div');attachment.dataset.testid='attachment-preview';editor.parentElement.append(attachment)},{once:true})
  })
  assert.equal((await page.evaluate(()=>window.send('[Harness protected-fixture] continue'))).outcome,'unknown')
- assert.equal(await page.locator('h4[data-conversation-role="user"]').count(),2)
+ assert.equal(await page.locator('h4[data-conversation-role="user"]').count(),3)
  assert.deepEqual(errors,[])
  console.log('Chat companion: real DOM send receipt, drafts, attachments, IME, user input, wrong chat and changed controls passed')
 },{vite:{plugins:[{name:'chat-companion-fixture',resolveId(id){if(['/__companion_adapter.mjs','/__companion_entry.js'].includes(id))return id},load(id){if(id==='/__companion_adapter.mjs')return adapter;if(id==='/__companion_entry.js')return entry},configureServer(server){server.middlewares.use('/__companion',async(_req,res)=>{res.setHeader('Content-Type','text/html');res.end(html)})}}]}})

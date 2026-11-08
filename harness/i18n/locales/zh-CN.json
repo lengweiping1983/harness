@@ -4793,6 +4793,7 @@
   "ui.companion.failed": "接续启动失败，请查看错误信息。",
   "ui.companion.address": "连接地址",
   "ui.companion.token": "配对码",
+  "ui.companion.extensionLabel": "扩展目录",
   "ui.companion.extension": "扩展目录（{version}）",
   "ui.companion.install": "在 Chrome 或 Edge 的扩展管理中加载此目录，然后刷新 ChatGPT 页面。",
   "ui.companion.invalidConfig": "接续桥设置无效；只允许启用状态和 1024～65535 的本机端口，原文件已保留。",

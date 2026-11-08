@@ -191,6 +191,17 @@ it('uses the same controlled input for pairing tokens and keeps unavailable reve
   expect(writes).toEqual([{path: '/api/v1/mcp-service/companion/token', body: undefined}])
 })
 
+it('omits empty extension version parentheses in the companion settings label', async () => {
+  prepareCompanion()
+  saved.companion.extension_version = ''
+  for (const locale of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(locale)
+    const label = text(companionTree())
+    expect(label).toContain(t('ui.companion.extensionLabel'))
+    expect(label).not.toMatch(/Extension folder \(\)|扩展目录（\）/)
+  }
+})
+
 function prepareCompanion() {
   saved.companion = {enabled: true, port: 8877, status: 'stopped', endpoint: 'http://127.0.0.1:8877/', token_mask: '',
     executor: 'offline', external: false, error: '', error_copy: null, extension_path: '/fixture/extension', extension_version: '1.0.0'}

@@ -16,9 +16,10 @@ if str(ROOT) not in sys.path:
 from harness.core.language import current_language
 from harness.execution.config import ExecutionConfig
 from harness.i18n import tr
+from harness.mcp_server.companion import PROTOCOL_VERSION
 
 
-PROTOCOL = {'protocol': 'harness-chat-companion', 'protocol_version': 1}
+PROTOCOL = {'protocol': 'harness-chat-companion', 'protocol_version': PROTOCOL_VERSION}
 
 
 def _token(config: ExecutionConfig) -> str | None:
