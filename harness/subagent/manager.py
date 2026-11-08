@@ -68,10 +68,16 @@ def validate_spawn_text(prompt: Any, description: Any) -> tuple[str, str]:
 
 
 def validate_wait_timeout(value: Any) -> float:
-    """等待时间只接受有限非负数，零秒表示立即核对状态。"""
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+    """等待时间只接受可表示为有限浮点数的非负值，零秒表示立即核对状态。"""
+    if type(value) not in (int, float):
         raise ValueError(tr('subagent.wait.invalid_timeout'))
-    return value
+    try:
+        timeout = float(value)
+    except OverflowError:
+        raise ValueError(tr('subagent.wait.invalid_timeout')) from None
+    if not math.isfinite(timeout) or timeout < 0:
+        raise ValueError(tr('subagent.wait.invalid_timeout'))
+    return timeout
 
 
 def validate_wait_ids(value: Any) -> list[str]:
