@@ -202,6 +202,88 @@ class DagSchedulerArtifactIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record.status, "completed")
         self.assertTrue(record.settled)
 
+    async def test_dag_work_attention_blocks_new_stages_until_active_work_settles(self):
+        received, accepted = self.accept_event()
+        await self.host.execution.route_trigger(accepted["ticket_id"], received["trigger_id"])
+        mission = self.rows("SELECT * FROM missions WHERE ticket_id=?", (accepted["ticket_id"],))[0]
+        roots = self.rows(
+            "SELECT assignment.*,job.node_id FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? AND job.role='work' ORDER BY job.node_id",
+            (mission["mission_id"],),
+        )
+        self.assertEqual({row["node_id"] for row in roots}, {"source-a", "source-b"})
+        for assignment in roots:
+            await self.wait_for_run(assignment)
+            workspace = self.harness.worktrees.get(assignment["workspace_id"])
+            (Path(workspace["path"]) / f"{assignment['node_id']}.txt").write_text(
+                assignment["node_id"], encoding="utf-8",
+            )
+        target = next(row for row in roots if row["node_id"] == "source-a")
+        original_inspect = self.adapter.inspect
+
+        def inspect(worker, assignment):
+            snapshot = original_inspect(worker, assignment)
+            if assignment["assignment_id"] == target["assignment_id"]:
+                output = json.dumps({
+                    "status": "attention", "summary": "Work is ready for a human decision.",
+                    "question": "Which deployment target should be used?",
+                    "options": ["staging", "production"],
+                })
+                return {**snapshot, "output_text": output, "output_hash": _hash(output)}
+            return snapshot
+
+        self.adapter.inspect = inspect
+        try:
+            result = await self.host.execution.reconcile(target["assignment_id"])
+        finally:
+            self.adapter.inspect = original_inspect
+        self.assertEqual(result["state"], "succeeded")
+        attentions = self.host.execution.list_attentions(accepted["ticket_id"], state="open")
+        self.assertEqual(len(attentions), 1)
+        self.assertEqual(attentions[0]["assignment_id"], target["assignment_id"])
+        self.assertEqual(attentions[0]["question_text"], "Which deployment target should be used?")
+        self.assertEqual(self.rows("SELECT state FROM missions WHERE mission_id=?", (mission["mission_id"],))[0]["state"], "running")
+
+        tick = await self.host.execution.schedule_dag_missions(limit=20)
+        self.assertFalse(tick["errors"])
+        self.assertFalse(self.rows(
+            "SELECT assignment.assignment_id FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? AND job.role IN ('integrate','review')",
+            (mission["mission_id"],),
+        ))
+
+        answer = self.host.sources.receive_local("local-source", {
+            "event_id": "dag-attention-human-answer",
+            "thread_id": "dag-real-artifacts",
+            "text": "Use staging for the first deployment.",
+            "occurred_at": "2026-11-07T08:05:00Z",
+            "metadata": {"actor_id": "human:1", "actor_kind": "human", "addressed": "direct"},
+        })
+        self.assertIn(accepted["ticket_id"], answer["fanout_ticket_ids"])
+        resolved = self.host.execution.resolve_attention(
+            attentions[0]["attention_id"], answer["trigger_id"],
+        )
+        self.assertEqual(resolved["state"], "answered")
+        self.assertEqual(self.host.execution.list_attentions(accepted["ticket_id"], state="open"), [])
+        answered_tick = await self.host.execution.schedule_dag_missions(limit=20)
+        self.assertFalse(answered_tick["errors"])
+        self.assertFalse(self.rows(
+            "SELECT assignment.assignment_id FROM assignments AS assignment "
+            "JOIN jobs AS job ON job.job_id=assignment.job_id "
+            "WHERE job.mission_id=? AND job.role IN ('integrate','review')",
+            (mission["mission_id"],),
+        ))
+
+        other = next(row for row in roots if row["node_id"] == "source-b")
+        settled = await self.host.execution.reconcile(other["assignment_id"])
+        self.assertEqual(settled["state"], "succeeded")
+        self.assertEqual(self.rows("SELECT state FROM missions WHERE mission_id=?", (mission["mission_id"],))[0]["state"], "blocked")
+        final_attention = self.host.execution.list_attentions(accepted["ticket_id"])[0]
+        self.assertEqual(final_attention["attention_id"], attentions[0]["attention_id"])
+        self.assertEqual(final_attention["state"], "answered")
+
     async def test_shared_dag_scheduler_delivers_real_binary_and_deletions_and_recovers_lost_import_receipt(self):
         received, accepted = self.accept_event()
         started = await self.host.execution.route_trigger(
@@ -663,7 +745,20 @@ class DagSchedulerArtifactIntegrationTests(unittest.IsolatedAsyncioTestCase):
             staged = next((m for m in messages if '"max_work_turns":2' in m), None)
             review = next((m for m in messages if "Host-owned independent Reviewer:" in m), None)
             if staged:
-                frame, _ = json.JSONDecoder().raw_decode(staged.rsplit("\n\n", 1)[-1])
+                decoder = json.JSONDecoder()
+                frame = None
+                for position, character in enumerate(staged):
+                    if character != "{":
+                        continue
+                    try:
+                        candidate, _ = decoder.raw_decode(staged[position:])
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(candidate, dict) and candidate.get("max_work_turns") == 2 and "attempt" in candidate:
+                        frame = candidate
+                        break
+                if frame is None:
+                    raise AssertionError("checkpoint frame with attempt and max_work_turns was not found")
                 seen.append(("work", frame["attempt"]))
                 output = {"status": "continue" if frame["attempt"] == 1 else "ready",
                           "summary": "Preserved first change" if frame["attempt"] == 1 else "Both changes ready",

@@ -185,6 +185,8 @@ class CoordinatorDagScheduler:
         mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
         if mission["state"] not in {"running", "integrating", "reviewing"}:
             return []
+        if self._has_attention(mission_id):
+            return []
         stage_state = mission["state"]
         allowed_roles = {"running": {"work"}, "integrating": {"integrate"}, "reviewing": {"review"}}[stage_state]
 
@@ -353,7 +355,53 @@ class CoordinatorDagScheduler:
             raise HarnessError("Plan node instruction is invalid or does not match its hash", code="superagent/plan-invalid")
         return base_prompt + "\n\nWork unit instruction:\n" + instruction
 
-    def _role_prompt(self, base_prompt, mission, job, attempt_no):
+    def _work_disposition_prompt(self, mission, input_ids):
+        e = self._execution
+        ticket = e._authorization.ticket(mission["ticket_id"])
+        origin = (ticket or {}).get("origin_trigger_id")
+        eligible = []
+        if input_ids and isinstance(origin, str):
+            marks = ",".join("?" for _ in input_ids)
+            rows = e._read_all(
+                "SELECT trigger_id FROM ticket_inputs WHERE ticket_id=? "
+                f"AND input_id IN ({marks}) AND context_only=0 AND state<>'handed_back' "
+                "AND trigger_id<>? ORDER BY created_at,input_id",
+                (mission["ticket_id"], *input_ids, origin),
+            )
+            eligible = list(dict.fromkeys(row["trigger_id"] for row in rows))
+        return tr("superagent.mission.work_disposition",
+                  context=_json({"eligible_handback_trigger_ids": eligible}))
+
+    def _handback_status(self, assignment, trigger_id, reason):
+        e = self._execution
+        if not isinstance(trigger_id, str) or not trigger_id or not isinstance(reason, str) or not reason.strip():
+            return "invalid"
+        ticket = e._authorization.ticket(assignment["ticket_id"])
+        if ticket is None or ticket.get("state") != "open" or ticket.get("origin_trigger_id") == trigger_id:
+            return "invalid"
+        row = e._input(assignment["ticket_id"], trigger_id)
+        if row is None or row["context_only"]:
+            return "invalid"
+        if row["state"] == "handed_back":
+            return "applied" if row.get("handback_reason") == reason else "invalid"
+        delivery = e._read_one(
+            "SELECT delivery.state FROM input_deliveries AS delivery "
+            "JOIN assignments AS owner ON owner.assignment_id=delivery.assignment_id "
+            "JOIN jobs AS job ON job.job_id=owner.job_id "
+            "WHERE delivery.input_id=? AND delivery.assignment_id=? "
+            "AND job.mission_id=? AND job.role='work'",
+            (row["input_id"], assignment["assignment_id"], assignment["mission_id"]),
+        )
+        if delivery is None or delivery["state"] != "applied":
+            return "invalid"
+        other = e._read_one(
+            "SELECT COUNT(*) AS total FROM input_deliveries WHERE input_id=? "
+            "AND assignment_id<>? AND state NOT IN ('rejected','unapplied')",
+            (row["input_id"], assignment["assignment_id"]),
+        )
+        return "ready" if other["total"] == 0 else "shared"
+
+    def _role_prompt(self, base_prompt, mission, job, attempt_no, *, input_ids=()):
         guidance = self._mission_instructions.applied_context(
             mission["mission_id"], job_id=job["job_id"] if job["role"] == "work" else None,
         ) if self._mission_instructions is not None else {"items": []}
@@ -368,9 +416,10 @@ class CoordinatorDagScheduler:
                     previous = self._assignment_for_job(job["job_id"])
                     with self._execution._store.transaction() as db:
                         frame["checkpoint"] = frozen_work_checkpoint(db, previous)
-                return tr("superagent.mission.checkpoint", frame=_json(frame))
-            return base_prompt + ("\n\n" + tr("superagent.mission.applied_context", context=_json(guidance))
-                                  if guidance["items"] else "")
+                return tr("superagent.mission.checkpoint", frame=_json(frame)) + "\n\n" + self._work_disposition_prompt(mission, input_ids)
+            return (base_prompt + ("\n\n" + tr("superagent.mission.applied_context", context=_json(guidance))
+                                  if guidance["items"] else "") + "\n\n"
+                    + self._work_disposition_prompt(mission, input_ids))
         if guidance["items"]:
             base_prompt += "\n\n" + tr("superagent.mission.applied_context", context=_json(guidance))
         plan, _, _, _ = self._load_plan(mission)
@@ -539,7 +588,7 @@ class CoordinatorDagScheduler:
                     raise HarnessError(tr("superagent.corrupt"), code="superagent/plan-corrupt")
             else:
                 node_prompt = self._node_prompt(base_prompt, node)
-            prompt = self._role_prompt(node_prompt, mission, job, attempt_no)
+            prompt = self._role_prompt(node_prompt, mission, job, attempt_no, input_ids=input_ids)
             assignment = self._create_pending_assignment(
                 mission, job, worker, prompt, input_ids, attempt_no=attempt_no,
             )
@@ -1295,6 +1344,16 @@ class CoordinatorDagScheduler:
         if job is None:
             raise LookupError("Assignment Job not found")
         mission_id = job["mission_id"]
+        disposition = e._parse_worker_report(snapshot.get("output_text", "")) if job["role"] == "work" else {"status": "completed"}
+        if disposition.get("status") == "handback":
+            if self._handback_status(
+                current, disposition.get("handback_trigger_id"), disposition.get("handback_reason", ""),
+            ) not in {"ready", "applied"}:
+                disposition = {
+                    "status": "attention", "summary": disposition.get("summary", ""),
+                    "question": disposition.get("handback_reason", "") or "A human decision is required to route this follow-up.",
+                    "options": [],
+                }
         if job["role"] == "review":
             return await self.finish_review_success(current, snapshot, evidence_ids)
         if current["state"] in {"accepted", "running"}:
@@ -1317,7 +1376,8 @@ class CoordinatorDagScheduler:
         mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
         _, nodes, _, _ = self._load_plan(mission)
         checkpoint = None
-        if job["role"] == "work" and nodes[job["node_id"]].get("max_work_turns") is not None:
+        if (job["role"] == "work" and nodes[job["node_id"]].get("max_work_turns") is not None
+                and disposition.get("status") not in {"attention", "handback"}):
             try:
                 raw = snapshot.get("output_text")
                 _text(raw, "checkpoint", limit=65536)
@@ -1371,6 +1431,10 @@ class CoordinatorDagScheduler:
             e._mark_unknown(current, f"artifact capture outcome is uncertain: {type(exc).__name__}", error_ref=f"artifact-capture:{current['assignment_id']}")
             return {"state": "unknown", "assignment_id": current["assignment_id"]}
 
+        attention_id = (
+            e._attention_id(current, current["goal_ref"], disposition.get("question", ""))
+            if disposition.get("status") == "attention" else None
+        )
         report_body = {
             "kind": "work_artifact_report", "assignment_id": current["assignment_id"],
             "run_id": current["run_id"], "artifact_id": artifact["artifact_id"],
@@ -1378,6 +1442,12 @@ class CoordinatorDagScheduler:
             "commit_id": artifact["commit_id"], "output_ref": f"artifact:{artifact['artifact_id']}",
             "output_hash": artifact["manifest_hash"], "evidence_ids": list(evidence_ids),
             "run_output_hash": snapshot.get("output_hash"),
+            "disposition": disposition.get("status", "completed"),
+            "summary": disposition.get("summary", ""),
+            "question": disposition.get("question", ""), "options": disposition.get("options", []),
+            "handback_reason": disposition.get("handback_reason", ""),
+            "handback_trigger_id": disposition.get("handback_trigger_id", ""),
+            "attention_id": attention_id,
         }
         if checkpoint is not None:
             report_body.update(checkpoint=checkpoint, checkpoint_output=snapshot["output_text"])
@@ -1488,10 +1558,40 @@ class CoordinatorDagScheduler:
                 or artifact["tree_hash"] != report.get("tree_hash")):
             raise HarnessError("Succeeded Work Assignment lost its frozen Artifact", code="superagent/artifact-corrupt")
         mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (job["mission_id"],))
+        if report.get("disposition") in {"attention", "handback"}:
+            mandate_valid, control_allows = self._mission_authorization(mission)
+            if mandate_valid and control_allows:
+                disposition = report["disposition"]
+                if disposition == "handback":
+                    status = self._handback_status(
+                        current, report.get("handback_trigger_id"), report.get("handback_reason", ""),
+                    )
+                    if status == "ready":
+                        try:
+                            e._authorization.handback(
+                                current["ticket_id"], report["handback_trigger_id"],
+                                report["handback_reason"], actor=_ACTOR,
+                                assignment_id=current["assignment_id"],
+                            )
+                        except PermissionError:
+                            ticket = e._authorization.ticket(current["ticket_id"])
+                            disposition = "attention" if ticket and ticket.get("state") == "open" else "completed"
+                    elif status != "applied":
+                        ticket = e._authorization.ticket(current["ticket_id"])
+                        disposition = "attention" if ticket and ticket.get("state") == "open" else "completed"
+                if disposition == "attention":
+                    question = report.get("question") or report.get("handback_reason", "")
+                    attention_id = e._attention_id(current, current["goal_ref"], question)
+                    if report.get("attention_id") not in {None, attention_id}:
+                        raise HarnessError("Frozen DAG Attention identity does not match its question", code="superagent/attention-conflict")
+                    e._create_attention(current, current["goal_ref"], question, report.get("options", []))
+                    self._block_job(job, "attention", assignment=current)
+                    self._advance_mission_state(job["mission_id"])
+                    return
         _, nodes, _, _ = self._load_plan(mission)
         maximum = nodes[job["node_id"]].get("max_work_turns") if job["role"] == "work" else None
         checkpoint = None
-        if maximum is not None:
+        if maximum is not None and report.get("disposition") not in {"attention", "handback"}:
             with e._store.transaction() as db:
                 checkpoint = frozen_work_checkpoint(db, current)
         if job["state"] == "checkpointed":
@@ -1735,6 +1835,12 @@ class CoordinatorDagScheduler:
             },
         )
 
+    def _has_attention(self, mission_id):
+        return self._execution._read_one(
+            "SELECT 1 AS present FROM attentions WHERE mission_id=? LIMIT 1",
+            (mission_id,),
+        ) is not None
+
     def _advance_mission_state(self, mission_id):
         e = self._execution
         mission = e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
@@ -1747,6 +1853,9 @@ class CoordinatorDagScheduler:
         if mission is None or mission["state"] not in {"running", "integrating", "reviewing"}:
             return
         if self._active_assignments(mission_id):
+            return
+        if self._has_attention(mission_id):
+            self._block_mission(mission, "attention")
             return
 
         jobs = self._load_jobs(mission_id, mission["plan_revision"])

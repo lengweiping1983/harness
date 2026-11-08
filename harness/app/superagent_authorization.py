@@ -1713,7 +1713,8 @@ class CoordinatorAuthorizationEngine:
             )
             return True
 
-    def handback(self, ticket_id: str, trigger_id: str, reason: str, *, actor: object) -> dict[str, Any]:
+    def handback(self, ticket_id: str, trigger_id: str, reason: str, *, actor: object,
+                 assignment_id: str | None = None) -> dict[str, Any]:
         ticket_id = _text(ticket_id, "ticket_id")
         trigger_id = _text(trigger_id, "trigger_id")
         reason = _text(reason, "reason")
@@ -1730,6 +1731,35 @@ class CoordinatorAuthorizationEngine:
                 raise PermissionError("a Ticket cannot hand back its origin Trigger")
             if input_row["context_only"]:
                 raise PermissionError("context-only input cannot be handed back")
+            if assignment_id is not None:
+                assignment_id = _text(assignment_id, "assignment_id")
+                delivery = db.execute(
+                    "SELECT delivery.state,job.role,mission.ticket_id,mission.state AS mission_state,"
+                    "control.mode AS control_mode FROM input_deliveries AS delivery "
+                    "JOIN assignments AS assignment ON assignment.assignment_id=delivery.assignment_id "
+                    "JOIN jobs AS job ON job.job_id=assignment.job_id "
+                    "JOIN missions AS mission ON mission.mission_id=job.mission_id "
+                    "LEFT JOIN mission_controls AS control ON control.mission_id=mission.mission_id "
+                    "WHERE delivery.input_id=? AND delivery.assignment_id=?",
+                    (input_row["input_id"], assignment_id),
+                ).fetchone()
+                if (delivery is None or delivery["state"] != "applied"
+                        or delivery["role"] != "work" or delivery["ticket_id"] != ticket_id
+                        or delivery["mission_state"] not in {"running", "integrating", "reviewing", "unknown"}
+                        or delivery["control_mode"] != "running" or ticket["state"] != "open"):
+                    raise PermissionError("only an active authorized Work Assignment may hand back this input")
+                mandate = db.execute(
+                    "SELECT * FROM mandates WHERE mandate_id=?", (ticket["mandate_id"],),
+                ).fetchone()
+                if mandate is None or self._mandate_status(db, mandate, actor=actor, now=_now()) not in {"valid", "affected"}:
+                    raise PermissionError("Ticket Mandate no longer authorizes this handback")
+                other = db.execute(
+                    "SELECT COUNT(*) AS total FROM input_deliveries WHERE input_id=? "
+                    "AND assignment_id<>? AND state NOT IN ('rejected','unapplied')",
+                    (input_row["input_id"], assignment_id),
+                ).fetchone()
+                if other["total"]:
+                    raise PermissionError("a shared input cannot be handed back by one Assignment")
             if input_row["state"] == "handed_back":
                 return {"state": "duplicate", "requeued": False}
             if ticket["state"] == "ended" and ticket["ended_by"] == "human":
