@@ -467,7 +467,7 @@ Phase 3 范围之外的后续接线：
 - CoordinatorArtifacts 通过原 Run、工具与后台收尾证据捕获真实文件。Capture / Import 使用持久 Effect 及原生回执，未知只回查原操作；确认尚未开始的失败 Effect 才可获新代次。Manifest 限制为最多 4096 文件、单文件 16 MiB、总内容 64 MiB，Git 文件及删除列表各限 2 MiB，超限保留原件并报错。
 - 独立 Review 绑定当前 Integrator 候选、Acceptance Hash 和原生 Evidence；有限修正保留旧候选和 Verdict，只创建新 Assignment，不改写图。最终结算事务再次核对 Mandate、MissionControl、计划及 Watchdog。
 - WatchdogSnapshot 与逐 Assignment 原 Run 游标持久化；Schema v19 将账本进度绑定 SQLite 实际事实投影。活动不完整、检查失败或重启不解除阻断，真实新事件／账本进度才可恢复。Harness 原生毫秒时间仅在监督投影边界规范化，原始事件与 Evidence 不改写。
-- CoordinatorMissionInstruction 提供显式 `deliver_instruction / reconcile_instruction / instruction_receipt`：绑定同 Ticket 的非 context-only Trigger、来源、Human Actor、Mission / Job / Assignment / 原 Run / Turn；原生接受锁内复核授权，accepted 与 applied 分开，unknown 不重放。生产跟进和阶段间上下文接线按 Phase 4.5 继续。
+- CoordinatorMissionInstruction 提供显式 `deliver_instruction / reconcile_instruction / instruction_receipt`：绑定同 Ticket 的非 context-only Trigger、来源、Human Actor、Mission / Job / Assignment / 原 Run / Turn；原生接受锁内复核授权，accepted 与 applied 分开，unknown 不重放。`instruction_context` 已只读投影当前计划的已应用指令，并由同一 Scheduler 实际传入后续 Work 阶段、Integrator 和 Reviewer；大小与作用域规则见产品页。生产跟进和周期性指令回查按 Phase 4.5 继续。
 - 保留已登记 Schema 迁移及有效业务回归；旧生产 Router / MissionStore / 信道仍待统一入口替换后退役。不开发旧版运行数据导入、隐式兼容、双轨运行或回退工具。
 
 剩余开发为 Phase 4.5 的持续协作与既有信道 Outbox Sender，以及 Phase 4.6 的 CLI 切换、默认路由与旧编排退役；线上模型质量、外部账号、跨平台实机和长期负载不在当前离线定向验收结论内。

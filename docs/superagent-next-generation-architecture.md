@@ -626,6 +626,8 @@ Watchdog 接收的原生日志时间在执行观察边界从 Unix 毫秒规范�
 - GitHub / Feishu 以 Source / Channel Adapter 接入统一 Trigger、Cursor、正文解析、Outbox Sender 和周期性回查，不保留旧信道的独立业务账本或依赖旧 Results 获取候选。
 - Candidate、pending、sent、unknown 严格区分；未找到、重复匹配或分页不完整均不能授权重发。文件仅承担输入或投影职责。
 
+**当前状态（2026-11-08）：开发中。** 已完成首块“已应用指令上下文”：同一 Host 的持久 MissionInstruction 回执由 Scheduler 实际消费，Work 阶段按 Job 隔离，集成及独立复核获得有界目标上下文；重启不重投，产品提示实际英→中→英切换，正文原样保留。定向回归见 `tests/test_superagent_unified_instruction_context.py`。普通来源跟进、Attention / Handback 的完整服务接线、既有信道生产 Sender 与周期性回查仍待完成，Phase 4.5 尚未验收。
+
 **出口：** 本地、GitHub 和飞书通过统一服务完成授权、工作、跟进和结果交付；受控 Provider 验证重复事件、发送后丢响应、重启及撤权不会重复执行或发送。
 
 #### Phase 4.6：唯一入口收口与旧编排清除

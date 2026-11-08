@@ -588,6 +588,69 @@ class CoordinatorMissionInstruction:
         row = self.get(request_id)
         return None if row is None else self._public(row)
 
+    def applied_context(self, mission_id: str, *, job_id: str | None = None) -> dict:
+        """只投影当前计划中已应用的原指令，优先保留最近内容并显式报告截断。"""
+        _text(mission_id, "mission_id")
+        if job_id is not None:
+            _text(job_id, "job_id")
+        with self._store.transaction() as db:
+            mission = db.execute("SELECT plan_revision FROM missions WHERE mission_id=?", (mission_id,)).fetchone()
+            if mission is None:
+                raise LookupError(tr("superagent.corrupt"))
+            if job_id is not None and db.execute(
+                "SELECT 1 FROM jobs WHERE job_id=? AND mission_id=? AND plan_revision=?",
+                (job_id, mission_id, mission["plan_revision"]),
+            ).fetchone() is None:
+                raise HarnessError(tr("superagent.conflict"), code="superagent/instruction-scope")
+            where = ("instruction.mission_id=? AND instruction.state='accepted' "
+                     "AND job.plan_revision=?")
+            params = [mission_id, mission["plan_revision"]]
+            if job_id is not None:
+                where += " AND instruction.job_id=?"
+                params.append(job_id)
+            source = (" FROM mission_instructions instruction JOIN jobs job ON job.job_id=instruction.job_id WHERE " + where)
+            invalid = db.execute(
+                "SELECT instruction.*" + source
+                + " AND (json_type(instruction.receipt_json,'$.native_receipt.status') IS NOT 'text' "
+                "OR json_extract(instruction.receipt_json,'$.native_receipt.status') NOT IN ('pending','applied','unapplied')) LIMIT 1",
+                params,
+            ).fetchone()
+            if invalid is not None:
+                self._decode(invalid)
+            applied = source + " AND json_extract(instruction.receipt_json,'$.native_receipt.status')='applied'"
+            total = db.execute("SELECT count(*)" + applied, params).fetchone()[0]
+            rows = db.execute("SELECT instruction.*" + applied + " ORDER BY instruction.rowid DESC LIMIT 16", params).fetchall()
+            items = []
+            for raw in rows:
+                row = self._decode(raw)
+                assignment = db.execute(
+                    "SELECT assignment.*,job.mission_id FROM assignments assignment "
+                    "JOIN jobs job ON job.job_id=assignment.job_id WHERE assignment.assignment_id=?",
+                    (row["assignment_id"],),
+                ).fetchone()
+                if (assignment is None or assignment["mission_id"] != mission_id
+                        or assignment["job_id"] != row["job_id"] or assignment["run_id"] != row["run_id"]):
+                    raise HarnessError(tr("superagent.corrupt"), code="superagent/instruction-corrupt")
+                native = row["receipt"]["native_receipt"]
+                text = row["payload"]["text"]
+                shown = text[:2048]
+                item = {
+                    "request_id": row["request_id"], "job_id": row["job_id"],
+                    "assignment_id": row["assignment_id"], "run_id": row["run_id"],
+                    "turn_id": row["turn_id"], "applied_seq": native["applied_seq"],
+                    "text": shown, "text_truncated": len(shown) < len(text),
+                }
+                # 整体预算包含序列化开销；不切断 UTF-8 字节，超长新指令仍保留有标记的摘要。
+                while shown and len(_json([*items, item]).encode("utf-8")) > 15000:
+                    shown = shown[:len(shown) // 2]
+                    item.update(text=shown, text_truncated=True)
+                if not shown:
+                    break
+                items.append(item)
+            items.reverse()
+            return {"items": items, "total": total, "has_more": total > len(items),
+                    "text_truncated": any(item["text_truncated"] for item in items)}
+
     async def reconcile(self, request_id: str) -> dict | None:
         """只查询原 request_id，不创建新投递。"""
         _text(request_id, "request_id")

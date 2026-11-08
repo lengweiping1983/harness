@@ -663,7 +663,7 @@ class DagSchedulerArtifactIntegrationTests(unittest.IsolatedAsyncioTestCase):
             staged = next((m for m in messages if '"max_work_turns":2' in m), None)
             review = next((m for m in messages if "Host-owned independent Reviewer:" in m), None)
             if staged:
-                frame, _ = json.JSONDecoder().raw_decode(staged[staged.index('{"attempt":'):])
+                frame, _ = json.JSONDecoder().raw_decode(staged.rsplit("\n\n", 1)[-1])
                 seen.append(("work", frame["attempt"]))
                 output = {"status": "continue" if frame["attempt"] == 1 else "ready",
                           "summary": "Preserved first change" if frame["attempt"] == 1 else "Both changes ready",

@@ -425,6 +425,9 @@ class _HostExecutionService:
     def instruction_receipt(self, request_id):
         with self.__host._operation():
             return self.__mission_instruction.receipt(request_id)
+    def instruction_context(self, mission_id, *, job_id=None):
+        with self.__host._operation():
+            return self.__mission_instruction.applied_context(mission_id, job_id=job_id)
     async def stop(self, assignment_id, *, reason):
         with self.__host._operation(): return await self.__service.stop(assignment_id, reason=reason)
     def report(self, assignment_id):
@@ -563,6 +566,7 @@ class CoordinatorHost:
                 store, self._authorization_service, self._source_service, executor_adapter,
                 admit_mission=self._execution_service._admit_mission,
             )
+            self._execution_service._dag_scheduler.set_mission_instructions(self._mission_instruction_service)
             self._artifacts_service = CoordinatorArtifacts(
                 store, executor_adapter, self._execution_service._dag_scheduler.admit_artifact_effect,
                 admit_effect=self._execution_service._dag_scheduler.admit_artifact_effect_in_transaction,

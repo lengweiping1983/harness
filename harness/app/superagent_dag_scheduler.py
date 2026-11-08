@@ -54,6 +54,7 @@ class CoordinatorDagScheduler:
         self._policy = policy
         self._watchdog = watchdog
         self._artifacts = None
+        self._mission_instructions = None
         self._capacity_lock = asyncio.Lock()
         self._reserved_global = 0
         self._reserved_by_mission = {}
@@ -64,6 +65,10 @@ class CoordinatorDagScheduler:
         ):
             raise TypeError("CoordinatorDagScheduler requires CoordinatorArtifacts")
         self._artifacts = artifacts
+
+    def set_mission_instructions(self, instructions):
+        """由同一宿主装配指令事实读取，不从旧引导文件推断上下文。"""
+        self._mission_instructions = instructions
 
     def uses_artifact_workflow(self, assignment):
         e = self._execution
@@ -349,19 +354,25 @@ class CoordinatorDagScheduler:
         return base_prompt + "\n\nWork unit instruction:\n" + instruction
 
     def _role_prompt(self, base_prompt, mission, job, attempt_no):
+        guidance = self._mission_instructions.applied_context(
+            mission["mission_id"], job_id=job["job_id"] if job["role"] == "work" else None,
+        ) if self._mission_instructions is not None else {"items": []}
         if job["role"] == "work":
             _, nodes, _, _ = self._load_plan(mission)
             maximum = nodes[job["node_id"]].get("max_work_turns")
             if maximum is not None:
                 frame = {"mission_id": mission["mission_id"], "job_id": job["job_id"],
                          "instruction": base_prompt, "attempt": attempt_no,
-                         "max_work_turns": maximum}
+                         "max_work_turns": maximum, "applied_guidance": guidance}
                 if attempt_no > 1:
                     previous = self._assignment_for_job(job["job_id"])
                     with self._execution._store.transaction() as db:
                         frame["checkpoint"] = frozen_work_checkpoint(db, previous)
                 return tr("superagent.mission.checkpoint", frame=_json(frame))
-            return base_prompt
+            return base_prompt + ("\n\n" + tr("superagent.mission.applied_context", context=_json(guidance))
+                                  if guidance["items"] else "")
+        if guidance["items"]:
+            base_prompt += "\n\n" + tr("superagent.mission.applied_context", context=_json(guidance))
         plan, _, _, _ = self._load_plan(mission)
         acceptance = plan["acceptance"]
         if job["role"] == "integrate":

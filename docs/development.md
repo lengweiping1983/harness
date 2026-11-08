@@ -490,6 +490,8 @@ Superagent 目标控制回归位于 `tests/test_superagent_control.py` 与 `test
 
 Superagent 长节点回归位于 `tests/test_superagent_checkpoints.py`，通过真实隔离工作树、文件工具、原运行和确定性模型检查阶段交接、最终依赖解锁、重启不重放、捕获确认丢失、后台写入、未知工具、预算和指令上下文。检查点协议为显式配置；完整行为及限制统一见 [Superagent 模式](superagent.md#长工作节点的阶段接续)。统一 Scheduler 的阶段接续定向回归位于 `tests/test_superagent_unified_checkpoints.py`，真实 Harness / Git 与独立质量门位于 `tests/test_superagent_unified_dag_artifact_integration.py::DagSchedulerArtifactIntegrationTests.test_staged_work_survives_restart_and_reaches_independent_quality_gate`；后者以受控时钟验证跨 24 小时检查失败与监督器重建，不能替代真实长期负载。这些离线回归不证明真实模型的交接质量或长时吞吐。
 
+统一 Scheduler 的已应用指令上下文定向回归位于 `tests/test_superagent_unified_instruction_context.py`，使用隔离协调账本和确定性执行适配器核对原生 accepted / applied 区分、阶段／节点／Mission 隔离、重启不重投、上下文大小及截断、损坏原件保留和实际派工的英→中→英资源消费；不代表生产信道或在线模型验收。
+
 对话自动标题由 `tests/test_session_titles.py` 经真实事件总线和持久存储核对首次人工输入、独立模型配置、原文保持、后续消息稳定、手动同值改名保护、并发对话隔离、删除后的迟到回包、关闭收尾及同实例英中英提示词。命名追踪回归通过真实适配器和受控 SSE 传输核对归档、失败原因、原件重开、删除后的迟到传输及自定义适配器签名；能力边界回归核对只对支持关闭的模型选择 `off`、能力查询计入超时且不重放，实际提供商桥接与本机 HTTP 回归核对关闭参数进入传输和归档、连接与执行配置不变；纯附件只取文件名，不将附件模型正文发送给命名请求。`test_session_creation_receipt.py` 保留初始请求身份和完成标记断言，并核对无标题创建的自动命名登记；前端 `sessionCreationRecovery.test.ts` 核对创建请求不把用户消息写成显式标题，未知结果仍只回查原创建请求；旧请求确认完成后，更换项目／检出／智能体的同一次发送继续创建当前对话，切换期间不误发。`test_model_readiness.py` 经实际状态路由、提供商凭据存储和标题消费者核对主配置无 Key 时的连接及订阅来源。
 
 
