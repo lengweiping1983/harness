@@ -1,15 +1,77 @@
 """监督摘要的真实运行归属、工具证据、隐私边界和等待状态矩阵。"""
 import asyncio
 import json
+from pathlib import Path
+import tempfile
 import unittest
 
-from harness.app.superagent_mission_status import dependencies, run_progress, waiting_reason
+from harness.app.superagent_run_evidence import run_progress
+from harness.app.superagent_status import dependencies, waiting_reason, snapshot
+from harness.app.superagent_coordinator_store import CoordinatorStore
 from harness.core.errors import HarnessError
 from harness.core.runs import AgentRun
 from harness.session.events import SessionEvent
 
 
 class MissionProgressTests(unittest.IsolatedAsyncioTestCase):
+    def create_mission(self, uow, suffix, state='planning'):
+        ticket = uow.tickets.create({'ticket_id':'ticket-' + suffix, 'mandate_id':'mandate-' + suffix,
+            'origin_trigger_id':'trigger-' + suffix, 'title':'Status fixture'})
+        return uow.missions.create({'mission_id':'mission-' + suffix, 'ticket_id':ticket['ticket_id'],
+            'sequence':1, 'repo':'/fixture', 'base_commit':'a' * 40, 'state':state})
+
+    def test_older_active_and_attention_missions_remain_visible_ahead_of_completed_history(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = CoordinatorStore(Path(temporary)/'superagent.sqlite3', instance_id='status', identity={})
+            with store.unit_of_work(actor={}) as uow:
+                self.create_mission(uow, 'active')
+                self.create_mission(uow, 'attention', 'blocked')
+                for index in range(35):
+                    self.create_mission(uow, str(index), 'completed')
+            current = snapshot(store)
+            self.assertEqual([m['mission_id'] for m in current['missions']['recent'][:2]], ['mission-active','mission-attention'])
+            self.assertTrue(current['missions']['has_more'])
+            self.assertEqual(current['missions']['total'], 37)
+            self.assertEqual(current['missions']['counts'], {'planning':1,'blocked':1,'completed':35})
+            scoped = snapshot(store, mission_id='mission-0')
+            self.assertEqual([m['mission_id'] for m in scoped['missions']['recent']], ['mission-0'])
+            self.assertFalse(scoped['missions']['has_more'])
+
+    def test_mission_plan_and_jobs_share_one_read_transaction_during_concurrent_planning(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary)/'superagent.sqlite3'
+            store = CoordinatorStore(path, instance_id='status', identity={})
+            other = CoordinatorStore.open_existing(path, instance_id='status', identity={})
+            with store.unit_of_work(actor={}) as uow:
+                mission = self.create_mission(uow, 'concurrent')
+            connect, seen, errors = store._connect, [], []
+            def connected():
+                db = connect()
+                def trace(sql):
+                    if not sql.startswith('SELECT * FROM jobs'):
+                        return
+                    db.set_trace_callback(None)
+                    try:
+                        with other.unit_of_work(actor={}) as uow:
+                            uow.plans.create(mission['mission_id'], expected_mission_revision=1,
+                                plan={'nodes':[{'node_id':'work','role':'work','profile_id':'reader','dependencies':[]}]},
+                                acceptance={'kind':'single_worker_report','schema_version':1}, created_by_kind='host', created_by_ref='fixture')
+                        seen.append(True)
+                    except BaseException as exc:
+                        errors.append(exc)
+                db.set_trace_callback(trace)
+                return db
+            store._connect = connected
+            try:
+                before = snapshot(store)['missions']['recent'][0]
+            finally:
+                store._connect = connect
+            self.assertEqual(errors, [])
+            self.assertEqual(seen, [True])
+            self.assertEqual((before['plan_revision'], before['jobs']), (0, []))
+            after = snapshot(store)['missions']['recent'][0]
+            self.assertEqual((after['plan_revision'], len(after['jobs'])), (1, 1))
+
     def events(self):
         return [
             SessionEvent('turn/start', 0, 100, {'turn': 1, 'run_id': 'first'}),
@@ -105,12 +167,12 @@ class MissionProgressTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(reason(True))
 
     def test_dependency_detail_keeps_missing_creation_explicit(self):
-        mission = {'plan': {'steps': [{'id': 'first'}, {'id': 'second'}]}}
-        job = {'role': 'work', 'attempt': 1, 'dependencies': ['first', 'second']}
-        first = {'id': 'first-job', 'role': 'work', 'node': 'first', 'attempt': 1, 'state': 'done'}
-        self.assertEqual(dependencies(mission, job, [first]), [{'node': 'second', 'job_id': None, 'state': None}])
-        first['state'] = 'accepted'
-        self.assertEqual(dependencies(mission, job, [first])[0], {'node': 'first', 'job_id': 'first-job', 'state': 'accepted'})
+        job = {'job_id': 'join'}
+        edges = [{'job_id': 'join', 'depends_on_job_id': 'first'}, {'job_id': 'join', 'depends_on_job_id': 'second'}]
+        first = {'job_id': 'first', 'state': 'done'}
+        self.assertEqual(dependencies(job, [first], edges), [{'job_id': 'second', 'state': None}])
+        first['state'] = 'running'
+        self.assertEqual(dependencies(job, [first], edges)[0], {'job_id': 'first', 'state': 'running'})
 
     def test_waiting_matrix_preserves_capacity_queue_unknown_and_halted_boundaries(self):
         cases = [
@@ -123,7 +185,7 @@ class MissionProgressTests(unittest.IsolatedAsyncioTestCase):
             ('accepted', 'suppressed', {'status': 'stopping', 'settled': False}, False, False, False, 'run-stop'),
             ('accepted', 'running', {'status': 'failed', 'settled': True}, False, False, False, 'failure-settlement'),
             ('pending', 'suppressed', None, True, False, True, 'mission-halted'),
-            ('importing', 'running', None, False, False, False, 'delivery-reconciliation'),
+            ('capturing', 'running', None, False, False, False, 'delivery-reconciliation'),
             ('submitting', 'running', None, False, False, False, 'submission-reconciliation'),
             ('unknown', 'unknown', {'status': 'running', 'settled': False}, False, False, False, 'result-reconciliation'),
         ]

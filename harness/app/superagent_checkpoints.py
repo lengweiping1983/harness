@@ -60,24 +60,3 @@ def frozen_work_checkpoint(db, assignment):
         raise ValueError
     except (KeyError, TypeError, ValueError, RecursionError) as exc:
         raise _error("corrupt") from exc
-
-
-def work_heads(jobs):
-    """每个逻辑节点只选择最后阶段，早期冻结产物不能提前解锁依赖。"""
-    result = {}
-    for job in jobs:
-        if job['role'] == 'work' and (job['node'] not in result or job['attempt'] > result[job['node']]['attempt']):
-            result[job['node']] = job
-    return result
-
-
-def status_jobs(jobs):
-    """每个工作节点仅展示最近两阶段；隐藏历史须已冻结，不能藏掉活动工作。"""
-    heads = work_heads(jobs)
-    result = []
-    for job in jobs:
-        if job['role'] != 'work' or job['attempt'] >= heads[job['node']]['attempt'] - 1:
-            result.append(job)
-        elif job['state'] != 'checkpointed':
-            raise _error('corrupt')
-    return result

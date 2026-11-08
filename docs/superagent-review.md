@@ -4,13 +4,11 @@
 
 ## 源码事实与设计选择
 
-默认 `superagent_router.py::_decision` 只接受每事件一个工作任务；`superagent_results.py::_poll` 只把内部结果整理为回复。它们保留单任务、订阅和跨来源续接用途，不能承担复杂目标的依赖规划与验收。自主方式由 `SuperagentService.open` 在显式配置时装配 `SuperagentMissions`，不是打开原宿主的普通团队／子智能体开关。
+当前增量从 Phase 4.5 与入口解耦提交 `d939f8c` 接续。`SuperagentService.open` → `superagent_bootstrap.open_service` → 当前配置 → CoordinatorHost → SourceRegistry / Authorization / Execution / Scheduler / DeliveryRuntime 是唯一生产链。只读本机命令直接打开现有协调账本，不构造模型；没有旧 Router / Autonomy 选择器或 Shadow 入口。
 
-`MissionStore` 仅保存协调事实；运行与工具事实仍来自 `RunController.find_submission`、原对话和 `tool_invocations`。`SuperagentWorkers` 在自主模式从账本取得共同资源组和冻结提交，不订阅节点 Thread。工作结果经已有 `capture_delivery` → `plan_delivery_merge` → `apply_delivery_merge` 交接，最终集成节点负责修正；每轮复核创建独立资源。现有 `worktree_delivery.py` 的共同组、基线和交付谱系约束均保留。
+`CoordinatorStore` 保存协调事实和原生调用引用，Harness 继续持有原始 Session / Run / Tool / Worktree。`HarnessExecutorAdapter` 的 Worker Lookup 由 CoordinatorExecutionService 注册，`Harness` 的实际运行与 AgentLoop 入口重新核对资源身份和工具范围；关闭由相同实例锁覆盖原生宿主清理和最终状态投影。包发现使用现有 setuptools 规则，CLI 直接引用统一服务；认证客户端和监听器不依赖退役模块。
 
-显式 `max_work_turns` 使工作节点采用阶段协议。`superagent_checkpoints.py::validate_checkpoint` 校验模型提议；`SuperagentMissions._capture/_confirmed_checkpoint` 核对原运行与工具证据后冻结文件；`_schedule/_dependency_jobs` 只采用逻辑节点的最终阶段。新阶段拥有独立资源、原提交键与本节点有界引导上下文，复用同一任务图和基线；不增加失败或未知副作用的重试。`status_jobs` 只隐藏已冻结的旧阶段，完整历史不删除。
-
-目标控制由 `MissionControl` 保存模式与原命令回执，`MissionControlRuntime` 只把已应用意图作用到确切原运行及当前所属后台作业。控制回执与进程收尾分开，`SuperagentService` 等待所属停止。相对于控制层初始提交 `44d45df`，本次核对了共享规划会话、命令顺序、活动容量、读事务和原回执链路；没有据此更新其他产品领域的审查结论。
+长节点由 `CoordinatorDagScheduler` 使用同一逻辑 Job 下的新 Assignment；纯检查点校验保留在 `superagent_checkpoints.py`。输入、指令、控制、效果与 Outbox 均在协调账本，受理与应用分开，unknown 只回查原身份。完整产品行为维护在产品页，本记录只保存问题证据和迁接依据。
 
 一手资料支持的工程取舍：
 
@@ -28,7 +26,7 @@
 
 ## Phase 4 协调模型与文件适配审查
 
-本节相对于整合改造前 `5f1c3b7` 核对当前增量，覆盖统一模型、显式内部适配入口、Phase 4.2 唯一服务生命周期、Phase 4.3 DAG Scheduler 真实交付闭环，以及 Phase 4.4 的独立质量门、有限修正、阶段接续与故障恢复。2026-11-08 已完成统一内部链路的定向验收；Phase 4.5 已在统一服务交付 Sender 与持续协作；生产 CLI、默认路由切换和旧生产链退役仍未交付。当前不切换生产默认路由。
+本节相对于整合改造前 `5f1c3b7` 核对当前增量，覆盖统一模型、显式内部适配入口、Phase 4.2 唯一服务生命周期、Phase 4.3 DAG Scheduler 真实交付闭环，以及 Phase 4.4 的独立质量门、有限修正、阶段接续与故障恢复。2026-11-08 已完成统一内部链路的定向验收；Phase 4.5 已在统一服务交付 Sender 与持续协作；Phase 4.6 已切换生产 CLI、默认路由并删除旧生产编排；对应证据见本页入口收口记录。
 
 | 触发条件 | 源码措施 | 对应回归 |
 |---|---|---|
@@ -85,7 +83,7 @@
 | 多 Run 的后续游标写入失败，或 Schema v18 / v19 DDL 遇到同名对象冲突 | 多 Run Cursor 与 WatchdogSnapshot 在同一写事务提交，后续任一游标写失败整体回滚；迁移失败回滚新增列、表和版本记录并保留原对象与数据 | `test_watchdog_multi_run_cursor_and_snapshot_updates_roll_back_together`、`test_migration18_rolls_back_ddl_when_cursor_table_name_conflicts`、`test_migration19_rolls_back_ddl_when_ledger_facts_view_name_conflicts`、`test_every_prior_schema_version_upgrades_without_losing_effects` |
 | 直接 SQL 试图回退投递、指令、控制、Watchdog Snapshot 或原生 Run 游标，重绑游标身份、重放／回退事件序号或删除游标历史 | Schema v16 固化指令、控制与投递状态边；Schema v18 将 Cursor 插入绑定到同 Mission 的活动原始 Assignment / Run / Session，更新只允许严格递增且禁止改写身份，历史不可删除；Schema v19 将 WatchdogSnapshot 的账本进度证明绑定到当前 SQLite 事实投影与 SHA-256 | `test_mission_instruction_control_and_watchdog_state_guards_are_monotonic`、`test_watchdog_cursor_sql_guards_reject_rebinding_regression_and_replay`、`test_input_has_independent_assignment_receipts_and_cannot_cross_tickets` |
 
-文件适配回归使用真实临时 Git 工作树和确定性模型传输驱动的原生 Run，不代表模型判断质量、生产账号、长期负载或跨平台实机验收。2026-11-06，`test_superagent_coordinator_store`、`test_superagent_unified_artifacts`、`test_superagent_unified_execution`、`test_superagent_execution` 与 `test_superagent_unified_model` 共 112 项回归全部通过，相关新增守卫的直接 SQL 越界、跨 Host 并发和畸形回执用例均在其中。后续缺口以领域模型的当前实现边界为准。 同日，`test_superagent_coordinator_host`、`test_superagent_phase2` 和 `test_superagent_service` 共 85 项回归全部通过，验证 CoordinatorHost 默认不再依赖 legacy_state_dir / Shadow，同时显式 Shadow 与 V1 / V2 状态目录隔离仍保持。
+文件适配回归使用真实临时 Git 工作树和确定性模型传输驱动的原生 Run，不代表模型判断质量、生产账号、长期负载或跨平台实机验收。2026-11-06，`test_superagent_coordinator_store`、`test_superagent_unified_artifacts`、`test_superagent_unified_execution`、`test_superagent_execution` 与 `test_superagent_unified_model` 共 112 项回归全部通过，相关新增守卫的直接 SQL 越界、跨 Host 并发和畸形回执用例均在其中。后续缺口以领域模型的当前实现边界为准。 同日，`test_superagent_coordinator_host`、`test_superagent_phase2` 和 `test_superagent_service` 共 85 项回归全部通过，当时验证 Host 默认不依赖 legacy_state_dir / Shadow；这是历史过程证据。Phase 4.6 已删除显式 Shadow 与旧目录参数，当前回归改为核对 API 不存在、原件保留及目录混用拒绝。
 
 ### Phase 4.2：唯一服务生命周期与持久控制
 
@@ -100,63 +98,25 @@
 
 本阶段回归仍使用隔离账本、确定性 Assessor 和 Fake Executor；验证服务装配、控制、幂等回查与资源所有权，不宣称在线模型质量、生产 Provider 发送能力或 Phase 4.3 DAG Scheduler 已完成。
 
-**提交门禁状态（2026-11-06）：** 定向 `.venv` 回归已通过。`harness_verify` 曾在执行命令前被当前 MCP 进程内存中的旧执行器 8 MiB 指纹上限拒绝；仓库源码已有独立 128 MiB 单文件／512 MiB 总量指纹上限，且已将对应 `files.py` / `runtime.py` 同步到本机安装目录。当前 MCP 进程仍需完全重启以重新加载模块；未忽略或跳过任何工作树文件，官方验证证据与提交仍待重启后完成。
+**提交门禁状态（2026-11-06）：** 定向 `.venv` 回归已通过。`harness_verify` 曾在执行命令前被当前 MCP 进程内存中的旧执行器 8 MiB 指纹上限拒绝；仓库源码已有独立 128 MiB 单文件／512 MiB 总量指纹上限，且已将对应 `files.py` / `runtime.py` 同步到本机安装目录。该记录仅描述当时的工具环境，不能作为当前代码未交付的判断；本次按当前仓库约定执行具体新增或修改用例，没有运行该聚合入口。
 
-## 已核对问题与防回归依据
+## 退役编排的业务回归迁接
 
-| 触发条件 | 当前源码措施 | 回归 |
-|---|---|---|
-| 后续任务需要前置未提交文件 | `SuperagentMissions._prepare_job` 导入冻结交付，`MissionStore.scope` 提供共同组与基线 | `test_dependency_files_are_imported_and_candidate_is_independently_verified` |
-| 源 HEAD 在计划后变化 | 计划接纳时冻结提交，Worker 创建与回查均核对它 | `test_frozen_baseline_is_shared_after_source_head_advances` |
-| 多个任务争用容量或有慢前置 | 活动目标轮转；依赖不就绪不创建运行，其他目标继续 | `test_slow_predecessor_does_not_block_other_work_or_lose_late_publication` |
-| 快目标先完成，发布游标超过慢目标接纳序号 | `MissionStore.complete` 同事务追加独立 `publications` 序号 | 同上，核对两个本地候选均发布 |
-| 模型无法知道内部事件序号 | 模型只引用自己可见的调用身份，宿主派生确切结果序号 | `test_dependency_files_are_imported_and_candidate_is_independently_verified` 的真实模型表面传输 |
-| 伪造调用、在其他仓库运行检查或改写复核候选 | `_verdict` 限定本运行唯一调用和显式目录，`_capture` 核对导入树未变 | `test_forged_evidence_cannot_complete_or_publish`、`test_command_in_another_repository_cannot_prove_candidate`、`test_reviewer_changes_do_not_redefine_the_candidate` |
-| 复核失败后原结论已过时 | 原集成对话新运行修正，新复核对话及工作树重新检查 | `test_repair_is_bounded_and_uses_same_integrator_and_fresh_reviewer` |
-| 原运行结束但后台写入未结束 | `_capture` 等待所属作业结算，不冻结半成品或解锁依赖 | `test_background_writer_must_finish_before_delivery_or_dependency_unlock` |
-| 提交／导入成功而确认丢失 | 原稳定键与确切导入元信息回查，不再调用写入 | `test_lost_plan_return_reconciles_one_original_submission`、`test_lost_dependency_import_return_is_not_applied_again` |
-| 提交无确切结果或重启遇到已完成目标 | 未确认保留 `unknown`，已完成目标只重读原引用 | `test_missing_submission_remains_unknown_without_replay`、`test_restart_does_not_reexecute_completed_plan_or_workers` |
-| 最后异步捕获期间撤销来源 | 最终结算及完成调度重新核验来源修订 | `test_source_revocation_during_final_capture_suppresses_completion` |
-| 损坏 ready 对话引用将工作转到其他会话 | 每次提交与回查均核对原 Worker、来源、模板、会话及工作树 | `test_corrupt_ready_session_cannot_submit_to_another_conversation` |
-| 损坏复核缓存或完成回复冒充通过 | 消费及候选重读时从原复核运行重算并比较 | `test_corrupt_review_cache_or_completed_reply_cannot_publish` |
-| 关闭发生在导入只读预检等待中 | 预检后重新核对准入，不启动迟到写入 | `test_close_during_import_preflight_does_not_start_late_workspace_write` |
-| 来源在导入只读预检期间撤销 | 预检后重新核对授权，保留原件而不启动导入 | `test_revocation_during_import_preflight_prevents_new_workspace_write` |
-| 并发本机提交暴露半个文件或产生重复事件 | 同目录完整准备后硬链接独占公开，身份键与正文分别核对 | `test_superagent_local.py` 的并发、相同身份冲突与无宿主 CLI 回归 |
-| 同一实例切换语言 | 实际规划、工作及独立复核调用按当前宿主语言解析显式资源，三次目标均执行到真实交付 | `test_runtime_language_round_trip_reaches_actual_planner_requests` |
-| 旧活动／阻塞目标被新完成目标挤出监督列表 | `MissionStore.status_snapshots` 按活动、待关注、抑制、完成分组，有界输出并报告总量及截断 | `test_older_active_and_attention_goals_are_visible_ahead_of_new_completions` |
-| 同一集成会话复用，后轮进度污染前轮 | `run_progress` 以原运行唯一轮次限定事件；终态任务不继承后轮后台等待 | `test_previous_run_in_reused_conversation_keeps_its_own_terminal_activity`、`test_terminal_run_cleanup_and_background_wait_have_distinct_meaning` |
-| 主运行未更新计数，或工具结果未确认却显示完成／活动 | 从原事件的真实开始及唯一结果配对计数；中断或终态的缺失结果保留 `unconfirmed` | `test_tool_progress_is_derived_from_current_run_instead_of_unused_counter`、`test_interrupted_or_terminal_tool_without_result_stays_unconfirmed`、`test_unpaired_or_duplicate_result_does_not_fabricate_completion` |
-| 状态读取推进未知提交或泄露执行正文 | `_submission` 只读核对原提交，摘要只投影元信息；不调用结算或执行入口 | `test_status_reads_original_run_without_writes_or_accepting_mismatched_identity`、`test_missing_submission_remains_unknown_without_replay`、`test_tool_progress_is_derived_from_current_run_instead_of_unused_counter` |
-| 规划尚未接纳便进入未知或终止状态，预算误标为交付阶段 | 预算阶段按是否已有合法计划判定，不能仅凭目标是否仍为 `planning` | `test_missing_submission_remains_unknown_without_replay` |
-| 多节点状态查询重复连接、验证计划及读取原事件 | `_decode_mission/_decode_job` 保留完整验证，一次读事务批量解析；不跨调用缓存 | `test_batch_read_checks_one_goal_and_original_event_without_repeating_connections`、`test_each_batch_entry_retains_hash_json_profile_dependency_and_resource_validation`、`test_plan_and_original_event_are_revalidated_on_each_snapshot` |
-| 目标与任务之间并发更新形成混合快照 | 显式 `BEGIN` 绑定目标账本读取；返回嵌套对象独立，不回写 | `test_goal_and_jobs_share_one_read_transaction_during_concurrent_update`、`test_snapshot_returns_independent_nested_objects_and_does_not_write` |
-| 服务一轮内构造两次状态 | `tick(include_status=False)` 只推进，服务在候选及信道处理后读取一次最终状态 | `test_service_builds_one_fresh_snapshot_per_tick` |
-| 工作进行中缺少确切节点的执行指令入口 | `SuperagentGuidance` 复用 `Harness.steer`，绑定原运行和轮次；仅后续集成及复核接收已应用上下文 | `test_node_instruction_reaches_original_run_once_and_later_independent_context` |
-| 引导等待锁期间来源撤销 | `before_accept` 在锁内同步复核，原接受事件之前不让出执行 | `test_revocation_during_steering_lock_wait_prevents_acceptance` |
-| 复用会话使迟到输入误投给新运行 | 新请求重新核对原 job/run/turn，终止或错误归属明确拒绝 | `test_late_original_turn_does_not_redirect_to_new_run_in_same_conversation`、`test_new_requests_with_wrong_target_or_authority_never_reach_native_steering` |
-| 引导接受返回或本地确认丢失 | `submitting/unknown` 只回查原稳定回执，不再调用 `steer` | `test_lost_accepted_return_reconciles_original_request_without_replay`、`test_confirmation_write_failure_recovers_one_original_acceptance`、`test_unconfirmed_intent_only_queries_and_keeps_original_run` |
-| 关闭或重启后文件仍显示等待应用 | 原生回执按实际活动运行解析；宿主关闭后统一刷新最终投影 | `test_accepted_instruction_survives_revocation_and_close_flushes_unapplied_receipt`、`test_restart_keeps_original_unapplied_receipt_without_new_model_or_submission`、`test_close_before_queued_tick_enters_guidance_is_normal_shutdown` |
-| 展示原文冒充真正模型指令，或异步准入未实际执行 | 接受与应用事件均核对真实正文及原运行；同步检查拒绝 awaitable 返回 | `test_original_display_text_cannot_replace_model_instruction_identity`、`test_async_acceptance_guards_are_rejected_and_existing_receipts_skip_new_guard` |
-| 旧指令占满上下文，或截断清单误判唯一目标 | 有界上下文优先保留最近接纳内容；截断时要求显式任务，损坏投影保留并拒绝 | `test_recent_applied_guidance_retains_newest_correction_with_global_budget`、`test_ambiguous_and_truncated_status_require_exact_job`、`test_corrupt_target_snapshot_is_rejected_without_creating_or_rewriting_state` |
-| 长节点阶段结束被误当作逻辑任务完成 | `checkpointed` 不解锁依赖，新阶段导入累计文件，最终阶段才参与集成 | `test_fresh_stages_preserve_files_and_unlock_only_the_final_delivery` |
-| 检查点后重启或冻结回执丢失导致重做工作 | 原阶段保持原提交身份，捕获与导入按原交付只读回查，新阶段独立派工 | `test_restart_after_checkpoint_continues_without_replaying_the_previous_stage`、`test_lost_checkpoint_capture_confirmation_uses_original_frozen_delivery` |
-| 没有结束的后台写入或未确认工具结果进入接续 | 原运行收尾、后台作业及原轮工具配对均进入准入；未确认保持未知 | `test_background_work_finishes_before_checkpoint_or_next_stage`、`test_unknown_tool_result_prevents_capture_and_continuation` |
-| 长节点持续请求继续或重复原报告 | 独立阶段预算、同树同检查点的明确停滞判定，不解锁依赖或发布候选 | `test_budget_exhaustion_and_repeated_unchanged_checkpoint_do_not_unlock_dependencies` |
-| 普通报告或损坏缓存冒充有效阶段交接 | 严格检查点协议，消费时重新核对原运行输出及工具证据 | `test_blocked_and_malformed_checkpoints_do_not_get_automatic_retries`、`test_corrupt_checkpoint_cache_cannot_supply_new_context_or_release_dependencies` |
-| 新上下文丢失本节点已应用指令，或将指令混入其他节点 | `applied_context(node=...)` 按原工作节点过滤，最终集成／复核仍获得目标上下文 | `test_node_guidance_is_carried_only_to_its_own_continuation_and_final_review` |
-| 取消旧目标时，共用规划会话已经在执行另一目标 | `MissionControlRuntime._cancel` 核对原任务资源、提交键和 `runtime.current`，只取消原操作句柄 | `test_cancelling_an_old_goal_never_interrupts_another_goal_in_the_shared_planner` |
-| 取消后仍计入活动目标上限，后续目标无法接纳 | 尚在调度的目标进入独立 `cancelled` 终态，保留原运行并释放目标名额 | `test_cancelled_goals_release_admission_capacity_without_replaying_the_old_goal` |
-| 超过百项目标时，最近列表漏掉需要停止的旧目标 | 控制采用原目标身份和完整活动清单，不从状态摘要选择停止对象 | `test_cancellation_finds_an_old_active_goal_beyond_a_hundred_recent_goals` |
-| 暂停在异步合并预检期间到达，随后仍导入文件 | `_control_allows` 在资源准备及写入边界采用原目标控制，继续后复用原资源 | `test_pause_during_import_preflight_blocks_late_write_and_resume_uses_original_resources` |
-| 控制队列前部都是未知目标，或时钟回拨改变动作顺序 | 持久插入顺序、有限轮转及每目标先后校验 | `test_unknown_targets_do_not_starve_later_valid_control_or_reorder_one_target`、`test_wall_clock_rollback_does_not_reorder_control_intent` |
-| 停止慢后台进程阻塞其他目标，或停止失败被自动重试 | 每个所属作业拥有单次停止任务，状态保留未知，关闭继续传播原失败 | `test_slow_background_cancellation_does_not_block_another_goal`、`test_failed_background_stop_stays_unknown_and_is_not_replayed_by_control` |
-| 原提交或重启后的后台进程未确认，被取消回执误称停止成功 | 控制模式与实际收尾分开；确切后台回执可核对，不可用保持未知，不向旧 PID 投递 | `test_cancel_does_not_resolve_or_replay_an_unknown_submission`、`test_restart_uses_exac
-| 最近十六项目标全部暂停，隐藏的活动目标没有计入待执行 | 全部活动清单与展示统计来自同一目标读事务，再按原控制模式计数 | `test_pending_counts_include_active_goals_hidden_by_the_recent_list`、`test_full_active_inventory_and_d
-| 损坏控制 JSON、模式或修订被当作合法历史或默认运行 | 严格解析、模式关联原已应用回执、修订核对真实已结算命令数，失败保留原件 | `test_corrupt_command_is_rejected_on_read_duplicate_and_reconcile_without_repair`、`test_mode_and_meta_corruption_are_not_treated_as_default_running` |
-| 并发操作者重复控制、控制回执缺失或原动作被拒绝 | 稳定请求原子认领；独立只读回执入口，单批 CLI 按本条原回执核对退出码 | `test_concurrent_operators_share_one_stable_control_receipt`、`test_missing_receipt_is_read_only_and_known_receipts_keep_original_status`、`test_once_control_exit_code_comes_from_the_original_receipt` |
-| 多模板有效配置超过单个说明字段大小 | 控制配置身份允许完整已验证配置，不按单个说明的大小截断 | `test_large_valid_profile_configuration_opens_and_closes_without_model_requests` |
+删除旧实现前核对生产入口、动态 Worker 注册、原生工具执行和资源分发。旧架构装配断言替换为无旧 API / 导入的断言；来源、授权、文件、证据、停止、指令和幂等业务保留在下列当前消费者中。旧文件的测试数量不作为业务完成或性能证据，未在本次运行的既有用例不能称作本次通过。
 
-这些回归均使用隔离临时数据和确定性模型传输。命令成功和调用配对能验证协调行为，不能验证在线模型的判断质量。
+| 退役测试／编排家族 | 当前消费者与可核验回归 |
+|---|---|
+| Inbox / Router / Dispatcher：来源、批次、稳定提交和恢复 | SourceRegistry / Authorization / CoordinatorModels；Phase2 的来源冲突与授权回归保留，生产入口 `test_concurrent_local_submissions_keep_one_trigger_and_conflicting_body_is_preserved`、`test_lost_coordinator_submit_ack_finds_original_run_and_never_replays`、`test_absent_unknown_coordinator_submission_is_not_resubmitted` |
+| Worker / Binding：资源归属、工具限制和跨来源参与 | HarnessExecutorAdapter / CoordinatorWorker；`test_worker_scope_and_input_receipt_bind_the_original_assignment`、`test_readonly_policy_refuses_a_visible_write_in_the_native_worker`、`test_explicit_cross_source_subscription_keeps_original_run_and_each_reply_target`；Subscription 必须先有确切授权，不自动猜测跨来源关联 |
+| Missions：冻结基线、真实文件、依赖与独立质量门 | CoordinatorDagScheduler / Artifacts；`test_shared_dag_scheduler_delivers_real_binary_and_deletions_and_recovers_lost_import_receipt`、`test_production_file_task_uses_integrator_independent_review_and_frozen_result`、`test_failed_review_runs_one_fresh_repair_round_and_completes_quality_gate` |
+| Results：冻结正文、原目标发布及重启去重 | CoordinatorDeliveryRuntime / Outbox / EffectRecovery；`test_local_result_is_projected_once_and_restart_does_not_execute_or_send_again`、两个 Provider 的 lost_post_ack 回归及真实 CLI 子进程用例 |
+| Control / ControlRuntime：暂停、原 Run 停止和未知收尾 | CoordinatorControl / Executor；`test_pause_resume_and_instruction_queue_use_original_native_run`、`test_unified_service_revoke_blocks_resume_and_cancel_settles_original_run`、`test_unknown_cancel_stop_is_not_replayed_and_can_be_reconciled` |
+| Guidance / GuidanceLocal：原 Run / Turn、稳定回执及应用上下文 | CoordinatorMissionInstruction / 同库本机请求；`test_real_followup_receipt_binds_original_run_and_is_applied_without_extra_mission`、`test_pause_resume_and_instruction_queue_use_original_native_run`，UnifiedExecution 的锁内撤权、错目标和 unknown 回查，以及 UnifiedInstructionContext 的 actual_stage_submission 回归 |
+| Checkpoints / Background / Watchdog：阶段、真实工具与所属后台作业 | 纯检查点协议用例保留；`test_staged_work_survives_restart_and_reaches_independent_quality_gate`、UnifiedCheckpoints 的阶段／预算／停滞／恢复回归保留；`test_superagent_background.py` 迁接真实后台回执、stdout / stderr 活动和未知停止，CoordinatorWatchdog 的持久可信进度回归保留 |
+| MissionSnapshots / MissionStatus：只读、有界和原 Run 事件 | `superagent_status.snapshot` 在同一读事务读取有界 Mission / Job / Assignment，活动与待关注优先；`test_older_active_and_attention_missions_remain_visible_ahead_of_completed_history`、`test_mission_plan_and_jobs_share_one_read_transaction_during_concurrent_planning` 核对历史不会挤占活动及并发计划不混合快照；`test_superagent_mission_status.py` 保留原工具配对、轮次和隐私断言；生产入口核对状态无宿主／凭据、外来观察拒绝与缺失状态不创建目录 |
+| GitHub / Feishu：验签、身份、原对象和真实 HTTP | 当前 SourceKind + 独立认证客户端；重写后的两个来源测试覆盖真实 Webhook、AES 标准互操作、挑战与错误语言；UnifiedDelivery 保留真实 HTTP POST / GET、刷新后撤权及 unknown 不重发 |
+
+迁接后的当前协议不再保留旧事件目录、旧自动创建模板或旧任务快照格式。旧目标计划的重复实现被统一 PlanRevision / Scheduler 和质量门取代；历史迁移仍保留并验证。自动跨来源关联、动态重规划和人工未知结果核实界面仍是明确的后续产品缺口，不把显式 Subscription API 写成自动能力。
 
 ## 账本读取基准
 
@@ -170,7 +130,7 @@
 | p95 耗时 | 5.3717 ms | 0.6282 ms |
 | Python 分配峰值 | 29,480 B | 26,055 B |
 
-基准脚本 SHA-256 为 `b2d880e214f5723982ed929c4aa8d3e1694e9a1f19017c37a645e4ddd8fc94ba`；基线存储源码为 `f157f4d1c1bd6db6a549e632c01b96dcef3ca338f1788dc5b9b478668afc4ded`，快照源码为 `a691cd2459ede295e77b9552d0559e5b73bf4111e22572ade24031f5fd45dc71`。当前实现可用 `python scripts/benchmark_superagent_reads.py` 复测；`benchmark(store_type)` 可接收从上述基线源码独立加载的存储类，保留同一测量方法。该结果仅证明固定小账本读取减少重复工作，不代表完整状态生成、模型执行、真实任务吞吐或跨平台性能；没有据此给出端到端加速结论。
+基准脚本 SHA-256 为 `b2d880e214f5723982ed929c4aa8d3e1694e9a1f19017c37a645e4ddd8fc94ba`；基线存储源码为 `f157f4d1c1bd6db6a549e632c01b96dcef3ca338f1788dc5b9b478668afc4ded`，快照源码为 `a691cd2459ede295e77b9552d0559e5b73bf4111e22572ade24031f5fd45dc71`。以上为已退役 MissionStore 的历史固定输入记录，不能用当前脚本复现或据此比较。当前 `scripts/benchmark_superagent_reads.py` 已改为统一 CoordinatorStore 的八个 Work、两个系统节点及十六条标准，预热 20 次后采样 100 次，读取当前只读快照；输入和实现均不同，不与旧数字直接比较。该结果仅证明固定小账本读取减少重复工作，不代表完整状态生成、模型执行、真实任务吞吐或跨平台性能；没有据此给出端到端加速结论。
 
 ### Phase 4.5：持续协作与既有信道
 
@@ -194,17 +154,27 @@
 
 | 触发条件 | 源码措施 | 对应回归 |
 |---|---|---|
-| 统一服务或飞书认证传输隐式装载旧 Inbox／编排／信道账本 | FeishuClient 独立到认证传输模块；共用校验直接来自 common；旧入口依赖仅在实际旧调用边界加载，Shadow 仅在显式目录时加载 | `test_unified_tick_and_authenticated_clients_do_not_import_legacy_orchestrators` |
-| 抽离认证客户端后既有实际回复断裂，或令牌刷新绕过发送准入 | 旧信道与统一服务使用同一 FeishuClient，不保留复制实现；新调用方直接引用独立传输模块 | `test_full_channel_posts_threaded_reply_with_stable_uuid_and_reference`、`test_real_feishu_token_refresh_rechecks_revocation_before_http_reply` |
+| CLI 仍选择旧编排、本机操作另建队列或重复任务 | 当前配置和 Bootstrap 只装配统一服务；本机事件、请求与控制同库，首次时间及原正文固定 | 生产入口完整执行／重启用例，`test_real_cli_subprocess_drives_unified_models_and_publishes_once`，并发提交及配置边界用例 |
+| 运行时把 Task 误当 Run ID，真实跟进／指令不能投向原任务 | Executor 从 runtime.active 的 Task 读取原 _executions 记录，再核对 Assignment Run、Session 与 Agent Run | `test_real_followup_receipt_binds_original_run_and_is_applied_without_extra_mission`、`test_pause_resume_and_instruction_queue_use_original_native_run` |
+| 原生协调提交 ACK 丢失、原记录缺失或相同 unavailable 批次反复研判 | 持久调用认领，冻结 Prompt / Session / Run；仅查原提交，相同冻结 unavailable 批次等待显式重新排队 | `test_lost_coordinator_submit_ack_finds_original_run_and_never_replays`、`test_absent_unknown_coordinator_submission_is_not_resubmitted` |
+| 规划等待期间撤权或关闭，仍派生迟到 Worker；清理期间新实例接管 | 规划在事务外等待，恢复后重新准入；关闭立即停止新准入，原生清理与最终观察写入完成后才释放 Host 锁 | `test_planning_await_releases_database_and_rechecks_revocation_before_workers`、`test_close_during_planning_waits_original_model_and_starts_no_worker`、`test_instance_lease_is_held_until_owned_native_harnesses_finish_closing` |
+| 配置或实例不符仍打开原生运行库，状态读取创建或升级数据 | 创建宿主前只读核对身份，锁内先升级协调 Schema；本机读仅附着现有库 | `test_changed_configuration_rejects_before_constructing_or_mutating_native_hosts`、`test_runtime_lease_rejects_second_owner_before_constructing_model_hosts`、只读现有库与缺失状态用例 |
+| 凭据主体与获准机器人不同，或回复过长 | 新 POST 前核对 Provider 账号、资源与原消息；超限保留原文并明确拒绝，预检失败返回错误码且不认领写入 | `test_wrong_github_token_owner_never_posts_or_claims_send`、`test_wrong_feishu_bot_never_posts_or_claims_send`、`test_oversized_reply_preserves_frozen_body_and_never_reaches_provider` |
+| GitHub 同事件用新 Delivery ID 重投，或原资源 URL 大小写不同 | 重投单独审计且保留原 Trigger / 生命周期；查回按资源 ID 与规范路径核对 | `test_actual_webhook_acknowledges_durable_intake_without_another_model_run`、`test_repository_case_in_original_receipt_does_not_force_reposting` |
+| Schema 升级覆盖原 Effect 或 DDL 冲突留下半个迁移 | v21 保持旧迁移校验和，全部 DDL 和版本记录原子提交；模型、事件和请求身份不可变 | `test_every_prior_schema_version_upgrades_without_losing_effects`、`test_migration21_preserves_prior_effect_and_conflicting_table_rolls_back_all_new_objects`、`test_current_model_and_request_identities_cannot_be_rebound_or_replayed` |
+| 新角色提示语言固定或重启改写已提交正文 | 当前语言资源在实际调用处解析，已提交提示与输出冻结；系统角色提示也经显式资源 | `test_native_model_prompts_consume_language_roundtrip_and_freeze_original_body`、`test_applied_context_resource_is_resolved_at_actual_stage_submission`；`test_coordinator_model_refuses_a_native_receipt_from_another_session` 拒绝外来运行凭据 |
+| 动态装配或认证客户端仍隐式加载退役模块 | 删除旧模块与 API，CLI／脚本／示例／分发使用当前入口 | `test_unified_tick_and_authenticated_clients_do_not_import_legacy_orchestrators`、Phase2 与 Host 的已退役 API 拒绝用例 |
 
-2026-11-08，上述三个定向用例通过，覆盖新解释器装配／Tick／关闭与真实本机 HTTP。当前只完成依赖解耦；CLI、默认路由、状态／控制／本机提交及旧编排删除仍待完成。未运行全量回归或构建。
+2026-11-08，本次最终定向验证覆盖 99 个不同用例，含针对性复测，全部通过，无跳过。覆盖生产入口／本机 CLI／来源、统一交付／后台与原事件投影、迁移守卫、实际 DAG 质量门及阶段接续、语言、控制／关闭和退役 API。语言生成器已按源执行，当前八 Work／两系统节点的隔离读取基准脚本执行成功；不与旧输入作性能比较。
+
+验证使用隔离数据库、确定性模型、原生 Harness / Git 和本机 HTTP，不访问用户运行数据。执行过程中发现的失败先定位修复并重跑相应用例；未运行的全量 Python／Web、生产构建、桌面／浏览器专项、在线模型和外部账号不计为通过。正式使用页、架构、领域、ADR 与示例已同步当前单入口行为。
 
 ## 待验证风险与产品缺口
 
 - 首次原生活动观察不可信时，首次后续可信观察只建立持久基线，不重置停滞时间或解除既有阻断；Schema v17 将历史快照保守标为未建立可信基线。若真实进度发生在可信基线建立前，该变化无法从旧指纹中追溯证明，必须等待后续可核验变化才恢复；这是避免误解锁的保守恢复代价，仍需真实长时运行评估。
 - 完成标准由模型规划，语义覆盖与复核质量需要真实在线任务集、固定模型和人工判定；任意 Shell 正文的语义没有被宿主证明，显式 cwd 检查不是沙箱。
 - 现有测试在本机运行；没有取得 Windows／Linux 实机、多设备、外部账号、长期负载或模型成本对比证据。
-- 统一服务已支持原 Thread 跟进、节点指令和 Attention 答案；跨来源目标续接、目标验收或依赖变更、动态重规划及人工未知结果核实界面仍待开发。CLI 仍使用旧入口，不能把显式统一 API 的能力写成默认 CLI 已提供。
+- 统一服务已支持原 Thread 跟进、节点指令、Attention 答案和确切授权的跨来源 Subscription。自动跨来源关联、目标验收或依赖变更、动态重规划及人工未知结果核实界面仍待开发；CLI 已使用统一入口。
 - 合并冲突、失败或中断运行、未知操作和资源总容量耗尽保留明确状态；当前不自动解决冲突、迁移配置、清理历史资源或重放任务。
 - 长节点阶段接续为显式协议，真实模型的交接质量、是否过早选择 `ready`、上下文重建成本及长时负载仍需独立在线评估。同树同报告的停止条件不能识别所有语义停滞；新阶段也不能自动带走忽略文件、环境、进程或外部服务状态。
 - 目标控制仅限可信本机操作者，尚未提供远端控制认证或多人权限审批工作台。停止只作用于当前拥有的句柄；重启前外部进程没有确切终态回执时仍需核实，不能根据旧 PID 重放停止。控制历史有明确容量上限，当前不自动归档或迁移。

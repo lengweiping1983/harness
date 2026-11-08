@@ -1,4 +1,4 @@
-"""V2 Ticket-to-single-Mission execution, evidence, Report and human Attention lifecycle."""
+"""统一 Ticket／Mission 执行、原生证据、报告和人工问题生命周期。"""
 from __future__ import annotations
 
 import asyncio
@@ -47,7 +47,7 @@ class SingleNodePlanner:
 
 
 class CoordinatorExecutionService:
-    """Explicit V2 execution surface; it never changes the production V1 Router."""
+    """统一协调执行入口，调度、交付和恢复共用同一账本。"""
 
     def __init__(self, store, authorization, sources, executor: ExecutionAdapter, *,
                  instance_id: str, planner=None, system_profiles: Mapping[str, str] | None = None,
@@ -101,6 +101,7 @@ class CoordinatorExecutionService:
         self._dag_scheduler = CoordinatorDagScheduler(self, policy, watchdog=watchdog)
         self._locks: dict[str, asyncio.Lock] = {}
         self._closed = False
+        self._admission_closed = False
         self._control = CoordinatorControl(store)
         self._input_deliveries = CoordinatorInputDelivery(store)
         executor.set_worker_lookup(self._worker_row)
@@ -601,8 +602,14 @@ class CoordinatorExecutionService:
         }))
         return worker_id, identity_hash
 
+    def stop_admission(self):
+        """关闭时只撤销新执行准入，已受理操作仍沿原身份收尾。"""
+        self._admission_closed = True
+
     def _admit_mission(self, mission_id: str) -> dict:
         """在每次新资源或写入边界重新核验持久控制与当前授权。"""
+        if self._admission_closed:
+            raise HarnessError(tr('superagent.closed'), code='superagent/closed')
         self._ensure_open()
         mission = self._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
         if mission is None or mission["state"] not in {"planning", "running", "integrating", "reviewing"}:
@@ -731,12 +738,18 @@ class CoordinatorExecutionService:
             (ticket_id, *_ACTIVE_ASSIGNMENTS),
         )
 
-    def _create_mission_plan(self, ticket, trigger, mandate, profile, budget, prompt):
+    def _create_mission_plan(self, ticket, trigger, mandate, profile, budget, prompt, *, frozen_plan=None):
         """先建立冻结目标和控制记录，再创建任何执行资源。"""
         ticket_id, trigger_id = ticket["ticket_id"], trigger["trigger_id"]
         mission_id = "mission_" + _hash(f"{ticket_id}\0{trigger_id}")[:32]
         original = self._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
         base_commit = original["base_commit"] if original else self._executor.base_commit(profile)
+        if original is None and frozen_plan is None:
+            frozen_plan = self._planner.plan(trigger_id=trigger_id, profile=profile, prompt=prompt)
+            if inspect.isawaitable(frozen_plan):
+                if inspect.iscoroutine(frozen_plan):
+                    frozen_plan.close()
+                raise HarnessError(tr("superagent.coordinator.output"), code="superagent/plan-invalid")
         with self._store.unit_of_work(actor=_ACTOR, correlation_id=f"ticket:{ticket_id}") as uow:
             mission = uow.missions.get(mission_id)
             if mission is None:
@@ -749,9 +762,6 @@ class CoordinatorExecutionService:
                     "source_revision_at_start": trigger.get("source_revision"),
                     "repo": profile.repo, "base_commit": base_commit, "budgets_json": budget,
                 })
-                frozen_plan = self._planner.plan(
-                    trigger_id=trigger_id, profile=profile, prompt=prompt,
-                )
                 if not isinstance(frozen_plan, dict):
                     raise HarnessError("Planner must return a structured frozen plan", code="superagent/plan-invalid")
                 plan_value = frozen_plan.get("plan")
@@ -945,7 +955,20 @@ class CoordinatorExecutionService:
             if turns_used >= budget["max_turns"]:
                 raise PermissionError("Ticket Mandate execution turn budget is exhausted")
             prompt, _ = self._build_prompt(ticket, trigger, mandate)
-            mission, _ = self._create_mission_plan(ticket, trigger, mandate, profile, budget, prompt)
+            mission_id = "mission_" + _hash(f"{ticket_id}\0{trigger_id}")[:32]
+            frozen_plan = None
+            if self._read_one("SELECT mission_id FROM missions WHERE mission_id=?", (mission_id,)) is None:
+                if self._admission_closed:
+                    raise HarnessError(tr('superagent.closed'), code='superagent/closed')
+                frozen_plan = self._planner.plan(trigger_id=trigger_id, profile=profile, prompt=prompt)
+                if inspect.isawaitable(frozen_plan):
+                    frozen_plan = await frozen_plan
+                if self._admission_closed:
+                    raise HarnessError(tr('superagent.closed'), code='superagent/closed')
+                # 模型等待后重新核验来源、预算与授权；规划结果不能放宽权限。
+                ticket = self._authorization.ticket(ticket_id)
+                mandate, profile, budget = self._mandate_context(ticket, trigger, input_row, require_work=True)
+            mission, _ = self._create_mission_plan(ticket, trigger, mandate, profile, budget, prompt, frozen_plan=frozen_plan)
 
             # Single-node reports and multi-node Work DAGs enter the same durable
             # Scheduler, Assignment creation, submission, and reconciliation path.
@@ -1043,7 +1066,9 @@ class CoordinatorExecutionService:
         return self._read_all(
             "SELECT input.ticket_id,input.trigger_id FROM ticket_inputs AS input "
             "JOIN tickets AS ticket ON ticket.ticket_id=input.ticket_id "
+            "JOIN triggers AS trigger ON trigger.trigger_id=input.trigger_id "
             "WHERE ticket.state='open' AND input.context_only=0 AND input.state='waiting' "
+            "AND COALESCE(json_extract(trigger.metadata_json,'$.instruction_only'),0)<>1 "
             "ORDER BY input.created_at,input.input_id LIMIT ?",
             (limit,),
         )
@@ -1779,6 +1804,24 @@ class CoordinatorExecutionService:
                 audit = {"reconciliation_ref": f"mission:{mission['mission_id']}:{status}"}
             self._transition("mission", mission["mission_id"], "blocked", facts=facts, audit_payload=audit)
 
+    def reply_triggers(self, mission_id):
+        """每个已获准且实际参与本次活动的 Thread 仅保留最早原回复目标。"""
+        mission = self._read_one("SELECT ticket_id,goal_ref FROM missions WHERE mission_id=?", (mission_id,))
+        if mission is None:
+            raise HarnessError(tr("superagent.corrupt"), code="superagent/mission-corrupt")
+        rows = self._read_all(
+            "SELECT i.trigger_id FROM ticket_inputs i WHERE i.ticket_id=? AND i.context_only=0 AND i.state<>'handed_back' "
+            "AND (i.trigger_id=? OR EXISTS(SELECT 1 FROM input_deliveries d JOIN assignments a ON a.assignment_id=d.assignment_id "
+            "JOIN jobs j ON j.job_id=a.job_id WHERE d.input_id=i.input_id AND d.state='applied' AND j.mission_id=?)) "
+            "ORDER BY (i.trigger_id=?) DESC,i.created_at,i.input_id LIMIT 1000",
+            (mission['ticket_id'], mission['goal_ref'], mission_id, mission['goal_ref']))
+        targets = {}
+        for row in rows:
+            trigger = self._sources.get_trigger(row['trigger_id'])
+            key = (trigger['source_instance_id'], trigger['primary_thread_id'])
+            targets.setdefault(key, trigger)
+        return list(targets.values())
+
     def _create_outbox_candidates(self, assignment: dict, report: dict, trigger: dict, ticket: dict) -> None:
         reply = report.get("reply")
         if not isinstance(reply, str) or not reply.strip():
@@ -1796,8 +1839,9 @@ class CoordinatorExecutionService:
             return
         if "reply" not in (mandate.get("scope") or {}).get("actions", []):
             return
-        channels = self._sources.reply_channels(trigger["trigger_id"])
-        for channel in channels:
+        targets = [(channel, target) for target in self.reply_triggers(assignment['mission_id'])
+                   for channel in self._sources.reply_channels(target['trigger_id'])]
+        for channel, target in targets:
             if not (channel.get("capabilities") or {}).get("reply") is True:
                 continue
             message_id = "message_" + hashlib.sha256(
@@ -1817,6 +1861,7 @@ class CoordinatorExecutionService:
                     "body_ref": body_ref, "body_hash": body_hash,
                     "idempotency_key": f"superagent-v2:{message_id}",
                 })
+                uow.db.execute("INSERT INTO outbox_reply_targets VALUES(?,?)", (message_id, target['trigger_id']))
 
     def report(self, assignment_id: str) -> dict | None:
         assignment = self._assignment(assignment_id)

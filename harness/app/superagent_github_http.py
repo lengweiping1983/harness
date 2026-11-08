@@ -1,9 +1,7 @@
 """GitHub 的请求头、成功状态和专用接收路径。"""
 from __future__ import annotations
 
-from urllib.parse import quote
-
-from .superagent_http import JSONClient, WebhookServer
+from .superagent_http import JSONClient
 
 
 class GitHubClient(JSONClient):
@@ -17,14 +15,3 @@ class GitHubClient(JSONClient):
         return await super().request(method, path, data, token=self.token,
             headers={'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2026-03-10'},
             expected_status=201 if method == 'POST' else 200, before_request=before_request)
-
-
-class GitHubWebhookServer(WebhookServer):
-    """GitHub 在验签事件持久排队后返回 202。"""
-
-    def __init__(self, channel, port, language):
-        super().__init__(channel, port, language, path='/github', prefix='github', success_status=202)
-
-
-def repository_path(repository):
-    return '/repos/' + '/'.join(quote(part,safe='') for part in repository.split('/'))

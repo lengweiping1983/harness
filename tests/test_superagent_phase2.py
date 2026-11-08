@@ -38,13 +38,12 @@ class SuperagentPhase2Tests(unittest.TestCase):
         }
         self.host = CoordinatorHost.open(
             self.root / "v2", instance_id="phase2-tests",
-            identity={"project": "harness"}, legacy_state_dir=self.root / "v1",
+            identity={"project": "harness"},
             secret_resolver=lambda reference: self.secrets[reference],
             local_identity_verifier=self._local_identity,
         )
         self.host.sources.create_instance(
             "local-source", kind="local", config={"namespace": "repo"},
-            legacy_source_id="legacy-local",
         )
 
     def tearDown(self):
@@ -1262,7 +1261,7 @@ class SuperagentPhase2Tests(unittest.TestCase):
         self.host.close()
         self.host = CoordinatorHost.open(
             self.root / "v2", instance_id="phase2-tests",
-            identity={"project": "harness"}, legacy_state_dir=self.root / "v1",
+            identity={"project": "harness"},
             secret_resolver=lambda reference: self.secrets[reference],
             local_identity_verifier=self._local_identity,
             source_kinds=(CustomLocalSourceKindV2(),),
@@ -1310,91 +1309,14 @@ class SuperagentPhase2Tests(unittest.TestCase):
                 },
             )
 
-    def test_shadow_compares_source_facts_and_decisions_without_writing_either_ledger(self):
-        self.publish()
-        received = self.receive(event_id="shadow-1", thread_id="thread-shadow", text="Same body")
-        received_second = self.receive(event_id="shadow-2", thread_id="thread-shadow", text="Same body")
-        received_denied = self.receive(
-            event_id="shadow-denied", thread_id="thread-shadow", text="Same body",
-            actor_id="human:2", addressed="none",
-        )
-        candidate = self.host.authorization.begin_evaluation(received["thread_ids"][0], actor={"kind": "host"})
-        accepted = self.host.authorization.complete_evaluation(
-            candidate["evaluation_id"], self.accept_proposal(evidence="Same body"),
-            actor={"kind": "assessor"},
-        )
-        inbox_path = self.root / "v1" / "inbox.sqlite3"
-        inbox_path.parent.mkdir(parents=True)
-        legacy = sqlite3.connect(inbox_path)
-        legacy.executescript("""
-            CREATE TABLE sources(instance TEXT,id TEXT,mode TEXT,actors TEXT,threads TEXT,revision INTEGER,
-                PRIMARY KEY(instance,id));
-            CREATE TABLE triggers(seq INTEGER PRIMARY KEY,id TEXT UNIQUE,instance TEXT,source TEXT,remote_id TEXT,
-                actor TEXT,text TEXT,threads TEXT,human INTEGER,explicit INTEGER,disposition TEXT,policy_revision INTEGER);
-        """)
-        legacy.execute(
-            "INSERT INTO triggers VALUES(1,'old-trigger','phase2-tests','legacy-local',?,?,?,?,1,1,'accepted',1)",
-            ("shadow-1", "human:1", "Same body", json.dumps(["local/repo/thread-shadow"])),
-        )
-        legacy.execute(
-            "INSERT INTO triggers VALUES(2,'old-trigger-2','phase2-tests','legacy-local',?,?,?,?,1,1,'accepted',1)",
-            ("shadow-2", "human:1", "Same body", json.dumps(["local/repo/thread-shadow"])),
-        )
-        legacy.execute(
-            "INSERT INTO triggers VALUES(3,'old-trigger-3','phase2-tests','legacy-local',?,?,?,?,1,0,'filtered',1)",
-            ("shadow-denied", "human:2", "Same body", json.dumps(["local/repo/thread-shadow"])),
-        )
-        legacy.commit()
-        legacy.close()
-        router_path = self.root / "v1" / "inbox.router.sqlite3"
-        router = sqlite3.connect(router_path)
-        router.executescript("""
-            CREATE TABLE batches(id TEXT PRIMARY KEY,instance TEXT,items TEXT,payload TEXT,state TEXT,
-                run_id TEXT,decision TEXT,reason TEXT);
-            CREATE TABLE inputs(seq INTEGER PRIMARY KEY,instance TEXT,trigger_id TEXT,source_id TEXT,event_id TEXT,
-                batch_id TEXT,target TEXT,revision INTEGER,state TEXT);
-        """)
-        router.execute(
-            "INSERT INTO batches VALUES('batch-1','phase2-tests','[]','{}','decided','run-1',?,NULL)",
-            (json.dumps({"old-trigger": "task-1", "old-trigger-2": "task-2", "old-trigger-3": None}),),
-        )
-        router.execute(
-            "INSERT INTO inputs VALUES(1,'phase2-tests','old-trigger','legacy-local','shadow-1',"
-            "'batch-1','task-1',1,'pending')"
-        )
-        router.execute(
-            "INSERT INTO inputs VALUES(2,'phase2-tests','old-trigger-2','legacy-local','shadow-2',"
-            "'batch-1','task-2',1,'pending')"
-        )
-        router.execute(
-            "INSERT INTO inputs VALUES(3,'phase2-tests','old-trigger-3','legacy-local','shadow-denied',"
-            "'batch-1',NULL,1,'pending')"
-        )
-        router.commit()
-        router.close()
-        check = sqlite3.connect(inbox_path)
-        before = check.execute("SELECT count(*) FROM triggers").fetchone()[0]
-        check.close()
-        result = self.host.shadow.compare()
-        check = sqlite3.connect(inbox_path)
-        after = check.execute("SELECT count(*) FROM triggers").fetchone()[0]
-        check.close()
-        self.assertTrue(result["available"])
-        self.assertEqual(result["sample"]["limit"], 200)
-        self.assertFalse(result["sample"]["source_facts"]["legacy_truncated"])
-        self.assertFalse(result["sample"]["source_facts"]["coordinator_truncated"])
-        self.assertFalse(result["sample"]["decisions"]["legacy_truncated"])
-        self.assertFalse(result["sample"]["decisions"]["coordinator_truncated"])
-        self.assertEqual(result["source_facts"]["compared"], 3)
-        self.assertEqual(result["source_facts"]["matched"], 3)
-        self.assertEqual(result["source_facts"]["mismatched"], 0)
-        self.assertEqual(result["decisions"]["compared"], 3)
-        self.assertEqual(result["decisions"]["matched"], 3)
-        self.assertEqual(result["side_effects"], {
-            "legacy_writes": False, "coordinator_writes": False, "execution": False,
-        })
-        self.assertEqual(before, after)
-        self.assertEqual(accepted["kind"], "accept")
+    def test_shadow_api_is_removed_without_opening_or_rewriting_old_ledgers(self):
+        legacy = self.root / 'old-ledger.sqlite3'
+        legacy.write_bytes(b'preserve original')
+        self.assertFalse(hasattr(self.host, 'shadow'))
+        with self.assertRaises(TypeError):
+            CoordinatorHost.open(self.root / 'unopened', instance_id='retired', identity={}, legacy_state_dir=legacy)
+        self.assertEqual(legacy.read_bytes(), b'preserve original')
+        self.assertFalse((self.root / 'unopened').exists())
 
 
     def test_explicit_human_request_can_be_accepted_in_observe_mode(self):
@@ -1664,7 +1586,7 @@ class SuperagentPhase2Tests(unittest.TestCase):
             self.host.sources.create_instance(
                 "s" * 129, kind="local", config={"namespace": "long-id"},
             )
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             self.host.sources.create_instance(
                 "long-legacy", kind="local", config={"namespace": "long-legacy"},
                 legacy_source_id="l" * 257,
@@ -1882,56 +1804,14 @@ class SuperagentPhase2Tests(unittest.TestCase):
         self.assertIsNone(self.host.authorization.decision("missing-decision"))
         self.assertIsNone(self.host.authorization.mandate("missing-mandate"))
 
-    def test_legacy_source_mapping_is_bound_once_and_audited(self):
-        with self.assertRaises(PermissionError):
-            self.host.sources.update_instance(
-                "local-source", expected_revision=1, legacy_source_id="legacy-local-renamed",
-            )
-        self.assertEqual(self.host.sources.get_instance("local-source").legacy_source_id, "legacy-local")
-
-        self.host.sources.create_instance(
-            "unmapped-source", kind="local", config={"namespace": "repo-two"},
-        )
-        updated = self.host.sources.update_instance(
-            "unmapped-source", expected_revision=1, legacy_source_id="legacy-second",
-        )
-        self.assertEqual(updated.config_revision, 1)
-        self.assertEqual(updated.legacy_source_id, "legacy-second")
-        with self.assertRaises(PermissionError):
-            self.host.sources.update_instance(
-                "unmapped-source", expected_revision=1, legacy_source_id="legacy-renamed",
-            )
-        with self.host._store.transaction(write=True) as db:
-            with self.assertRaises(sqlite3.IntegrityError):
-                db.execute(
-                    "UPDATE source_instances SET legacy_source_id='legacy-renamed' WHERE source_instance_id='unmapped-source'"
-                )
-        self.host.sources.create_instance(
-            "duplicate-source", kind="local", config={"namespace": "repo-three"},
-        )
-        with self.assertRaises(ValueError):
-            self.host.sources.update_instance(
-                "duplicate-source", expected_revision=1, legacy_source_id="legacy-local",
-            )
-        with self.assertRaises(ValueError):
-            self.host.sources.create_instance(
-                "duplicate-source-create", kind="local",
-                config={"namespace": "repo-four"}, legacy_source_id="legacy-local",
-            )
-        with self.host._store.transaction(write=True) as db:
-            with self.assertRaises(sqlite3.IntegrityError):
-                db.execute(
-                    "UPDATE source_instances SET legacy_source_id='legacy-local' WHERE source_instance_id='duplicate-source'"
-                )
-        with self.host._store.transaction() as db:
-            event = db.execute(
-                """SELECT payload_json FROM audit_events
-                   WHERE aggregate_type='source_instance' AND aggregate_id=?
-                     AND event_type='source_instance.legacy_mapping_bound'""",
-                ("unmapped-source",),
-            ).fetchone()
-        self.assertIsNotNone(event)
-        self.assertEqual(json.loads(event["payload_json"])["legacy_source_id"], "legacy-second")
+    def test_legacy_source_mapping_api_is_removed_and_current_source_is_preserved(self):
+        before = self.host.sources.get_instance('local-source')
+        with self.assertRaises(TypeError):
+            self.host.sources.update_instance('local-source', expected_revision=1, legacy_source_id='retired')
+        with self.assertRaises(TypeError):
+            self.host.sources.create_instance('retired', kind='local', config={'namespace':'retired'}, legacy_source_id='retired')
+        self.assertEqual(self.host.sources.get_instance('local-source'), before)
+        self.assertNotIn('retired', [s.source_instance_id for s in self.host.sources.list_instances()])
 
 
 

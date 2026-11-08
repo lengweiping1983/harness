@@ -2,23 +2,13 @@
 
 应用装配入口为 `harness/app/harness.py` 中的 `Harness`，命令行入口为 `harness/cli.py`。
 
-Superagent 已有默认事件路由和显式自主目标两种协调方式，工作台、主动规则和远程执行仍未形成完整产品闭环；当前能力与边界见 [Superagent 模式](superagent.md)。团队、持续目标和定时自动化保留各自语义。
+Superagent 由 `superagent_cli.py`、`app/superagent_config.py` 和 `app/superagent_bootstrap.py` 装配唯一 `SuperagentService`。普通问答和复杂文件目标共用 Source → Gate / Evaluation → Ticket / Mandate → Mission / PlanRevision → Scheduler → 原生 Harness → Report / Artifact / Review → Outbox，任务复杂度只决定冻结计划和完成契约。
 
-`app/superagent_inbox.py` 提供可信宿主显式创建的持久事件入口，保存来源策略、任务引用、订阅及原子分发意图。它不启动对话、工具或外部发送，也不替代现有运行事实源；实际 API 和准入边界统一维护在上述模式文档。
+`app/superagent_coordinator_store.py` 保存实例协调事实、控制、原生模型调用与本机请求引用；原始 Session、Run、Tool、Worktree 和后台作业继续归 Harness。`superagent_execution.py`、`superagent_dag_scheduler.py` 与 `superagent_executor.py` 负责有界调度、资源隔离、原 Run 回查和执行准入；真实文件交接经 `superagent_artifacts.py`，质量门由宿主冻结候选并以独立 Reviewer 核验。
 
-`app/superagent_dispatch.py` 将已有工作订阅中的真人事件显式提交给 `RunController`，也供可信协调宿主指定未归属明确真人请求的工作任务；独立投递存储和稳定提交键关联原运行。未知提交只经 `find_submission` 回查，不按超时或重启自动重放。
+`superagent_source_registry.py` 与 `superagent_authorization.py` 核验来源、Scope、Mandate 和 Subscription。`superagent_input_delivery.py`、`superagent_mission_instruction.py` 将跟进和指令固定到原 Assignment / Run / Turn；`superagent_coordination.py` 与 `superagent_watchdog.py` 保存同库控制和监督事实。未知副作用只回查原操作，暂停或关闭阻止新的准入。
 
-`app/superagent_router.py` 以独立、无工具的 Router 宿主运行固定批次研判，原子保存协调游标、决策和输入意图，复用投递器续投容量不足的工作。SDK 消费循环由显式 CLI 模式装配，可连接本地文件及可选 GitHub／飞书信道，尚未接入工作台；角色、存储与当前限制统一见模式文档。
-
-`app/superagent_workers.py` 将可信宿主的创建模板接入 Router，复用工作树服务和对话存储建立独立 Worker，并订阅原 Thread。已有 Worker 的有界来源卡片加入冻结批次，允许在模板来源范围内续接新 Thread；`app/superagent_bindings.py` 独立保存关联意图和回执，未知关联只回查，不重新订阅。资源创建先持久认领，未知结果只回查，关闭等待已接受的 Git 写入；`Harness` 在命令分流与 AgentLoop 装配时核实持久角色并限制工具范围。模板授权、数量上限和恢复边界见模式文档。
-
-`app/superagent_results.py` 从原工作运行核对内部终态报告，交给同一 Router 对话整理为本地回复候选；独立账本保存消费与整理引用，不重复执行工作或对外发送。`app/superagent_service.py` 和 `superagent_cli.py` 装配独立运行目录、两个宿主、本地可信文件信道和关闭生命周期，主 CLI 通过 `--superagent CONFIG` 显式进入，不启用普通会话宿主。
-
-`app/superagent_mission_store.py` 保存自主目标、有限依赖图、冻结基线、操作意图和完成流，并在单次读事务中提供目标与任务快照；`app/superagent_missions.py` 在显式 `autonomy` 配置下替代默认 Router 的决策循环。它复用 `RunController`、受管理 Worker 和既有工作树交付原语，组合并行工作、真实依赖导入、集成、独立复核和有限修正；目标节点不订阅外部 Thread。`app/superagent_mission_status.py` 从原运行和轮次事件只读派生进度与等待原因，不参与执行或结算。`app/superagent_local.py` 提供不构造宿主的可信本机提交与状态读取。状态含义、证据保证和恢复边界只在模式文档维护。
-
-`app/superagent_guidance.py` 以独立意图账本把节点执行指令接到原生 `Harness.steer`，不替代原轮次的受理与应用事实；`app/superagent_guidance_files.py` 提供有界本机输入和回执投影，CLI 复用原子发布入口。后续集成与复核只消费有原日志证据的有界上下文，依赖图、验收和工具权限仍由原协调层约束。
-
-`app/superagent_github.py` 提供可选的签名来源核验、持久接收队列及评论发件箱；`app/superagent_github_http.py` 固定 GitHub 请求头、专用路径和成功状态。`app/superagent_feishu.py` 负责飞书加密事件、租户令牌和原消息回复，两个信道共用 `app/superagent_http.py` 的本机监听器、请求大小限制、禁止重定向及所属网络线程收尾。发送意图只来自核验身份的原事件及 Router 候选，目标由固定来源和原对象推导；未知写入只查回，不自动重发。具体配置、授权和凭据边界统一见 [Superagent 信道](superagent.md#github-webhook-与评论信道)。
+`superagent_delivery_runtime.py` 从冻结结果建立原目标 Outbox，发送前核对账号、资源和当前授权；`superagent_github_http.py`、`superagent_feishu_http.py` 及 `superagent_http.py` 提供认证 HTTP 和本机监听器。`superagent_provider_adapters.py` 与 `superagent_effect_recovery.py` 只读确认未知发送。`superagent_local.py`、`superagent_state.py`、`superagent_status.py` 提供同库本机操作及有界只读状态；运行观察文件不承担独立账本。完整配置和实际边界统一见 [Superagent 模式](superagent.md)。
 
 ## 源码与修改入口
 

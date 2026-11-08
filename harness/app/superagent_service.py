@@ -1,273 +1,29 @@
-"""独立目录中的 Superagent 本地文件信道与完整宿主生命周期。"""
+"""唯一 Superagent 服务：来源、授权、调度、执行、交付和恢复共用生命周期。"""
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
-import os
-import sqlite3
 import time
-from contextlib import ExitStack, contextmanager
 from collections.abc import Mapping
-from dataclasses import asdict, fields
+from dataclasses import asdict
 from pathlib import Path
-from itertools import islice
 
 from ..core.cleanup import join_cleanup, raise_cleanup_errors
-from ..core.sqlite import prepare_database
 from ..core.errors import HarnessError
 from ..i18n import tr
+from ..core.language import current_language
+from .superagent_common import _error, _json as strict_loads
+from .superagent_coordinator_store import _hash, _json, _now
 from ..session.store import _atomic_write
-from ..session.write_lock import event_write_lock
-from .config import HarnessConfig, _default_owned_processes
-from .harness import Harness
-from .superagent_common import _error, _json as strict_json, _names, _text
-
-
-SCHEMA = '''
-CREATE TABLE instances (
-    instance TEXT PRIMARY KEY, config TEXT NOT NULL, state TEXT NOT NULL
-    CHECK(state IN ('planned','creating','ready','unknown')), session_id TEXT);
-PRAGMA user_version=1;
-'''
-
-
-def read_config(path: Path):
-    """在创建宿主、读取凭据或修改目录之前核对全部显式配置。"""
-    path = Path(path).expanduser().resolve(strict=True)
-    with path.open('rb') as stream:
-        raw = stream.read(131073)
-    if len(raw) > 131072:
-        raise _error('invalid', field='config')
-    try:
-        value = strict_json(raw.decode('utf-8'))
-        required = {'version','instance_id','state_dir','language','router_model','worker_model',
-                    'base_url','permission_policy','sources','profiles'}
-        if (not isinstance(value, dict) or set(value) - required - {'max_active','max_workers','interval','once_timeout','github','feishu','autonomy'}
-                or required - set(value) or type(value['version']) is not int or value['version'] != 1):
-            raise ValueError
-        _text(value['instance_id'], 'instance_id')
-        for key in ('router_model','worker_model','base_url'):
-            _text(value[key], key)
-        if value['language'] not in ('en','zh-CN') or value['permission_policy'] not in ('read_only','full_access'):
-            raise ValueError
-        def resolved(raw):
-            candidate = Path(_text(raw, 'path', limit=4096)).expanduser()
-            return (path.parent / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
-        value['state_dir'] = str(resolved(value['state_dir']))
-        if not isinstance(value['sources'], dict) or not 1 <= len(value['sources']) <= 32:
-            raise ValueError
-        for name, source in value['sources'].items():
-            _text(name, 'source_id')
-            if (not isinstance(source, dict) or set(source) != {'mode','actors','threads'}
-                    or source['mode'] not in ('ignore','requests','candidates')):
-                raise ValueError
-            source['actors'] = _names(source['actors'], 'actors')
-            source['threads'] = _names(source['threads'], 'threads')
-        if not isinstance(value['profiles'], dict) or not 1 <= len(value['profiles']) <= 32:
-            raise ValueError
-        for name, profile in value['profiles'].items():
-            _text(name, 'profile_id', limit=64)
-            if not isinstance(profile, dict) or set(profile) != {'repo','description','sources','tools'}:
-                raise ValueError
-            repo = resolved(profile['repo'])
-            if not repo.is_dir():
-                raise ValueError
-            profile['repo'] = str(repo)
-            _text(profile['description'], 'description', limit=4096)
-            profile['sources'] = _names(profile['sources'], 'sources', nonempty=True)
-            profile['tools'] = _names(profile['tools'], 'tools')
-            if any(source not in value['sources'] for source in profile['sources']):
-                raise ValueError
-        for name, default, maximum in (('max_active',3,128),('max_workers',128,128),('interval',0.5,60),('once_timeout',600,86400)):
-            item = value.setdefault(name, default)
-            if (isinstance(item, bool) or not isinstance(item, (int,float)) or not 0 < item <= maximum
-                    or name in ('max_active','max_workers') and type(item) is not int):
-                raise ValueError
-        if value['interval'] < 0.01:
-            raise ValueError
-        if 'autonomy' in value:
-            from .superagent_mission_store import validate_autonomy
-            value['autonomy'] = validate_autonomy(value['autonomy'], value['profiles'])
-        if 'github' in value:
-            from .superagent_github import validate_github
-            value['github'] = validate_github(value['github'],value['sources'])
-        if 'feishu' in value:
-            from .superagent_feishu import validate_feishu
-            value['feishu'] = validate_feishu(value['feishu'],value['sources'])
-        if 'github' in value and 'feishu' in value and (value['github']['source_id'] == value['feishu']['source_id']
-                or value['github']['webhook_port'] and value['github']['webhook_port'] == value['feishu']['webhook_port']):
-            raise ValueError
-        return value
-    except (ValueError, TypeError, KeyError, UnicodeError, RecursionError, HarnessError) as exc:
-        raise _error('invalid', field='config') from exc
-
-
-_COORDINATOR_STATE_FILES = (
-    "superagent.sqlite3", "superagent.sqlite3-wal", "superagent.sqlite3-shm",
-)
-
-
-def _has_coordinator_state(root: Path) -> bool:
-    """识别当前及祖先目录中的 v2 协调账本，拒绝嵌套状态目录。"""
-    return any(
-        (ancestor / name).exists() or (ancestor / name).is_symlink()
-        for ancestor in (root, *root.parents)
-        for name in _COORDINATOR_STATE_FILES
-    )
 
 
 class SuperagentService:
-    """本机可信文件信道；同一状态目录只允许一个所属运行进程。"""
+    """CLI 和嵌入宿主共用同一协调服务，没有编排模式选择。"""
 
     @classmethod
-    async def open(cls, config_path: Path, *, worker_transport=None, router_transport=None):
-        # 旧入口仍供 CLI 使用；统一服务装配不加载这些待退役模块。
-        from .superagent_inbox import SuperagentInbox
-        from .superagent_dispatch import SuperagentDispatcher
-        from .superagent_router import SuperagentRouter
-        from .superagent_workers import SuperagentWorkerProfile, SuperagentWorkers
-        from .superagent_results import SuperagentResults
-        from .superagent_mission_store import MissionStore
-        from .superagent_missions import SuperagentMissions
-        from .superagent_guidance import SuperagentGuidance
-        from .superagent_guidance_files import GuidanceFiles
-        from .superagent_control import MissionControl
-        from .superagent_github import SuperagentGitHub, github_credentials
-        from .superagent_feishu import SuperagentFeishu, feishu_credentials
-        spec = read_config(config_path)
-        # 先于凭据读取拒绝 v2 账本；锁内还会复核一次以封闭并发启动竞态。
-        if _has_coordinator_state(Path(spec['state_dir'])):
-            raise _error('conflict')
-        api_key = os.environ.get('HARNESS_API_KEY') or os.environ.get('OPENROUTER_API_KEY','')
-        if not api_key:
-            raise _error('credentials-required')
-        channel_credentials = github_credentials(spec['github']) if 'github' in spec else None
-        feishu_keys = feishu_credentials(spec['feishu']) if 'feishu' in spec else None
-        service = cls()
-        service.spec = spec
-        service.root = Path(spec['state_dir'])
-        service.root.mkdir(parents=True, exist_ok=True)
-        service.stack = ExitStack()
-        service.hosts = []
-        service.closed = False
-        service._close_task = None
-        service._tick_task = None
-        service._serve_error = None
-        service._file_cursor = 0
-        service._draft_cursor = 0
-        service._file_errors = {}
-        service.file_errors = []
-        service.router = service.dispatcher = None
-        service.github = None
-        service.feishu = None
-        service.channels = []
-        service.guidance_files = None
-        service.owner = asyncio.get_running_loop()
-        try:
-            try:
-                service.stack.enter_context(event_write_lock(service.root / 'superagent-runtime'))
-            except OSError as exc:
-                raise _error('runtime-busy') from exc
-            if _has_coordinator_state(service.root):
-                raise _error('conflict')
-            service.path = service.root / 'service.sqlite3'
-            with service._db(initialize=True, write=True) as db:
-                identity = json.dumps(spec, ensure_ascii=False, sort_keys=True)
-                row = db.execute('SELECT config FROM instances WHERE instance=?', (spec['instance_id'],)).fetchone()
-                # 一个运行目录只归一个实例，不能重用其中的两个宿主目录。
-                if row is None:
-                    if db.execute('SELECT 1 FROM instances LIMIT 1').fetchone():
-                        raise _error('conflict')
-                    db.execute("INSERT INTO instances VALUES(?,?,'planned',NULL)", (spec['instance_id'], identity))
-                elif row[0] != identity:
-                    raise _error('conflict')
-            for kind, model, transport in (('router',spec['router_model'],router_transport),
-                                            ('worker',spec['worker_model'],worker_transport)):
-                flags = {item.name: False for item in fields(HarnessConfig) if item.name.startswith('enable_')}
-                if kind == 'worker':
-                    flags.update(enable_fs=True, enable_shell=True, enable_todo=True, enable_worktrees=True,
-                                 enable_owned_processes=_default_owned_processes())
-                config = HarnessConfig(home=service.root / (kind + '-home'), cwd=service.root,
-                    api_key=api_key,
-                    model=model, base_url=spec['base_url'], language=spec['language'], max_steps=64,
-                    max_retries=0, permission_policy=spec['permission_policy'], **flags)
-                host = Harness(config, transport=transport, codex_gateway_home=service.root / (kind + '-gateway'))
-                service.hosts.append(host)
-                if kind == 'worker' and spec['permission_policy'] == 'read_only':
-                    # 本地模式没有审批界面，先于普通宿主的审批钩子拒绝不受理的写入。
-                    def read_only(tool, args, ctx):
-                        if tool.effect != 'read' or tool.dangerous or tool.approval_required:
-                            return tr('superagent.read-only')
-                        return None
-                    host.tools.add_restriction(read_only)
-                    host.tools.add_execution_check(read_only)
-            service.router_host, service.worker_host = service.hosts
-            session_id = service._router_conversation()
-            service.inbox = SuperagentInbox(service.root / 'inbox.sqlite3', instance_id=spec['instance_id'])
-            for name, source in spec['sources'].items():
-                try:
-                    old = service.inbox.source(name)
-                except HarnessError as exc:
-                    if exc.code != 'superagent/source-unavailable':
-                        raise
-                    service.inbox.configure_source(name, **source)
-                else:
-                    if any(old[key] != source[key] for key in ('mode','actors','threads')):
-                        raise _error('conflict')
-            profiles = {name: SuperagentWorkerProfile(Path(value['repo']), value['description'],
-                        tuple(value['sources']), tuple(value['tools']), model=spec['worker_model'])
-                        for name, value in spec['profiles'].items()}
-            mission_store = (MissionStore(service.root / 'missions.sqlite3', service.inbox,
-                identity={'config': spec, 'session_id': session_id}, profiles=spec['profiles'], limits=spec['autonomy'])
-                if 'autonomy' in spec else None)
-            service.control = (MissionControl(service.root / 'control.sqlite3', instance_id=spec['instance_id'],
-                identity=identity) if mission_store is not None else None)
-            service.factory = SuperagentWorkers(service.worker_host, service.inbox,
-                owner_session_id=session_id, profiles=profiles, max_workers=spec['max_workers'], mission_store=mission_store)
-            service.dispatcher = SuperagentDispatcher(service.worker_host, service.inbox, max_active=spec['max_active'])
-            reply_limits = {spec['feishu']['source_id']:99} if 'feishu' in spec else None
-            if mission_store is not None:
-                service.router = SuperagentMissions(service.dispatcher, service.router_host,
-                    session_id=session_id, worker_factory=service.factory, store=mission_store, reply_limits=reply_limits,
-                    control=service.control)
-                service.results = service.router.results
-                remote_sources = {spec[name]['source_id'] for name in ('github', 'feishu') if name in spec}
-                service.router.guidance = SuperagentGuidance(service.router, sources=set(spec['sources']) - remote_sources)
-                service.guidance_files = GuidanceFiles(service.root / 'guidance', service.router.guidance)
-            else:
-                service.router = SuperagentRouter(service.dispatcher, service.router_host,
-                    session_id=session_id, workers={}, worker_factory=service.factory)
-                service.results = SuperagentResults(service.router, reply_limits=reply_limits)
-            for name in ('incoming','receipts','drafts'):
-                (service.root / name).mkdir(exist_ok=True)
-            if channel_credentials is not None:
-                service.github = SuperagentGitHub(service,spec['github'],*channel_credentials)
-                service.channels.append(('github', service.github))
-                await service.github.server.start()
-            if feishu_keys is not None:
-                service.feishu = SuperagentFeishu(service, spec['feishu'], feishu_keys)
-                service.channels.append(('feishu', service.feishu))
-                await service.feishu.server.start()
-            return service
-        except BaseException as original:
-            errors = [original]
-            for _, channel in reversed(service.channels):
-                channel.stop()
-                try:
-                    await channel.server.aclose()
-                except BaseException as cleanup:
-                    errors.append(cleanup)
-            for host in reversed(service.hosts):
-                try:
-                    await host.close()
-                except BaseException as cleanup:
-                    errors.append(cleanup)
-            try:
-                service.stack.close()
-            except BaseException as cleanup:
-                errors.append(cleanup)
-            raise_cleanup_errors(errors)
+    async def open(cls, config_path: Path, *, worker_transport=None, coordinator_transport=None):
+        from .superagent_bootstrap import open_service
+        return await open_service(cls, config_path, worker_transport=worker_transport,
+                                  coordinator_transport=coordinator_transport)
 
     @classmethod
     async def open_coordinator(
@@ -278,9 +34,9 @@ class SuperagentService:
         interval: float = 0.5, once_timeout: float = 600,
         max_threads_per_tick: int = 16, planner: object | None = None,
         system_profiles: Mapping[str, str] | None = None,
-        provider_clients: Mapping | None = None,
+        provider_clients: Mapping | None = None, _runtime_stack=None,
     ):
-        """显式打开统一协调运行模式；不被旧 CLI 或生产默认路由自动选择。"""
+        """嵌入宿主注入原生端口，与生产 CLI 共用同一服务。"""
         if (
             isinstance(interval, bool) or not isinstance(interval, (int, float))
             or not 0.01 <= interval <= 60
@@ -289,6 +45,7 @@ class SuperagentService:
             or type(max_threads_per_tick) is not int or not 1 <= max_threads_per_tick <= 100
             or not isinstance(source_kinds, (tuple, list))
             or effect_adapters is not None and not isinstance(effect_adapters, Mapping)
+            or provider_clients is not None and not isinstance(provider_clients, Mapping)
         ):
             raise ValueError("unified SuperagentService runtime options are invalid")
         from .superagent_coordinator_host import CoordinatorHost
@@ -299,11 +56,10 @@ class SuperagentService:
             local_identity_verifier=local_identity_verifier,
             source_kinds=tuple(source_kinds), executor_adapter=executor_adapter,
             watchdog_limits=watchdog_limits, planner=planner,
-            system_profiles=system_profiles,
+            system_profiles=system_profiles, _runtime_stack=_runtime_stack,
         )
         try:
             service = cls()
-            service._coordinator_mode = True
             service._coordinator_host = host
             service._coordinator_assessor = assessor
             from .superagent_delivery_runtime import CoordinatorDeliveryRuntime
@@ -322,10 +78,9 @@ class SuperagentService:
             service._coordinator_last_status = None
             service.spec = {"interval": float(interval), "once_timeout": float(once_timeout)}
             service.root = host.state_dir
-            service.hosts = []
-            service.channels = []
-            service.router = service.dispatcher = service.factory = None
-            service.guidance_files = service.results = service.inbox = None
+            service.listeners = []
+            service._owned_harnesses = []
+            service._production_config = None
             service.closed = False
             service._close_task = None
             service._tick_task = None
@@ -338,16 +93,12 @@ class SuperagentService:
 
     @property
     def coordinator(self):
-        if not getattr(self, "_coordinator_mode", False):
-            raise HarnessError(tr("superagent.conflict"), code="superagent/coordinator-unavailable")
         if self.closed:
             raise _error("closed")
         return self._coordinator_host
 
     @property
     def coordinator_status(self):
-        if not getattr(self, "_coordinator_mode", False):
-            raise HarnessError(tr("superagent.conflict"), code="superagent/coordinator-unavailable")
         return self._coordinator_last_status
 
     def receive_source(self, source_id, *, headers, raw, **kwargs):
@@ -360,117 +111,70 @@ class SuperagentService:
         self.coordinator
         return self._coordinator_delivery.ingress(source_id)
 
-    @contextmanager
-    def _db(self, *, initialize=False, write=False):
-        db = sqlite3.connect(self.path, timeout=10)
-        db.row_factory = sqlite3.Row
-        try:
-            with db:
-                if write:
-                    db.execute('BEGIN IMMEDIATE')
-                prepare_database(db, SCHEMA, initialize=initialize)
-                yield db
-        finally:
-            db.close()
-
-    def _router_conversation(self):
-        with self._db(write=True) as db:
-            row = db.execute('SELECT * FROM instances WHERE instance=?', (self.spec['instance_id'],)).fetchone()
-            creating = row['state'] == 'planned'
-            if creating:
-                db.execute("UPDATE instances SET state='creating' WHERE instance=?", (self.spec['instance_id'],))
-        marker = hashlib.sha256(row['config'].encode('utf-8')).hexdigest()
-        headers = [header for header in self.router_host.sessions.list_sessions()
-                   if header.metadata.get('superagent_router') == marker]
-        if not headers and creating:
-            self.router_host.create_session(metadata={'superagent_router': marker})
-            headers = [header for header in self.router_host.sessions.list_sessions()
-                       if header.metadata.get('superagent_router') == marker]
-        if len(headers) != 1 or row['session_id'] is not None and headers[0].id != row['session_id']:
-            with self._db(write=True) as db:
-                db.execute("UPDATE instances SET state='unknown' WHERE instance=?", (self.spec['instance_id'],))
-            raise _error('worker-unavailable')
-        with self._db(write=True) as db:
-            db.execute("UPDATE instances SET state='ready',session_id=? WHERE instance=?", (headers[0].id, self.spec['instance_id']))
-        return headers[0].id
-
-    @staticmethod
-    def _publish(path, value):
-        raw = (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + '\n').encode('utf-8')
-        try:
-            with path.open('xb') as stream:
-                stream.write(raw)
-                stream.flush()
-                os.fsync(stream.fileno())
-        except FileExistsError:
-            if path.is_symlink():
-                raise _error('conflict')
-            with path.open('rb') as stream:
-                if stream.read(len(raw) + 1) != raw:
-                    raise _error('conflict')
-
-    def _scan(self):
-        files = list(islice((self.root / 'incoming').glob('*.json'),1025))
-        if len(files) > 1024:
-            raise _error('file-capacity')
-        files.sort()
-        self._input_count = len(files)
-        names = {path.name for path in files}
-        self._file_errors = {name: value for name, value in self._file_errors.items() if name in names}
-        if files:
-            offset = self._file_cursor % len(files)
-            selected = (files[offset:] + files[:offset])[:16]
-            self._file_cursor = offset + len(selected)
-        else:
-            selected = []
-        for path in selected:
-            try:
-                if path.is_symlink() or not path.is_file() or path.stat().st_size > 524288:
-                    raise _error('invalid', field='event_file')
-                with path.open('rb') as stream:
-                    raw = stream.read(524289)
-                if len(raw) > 524288:
-                    raise _error('invalid', field='event_file')
-                value = strict_json(raw.decode('utf-8'))
-                if not isinstance(value, dict) or set(value) != {'source_id','event_id','actor_id','text','thread_ids','human','explicit'}:
-                    raise _error('invalid', field='event_file')
-                receipt = self.inbox.receive(**value)
-                identity = hashlib.sha256(path.name.encode('utf-8') + b'\0' + raw).hexdigest()
-                self._publish(self.root / 'receipts' / (identity + '.json'),
-                              {'file': path.name, 'receipt': {key: value for key, value in receipt.items() if key != 'duplicate'}})
-                self._file_errors.pop(path.name, None)
-            except (UnicodeError, ValueError, RecursionError):
-                self._file_errors[path.name] = {'file': path.name, 'code': 'superagent/invalid'}
-            except HarnessError as exc:
-                if exc.code not in {'superagent/invalid','superagent/event-conflict','superagent/source-unavailable'}:
-                    raise
-                self._file_errors[path.name] = {'file': path.name, 'code': exc.code}
-        self.file_errors = [self._file_errors[name] for name in sorted(self._file_errors)]
-
     async def tick(self):
-        if getattr(self, "_coordinator_mode", False):
-            return await self._tick_coordinator_entry()
         if self.closed:
-            raise _error('closed')
+            raise _error("closed")
         if self.owner is not asyncio.get_running_loop():
             future = asyncio.run_coroutine_threadsafe(self.tick(), self.owner)
             return await join_cleanup(asyncio.wrap_future(future))
         if self._tick_task is None or self._tick_task.done():
-            self._tick_task = asyncio.create_task(self._tick())
+            language = self._production_config['language'] if self._production_config else current_language.get()
+            with current_language.set(language):
+                self._tick_task = asyncio.create_task(self._tick_coordinator())
         return await join_cleanup(self._tick_task)
 
-    async def _tick_coordinator_entry(self):
-        if self.closed:
-            raise _error("closed")
-        if self.owner is not asyncio.get_running_loop():
-            future = asyncio.run_coroutine_threadsafe(self._tick_coordinator_entry(), self.owner)
-            return await join_cleanup(asyncio.wrap_future(future))
-        if self._tick_task is None or self._tick_task.done():
-            self._tick_task = asyncio.create_task(self._tick_coordinator())
-        return await join_cleanup(self._tick_task)
+    async def _apply_local_requests(self):
+        host = self._coordinator_host
+        with host._store.transaction() as db:
+            rows = db.execute("SELECT * FROM coordinator_requests WHERE state='pending' ORDER BY created_at,request_id LIMIT 17").fetchall()
+        errors = []
+        for row in rows[:16]:
+            if _hash(row['payload_json']) != row['payload_hash']:
+                raise _error('corrupt')
+            payload = strict_loads(row['payload_json'])
+            try:
+                result = await host.execution.deliver_instruction(
+                    payload['mission_id'], payload['job_id'], payload['assignment_id'], row['request_id'],
+                    payload['trigger_id'], payload['text'], expected_run_id=payload['expected_run_id'],
+                    expected_turn_id=payload['expected_turn_id'])
+                state = 'accepted'
+            except Exception as exc:
+                original = host.execution.instruction_receipt(row['request_id'])
+                if original is not None:
+                    result, state = original, 'accepted'
+                elif isinstance(exc, (HarnessError, PermissionError, LookupError, ValueError)):
+                    result, state = {'code': getattr(exc, 'code', type(exc).__name__), 'detail': str(exc)}, 'rejected'
+                else:
+                    errors.append({'request_id': row['request_id'], 'code': type(exc).__name__})
+                    continue
+            with host._store.transaction(write=True) as db:
+                db.execute("UPDATE coordinator_requests SET state=?,receipt_json=?,updated_at=? WHERE request_id=? AND state='pending'", (state, _json(result), _now(), row['request_id']))
+        return {'backlog': len(rows) > 16, 'errors': errors}
+
+    def _publish_status(self, status):
+        if self._production_config is None:
+            return
+        runtime = {**status, 'instance_id': self._production_config['instance_id'], 'observed_at': _now()}
+        active_runs = {}
+        e = self._coordinator_host._execution_service
+        for assignment in e._read_all("SELECT a.assignment_id FROM assignments a WHERE a.state IN ('accepted','running') ORDER BY assignment_id LIMIT 128"):
+            current = e._assignment(assignment['assignment_id'])
+            worker = e._worker_row(current['worker_id'])
+            try:
+                evidence = e._executor.inspect(worker, current)
+                observed = {key: evidence.get(key) for key in ('run_id', 'status', 'settled', 'turn', 'unconfirmed_tools', 'unsettled_background')}
+            except (HarnessError, PermissionError, ValueError):
+                observed = {'run_id': current['run_id'], 'turn': None, 'status': 'unknown', 'settled': False}
+            active_runs[current['assignment_id']] = observed
+        runtime['active_runs'] = active_runs
+        _atomic_write(self.root / 'runtime-status.json', _json(runtime))
 
     async def _tick_coordinator(self):
         host = self._coordinator_host
+        for listener in self.listeners:
+            if listener['server'].errors:
+                raise listener['server'].errors[0]
+        local_requests = await self._apply_local_requests()
         self._coordinator_delivery.prepare_channels()
         controls = await host.execution.reconcile_controls(limit=100)
         instructions = await host.execution.reconcile_instructions(limit=100)
@@ -485,11 +189,16 @@ class SuperagentService:
         routes = []
         route_errors = []
         for thread in selected:
+            if self.closed:
+                break
             result = await host.authorization.assess_next_async(
                 thread["thread_id"], self._coordinator_assessor,
                 actor={"kind": "host"}, assessor_actor={"kind": "assessor"},
             )
             assessments.append(result)
+
+        if self.closed:
+            return self._coordinator_last_status or {'runtime_state':'stopping'}
 
         # 已接受的 TicketInput 在暂停、撤权或进程重启后仍保留 waiting；
         # 每轮从账本重读并复用 route_trigger 的原身份幂等路径。
@@ -547,13 +256,14 @@ class SuperagentService:
             watchdog_status["states"]["stalled"] + watchdog_status["states"]["blocked"]
         )
 
-        pending_triggers = 0
+        pending_triggers = blocked_triggers = 0
+        unavailable_threads = {thread['thread_id'] for thread, result in zip(selected, assessments) if result.get('state') in {'unavailable', 'blocked'}}
         for thread in threads:
             triggers = host.sources.list_triggers(thread_id=thread["thread_id"], limit=1000)
-            pending_triggers += sum(
-                1 for trigger in triggers
-                if (trigger.get("disposition") or {}).get("state") == "evaluation.queued"
-            )
+            count = sum(1 for trigger in triggers if (trigger.get("disposition") or {}).get("state") == "evaluation.queued")
+            pending_triggers += count
+            if thread['thread_id'] in unavailable_threads:
+                blocked_triggers += count
 
         control_pending = sum(
             1 for item in controls["missions"] if item.get("stop_state") == "pending"
@@ -579,6 +289,7 @@ class SuperagentService:
         )
         status = {
             "runtime_state": "running",
+            "local_requests": local_requests,
             "outbox": sending,
             "instructions": instructions,
             "open_attentions": host._execution_service._read_one("SELECT count(*) AS n FROM attentions WHERE state='open'")["n"],
@@ -604,6 +315,7 @@ class SuperagentService:
             "active_assignments": len(active_assignments),
             "unknown_assignments": len(unknown_assignments),
             "pending_triggers": pending_triggers,
+            "blocked_triggers": blocked_triggers,
             "pending_routes": pending_route_count,
             "route_backlog": route_backlog,
             "reconcile_backlog": reconciliation["processed"] >= 100,
@@ -621,6 +333,7 @@ class SuperagentService:
             "blocked_assessments": blocked_assessments,
         }
         self._coordinator_last_status = status
+        self._publish_status(status)
         return status
 
     async def _serve_coordinator(self, stop: asyncio.Event, *, once: bool = False):
@@ -631,10 +344,12 @@ class SuperagentService:
             except Exception as exc:
                 self._serve_error = exc
                 raise
-            if once and status["route_errors"]:
+            if self.closed:
+                return 0
+            if once and (status["route_errors"] or status['local_requests']['errors']):
                 return 2
             pending = bool(
-                status["pending_triggers"] or status["pending_routes"]
+                status["pending_triggers"] > status['blocked_triggers'] or status["pending_routes"]
                 or status["route_backlog"] or status["active_assignments"]
                 or status["pending_missions"] or status["mission_backlog"]
                 or status["dag_scheduler_backlog"]
@@ -642,7 +357,7 @@ class SuperagentService:
                 or status["reconcile_backlog"]
                 or status["publication_backlog"] or status["outbox"]["backlog"]
                 or status["outbox"]["pending"] > status["outbox"]["unavailable"]
-                or status["instructions"]["backlog"]
+                or status["instructions"]["backlog"] or status['local_requests']['backlog']
             )
             uncertain = bool(
                 status["control_unknown"] or status["unknown_assignments"]
@@ -671,179 +386,49 @@ class SuperagentService:
             return
         if self._close_task is None:
             self.closed = True
+            self._coordinator_host._execution_service.stop_admission()
+            for listener in self.listeners:
+                listener['server'].stop()
             self._close_task = asyncio.create_task(self._close_coordinator())
         await join_cleanup(self._close_task)
 
     async def _close_coordinator(self):
         errors = []
+        for listener in reversed(self.listeners):
+            try:
+                await listener['server'].aclose()
+            except BaseException as exc:
+                errors.append(exc)
         if self._tick_task is not None:
             try:
                 await self._tick_task
             except BaseException as exc:
                 errors.append(exc)
+        for harness in reversed(self._owned_harnesses):
+            try:
+                await harness.close()
+            except BaseException as exc:
+                errors.append(exc)
+        def final_status(host_errors):
+            all_errors = [*errors, *host_errors]
+            previous = self._coordinator_last_status or {}
+            failure = all_errors[0] if all_errors else self._serve_error
+            self._coordinator_last_status = {**previous,
+                'runtime_state':'failed' if failure is not None else 'stopped',
+                **({'last_error_code':getattr(failure, 'code', 'runtime/failure')} if failure is not None else {})}
+            self._publish_status(self._coordinator_last_status)
+        self._coordinator_host._before_release = final_status
         try:
             await self._coordinator_host.aclose()
         except BaseException as exc:
             errors.append(exc)
-        previous = self._coordinator_last_status or {}
-        self._coordinator_last_status = {
-            **previous,
-            "runtime_state": "failed" if errors or self._serve_error is not None else "stopped",
-            **({"last_error_code": getattr(errors[0] if errors else self._serve_error,
-                                            "code", "runtime/failure")}
-               if errors or self._serve_error is not None else {}),
-        }
+            self._coordinator_last_status = {**(self._coordinator_last_status or {}),
+                'runtime_state':'failed', 'last_error_code':getattr(exc, 'code', 'runtime/failure')}
         raise_cleanup_errors(errors)
 
-    async def _tick(self):
-        for _, channel in self.channels:
-            if channel.server.errors:
-                raise channel.server.errors[0]
-            channel.drain()
-        self._scan()
-        try:
-            if not self.closed and self.guidance_files is not None:
-                self.guidance_files.scan()
-            await self.router.tick(include_status=False)
-        except HarnessError as exc:
-            if not self.closed or exc.code != 'superagent/closed':
-                raise
-        for draft in self.results.drafts(after=self._draft_cursor, limit=16):
-            self._publish(self.root / 'drafts' / (draft['id'] + '.json'), draft)
-            self._draft_cursor = draft['seq']
-        for _, channel in self.channels:
-            await channel.tick()
-        if self.guidance_files is not None:
-            self.guidance_files.publish()
-        status = {**self.router.status(), 'input_errors': self.file_errors,
-                  'runtime_state': 'stopping' if self.closed else 'running',
-                  **{name:channel.status() for name, channel in self.channels},
-                  **({'guidance_files': self.guidance_files.status()} if self.guidance_files is not None else {})}
-        _atomic_write(self.root / 'status.json', json.dumps(status, ensure_ascii=False, indent=2))
-        return status
 
     async def serve(self, stop: asyncio.Event, *, once=False):
-        if getattr(self, "_coordinator_mode", False):
-            return await self._serve_coordinator(stop, once=once)
-        from .superagent_missions import SuperagentMissions
-
-        started = time.monotonic()
-        scans = 0
-        if once and self.guidance_files is not None:
-            self.guidance_files.seen.clear()
-        while not stop.is_set() and not self.closed:
-            status = await self.tick()
-            scans += 1
-            active = any(host.runtime.records.active or host.jobs.active_owners() for host in self.hosts)
-            pending = any(status['inputs'].get(key,0) for key in ('waiting','pending'))
-            pending |= any(status['results'].get(key,0) for key in ('waiting','ready','submitting','accepted'))
-            pending |= self.results.uncollected()
-            pending |= bool(status.get('control', {}).get('states', {}).get('queued'))
-            if isinstance(self.router, SuperagentMissions) and self.router.control_runtime is not None:
-                pending |= self.router.control_runtime.pending()
-            pending |= bool(self.results.drafts(after=self._draft_cursor, limit=1))
-            pending |= bool(self.inbox.events(after=status['cursor'], limit=1)['events'])
-            if self.guidance_files is not None:
-                pending |= self.guidance_files.unscanned or any(status['guidance']['states'].get(key, 0) for key in ('pending', 'submitting'))
-            outgoing = [status[name]['outbound'] for name, _ in self.channels]
-            pending |= any(status[name]['queued'] for name, _ in self.channels)
-            pending |= any(counts.get(key,0) for counts in outgoing for key in ('pending','sending'))
-            # 至少轮询完输入目录；重启读回不重放旧运行或写入。
-            covered = scans * 16 >= self._input_count
-            if once and not active and any(batch['state'] == 'unknown' for batch in status['batches']):
-                return 2
-            if once and covered and not active and not pending:
-                if self.guidance_files is not None:
-                    self.guidance_files.publish(final=True)
-                return 2 if (status['input_errors'] or status['inputs'].get('unknown') or status['inputs'].get('rejected')
-                    or isinstance(self.router, SuperagentMissions) and self.router.control_runtime is not None
-                        and self.router.control_runtime.uncertain()
-                    or self.guidance_files is not None and (status['guidance_files']['input_errors'] or
-                        any(status['guidance']['states'].get(key, 0) for key in ('unknown', 'rejected')))
-                    or any(counts.get('unknown') for counts in outgoing)
-                    or any(status['results'].get(key) for key in ('unknown','rejected'))
-                    or any(batch['state'] in ('unknown','rejected') for batch in status['batches'])) else 0
-            if once and time.monotonic() - started >= self.spec['once_timeout']:
-                self._serve_error = _error('once-timeout')
-                raise self._serve_error
-            try:
-                await asyncio.wait_for(stop.wait(), self.spec['interval'])
-            except TimeoutError:
-                pass
-        return 0
+        return await self._serve_coordinator(stop, once=once)
 
     async def aclose(self):
-        if getattr(self, "_coordinator_mode", False):
-            await self._aclose_coordinator()
-            return
-        if self.owner is not asyncio.get_running_loop():
-            future = asyncio.run_coroutine_threadsafe(self.aclose(), self.owner)
-            await join_cleanup(asyncio.wrap_future(future))
-            return
-        self.closed = True
-        self.router.close()
-        if self.guidance_files is not None:
-            self.router.guidance.close()
-        self.dispatcher.close()
-        self.factory.stop()
-        for _, channel in self.channels:
-            channel.stop()
-        for host in self.hosts:
-            host.runtime.begin_close()
-        if self._close_task is None:
-            self._close_task = asyncio.create_task(self._close())
-        await join_cleanup(self._close_task)
-
-    async def _close(self):
-        from .superagent_missions import SuperagentMissions
-
-        errors = []
-        for _, channel in reversed(self.channels):
-            try:
-                await channel.server.aclose()
-            except BaseException as exc:
-                errors.append(exc)
-        try:
-            await self.factory.aclose()
-        except BaseException as exc:
-            errors.append(exc)
-        if self._tick_task is not None:
-            try:
-                await self._tick_task
-            except BaseException as exc:
-                errors.append(exc)
-        if self.guidance_files is not None:
-            try:
-                await self.router.guidance.aclose()
-            except BaseException as exc:
-                if not any(exc is error for error in errors):
-                    errors.append(exc)
-        if isinstance(self.router, SuperagentMissions):
-            try:
-                await self.router.aclose()
-            except BaseException as exc:
-                if not any(exc is error for error in errors):
-                    errors.append(exc)
-        for host in reversed(self.hosts):
-            try:
-                await host.close()
-            except BaseException as exc:
-                errors.append(exc)
-        try:
-            if self.guidance_files is not None:
-                self.guidance_files.publish(final=True)
-            failure = errors[0] if errors else self._serve_error
-            status = {**self.router.status(), 'input_errors': self.file_errors,
-                      'runtime_state': 'failed' if failure is not None else 'stopped',
-                      **{name:channel.status() for name, channel in self.channels},
-                      **({'guidance_files': self.guidance_files.status()} if self.guidance_files is not None else {})}
-            if failure is not None:
-                status['last_error_code'] = getattr(failure,'code','runtime/failure')
-            _atomic_write(self.root / 'status.json', json.dumps(status, ensure_ascii=False, indent=2))
-        except BaseException as exc:
-            errors.append(exc)
-        try:
-            self.stack.close()
-        except BaseException as exc:
-            errors.append(exc)
-        raise_cleanup_errors(errors)
+        await self._aclose_coordinator()

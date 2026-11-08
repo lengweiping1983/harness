@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -93,7 +94,15 @@ class SourceIngress:
         self.runtime, self.source_id = runtime, source_id
 
     def receive(self, headers, raw, *, queued=False):
-        return self.runtime.receive(self.source_id, headers=headers, raw=raw)
+        try:
+            result = self.runtime.receive(self.source_id, headers=headers, raw=raw)
+            return {'challenge': result['challenge']} if result.get('state') == 'challenge' else result
+        except PermissionError as exc:
+            source = self.runtime.host.sources.get_instance(self.source_id)
+            raise _error(source.kind + '-signature') from exc
+        except (ValueError, TypeError) as exc:
+            source = self.runtime.host.sources.get_instance(self.source_id)
+            raise _error(source.kind + '-request') from exc
 
 
 class CoordinatorDeliveryRuntime:
@@ -229,7 +238,12 @@ class CoordinatorDeliveryRuntime:
                 raise _error("corrupt")
             mission_id = assignment["mission_id"]
         mission = self.e._read_one("SELECT * FROM missions WHERE mission_id=?", (mission_id,))
-        trigger = self.host.sources.get_trigger(mission["goal_ref"]) if mission else None
+        binding = self.e._read_one("SELECT trigger_id FROM outbox_reply_targets WHERE message_id=?", (message['message_id'],))
+        if binding is None and message.get('reply_trigger_id'):
+            binding = {'trigger_id': message['reply_trigger_id']}
+        trigger = self.host.sources.get_trigger(binding['trigger_id'] if binding else mission['goal_ref']) if mission else None
+        if trigger is not None and trigger['trigger_id'] not in {item['trigger_id'] for item in self.e.reply_triggers(mission_id)}:
+            raise _error('mandate.unavailable')
         if (mission is None or mission["ticket_id"] != ticket["ticket_id"] or trigger is None
                 or trigger["source_instance_id"] != source.source_instance_id
                 or trigger["source_revision"] != source.config_revision):
@@ -253,7 +267,9 @@ class CoordinatorDeliveryRuntime:
         trigger = self.host.sources.get_trigger(mission["goal_ref"])
         if ticket is None or trigger is None:
             raise _error("corrupt")
-        for channel in self.host.sources.reply_channels(trigger["trigger_id"]):
+        targets = [(channel, target) for target in self.e.reply_triggers(mission['mission_id'])
+                   for channel in self.host.sources.reply_channels(target['trigger_id'])]
+        for channel, target in targets:
             message_id = "message_" + _hash(_json([identity, channel["channel_id"], kind]))[:32]
             old = self.e._read_one("SELECT * FROM outbox_messages WHERE message_id=?", (message_id,))
             if old is not None:
@@ -261,7 +277,8 @@ class CoordinatorDeliveryRuntime:
                 continue
             message = {"message_id": message_id, "ticket_id": mission["ticket_id"],
                        "channel_id": channel["channel_id"], "kind": kind, "body_ref": reference,
-                       "body_hash": _hash(self.body(reference)), "idempotency_key": "superagent:" + message_id}
+                       "body_hash": _hash(self.body(reference)), "idempotency_key": "superagent:" + message_id,
+                       "reply_trigger_id": target['trigger_id']}
             try:
                 self._authorized(message)
             except Exception as exc:
@@ -270,7 +287,8 @@ class CoordinatorDeliveryRuntime:
                 raise
             with self.host._store.unit_of_work(actor=_ACTOR) as uow:
                 if uow.outbox.get(message_id) is None:
-                    uow.outbox.create(message)
+                    uow.outbox.create({key:value for key,value in message.items() if key != 'reply_trigger_id'})
+                    uow.db.execute("INSERT INTO outbox_reply_targets VALUES(?,?)", (message_id, target['trigger_id']))
 
     def prepare_candidates(self, *, limit=100):
         rows = self.e._read_all("SELECT rowid AS cursor,* FROM missions WHERE rowid>? ORDER BY rowid LIMIT ?",
@@ -307,8 +325,33 @@ class CoordinatorDeliveryRuntime:
         adapter = OutboxProviderLookupAdapter({channel["channel_id"]: provider}, self.body)
         return await adapter.lookup(effect=effect)
 
+    async def _verify_provider(self, channel, provider):
+        """原生 POST 前核验凭据主体与提供方资源，不从事件 URL 推断发言权。"""
+        source = self.host.sources.get_instance(channel['source_instance_id'])
+        if provider.provider_id == 'github':
+            user = await provider.client.request('GET', '/user')
+            repo_path = '/repos/' + '/'.join(quote(part, safe='') for part in provider.address['repository'].split('/'))
+            repo = await provider.client.request('GET', repo_path)
+            if (not isinstance(user, dict) or type(user.get('id')) is not int or user['id'] != source.config['bot_user_id']
+                    or not isinstance(user.get('login'), str) or user['login'].casefold() != source.config['bot_login'].casefold()
+                    or not isinstance(repo, dict) or type(repo.get('id')) is not int or repo['id'] != source.config['repository_id']):
+                raise _error('github-scope')
+        elif provider.provider_id == 'feishu':
+            bot = await provider.client.request('GET', '/open-apis/bot/v3/info/')
+            if not isinstance(bot, dict) or not isinstance(bot.get('bot'), dict) or bot['bot'].get('open_id') != source.config['bot_open_id']:
+                raise _error('feishu-scope')
+            original = await provider.client.request('GET', '/open-apis/im/v1/messages/' + quote(provider.address['message_id'], safe='') + '?user_id_type=open_id')
+            items = (original.get('data') or {}).get('items') if isinstance(original, dict) else None
+            if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+                raise _error('feishu-response')
+            item = items[0]
+            if (item.get('message_id') != provider.address['message_id'] or item.get('chat_id') != provider.address['chat_id']
+                    or (item.get('root_id') or item.get('message_id')) != provider.address['root_id'] or item.get('deleted') is True):
+                raise _error('feishu-scope')
+
     async def tick(self, *, limit=16):
         sent = unknown = unavailable = withdrawn = 0
+        errors = []
         owner = "sender:" + self.e.instance_id
         pending = self.e._read_all("SELECT * FROM outbox_messages WHERE state IN ('pending','retry_wait') ORDER BY (created_at,message_id) <= (?,?),created_at,message_id LIMIT ?", (*self._sender_cursor, limit))
         if pending:
@@ -324,6 +367,17 @@ class CoordinatorDeliveryRuntime:
                 raise
             if provider is None:
                 unavailable += 1
+                continue
+            body = self.body(message['body_ref'])
+            wire = feishu_outbox_body(body, message['idempotency_key']) if provider.provider_id == 'feishu' else body
+            if len(re.findall(r'[\u3400-\u9fff]|[^\s\u3400-\u9fff]+', wire)) > 100:
+                raise _error('invalid', field='reply')
+            try:
+                await self._verify_provider(channel, provider)
+                self._authorized(message)
+            except Exception as exc:
+                unavailable += 1
+                errors.append({'message_id':message['message_id'], 'code':getattr(exc, 'code', type(exc).__name__)})
                 continue
             lease = (datetime.now(timezone.utc) + timedelta(seconds=120)).isoformat()
             effects = self.host.outbox.claim(owner=owner, limit=1, lease_until=lease, message_id=message["message_id"])
@@ -366,4 +420,4 @@ class CoordinatorDeliveryRuntime:
                     unknown += 1
         total = self.e._read_one("SELECT count(*) AS n FROM outbox_messages WHERE state IN ('pending','retry_wait')")["n"]
         return {"sent": sent, "unknown": unknown, "unavailable": unavailable, "withdrawn": withdrawn,
-                "pending": total, "backlog": total > len(pending)}
+                "pending": total, "backlog": total > len(pending), "errors": errors}

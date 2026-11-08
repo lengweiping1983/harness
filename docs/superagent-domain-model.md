@@ -137,7 +137,7 @@ SourceCursor 以 (source_instance_id, stream_key) 为唯一身份，保存不透
 
 source_instance_id, kind, kind_api_version, enabled, config_json, config_revision, identity_hash, created_at, updated_at, health_json。
 
-凭据只保存 Secret Reference，不保存 Token 明文。配置修订变更不能悄悄改变已接收 Trigger 的身份解释。统一目标模型不包含旧版来源映射；现存 legacy_source_id 仅是 Shadow 专用实现遗留，其运行和 API 依赖随 Phase 4 收口清除，不进入新配置或新来源身份。已有迁移校验和与持久原件仍受保护，不能为清除依赖而改写历史迁移。
+凭据只保存 Secret Reference，不保存 Token 明文。配置修订变更不能悄悄改变已接收 Trigger 的身份解释。统一目标模型不包含旧版来源映射；历史 Schema 的 legacy_source_id 列仅为保持迁移完整性保留，当前没有映射 API、Shadow 或运行消费者，不进入新配置或新来源身份。已有迁移校验和与持久原件仍受保护，不能为清除依赖而改写历史迁移。
 
 ### 5.2 ActorRef、ThreadRef 与 ChannelRef
 
@@ -412,187 +412,25 @@ seq, event_id, aggregate_type, aggregate_id, event_type, schema_version, payload
 
 ## 9. Phase 1–4 当前实现边界
 
-本文件定义完整目标领域模型。Phase 1 的独立持久化基础设施、状态机基础与宿主隔离已完成；Phase 2 的 Source Registry、Authorization Engine 和只读 Shadow 已通过显式 CoordinatorHost API 提供；Phase 3 的单 Worker 执行闭环也已通过显式 CoordinatorHost API 实现并完成专项回归。目前统一应用服务仍需显式调用，生产入口尚未完成替换；这是 Phase 4 的未完成事实，不是继续维持旧路由的开发要求。
+Phase 4.1–4.6 的统一链路已接通：CLI 和嵌入端口装配同一个 SuperagentService，SourceRegistry、Gate / Evaluation、Mandate / Ticket、Mission / PlanRevision、CoordinatorDagScheduler、原生 Executor、Artifact / Delivery / Review、控制及 Outbox 共用单实例协调账本。生产默认入口不再选择旧 Router / Autonomy，也不装配 Shadow 或旧来源映射。
 
-已落地的持久化基础：
+当前配置、CLI、来源协议、质量门、阶段接续、持续协作及关闭边界的完整行为统一维护在[产品页](superagent.md)。实现和验收范围见[开发计划](superagent-next-generation-architecture.md#phase-46唯一入口收口与旧编排清除)及[审查证据](superagent-review.md#phase-46入口收口与旧编排退役的当前证据)。表清单描述领域结构；当前具体列、约束及迁移以 CoordinatorStore 和各迁移源为准。
 
-- `CoordinatorStore` 只在调用方显式提供数据库路径和 Instance 身份时初始化专用 SQLite 文件；启用 WAL、Application ID、外键、事务和带 checksum 的版本迁移。
-- Schema v1 提供 Instance 身份、聚合 Revision、追加式 AuditEvent 和 Durable Effect。
-- Schema v2 提供 Ticket、Mission、PlanRevision、Job、Job Dependency、Assignment 规范化表及其基础唯一约束。
-- Schema v3 提供 OutboxMessage、Provider Receipt Key 唯一约束和不可变身份约束。
-- Schema v4 为 PlanRevision、Job 和 JobDependency 增加顺序、身份、不可变和 DAG 环约束；PlanRevision 仅允许在同一事务内完成物化后封存。
-- Ticket、Mission、Job、Assignment、OutboxMessage Repository 通过 Unit of Work 写入；CAS、AuditEvent 和可选 Effect 入队处于同一 SQLite 事务。
-- PlanRevisionRepository 通过 Mission CAS 创建不可变计划与 Acceptance 快照，并在同一事务内生成稳定 Job ID、物化依赖边、校验节点身份与 DAG 环，再封存版本；读取时重新校验快照哈希、Job 身份集合和物化依赖边；JobDependencyRepository 提供按 Job / PlanRevision 查询。
-- 过期 Effect Lease 只会转为 unknown 并清除租约，不会自动重新入队；EffectRecoveryService 只调用注入的只读 lookup Adapter，只有原 Provider 回执证明已应用或明确证明未应用且 retry_safe 时才会完成 reconciliation。
-- Mission 的 plan_revision 只能由 PlanRevisionRepository 推进；封存后的计划、Job 身份、计划规格字段及依赖关系不可追加或改写；读取时核对 PlanRevision 哈希、Job 规格哈希与 DAG 物化结果。
-- Assignment 的 Run 身份一经绑定不可替换；Outbox 的状态转换拒绝从 unknown 自动回到 sending，发送成功必须同时保存 Provider 身份、幂等键和时间。
+Schema v21 为原生协调模型调用、本机事件身份、本机指令请求和原回复目标增加同库记录。原生调用使用固定 Session / Run / prompt hash，丢回执后只查原提交；本机指令固定 Assignment / Run / Turn，不经普通跟进广播。只读 CLI 使用现有 Schema 和实例身份，不初始化、迁移或修复用户状态。已有迁移及原件保持完整；意外发现旧运行目录时拒绝混用，不导入、转换或清理。
 
-Phase 2 已实现的来源与授权能力：
-
-- `SourceRegistry` 提供带 API 版本兼容检查的 `SourceKind` 插件契约、SourceInstance 配置修订，以及 GitHub、Feishu、Local 三种内置来源规范化；版本不匹配的插件按 unavailable 处理。`CoordinatorHost.open(source_kinds=...)` 可在启动时注入自定义插件，并核对持久化 SourceInstance 与当前插件清单；缺失或版本不匹配会撤销相关 Mandate、取消在途 Evaluation、过滤待评估 Trigger。运行期插件注册/卸载由注册表锁与宿主操作租约保护，卸载与事件规范化串行执行；插件恢复不会自动恢复旧授权或重放旧事件。Webhook 在调用插件前统一限制请求体、Header 数量及单值
-- `CoordinatorAuthorizationEngine` 提供不可变 PolicyRevision、Gate、Evaluation、Decision、Mandate、Ticket、Subscription 和 TicketInput；accept 在单一事务中创建 Decision、Mandate、Ticket、订阅、输入和审计记录。accept 的 direction.evidence 与 intent_evidence 必须是同一条 Gate 放行 Trigger 正文或标题中的原文片段，不能以模型自述替代来源事实；Proposal 和 Policy 字段及快照有明确大小上限。Gate 同时检查 Thread 生命周期：GitHub close 事件仅更新状态，已关闭 Thread 上的新消息不会进入评估或 fanout；关闭来源主 Thread 会在同一事务中撤销相关 Mandate。SourceInstance 停用或配置修订变化也会在配置事务中立即撤销该来源的 Mandate；SourceKind 卸载、宿主启动时缺失或 API 版本不匹配同样会撤销 Mandate、取消在途 Evaluation 并过滤待评估 Trigger。每个新 Trigger 在复用既有 Ticket Subscription 前重新执行当前 Gate；只有主 Thread 命中 work Subscription 才能形成 work fanout，相关 Thread 命中保持 context-only，work 与 context 投影分别记录；Policy 变化可触发 Mandate revalidation。
-- 授权宿主 API 提供 PolicyRevision、Evaluation、Decision、Mandate 的有界只读历史查询；Evaluation 详情包含冻结 Policy 与逐 Trigger Gate 快照，Mandate 详情包含追加式状态事件。
-- `ShadowComparisonService` 只读对照 v1 Inbox / Router 与 v2 来源事实和决策；决策比较按每个 Trigger 的 Gate 结果映射，Gate 拒绝项按 ignore 对照，并报告新旧两侧未匹配项及有界样本是否截断，不写任一账本、不执行 Ticket。
-
-Phase 3 已实现的单 Worker 执行闭环：
-
-- `CoordinatorExecutionService.route_trigger` 仅在调用方显式执行时，将已接受 Trigger 映射为一个 Mission、不可变单节点 PlanRevision、Work Job 和 Assignment；Assignment 使用稳定 submission key，避免重复提交。
-- `HarnessExecutorAdapter` 为 Worker 创建并核验专属 Worktree / Session，绑定不可变 Worker Profile、工具白名单与来源能力；Session metadata 与持久 Worker 账本双向核验，不能仅凭 Session 元数据取得 Worker 身份。
-- Run 提交结果不确定时只按原 submission key 回查，不盲目重提；重启后按原 Run ID 恢复。`HarnessEvidenceProvider` 从 Harness 原生 Run / Tool / Background Job 事件日志只读提取证据，不复制或伪造 Runtime 历史。
-- Mandate 的 max_turns / max_seconds 约束进入 Assignment；时间预算 Watchdog 只尝试取消精确匹配的原生 Run，取消无法确认时将 Assignment 标为 unknown，禁止把不确定结果当作成功。排队但尚未启动的原生 Run 可按原 Run ID 移除。
-- Phase 3 单 Worker 路径按幂等 delivery key 将 TicketInput 送入当前 Assignment；交付前重新核验 Ticket、Mandate 和 Assignment。context-only 输入不启动执行；Handback 必须指向实际交付给该 Assignment 的非源始 TicketInput，无法验证时转为 Attention。该路径的单目标字段不代表多节点消费状态。
-- Worker Report 先冻结并校验内容哈希，再幂等完成 Mission、Attention、Handback 和 Outbox Candidate；进程中断后可从冻结 Report 恢复后续效果。Outbox Candidate 创建时再次检查 Ticket 状态、Mandate 和 reply Scope，不把 Candidate 误报为已发送。
-- Schema v13 为 Worker 与 Attention 聚合补齐 `updated_at`，并将旧行回填为 `created_at`；迁移覆盖 v1–v12 的升级路径。`tests/test_superagent_execution.py` 覆盖原 Run 恢复、报告效果幂等、后续输入 Handback、Mandate 撤销、预算 Watchdog、排队 Run 停止和并发去重。
-
-Phase 3 范围之外的后续接线：
-
-- Phase 4.2–4.4 已接通统一生命周期、目标停止、DAG 交付、质量门和阶段接续；当前实现见下节。
-- EffectRecoveryService 提供同步与异步只读回查入口；OutboxProviderLookupAdapter 通过宿主注入的 Channel 与正文解析器分发到 GitHubIssueCommentLookupAdapter / FeishuThreadReplyLookupAdapter。两种适配器仅查询 Provider 资源 GET，只有在完整有界扫描中找到唯一、原幂等键标记和发送主体均匹配的远端对象才返回 applied；未找到、重复匹配或分页不完整均保持 indeterminate，不把缺失结果解释为安全重试。GitHub / 飞书列表接口不提供权威的“未执行”回执，因此这两种适配器不会返回 not_applied / permanent_rejection；retry_wait 仍必须由支持原操作状态查询的 Provider 明确证明。
-- Phase 3 的单 Worker Report / Attention / Handback / Outbox Candidate 已接通。Phase 4.5 已在统一服务装配 Outbox Sender、Channel 回复绑定、冻结正文 Resolver 和周期性只读恢复；Candidate 不等于已发送，行为见产品页。
-- CoordinatorHost 的 Source / Authorization / Execution API 仍须显式调用；SuperagentService 已提供显式 open_coordinator 统一装配，生产 CLI 的旧编排入口仍待替换。Phase 4 直接接入统一应用服务，不把接入旧 Router / MissionStore / Dispatcher 作为开发目标。
-- CoordinatorControl 已进入实际调度与写入准入，统一目标停止沿原 Run 与所属后台作业回查。状态观测中的 `control_allows=True` 仍不能替代新写入前对持久模式及当前授权的实际核验。
-- 推断自动接受仅在具体 Source 策略显式启用 `auto` 且 Gate、规则、意图与 Scope 全部通过时可用；它不会因此切换生产默认路由。远程 Worker 与 OS Sandbox 尚未启用。
-
-因此，Phase 1 按持久化基础设施、状态机基础和宿主隔离范围完成；Phase 2 的来源事实、授权闭环和只读 Shadow 已交付；Phase 3 的单 Worker 执行、原 Run 恢复、冻结 Report 与后续效果恢复已在显式 CoordinatorHost API 中实现；Phase 4.1 的统一协调契约与数据库状态守卫已由 Schema v16 固化，并通过 5 个测试模块的 112 项回归。后续 Phase 4.2–4.4 的统一生命周期、目标停止、DAG / Delivery、质量门与阶段接续已接通；Phase 4.5 已接通既有 Channel 外发；唯一入口仍待 Phase 4.6，不回退旧编排。
-
-### Phase 4 当前统一实现
-
-实施顺序及出口统一见[总体方案](superagent-next-generation-architecture.md#phase-4完整-superagent-整合与替换)。Phase 4.1–4.5 已接通统一服务链路及既有信道；生产入口仍待 Phase 4.6 替换。
-
-- `SuperagentService.open_coordinator` 装配同一 CoordinatorHost、持久控制、来源／授权、DAG Scheduler、Executor、Artifact / Delivery、Review 与 Watchdog。服务从持久输入恢复，取消绑定确切原 Run 与所属后台任务，关闭等待实例操作收尾。
-- PlanRevision 在封存前由宿主物化 integrate / review 节点，Planner 只能提出 work。单节点产物任务仍经过完整质量门；只读单节点报告使用独立接受契约。
-- Scheduler 冻结单仓库基线，按依赖、逐边 applied Delivery、公平轮转和有限并发派发；每次实际执行绑定独立 Worker / Assignment / Session / Workspace。同 Profile 可用于多个节点或阶段。
-- Work 检查点沿同一 Job 创建新 Assignment，宿主预算与结构化任务封存在 PlanRevision。`Job.result_hash` 在 checkpointed 时绑定阶段报告哈希，最终 ready 才绑定最终 Artifact manifest hash。预算、协议、停止条件与恢复行为统一见 [Superagent 模式](superagent.md#统一整合架构与当前边界)。
-- CoordinatorAssignmentInputDelivery 为每个 Input / Assignment 维护稳定原生身份和接受／应用回执；同一 DAG 的多个节点独立消费。unknown 仅回查原 request_id，不能将旧输入投向另一个活动 Run。
-- CoordinatorArtifacts 通过原 Run、工具与后台收尾证据捕获真实文件。Capture / Import 使用持久 Effect 及原生回执，未知只回查原操作；确认尚未开始的失败 Effect 才可获新代次。Manifest 限制为最多 4096 文件、单文件 16 MiB、总内容 64 MiB，Git 文件及删除列表各限 2 MiB，超限保留原件并报错。
-- 独立 Review 绑定当前 Integrator 候选、Acceptance Hash 和原生 Evidence；有限修正保留旧候选和 Verdict，只创建新 Assignment，不改写图。最终结算事务再次核对 Mandate、MissionControl、计划及 Watchdog。
-- WatchdogSnapshot 与逐 Assignment 原 Run 游标持久化；Schema v19 将账本进度绑定 SQLite 实际事实投影。活动不完整、检查失败或重启不解除阻断，真实新事件／账本进度才可恢复。Harness 原生毫秒时间仅在监督投影边界规范化，原始事件与 Evidence 不改写。
-- CoordinatorMissionInstruction 提供显式 `deliver_instruction / reconcile_instruction / instruction_receipt`：绑定同 Ticket 的非 context-only Trigger、来源、Human Actor、Mission / Job / Assignment / 原 Run / Turn；原生接受锁内复核授权，accepted 与 applied 分开，unknown 不重放。`instruction_context` 已只读投影当前计划的已应用指令，并由同一 Scheduler 实际传入后续 Work 阶段、Integrator 和 Reviewer；大小与作用域规则见产品页。Phase 4.5 的普通跟进、Attention / Handback、周期性指令回查和 Sender 已接入同一服务，完整行为见产品页。
-- 保留已登记 Schema 迁移及有效业务回归；旧生产 Router / MissionStore / 信道仍待统一入口替换后退役。不开发旧版运行数据导入、隐式兼容、双轨运行或回退工具。
-
-剩余开发为 Phase 4.6 的 CLI 切换、默认路由与旧编排退役；线上模型质量、外部账号、跨平台实机和长期负载不在当前离线定向验收结论内。
+当前仍限单实例、本机执行和单仓库 Mission。动态 Source Plugin、自动跨来源关联、动态重规划、人工未知结果核实界面、远程 Worker、操作系统 Sandbox 和多人工作台属后续扩展；显式授权的 Subscription 已可跨来源参与同一活动。离线回归不代表在线模型质量、外部账号、跨平台实机或长期负载验收。
 
 ## 10. 源码依据
 
-### Harness
+- `harness/superagent_cli.py`、`superagent_bootstrap.py`、`superagent_config.py`：唯一 CLI、当前配置和原生宿主装配。
+- `superagent_service.py`、`superagent_coordinator_host.py`：周期处理、恢复、所属操作与实例锁生命周期。
+- `superagent_coordinator_store.py` 及迁移模块：事务、CAS、审计、效果队列和数据库守卫。
+- `superagent_source_registry.py`、`superagent_authorization.py`：来源原文、身份、Gate、授权、Ticket 和 Subscription。
+- `superagent_models.py`：无工具原生 Assessor / Planner、冻结提案与原提交恢复。
+- `superagent_execution.py`、`superagent_dag_scheduler.py`、`superagent_executor.py`：Mission、调度、独立资源和原 Run 证据。
+- `superagent_artifacts.py`、`superagent_quality_gate.py`、`superagent_checkpoints.py`：文件交付、独立 Review 和阶段协议。
+- `superagent_coordination.py`、`superagent_input_delivery.py`、`superagent_mission_instruction.py`、`superagent_watchdog.py`：控制、逐执行输入、指令和持久监督。
+- `superagent_delivery_runtime.py`、`superagent_provider_adapters.py`、`superagent_outbox.py`、`superagent_effect_recovery.py`：发送准入、原回复目标、确认及未知效果只读恢复。
+- `superagent_local.py`、`superagent_state.py`、`superagent_status.py`：同库本机操作与只读投影。
 
-- harness/app/superagent_coordinator_migration_14.py：执行资源作用域、InputDelivery、Artifact / Delivery / Review 及控制协调表。
-- harness/app/superagent_coordinator_migration_15.py：MissionInstruction Revision、Assignment / Run 作用域触发器及查询索引。
-- harness/app/superagent_coordinator_migration_16.py：InputDelivery、Artifact Delivery、Review、MissionInstruction、MissionControl、ControlCommand 与 WatchdogSnapshot 的数据库状态和作用域守卫。
-- harness/app/superagent_coordination.py：持久控制模式与回执、逐 Assignment 输入投递。
-- harness/app/superagent_artifacts.py：真实捕获、导入、稳定 Effect 与原回执恢复。
-- harness/app/superagent_coordinator_store.py：统一协调账本、带校验和的 Schema 迁移、Revision、AuditEvent、Durable Effect 与 UOW。
-- harness/app/superagent_coordinator_migration_13.py：Worker / Attention `updated_at` 字段及历史行回填。
-- harness/app/superagent_coordinator_host.py：v2 宿主组合、活动操作租约、来源 / 授权 / Shadow / Execution API 与 v1 隔离。
-- harness/app/superagent_execution.py：单 Worker Mission / Job / Assignment 编排、TicketInput、Run reconciliation、冻结 Report、Attention / Handback 与 Outbox Candidate。
-- harness/app/superagent_input_delivery.py：按 Input / Assignment 独立消费、原生回执校验与未知投递只读恢复。
-- harness/app/superagent_mission_instruction.py：Mission / Job / Assignment / Run / Turn 绑定、源 Trigger 授权、幂等指令投递及原生回执单调恢复。
-- harness/app/superagent_executor.py：Harness 原生 Worktree / Session 适配、受限工具、Run / Tool / Background 只读证据和精确 Run 预算 Watchdog。
-- harness/app/superagent_source_registry.py：SourceKind、SourceInstance、GitHub / Feishu / Local 规范化、Trigger Intake、Thread / Channel 和 Cursor。
-- harness/app/superagent_authorization.py：PolicyRevision、Gate、Evaluation、Decision、Mandate、Ticket、Subscription、TicketInput 与审计查询。
-- harness/app/superagent_shadow.py：v1 Inbox / Router 与 v2 来源事实及决策的只读对照。
-- harness/app/superagent_inbox.py：当前 v1 Source、Task、Subscription、Trigger、Route、重复事件和正文冲突校验。
-- harness/app/superagent_dispatch.py：稳定 submission key、原 Run 回查及 submitting / accepted / unknown。
-- harness/app/superagent_router.py：批次、输入、研判提交及恢复。
-- harness/app/superagent_workers.py：Worker Profile、Workspace、Session 资源绑定。
-- harness/app/superagent_mission_store.py：当前 Mission / Job 表、计划哈希、状态和同事务快照读取。
-- harness/app/superagent_missions.py：Plan、Work、Integrate、Review、Checkpoint、Artifact Capture 和修正轮次。
-- harness/app/superagent_effect_recovery.py：Effect unknown 回查编排，支持同步与异步只读 Adapter，并以 generation fencing 防止迟到结果覆盖。
-- harness/app/superagent_provider_adapters.py：GitHub Issue 评论与飞书线程回复的只读 Outbox 回查、Channel 身份和正文哈希核验。
-- harness/app/superagent_mission_control.py：精确原 Run / Background Job 停止和未知收尾。
-- harness/app/superagent_watchdog.py：活性指纹、stalled / blocked 观察。
-
-### dsh-superagent 参考
-
-- dsh-superagent-prototype/src/core/model.ts：ActorRef、ThreadRef、Trigger、Mandate、Evaluation、Decision、Ticket、Assignment、TicketInput。
-- dsh-superagent-prototype/src/core/ports.ts：Policy、Assessor、Executor、Outbox 和 Repository Ports。
-
-- dsh-superagent-prototype/src/core/engine.ts：事务入口、Intake、Evaluation、Ticket 和 Assignment 协调。
-- dsh-superagent-prototype/src/app/store.ts：协调账本表与事务。
-- dsh-superagent-prototype/src/app/effects.ts、outbox.ts：持久副作用与消息回执。
-- harness/app/superagent_mission_control.py：精确原 Run / Background Job 停止和未知收尾。
-- harness/app/superagent_watchdog.py：活性指纹、stalled / blocked 观察。
-
-### dsh-superagent 参考
-
-- dsh-superagent-prototype/src/core/model.ts：ActorRef、ThreadRef、Trigger、Mandate、Evaluation、Decision、Ticket、Assignment、TicketInput。
-- dsh-superagent-prototype/src/core/ports.ts：Policy、Assessor、Executor、Outbox 和 Repository Ports。
-
-- dsh-superagent-prototype/src/core/engine.ts：事务入口、Intake、Evaluation、Ticket 和 Assignment 协调。
-- dsh-superagent-prototype/src/app/store.ts：协调账本表与事务。
-- dsh-superagent-prototype/src/app/effects.ts、outbox.ts：持久副作用与消息回执。
-- harness/app/superagent_mission_store.py：当前 Mission / Job 表、计划哈希、状态和同事务快照读取。
-- harness/app/superagent_missions.py：Plan、Work、Integrate、Review、Checkpoint、Artifact Capture 和修正轮次。
-- harness/app/superagent_mission_control.py：精确原 Run / Background Job 停止和未知收尾。
-- harness/app/superagent_watchdog.py：活性指纹、stalled / blocked 观察。
-
-### dsh-superagent 参考
-
-- dsh-superagent-prototype/src/core/model.ts：ActorRef、ThreadRef、Trigger、Mandate、Evaluation、Decision、Ticket、Assignment、TicketInput。
-- dsh-superagent-prototype/src/core/ports.ts：Policy、Assessor、Executor、Outbox 和 Repository Ports。
-
-- dsh-superagent-prototype/src/core/engine.ts：事务入口、Intake、Evaluation、Ticket 和 Assignment 协调。
-- dsh-superagent-prototype/src/app/store.ts：协调账本表与事务。
-- dsh-superagent-prototype/src/app/effects.ts、outbox.ts：持久副作用与消息回执。
-- harness/app/superagent_mission_control.py：精确原 Run / Background Job 停止和未知收尾。
-- harness/app/superagent_watchdog.py：活性指纹、stalled / blocked 观察。
-
-### dsh-superagent 参考
-
-- dsh-superagent-prototype/src/core/model.ts：ActorRef、ThreadRef、Trigger、Mandate、Evaluation、Decision、Ticket、Assignment、TicketInput。
-- dsh-superagent-prototype/src/core/ports.ts：Policy、Assessor、Executor、Outbox 和 Repository Ports。
-
-- dsh-superagent-prototype/src/core/engine.ts：事务入口、Intake、Evaluation、Ticket 和 Assignment 协调。
-- dsh-superagent-prototype/src/app/store.ts：协调账本表与事务。
-
-- harness/app/superagent_workers.py：Worker Profile、Workspace、Session 资源绑定。
-- harness/app/superagent_mission_store.py：当前 Mission / Job 表、计划哈希、状态和同事务快照读取。
-- harness/app/superagent_missions.py：Plan、Work、Integrate、Review、Checkpoint、Artifact Capture 和修正轮次。
-- harness/app/superagent_effect_recovery.py：Effect unknown 回查编排，支持同步与异步只读 Adapter，并以 generation fencing 防止迟到结果覆盖。
-- harness/app/superagent_provider_adapters.py：GitHub Issue 评论与飞书线程回复的只读 Outbox 回查、Channel 身份和正文哈希核验。
-- harness/app/superagent_mission_control.py：精确原 Run / Background Job 停止和未知收尾。
-- harness/app/superagent_watchdog.py：活性指纹、stalled / blocked 观察。
-
-### dsh-superagent 参考
-
-- dsh-superagent-prototype/src/core/model.ts：ActorRef、ThreadRef、Trigger、Mandate、Evaluation、Decision、Ticket、Assignment、TicketInput。
-- dsh-superagent-prototype/src/core/ports.ts：Policy、Assessor、Executor、Outbox 和 Repository Ports。
-
-- dsh-superagent-prototype/src/core/engine.ts：事务入口、Intake、Evaluation、Ticket 和 Assignment 协调。
-- dsh-superagent-prototype/src/app/store.ts：协调账本表与事务。
-- dsh-superagent-prototype/src/app/effects.ts、outbox.ts：持久副作用与消息回执。
-- harness/app/superagent_mission_control.py：精确原 Run / Background Job 停止和未知收尾。
-- harness/app/superagent_watchdog.py：活性指纹、stalled / blocked 观察。
-
-### dsh-superagent 参考
-
-- dsh-superagent-prototype/src/core/model.ts：ActorRef、ThreadRef、Trigger、Mandate、Evaluation、Decision、Ticket、Assignment、TicketInput。
-- dsh-superagent-prototype/src/core/ports.ts：Policy、Assessor、Executor、Outbox 和 Repository Ports。
-
-- dsh-superagent-prototype/src/core/engine.ts：事务入口、Intake、Evaluation、Ticket 和 Assignment 协调。
-- dsh-superagent-prototype/src/app/store.ts：协调账本表与事务。
-- dsh-superagent-prototype/src/app/effects.ts、outbox.ts：持久副作用与消息回执。
-- harness/app/superagent_mission_store.py：当前 Mission / Job 表、计划哈希、状态和同事务快照读取。
-- harness/app/superagent_missions.py：Plan、Work、Integrate、Review、Checkpoint、Artifact Capture 和修正轮次。
-- harness/app/superagent_mission_control.py：精确原 Run / Background Job 停止和未知收尾。
-- harness/app/superagent_watchdog.py：活性指纹、stalled / blocked 观察。
-
-### dsh-superagent 参考
-
-- dsh-superagent-prototype/src/core/model.ts：ActorRef、ThreadRef、Trigger、Mandate、Evaluation、Decision、Ticket、Assignment、TicketInput。
-- dsh-superagent-prototype/src/core/ports.ts：Policy、Assessor、Executor、Outbox 和 Repository Ports。
-
-- dsh-superagent-prototype/src/core/engine.ts：事务入口、Intake、Evaluation、Ticket 和 Assignment 协调。
-- dsh-superagent-prototype/src/app/store.ts：协调账本表与事务。
-- dsh-superagent-prototype/src/app/effects.ts、outbox.ts：持久副作用与消息回执。
-- harness/app/superagent_mission_control.py：精确原 Run / Background Job 停止和未知收尾。
-- harness/app/superagent_watchdog.py：活性指纹、stalled / blocked 观察。
-
-### dsh-superagent 参考
-
-- dsh-superagent-prototype/src/core/model.ts：ActorRef、ThreadRef、Trigger、Mandate、Evaluation、Decision、Ticket、Assignment、TicketInput。
-- dsh-superagent-prototype/src/core/ports.ts：Policy、Assessor、Executor、Outbox 和 Repository Ports。
-
-- dsh-superagent-prototype/src/core/engine.ts：事务入口、Intake、Evaluation、Ticket 和 Assignment 协调。
-- dsh-superagent-prototype/src/app/store.ts：协调账本表与事务。
-- dsh-superagent-prototype/src/app/effects.ts、outbox.ts：持久副作用与消息回执。
+除首项 CLI 外，以上 Python 模块均在 `harness/app/`；语言源在 `harness/i18n/locales/`，原生 Session / Run / Worktree 事实仍归各自模块。

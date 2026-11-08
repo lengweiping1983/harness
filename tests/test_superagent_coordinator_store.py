@@ -115,6 +115,8 @@ class CoordinatorStoreTests(unittest.TestCase):
                     self.assertEqual(db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], len(MIGRATIONS))
                     columns = {row[1] for row in db.execute("PRAGMA table_info(effects)")}
                     self.assertTrue({"correlation_id", "last_event_id"} <= columns)
+                    for table in ('coordinator_model_calls', 'coordinator_requests', 'coordinator_local_events', 'outbox_reply_targets'):
+                        self.assertEqual(db.execute('SELECT count(*) FROM ' + table).fetchone()[0], 0)
                     legacy = db.execute(
                         "SELECT kind,aggregate_id,idempotency_key,payload_json,state,correlation_id,last_event_id "
                         "FROM effects WHERE effect_id=?",
@@ -251,6 +253,65 @@ class CoordinatorStoreTests(unittest.TestCase):
                 "AND name='watchdog_snapshots_transition_guard'"
             ).fetchone())
 
+    def test_migration21_preserves_prior_effect_and_conflicting_table_rolls_back_all_new_objects(self):
+        for conflict in (False, True):
+            with self.subTest(conflict=conflict):
+                path = Path(self.temp.name) / f'v20-runtime-{conflict}.sqlite3'
+                instance, identity, effect = self._create_legacy_schema_with_effect(path, 20)
+                if conflict:
+                    with closing(sqlite3.connect(path)) as db:
+                        db.execute('CREATE TABLE coordinator_model_calls(original TEXT)')
+                        db.execute("INSERT INTO coordinator_model_calls VALUES('preserve')")
+                        db.commit()
+                    with self.assertRaises(sqlite3.OperationalError):
+                        CoordinatorStore(path, instance_id=instance, identity=identity)
+                    with closing(sqlite3.connect(path)) as db:
+                        self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 20)
+                        self.assertEqual(db.execute('SELECT original FROM coordinator_model_calls').fetchone()[0], 'preserve')
+                        self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='outbox_reply_targets'").fetchone())
+                else:
+                    upgraded = CoordinatorStore(path, instance_id=instance, identity=identity)
+                    with upgraded.transaction() as db:
+                        self.assertEqual(db.execute('SELECT state FROM effects WHERE effect_id=?', (effect,)).fetchone()[0], 'pending')
+                        for table in ('coordinator_model_calls', 'coordinator_requests', 'coordinator_local_events', 'outbox_reply_targets'):
+                            self.assertEqual(db.execute('SELECT count(*) FROM '+table).fetchone()[0], 0)
+
+    def test_current_model_and_request_identities_cannot_be_rebound_or_replayed(self):
+        with self.store.transaction(write=True) as db:
+            db.execute("INSERT INTO coordinator_model_calls VALUES('call','assess','session','original','hash','prepared',NULL,NULL,'now','now')")
+            db.execute("UPDATE coordinator_model_calls SET state='accepted',run_id='original-run' WHERE call_key='call'")
+            db.execute("UPDATE coordinator_model_calls SET state='completed',output_json='{}' WHERE call_key='call'")
+            db.execute("INSERT INTO coordinator_requests VALUES('request','original','hash','pending',NULL,'now','now')")
+            db.execute("UPDATE coordinator_requests SET state='accepted',receipt_json='{}' WHERE request_id='request'")
+            db.execute("INSERT INTO coordinator_local_events VALUES('source','event','original','hash','now')")
+        updates = (
+            "UPDATE coordinator_model_calls SET prompt='different'", "UPDATE coordinator_model_calls SET run_id='different'",
+            "UPDATE coordinator_model_calls SET state='prepared'", "UPDATE coordinator_model_calls SET output_json='null'",
+            "DELETE FROM coordinator_model_calls", "UPDATE coordinator_requests SET payload_json='different'",
+            "UPDATE coordinator_requests SET state='pending'", "DELETE FROM coordinator_requests",
+            "UPDATE coordinator_local_events SET payload_json='different'", "DELETE FROM coordinator_local_events",
+        )
+        for statement in updates:
+            with self.subTest(statement=statement), self.assertRaises(sqlite3.IntegrityError):
+                with self.store.transaction(write=True) as db:
+                    db.execute(statement)
+        with self.store.transaction() as db:
+            self.assertEqual(db.execute('SELECT prompt,run_id,state,output_json FROM coordinator_model_calls').fetchone()[:], ('original','original-run','completed','{}'))
+            self.assertEqual(db.execute('SELECT payload_json,state FROM coordinator_requests').fetchone()[:], ('original','accepted'))
+
+    def test_readonly_existing_store_rejects_writes_identity_changes_and_missing_state(self):
+        store = CoordinatorStore.open_existing(self.store.path, instance_id=self.store.instance_id,
+                                               identity={'profile':'local'}, read_only=True)
+        with self.assertRaises(sqlite3.OperationalError):
+            with store.transaction(write=True) as db:
+                db.execute("DELETE FROM audit_events")
+        with self.assertRaises(HarnessError):
+            CoordinatorStore.open_existing(self.store.path, instance_id='another', identity={}, read_only=True)
+        missing = Path(self.temp.name) / 'missing' / 'superagent.sqlite3'
+        with self.assertRaises(HarnessError):
+            CoordinatorStore.open_existing(missing, instance_id='missing', identity={}, read_only=True)
+        self.assertFalse(missing.parent.exists())
+
     def test_migration20_preserves_v19_effects_and_rejects_conflicting_binding_table_atomically(self):
         for conflict in (False, True):
             with self.subTest(conflict=conflict):
@@ -270,7 +331,7 @@ class CoordinatorStoreTests(unittest.TestCase):
                 else:
                     upgraded = CoordinatorStore(path, instance_id=instance, identity=identity)
                     with upgraded.transaction() as db:
-                        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 20)
+                        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], MIGRATIONS[-1][0])
                         self.assertEqual(db.execute("SELECT state FROM effects WHERE effect_id=?", (effect,)).fetchone()[0], "pending")
                         self.assertEqual(db.execute("SELECT count(*) FROM channel_reply_bindings").fetchone()[0], 0)
 

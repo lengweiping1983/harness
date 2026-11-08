@@ -22,6 +22,7 @@ from .superagent_coordinator_migration_17 import MIGRATION_17
 from .superagent_coordinator_migration_18 import MIGRATION_18
 from .superagent_coordinator_migration_19 import MIGRATION_19
 from .superagent_coordinator_migration_20 import MIGRATION_20
+from .superagent_coordinator_migration_21 import MIGRATION_21
 
 _APPLICATION_ID = int.from_bytes(b"SUPA", "big")
 _MAX_EFFECT_BATCH = 100
@@ -813,6 +814,7 @@ MIGRATIONS = (
     (15, MIGRATION_15), (16, MIGRATION_16), (17, MIGRATION_17), (18, MIGRATION_18),
     (19, MIGRATION_19),
     (20, MIGRATION_20),
+    (21, MIGRATION_21),
 )
 
 class CoordinatorStore:
@@ -847,8 +849,39 @@ class CoordinatorStore:
                 if tuple(row) != (self.instance_id, self.identity_json, self.identity_hash):
                     raise HarnessError(tr("storage.schema.invalid"), code="superagent/instance-conflict")
 
+    @classmethod
+    def open_existing(cls, path, *, instance_id, identity, read_only=False, current_schema=True):
+        """本机读取／命令只连接当前账本，不创建目录、迁移或修补原数据。"""
+        store = cls.__new__(cls)
+        store.path = Path(path)
+        store.instance_id = instance_id
+        store.identity_json = _json(identity)
+        store.identity_hash = _hash(store.identity_json)
+        store._read_only = read_only
+        store._attached = True
+        if not store.path.is_file() or store.path.is_symlink():
+            raise HarnessError(tr("superagent.status-unavailable"), code="superagent/status-unavailable")
+        with store.transaction() as db:
+            if db.execute("PRAGMA application_id").fetchone()[0] != _APPLICATION_ID:
+                raise HarnessError(tr("superagent.corrupt"), code="superagent/coordinator-invalid")
+            history = db.execute("SELECT version,checksum FROM schema_migrations ORDER BY version").fetchall()
+            expected = [(v, _hash(script)) for v, script in MIGRATIONS]
+            actual = [(row[0], row[1]) for row in history]
+            if (not actual or actual != expected[:len(actual)] or len(actual) > len(expected)
+                    or current_schema and actual != expected
+                    or db.execute('PRAGMA user_version').fetchone()[0] != actual[-1][0]):
+                raise HarnessError(tr("superagent.corrupt"), code="superagent/schema-version")
+            row = db.execute("SELECT instance_id,identity_json,identity_hash FROM instances").fetchone()
+            if row is None or tuple(row) != (instance_id, store.identity_json, store.identity_hash):
+                raise HarnessError(tr("superagent.conflict"), code="superagent/instance-conflict")
+        return store
+
     def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
+        if getattr(self, '_attached', False):
+            mode = 'ro' if self._read_only else 'rw'
+            db = sqlite3.connect(self.path.resolve().as_uri() + '?mode=' + mode, uri=True, timeout=10, isolation_level=None)
+        else:
+            db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         db.row_factory = sqlite3.Row
         db.create_function(
             "superagent_sha256", 1,

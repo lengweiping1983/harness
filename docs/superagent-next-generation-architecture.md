@@ -12,10 +12,10 @@
 - **不再沿旧链路开发。** 不为旧 Router / Autonomy 编排增加功能，不包装旧 Router、Dispatcher 或 MissionStore 来实现新服务，不新增 V1 / V2 服务、执行开关、兼容 Facade 或自动回退。缺失能力在统一链路补齐，不能转交旧链路执行。
 - **只保留可复用能力与有效业务回归。** 文件交接、证据核验、停止和引导等能力抽离后接入统一接口；每项能力接通后清除对应旧编排与依赖。Phase 4.6 做最终收口核对，不是到该阶段才开始删除旧实现。
 - **不开发旧运行数据转换。** 当前没有旧 Superagent 运行数据，不开发旧配置别名、旧任务导入、离线转换、双写、双轨运行或旧版回退工具。意外发现的旧目录保留原件并拒绝混用；已登记的 Coordinator Schema 迁移和原始 Harness 事实继续按现有规则保护。
-- **从现有成果继续。** Phase 1–3 为已交付基础，不重做 Phase 0，不重新比较或移植 dsh 运行时。首批统一基础层审查基线为 `a0fbf7d`；以当前源码接续，不回退该提交覆盖后续工作。Phase 4.1 的统一协调契约、Schema v16 状态守卫及 112 项模块回归已验收；Phase 4.2–4.4 的统一生命周期、DAG、质量门与阶段接续已沿同一链路接通；Phase 4.5 的持续协作与既有信道已完成统一服务接线及离线定向验收，当前推进 Phase 4.6 的唯一入口与旧编排退役。
+- **从现有成果继续。** Phase 1–3 为已交付基础，不重做 Phase 0，不重新比较或移植 dsh 运行时。首批统一基础层审查基线为 `a0fbf7d`；以当前源码接续，不回退该提交覆盖后续工作。Phase 4.1 的统一协调契约、Schema v16 状态守卫及 112 项模块回归已验收；Phase 4.2–4.4 的统一生命周期、DAG、质量门与阶段接续已沿同一链路接通；Phase 4.5 的持续协作与既有信道已完成统一服务接线及离线定向验收，Phase 4.6 的唯一入口、统一配置与旧编排退役已完成，后续进入 Phase 5 的同系统产品完善。
 - **以实际消费和业务证据验收。** 建表、增加内部 API、适配器单测或某个阶段提交，均不能代替统一服务接线和真实业务闭环。未接线阶段可通过统一应用服务定向验证，不能借旧链路完成验收。Phase 4 总体验收必须包含唯一入口和旧编排退役。
 
-当前源码中尚存的旧入口、旧账本依赖和 Shadow 装配是待清除的实现缺口，不是获准继续维护的第二套方案。本次计划更新不代表这些代码已经删除。
+当前生产入口只装配统一链路；旧编排、独立业务账本消费者、Shadow 及其专用映射 API 已移除。历史迁移和旧目录拒绝混用检查保留，不构成旧版执行入口。
 
 ## 1. 目标、范围与设计结论
 
@@ -54,7 +54,7 @@
 
 Phase 1–3 已建立 CoordinatorStore、来源与授权服务、原生 Harness 执行适配及单 Worker 内部闭环；首批 Phase 4 改造已补充执行资源作用域、宿主系统节点封存、独立 InputDelivery 账本与逐 Assignment 消费 API、持久暂停和真实 Artifact / Delivery 适配。
 
-统一服务的 Scheduler、质量门、目标停止和既有信道发送已接通；生产 CLI 与默认入口仍待切换。具体已实现行为与限制只维护在[领域模型第 9 节](superagent-domain-model.md#9-phase-14-当前实现边界)。现存旧模块仅用于定位能力抽离、调用方改造和删除范围，不能作为后续开发入口。
+统一服务的 Scheduler、质量门、目标停止、信道发送及生产 CLI 已接通。具体已实现行为与限制只维护在[产品页](superagent.md)和[领域模型第 9 节](superagent-domain-model.md#9-phase-14-当前实现边界)。
 
 ### 2.2 已确定的参考取舍
 
@@ -62,7 +62,7 @@ dsh-superagent-prototype 仅作为 Source / Trigger / Thread / Policy / Mandate 
 
 Harness Runtime、原生 Worktree 交付、运行和工具证据继续复用。参考项目的实现状态不能作为 Harness 已完成或已验收的依据。
 
-### 2.3 当前整合必须闭合的问题
+### 2.3 Phase 4 整合要求（已沿统一链路落实）
 
 1. 将现有来源、授权和单 Worker 基础接入唯一 SuperagentService，清除生产装配对旧目录、Shadow 和旧编排的依赖。
 2. 让单节点与多节点真正共用 Scheduler、Assignment 提交、输入投递和原操作恢复；取消单 Worker 的文件交付完成旁路。
@@ -565,10 +565,10 @@ Phase 0–3 是已经形成的领域和基础能力背景，不再作为待执�
 | Phase 1：协调账本 | 复用事务、CAS、审计、Effect / Outbox 和现有迁移校验，不重新建立另一套数据库 |
 | Phase 2：来源与授权 | 复用 SourceRegistry、Gate、Policy、Mandate、Ticket 和原始来源核验，不再新增旧 Inbox / Router 分发 |
 | Phase 3：原生单 Worker | 复用原 Run、Report、Attention / Handback 和执行证据；生产整合未完成的部分纳入 Phase 4 |
-| Phase 4：统一整合 | 基础层已部分落地；依次完成 4.1 → 4.2 → 4.3 → 4.4 → 4.5 → 4.6 的剩余接线与验收 |
+| Phase 4：统一整合 | 4.1 → 4.6 已接通并取得本机离线定向证据；保留协议与业务回归 |
 | Phase 5 / 6：扩展 | 仅扩展 Phase 4 完成后的同一系统，不能承担延后的核心整合或旧编排退役 |
 
-后续开发先核对领域模型第 9 节与当前源码，按 Phase 4.6 收口 CLI、默认路由和旧编排；已接通的独立输入投递、作用域守卫、资源归属、系统节点封存和文件适配继续复用。不得把“已有表和适配器”直接标记为阶段完成。每次交付同步更新已核验的实现边界、相关正式文档及回归。
+后续开发先核对领域模型第 9 节与当前源码，进入 Phase 5 的产品协作完善；已接通的独立输入投递、作用域守卫、资源归属、系统节点封存和文件适配继续复用。不得把“已有表和适配器”直接标记为阶段完成。每次交付同步更新已核验的实现边界、相关正式文档及回归。
 
 ### Phase 4：完整 Superagent 整合与替换
 
@@ -577,7 +577,7 @@ Phase 0–3 是已经形成的领域和基础能力背景，不再作为待执�
 #### Phase 4.1：整合契约与协调模型
 
 - 沿现有统一账本补齐 Worker 的 Mission / Job / stage 绑定、独立 InputDelivery，以及 Artifact / Delivery / Review、控制、指令和 Watchdog 的约束与状态转移。
-- 输入投递消费不再依赖 TicketInput 的单 Assignment 字段判断所有节点是否已读取；每条 Input / Assignment 投递使用自己的稳定身份、原生回执与 CAS，禁止跨 Ticket 或节点冒用。 当前已由 CoordinatorAssignmentInputDelivery 提供显式 Host API，并由统一 Scheduler 与持续协作入口实际消费，覆盖多 Assignment、丢回执恢复、Handback 后回查、畸形回执、原 Run 冲突和并发单调性；生产默认路由仍待 Phase 4.6 切换。
+- 输入投递消费不再依赖 TicketInput 的单 Assignment 字段判断所有节点是否已读取；每条 Input / Assignment 投递使用自己的稳定身份、原生回执与 CAS，禁止跨 Ticket 或节点冒用。 当前已由 CoordinatorAssignmentInputDelivery 提供显式 Host API，并由统一 Scheduler 与持续协作入口实际消费，覆盖多 Assignment、丢回执恢复、Handback 后回查、畸形回执、原 Run 冲突和并发单调性；生产默认入口已在 Phase 4.6 切换。
 - Planner 只提出 work DAG；宿主按允许的多角色 Profile 集确定性建立 Integrator / Reviewer 后整体封存。Assignment 的接续和修正不能覆盖旧 Run，不能改写冻结计划。
 - 保持普通 Repository 更新不能绕过状态机；新增结构使用新迁移，不改写已有迁移校验和。Schema v16 必须在数据库层守住 InputDelivery / MissionInstruction / Delivery 状态与 Revision 单调、DAG 交付作用域、独立 Review 身份、MissionControl 取消终态、终态控制回执及 Watchdog 进度单调性。
 
@@ -585,7 +585,7 @@ Phase 0–3 是已经形成的领域和基础能力背景，不再作为待执�
 
 #### Phase 4.2：唯一服务生命周期与持久控制
 
-- 改造唯一 SuperagentService，组合 CoordinatorHost、来源、原生 Assessor / Planner、Executor、Effect 和恢复循环；CoordinatorHost 不再强制依赖 legacy_state_dir 或装配生产 Shadow。2026-11-06 已完成 Host 解耦第一步：legacy_state_dir 改为可选，默认不构造 ShadowComparisonService；仅显式传入旧账本目录时保留只读 Shadow 审计。旧版 V1 状态目录冲突检查仍保留，防止同一目录双账本。
+- 改造唯一 SuperagentService，组合 CoordinatorHost、来源、原生 Assessor / Planner、Executor、Effect 和恢复循环；CoordinatorHost 不再强制依赖 legacy_state_dir 或装配生产 Shadow。Phase 4.6 已移除 legacy_state_dir 参数和 Shadow API；旧运行目录冲突检查继续拒绝混用并保留原件。
 - 唯一 `SuperagentService.open_coordinator` 组合 CoordinatorHost、SourceRegistry、原生 Assessor / Planner、Executor、EffectRecovery 与持久控制；默认不构造 V1 Shadow。统一 `tick` 先恢复控制、轮转评估 Thread，再从账本重读 waiting TicketInput 路由，回查活动 Assignment、Mission 和 Watchdog，最后执行有界 Effect Recovery。
 - `pending_routes`、`active_mission_states` 均为有界只读清单。暂停或重启后未完成的 TicketInput 保留原 Ticket / Trigger 身份，恢复时复用 `route_trigger` 幂等路径；控制、路由、Assignment、Mission 和 Effect 的批次背压进入 `serve` 状态。控制、Assignment 与 Mission 恢复按持久 `WatchdogSnapshot.observed_at` 轮转，优先处理从未观察或最久未观察的项目，避免未知旧任务永久占满前 100 条。
 - Effect Recovery 始终由统一服务装配。未配置 Provider Adapter 时明确记录 `lookup_unavailable` 并保留 `unknown`，不把缺少适配器当作未发生，也不重放外部副作用；重复相同观测不重复追加审计事件。
@@ -613,7 +613,7 @@ Phase 0–3 是已经形成的领域和基础能力背景，不再作为待执�
 
 **出口状态（2026-11-08）：已完成统一内部链路的功能与定向验收。** 单节点产物任务与多节点 DAG 均经过冻结 Work Artifact、宿主 Integrator、独立 Session / Workspace 的 Reviewer 及持久 Verdict；失败 Review 只在冻结预算内创建新的修正 Assignment，旧候选和历史判定保留。原操作未知、候选改写、伪造／过期证据、撤权、暂停及 Watchdog blocked 均不能产生通过结论或交付。
 
-Work 阶段接续已进入相同 Scheduler：冻结阶段报告及累计文件，使用同一逻辑 Job 下的新执行资源，只有最终 ready 才解锁下游；宿主阶段预算、异常、循环停滞及 unknown 不重放均有定向证据。完整协议和使用边界统一见 [Superagent 模式](superagent.md#统一整合架构与当前边界)。
+Work 阶段接续已进入相同 Scheduler：冻结阶段报告及累计文件，使用同一逻辑 Job 下的新执行资源，只有最终 ready 才解锁下游；宿主阶段预算、异常、循环停滞及 unknown 不重放均有定向证据。完整协议和使用边界统一见 [Superagent 模式](superagent.md#授权工作与独立质量门)。
 
 Watchdog 接收的原生日志时间在执行观察边界从 Unix 毫秒规范为 UTC 文本，原始 Evidence 保持原值，避免真实 Run 被误判为不可信活动。真实 Harness / Git 回归 `test_staged_work_survives_restart_and_reaches_independent_quality_gate` 已完成两阶段文件交接、Host 重启、受控时钟跨越 24 小时的监督检查失败与监督器重建、持续阻断、原 Reviewer Run 新事件恢复以及独立 Review passed → Mission completed；`test_failed_review_runs_one_fresh_repair_round_and_completes_quality_gate` 保留失败复核后的有限修正闭环。阶段异常、预算、上下文语言、逐边交付及不重放的针对性回归见 `tests/test_superagent_unified_checkpoints.py`。受控时钟故障注入不等于真实 24 小时负载或在线模型质量验收；这些持续评估风险保留在审查记录。生产信道发送归 Phase 4.5，CLI 切换和旧编排退役归 Phase 4.6，不作为本阶段延后的开发项。
 
@@ -626,14 +626,15 @@ Watchdog 接收的原生日志时间在执行观察边界从 Unix 毫秒规范�
 - GitHub / Feishu 以 Source / Channel Adapter 接入统一 Trigger、Cursor、正文解析、Outbox Sender 和周期性回查，不保留旧信道的独立业务账本或依赖旧 Results 获取候选。
 - Candidate、pending、sent、unknown 严格区分；未找到、重复匹配或分页不完整均不能授权重发。文件仅承担输入或投影职责。
 
-**出口状态（2026-11-08）：已完成统一服务范围的开发与离线定向验收。** 阶段间已应用指令上下文、固定目标的单／多节点跟进、Attention / Handback、原生指令周期回查、Source 接收与 Cursor、Channel 回复绑定、冻结结果正文、Outbox Sender 及只读恢复均接入同一服务。真实 Harness / Git 产物经独立质量门后只发布一次；受控 GitHub／飞书验证重复事件、跟进 ACK 丢失、发送后丢响应、重启、撤权与关闭不会重复执行或发送。实际 HTTP 边界覆盖 GitHub POST→GET 确认及飞书令牌刷新后的撤权检查。完整行为见 [Superagent 模式](superagent.md#统一整合架构与当前边界)，触发条件、回归与未验证环境见 [协调审查](superagent-review.md#phase-45持续协作与既有信道)。生产 CLI 仍在旧入口，切换及退役归 Phase 4.6；本阶段没有取得真实外部账号、在线模型或长期负载验收。
+**出口状态（2026-11-08）：已完成统一服务范围的开发与离线定向验收。** 阶段间已应用指令上下文、固定目标的单／多节点跟进、Attention / Handback、原生指令周期回查、Source 接收与 Cursor、Channel 回复绑定、冻结结果正文、Outbox Sender 及只读恢复均接入同一服务。真实 Harness / Git 产物经独立质量门后只发布一次；受控 GitHub／飞书验证重复事件、跟进 ACK 丢失、发送后丢响应、重启、撤权与关闭不会重复执行或发送。实际 HTTP 边界覆盖 GitHub POST→GET 确认及飞书令牌刷新后的撤权检查。完整行为见 [Superagent 模式](superagent.md#授权工作与独立质量门)，触发条件、回归与未验证环境见 [协调审查](superagent-review.md#phase-45持续协作与既有信道)。生产 CLI 的切换及退役已在 Phase 4.6 完成；本阶段没有取得真实外部账号、在线模型或长期负载验收。
 
 **出口：** 本地、GitHub 和飞书通过统一服务完成授权、工作、跟进和结果交付；受控 Provider 验证重复事件、发送后丢响应、重启及撤权不会重复执行或发送。
 
 #### Phase 4.6：唯一入口收口与旧编排清除
 
-**当前状态（2026-11-08）：开发中。** 已独立飞书认证传输，HTTP 与 Watchdog 的公共校验不再经旧 Inbox 加载；统一服务装配、Tick 和关闭无需导入旧 Router、Dispatcher、MissionStore、Worker、Results、旧信道或 Shadow。新解释器在禁止这些模块加载的条件下验证该链路，既有飞书入口的真实 HTTP 回复与统一服务的令牌刷新撤权检查均通过。旧 CLI 仍可选择旧编排，配置收口、控制／状态／本机提交入口迁接及旧模块删除尚未完成，不能据此宣告 Phase 4 总出口完成。
+**当前状态（2026-11-08）：已完成开发与本机离线定向验收。** 唯一 `SuperagentService.open` 接收当前统一配置，构造无工具 Assessor / Planner 和受限原生 Executor；提交、状态、节点指令、控制与回执全部使用同一协调账本。旧编排模块、模式选择器、独立控制／信道账本消费者、Shadow 和旧来源映射 API 已删除。历史 Coordinator 迁移保持校验和，新增 Schema v21 为模型调用与本机请求固化身份；旧运行目录保留原件并拒绝混用。
 
+真实 CLI 子进程以同一请求运行两次，只执行和发布一次；原生文件任务经过 Work → Integrator → 独立 Reviewer → 冻结结果。其余针对性证据覆盖本机并发、原 Run / Turn 指令、暂停恢复、未知模型提交、读操作无副作用、实例锁、关闭准入、真实 Webhook / HTTP、语言消费及正常 Schema 升级／冲突回滚。具体触发条件和旧回归迁接对应关系见[审查记录](superagent-review.md#phase-46入口收口与旧编排退役的当前证据)。未运行全量回归、生产构建、桌面／浏览器专项，也未访问在线模型或外部账号。
 - 将 CLI 提交、状态、引导、控制和回执全部接到统一 Application 服务；autonomy 不再选择不同协调器，配置只支持当前统一格式。
 - 核对实际调用方、Worker 动态注册和绑定、资源分发、脚本、示例及有效回归，删除残余旧 Router、Dispatcher、MissionStore、Worker / Results 编排和独立控制账本。
 - 替换“必须启动旧版”“必须维持旧默认路由”等过渡架构断言；将有效业务断言迁接到统一实现，禁止为删除旧模块而直接删掉业务回归。
@@ -723,31 +724,4 @@ Phase 4 按依赖顺序完成协调模型、执行、交付、质量门、信道
 
 ## 15. 源码依据
 
-### Harness 当前实现
-
-- docs/superagent.md：当前运行模式、Autonomy、状态、限制和 CLI；
-- docs/superagent-review.md：当前 Mission / Job / Delivery / Control / Watchdog 的源码事实及防回归依据；
-- harness/app/superagent_service.py：运行装配和配置身份；
-- harness/app/superagent_inbox.py：事件、Task、Subscription 和 Route；
-- harness/app/superagent_router.py、superagent_dispatch.py：批次决策和稳定提交；
-- harness/app/superagent_workers.py：Worker Profile / Session / Workspace；
-- harness/app/superagent_missions.py、superagent_mission_store.py：DAG、调度、集成、复核和账本；
-- harness/app/superagent_results.py：结果候选；
-- harness/app/superagent_control.py、superagent_mission_control.py：控制与收尾；
-- harness/app/superagent_watchdog.py：进度监督；
-- harness/app/superagent_guidance.py：运行中指令。
-
-### dsh-superagent 本地参考实现
-
-- dsh-superagent-prototype/README.md：项目定位和研究原型声明；
-- dsh-superagent-prototype/docs/001-domain.md：领域模型；
-- dsh-superagent-prototype/docs/002-authorization.md：Gate、Admission、Mandate 和 Follow-up；
-- dsh-superagent-prototype/docs/003-execution.md：Ticket Stage、Assignment、重试和恢复；
-- dsh-superagent-prototype/docs/007-architecture.md：Runtime、Engine、Source、Assessor、Executor 和 Store；
-- dsh-superagent-prototype/src/core/model.ts、engine.ts、ports.ts；
-- dsh-superagent-prototype/src/policy.ts；
-- dsh-superagent-prototype/src/sources/kind.ts、registry.ts；
-- dsh-superagent-prototype/src/app/store.ts、effects.ts、outbox.ts；
-- dsh-superagent-prototype/src/executor/dsh.ts。
-
-以上路径用于说明本提案的设计来源；新架构的字段和状态以未来 Harness 自己的正式协议为准，不直接继承 dsh 的数据库 Schema。
+当前入口、协调服务、协议源和最终消费者统一列在[领域模型的源码依据](superagent-domain-model.md#10-源码依据)；使用方法维护在[产品页](superagent.md)，针对性验证和退役回归映射维护在[审查记录](superagent-review.md)。不以原型或已删除的旧编排作为当前能力依据。

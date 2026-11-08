@@ -1,4 +1,4 @@
-"""显式 Superagent 本地文件信道入口，不加载普通对话宿主。"""
+"""唯一 Superagent CLI，提交、状态、指令与控制使用同一协调账本。"""
 from __future__ import annotations
 
 import asyncio
@@ -79,7 +79,7 @@ def handle(args, parser):
                 code = asyncio.run(run(Path(args.superagent), once=True))
                 if control_action is not None:
                     from .app.superagent_local import read_control_receipt
-                    if read_control_receipt(Path(args.superagent), result['request_id'])['status'] != 'applied':
+                    if read_control_receipt(Path(args.superagent), result['request_id'])['state'] != 'applied':
                         return 2
                 return code
             return 0
@@ -97,10 +97,8 @@ async def run(config_path: Path, *, once=False):
     result = 2
     try:
         print(tr('superagent.cli.started', path=str(service.root)), file=sys.stderr, flush=True)
-        if service.github is not None:
-            print(tr('superagent.cli.github',port=service.github.server.port),file=sys.stderr,flush=True)
-        if service.feishu is not None:
-            print(tr('superagent.cli.feishu',port=service.feishu.server.port),file=sys.stderr,flush=True)
+        for listener in service.listeners:
+            print(tr('superagent.cli.' + listener['kind'], port=listener['server'].port), file=sys.stderr, flush=True)
         result = await service.serve(asyncio.Event(), once=once)
     except BaseException as exc:
         errors.append(exc)

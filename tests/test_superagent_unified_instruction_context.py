@@ -7,6 +7,7 @@ import unittest
 from harness.core.errors import HarnessError
 from harness.core.language import current_language
 from tests import test_superagent_unified_checkpoints as fixtures
+from tests.superagent_product_fixture import review_contract
 
 
 class UnifiedInstructionContextTests(unittest.IsolatedAsyncioTestCase):
@@ -126,6 +127,7 @@ class UnifiedInstructionContextTests(unittest.IsolatedAsyncioTestCase):
             await self.stage.finish(join, "ready")
             await self.stage.schedule()
             self.assertIn("Confirmed applied node instructions are bounded task context", self.stage.prompts[-1])
+            self.assertIn("Host-owned Integrator contract:", self.stage.prompts[-1])
             integrator = self.stage.rows("SELECT a.* FROM assignments a JOIN jobs j ON j.job_id=a.job_id WHERE j.role='integrate'")[0]
             await self.stage.finish(integrator, "ready")
             current_language.set("zh-CN")
@@ -133,8 +135,9 @@ class UnifiedInstructionContextTests(unittest.IsolatedAsyncioTestCase):
             reviewer_prompt = self.stage.prompts[-1]
             self.assertIn("以下已确认应用的节点指令是有界任务上下文", reviewer_prompt)
             self.assertIn("User text stays original", reviewer_prompt)
-            marker = "Host-owned independent Reviewer:"
-            contract, _ = json.JSONDecoder().raw_decode(reviewer_prompt.split(marker, 1)[1].split("\n", 1)[1].lstrip())
+            self.assertNotIn("Host-owned independent Reviewer:", reviewer_prompt)
+            contract = review_contract({'messages':[{'content':reviewer_prompt}]})
+            self.assertIsNotNone(contract)
             reviewer = self.stage.rows("SELECT a.* FROM assignments a JOIN jobs j ON j.job_id=a.job_id WHERE j.role='review'")[0]
             verdict = {
                 "schema_version": 1, "candidate_artifact_id": contract["candidate_artifact_id"],
@@ -150,6 +153,8 @@ class UnifiedInstructionContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Confirmed applied node instructions are bounded task context", self.stage.prompts[-1])
             self.assertNotIn("以下已确认应用的节点指令是有界任务上下文", self.stage.prompts[-1])
             self.assertIn("User text stays original", self.stage.prompts[-1])
+            self.assertIn("Host-owned Integrator contract:", self.stage.prompts[-1])
+            self.assertIn("Repair only the failed acceptance criteria", self.stage.prompts[-1])
             self.assertEqual(len(self.f.shared["instruction_calls"]), 1)
         finally:
             current_language.reset(token)

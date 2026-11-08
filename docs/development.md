@@ -16,7 +16,7 @@ Python 构建以 `pyproject.toml` 为唯一配置入口：包发现、包内资�
 
 模型桥接的许可证源和随包运行时由 `.gitattributes` 固定为 LF，避免 Windows 的 `core.autocrlf` 改写字节后使生成同步检查失败。已有检出目录不会因新增属性自动重写文件；遇到该错误时先保留本地修改，再核对许可证源的行尾并重新运行生成器，不跳过同步检查或手工修改生成产物。
 
-显式 Superagent 飞书信道使用 `.[superagent]` 可选依赖中的 cryptography 处理加密 Webhook；普通运行未启用该信道时不导入加密库。`.[test]` 同时包含该依赖，回归以本机 HTTP 和隔离凭据验证信道，不要求真实账号。配置与当前限制见 [Superagent 模式](superagent.md#飞书加密-webhook-与原消息回复)。
+显式 Superagent 飞书信道使用 `.[superagent]` 可选依赖中的 cryptography 处理加密 Webhook；普通运行未启用该信道时不导入加密库。`.[test]` 同时包含该依赖，回归以本机 HTTP 和隔离凭据验证信道，不要求真实账号。配置与当前限制见 [Superagent 模式](superagent.md#来源与既有信道)。
 
 ## 开发服务的重载边界
 
@@ -313,8 +313,8 @@ python -m venv .run/semantic-eval
 | 面板隐藏与迟到结果 | `ExecutionTracePanel.tsx`、`TeamMemberDetails.tsx`；`member-trace-visibility-smoke.mjs`、`plan-visibility-smoke.mjs` |
 | 共享对话 | `harness/web/api/collaboration.py`、`shared_projection.py`；`shared-session-smoke.mjs`、`test_collaboration_error_language.py` |
 | 生成协议 | `harness/web/protocol.py`、`response_contracts.py`；`test_protocol_current_boundaries.py`、两个生成器的 `--check` |
-| Superagent 自主目标、监督与本机提交 | `app/superagent_missions.py`、`superagent_mission_store.py`、`superagent_mission_status.py`、`superagent_local.py`；`test_superagent_missions.py`、`test_superagent_mission_snapshots.py`、`test_superagent_mission_status.py`、`test_superagent_local.py`，并保留原事件、Router、Worker、结果及信道回归 |
-| Superagent 节点指令与回执 | `app/superagent_guidance.py`、`superagent_guidance_files.py`、`Harness.steer`；`test_superagent_guidance.py`、`test_superagent_guidance_local.py`，并保留原生引导、关闭与自主目标完整回归 |
+| Superagent 统一入口、监督与本机提交 | `app/superagent_service.py`、`superagent_config.py`、`superagent_local.py`、`superagent_status.py`；`test_superagent_service.py`、`test_superagent_local.py`、`test_superagent_mission_status.py`，以及统一执行、交付及信道定向用例 |
+| Superagent 节点指令与回执 | `app/superagent_mission_instruction.py`、`superagent_input_delivery.py`、`Harness.steer`；`test_superagent_unified_execution.py`、`test_superagent_unified_instruction_context.py` 的对应用例及生产入口的原 Run / Turn 用例 |
 
 后端测试名称均相对 `tests/`，前端纯逻辑测试使用 `rg --files web/src` 定位，浏览器场景位于 `web/tests/`。不在此固定用例总数或将已记录风险描述为已覆盖。
 
@@ -492,15 +492,15 @@ OAuth收尾回归补充授权忽略取消的屏障，注销后释放旧结果与
 
 ## 运行、对话与持久状态
 
-Superagent 目标控制回归位于 `tests/test_superagent_control.py` 与 `tests/test_superagent_control_runtime.py`，核对多目标精确取消、暂停与异步写入边界、后台停止所有权、重启回执、完整活动计数和控制 CLI。目标快照回归同时验证活动清单与展示统计的同事务读取。只使用临时数据、本机进程和确定性模型，不读取外部账号或启动桌面／浏览器专项。
+Superagent 生产入口回归位于 `tests/test_superagent_service.py` 与 `tests/test_superagent_local.py`，使用当前配置、原生 Harness、隔离 Git 和确定性模型；CLI 子进程通过回环模型 HTTP 验证重复提交只执行和交付一次。控制及未知原 Run 收尾在 `tests/test_superagent_unified_execution.py` 的对应用例中核对；后台活动与原证据投影分别在 `test_superagent_background.py`、`test_superagent_mission_status.py`。只运行本次新增或修改的具体用例，无法单独选择时才运行最小文件。
 
-Superagent 长节点回归位于 `tests/test_superagent_checkpoints.py`，通过真实隔离工作树、文件工具、原运行和确定性模型检查阶段交接、最终依赖解锁、重启不重放、捕获确认丢失、后台写入、未知工具、预算和指令上下文。检查点协议为显式配置；完整行为及限制统一见 [Superagent 模式](superagent.md#长工作节点的阶段接续)。统一 Scheduler 的阶段接续定向回归位于 `tests/test_superagent_unified_checkpoints.py`，真实 Harness / Git 与独立质量门位于 `tests/test_superagent_unified_dag_artifact_integration.py::DagSchedulerArtifactIntegrationTests.test_staged_work_survives_restart_and_reaches_independent_quality_gate`；后者以受控时钟验证跨 24 小时检查失败与监督器重建，不能替代真实长期负载。这些离线回归不证明真实模型的交接质量或长时吞吐。
+检查点纯协议回归位于 `tests/test_superagent_checkpoints.py`；统一 Scheduler 的阶段接续回归位于 `tests/test_superagent_unified_checkpoints.py`。真实 Harness / Git 与独立质量门位于 `tests/test_superagent_unified_dag_artifact_integration.py::DagSchedulerArtifactIntegrationTests.test_staged_work_survives_restart_and_reaches_independent_quality_gate`；其受控时钟跨越 24 小时的检查故障不等于真实长期负载，线上模型交接质量仍需独立评估。协议和限制见 [Superagent 模式](superagent.md#授权工作与独立质量门)。
 
 统一 Scheduler 的已应用指令上下文定向回归位于 `tests/test_superagent_unified_instruction_context.py`，使用隔离协调账本和确定性执行适配器核对原生 accepted / applied 区分、阶段／节点／Mission 隔离、重启不重投、上下文大小及截断、损坏原件保留和实际派工的英→中→英资源消费；不代表外部账号部署或在线模型验收。
 
 统一信道和持续协作定向回归位于 `tests/test_superagent_unified_delivery.py`，使用隔离账本、受控 GitHub／飞书 Provider 及本机 HTTP，覆盖重复事件、跟进／发送丢失回执、重启、撤权、关闭、原回复目标、Channel 修订、Attention / Handback 及指令周期回查。真实产物到冻结结果的发送验证位于上述 `test_staged_work_survives_restart_and_reaches_independent_quality_gate`；Schema v20 冲突回滚和未知 Effect 轮转分别位于 CoordinatorStore 与 EffectRecovery 的针对性用例。只运行本次修改的用例，不以这些离线结果替代外部账号部署、在线模型或全量构建验收。
 
-`tests/test_superagent_unified_loading.py` 在全新解释器中禁止加载待退役编排模块，再执行统一服务装配、Tick、关闭及认证客户端构造；它覆盖真实导入边界，不能替代带任务输入的交付回归。飞书认证传输抽离同时保留 `test_superagent_feishu.py` 的真实 HTTP 回复断言及统一服务令牌刷新后撤权用例。
+`tests/test_superagent_unified_loading.py` 在全新解释器中禁止加载已退役编排模块，再执行统一服务装配、Tick、关闭及认证客户端构造；它覆盖真实导入边界，不能替代带任务输入的交付回归。真实 HTTP 回复与令牌刷新后撤权位于 `test_superagent_unified_delivery.py`；签名、AES 互操作、挑战和来源范围位于 `test_superagent_github.py`、`test_superagent_feishu.py`。旧回归迁接与未验证环境见 [协调审查](superagent-review.md)。
 
 对话自动标题由 `tests/test_session_titles.py` 经真实事件总线和持久存储核对首次人工输入、独立模型配置、原文保持、后续消息稳定、手动同值改名保护、并发对话隔离、删除后的迟到回包、关闭收尾及同实例英中英提示词。命名追踪回归通过真实适配器和受控 SSE 传输核对归档、失败原因、原件重开、删除后的迟到传输及自定义适配器签名；能力边界回归核对只对支持关闭的模型选择 `off`、能力查询计入超时且不重放，实际提供商桥接与本机 HTTP 回归核对关闭参数进入传输和归档、连接与执行配置不变；纯附件只取文件名，不将附件模型正文发送给命名请求。`test_session_creation_receipt.py` 保留初始请求身份和完成标记断言，并核对无标题创建的自动命名登记；前端 `sessionCreationRecovery.test.ts` 核对创建请求不把用户消息写成显式标题，未知结果仍只回查原创建请求；旧请求确认完成后，更换项目／检出／智能体的同一次发送继续创建当前对话，切换期间不误发。`test_model_readiness.py` 经实际状态路由、提供商凭据存储和标题消费者核对主配置无 Key 时的连接及订阅来源。
 

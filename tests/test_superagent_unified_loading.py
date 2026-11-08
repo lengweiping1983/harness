@@ -1,4 +1,4 @@
-"""在全新解释器中验证统一服务与认证传输不装载待退役编排。"""
+"""在全新解释器中验证统一服务与认证传输不装载已退役编排。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,7 +22,7 @@ class UnifiedLoadingTests(unittest.TestCase):
                 "harness.app.superagent_" + suffix for suffix in (
                     "inbox", "dispatch", "router", "workers", "results",
                     "mission_store", "missions", "guidance", "guidance_files",
-                    "control", "control_runtime", "github", "feishu", "shadow",
+                    "control", "mission_control", "mission_status", "bindings", "github", "feishu", "shadow",
                 )
             }
 

@@ -221,7 +221,7 @@ Phase 2 先实现静态 SourceRegistry 和内置 GitHub / Feishu / Local Adapter
 - 当前没有旧版运行数据，不开发旧任务导入、离线转换、历史协议兼容或双轨运行工具；本决策取代此前将迁移退役延后至 Phase 7 的路线。
 - 旧目录仍属于用户数据。发现旧账本或目录混用时在写入前拒绝，保留原件，不隐式清理或迁移。
 - Coordinator 已登记的迁移内容及校验和不变，新增结构使用新迁移；Harness 原生执行事实不复制。
-- 唯一生产宿主不要求 legacy_state_dir，也不装配生产 Shadow。现存旧目录必填、Shadow 和旧默认路由均作为 Phase 4 缺口清除，不能写成必须保留的架构约束。
+- 唯一生产宿主不要求 legacy_state_dir，也不装配生产 Shadow。Phase 4.6 已移除旧目录参数、Shadow、旧来源映射 API 和旧默认路由；拒绝旧目录混用与历史 Schema 校验继续保留。
 - 删除前核对实际调用方、动态绑定、资源分发与有效业务回归；迁接业务断言，替换仅锁定旧架构的断言，不删除有效回归。
 
 ### ADR-012：不把工具白名单或 Worktree 宣称为 OS Sandbox
@@ -404,32 +404,10 @@ UnitOfWork 暴露 Ticket、Mission、Job、Assignment 等有类型的 Repository
 
 ## 8. 后续开发准入与完成门禁
 
-从[唯一开发计划第 11 节](superagent-next-generation-architecture.md#11-分阶段实施计划)接续 Phase 4.1 的消费闭环，再依次推进后续子阶段。Phase 0 的原始评审清单不再作为当前待执行任务。
+从[唯一开发计划第 11 节](superagent-next-generation-architecture.md#11-分阶段实施计划)接续已完成的 Phase 4 统一链路，进入 Phase 5 的产品协作完善。Phase 0 的原始评审清单不再作为当前待执行任务。
 
 验收必须通过统一应用服务的实际消费者、原始回执和业务断言取得证据；旧默认路由保持、旧服务仍可启动或只读 Shadow 比较不属于新架构的验收门禁。当前已实现与缺口以领域模型第 9 节为准，不以本页 ADR 状态代替实现证明。
 
-## 9. 参考源码
+## 9. 源码依据
 
-### Harness
-
-- harness/app/superagent_inbox.py
-- harness/app/superagent_dispatch.py
-- harness/app/superagent_router.py
-- harness/app/superagent_workers.py
-- harness/app/superagent_mission_store.py
-- harness/app/superagent_missions.py
-- harness/app/superagent_mission_control.py
-- harness/app/superagent_watchdog.py
-
-### dsh-superagent
-
-- dsh-superagent-prototype/src/core/model.ts
-- dsh-superagent-prototype/src/core/ports.ts
-- dsh-superagent-prototype/src/core/engine.ts
-- dsh-superagent-prototype/src/app/store.ts
-- dsh-superagent-prototype/src/app/effects.ts
-- dsh-superagent-prototype/src/app/outbox.ts
-- dsh-superagent-prototype/src/sources/kind.ts
-- dsh-superagent-prototype/src/sources/registry.ts
-
-以上源码用于追溯设计依据；接口示例是目标协议草案，不代表当前项目已经暴露这些 API。
+当前实际消费者和协议源见[领域模型第 10 节](superagent-domain-model.md#10-源码依据)，包含唯一 CLI、配置、协调账本、原生执行、文件交付、独立 Review 和 Outbox。接口示例用于明确端口边界；当前公开方法和产品行为以源码及[产品页](superagent.md)为准。

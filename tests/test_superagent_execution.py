@@ -306,7 +306,7 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.host = self._open_host(self.adapter, planner=self.planner)
         self.host.sources.create_instance(
             "local-source", kind="local", config={"namespace": "repo"},
-            legacy_source_id="legacy-local",
+
         )
 
     async def asyncTearDown(self):
@@ -1445,7 +1445,7 @@ class SuperagentExecutionTests(unittest.IsolatedAsyncioTestCase):
         return CoordinatorHost.open(
             self.root / "v2", instance_id=self.instance_id,
             identity={"project": "harness", "suite": "phase3"},
-            legacy_state_dir=self.root / "v1",
+
             local_identity_verifier=self._local_identity,
             executor_adapter=adapter, planner=planner, system_profiles=system_profiles,
         )

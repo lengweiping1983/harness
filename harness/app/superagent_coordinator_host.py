@@ -1,4 +1,4 @@
-"""下一代 Superagent 的宿主组合边界；不启动旧 Router 或 Harness Worker。"""
+"""统一 Superagent 的宿主组合边界和所属操作生命周期。"""
 from __future__ import annotations
 
 import asyncio
@@ -50,14 +50,6 @@ def _legacy_state_present(root: Path) -> bool:
     ):
         return True
     return any(root.glob("*.router.sqlite3")) or any(root.glob("*.deliveries.sqlite3"))
-
-
-def _paths_overlap(left: Path, right: Path) -> bool:
-    return (
-        left == right
-        or left.is_relative_to(right)
-        or right.is_relative_to(left)
-    )
 
 
 class _HostAggregateRepository:
@@ -372,20 +364,6 @@ class _HostAuthorizationEngine:
             return self.__service.ticket(*args, **kwargs)
 
 
-class _HostShadowComparison:
-    """Shadow 只读扫描期间保留宿主实例租约。"""
-
-    __slots__ = ("__host", "__service")
-
-    def __init__(self, host, service):
-        self.__host = host
-        self.__service = service
-
-    def compare(self, **kwargs):
-        with self.__host._operation():
-            return self.__service.compare(**kwargs)
-
-
 class _HostExecutionService:
     __slots__ = ("__host", "__service", "__input_delivery", "__mission_instruction")
     def __init__(self, host, service, input_delivery, mission_instruction):
@@ -481,10 +459,10 @@ class _HostExecutionService:
     async def reconcile_input_delivery(self, input_id, assignment_id):
         with self.__host._operation():
             return await self.__input_delivery.reconcile(input_id, assignment_id)
-    async def deliver_instruction(self, mission_id, job_id, assignment_id, request_id, trigger_id, text):
+    async def deliver_instruction(self, mission_id, job_id, assignment_id, request_id, trigger_id, text, **kwargs):
         with self.__host._operation():
             return await self.__mission_instruction.deliver(
-                mission_id, job_id, assignment_id, request_id, trigger_id, text,
+                mission_id, job_id, assignment_id, request_id, trigger_id, text, **kwargs,
             )
     async def reconcile_instruction(self, request_id):
         with self.__host._operation():
@@ -569,13 +547,13 @@ class _HostWatchdogService:
 class CoordinatorHost:
     """下一代 Superagent 的宿主组合边界。
 
-    组合 Source Registry、Authorization Engine 与可选的显式 Shadow 审计；
-    默认不依赖旧账本、不创建旧版 Harness / Router / Worker，也不注册生产路由。
+    组合 Source Registry、Authorization Engine、统一执行与恢复，
+    不加载旧编排或 Shadow，不读取旧运行目录。
     """
 
     def __init__(
         self, state_dir: Path, store: CoordinatorStore, stack: ExitStack,
-        *, instance_id: str, legacy_state_dir: Path | None = None, evidence_verifier: HostEvidenceVerifier | None = None,
+        *, instance_id: str, evidence_verifier: HostEvidenceVerifier | None = None,
         secret_resolver: SecretResolver | None = None,
         local_identity_verifier: LocalIdentityVerifier | None = None,
         source_kinds: tuple[SourceKind, ...] = (), executor_adapter: object | None = None,
@@ -585,7 +563,7 @@ class CoordinatorHost:
         if executor_adapter is not None and getattr(executor_adapter, "instance_id", None) != instance_id:
             raise ValueError("ExecutorAdapter instance_id must match CoordinatorHost")
         self.state_dir = state_dir
-        self._legacy_state_dir = legacy_state_dir
+        self._before_release = None
         self._store = store
         self._stack = stack
         self._evidence_verifier = evidence_verifier
@@ -605,16 +583,8 @@ class CoordinatorHost:
             initial_kinds=source_kinds,
             secret_resolver=secret_resolver, local_identity_verifier=local_identity_verifier,
         )
-        self._shadow_service = None
-        if legacy_state_dir is not None:
-            from .superagent_shadow import ShadowComparisonService
-            self._shadow_service = ShadowComparisonService(store, legacy_state_dir)
         self._sources = _HostSourceRegistry(self, self._source_service)
         self._authorization = _HostAuthorizationEngine(self, self._authorization_service)
-        self._shadow = (
-            _HostShadowComparison(self, self._shadow_service)
-            if self._shadow_service is not None else None
-        )
         self._execution_service = None
         self._input_delivery_service = None
         self._mission_instruction_service = None
@@ -651,13 +621,12 @@ class CoordinatorHost:
     @classmethod
     def open(
         cls, state_dir: str | Path, *, instance_id: str, identity: object,
-        legacy_state_dir: str | Path | None = None,
         evidence_verifier: HostEvidenceVerifier | None = None,
         secret_resolver: SecretResolver | None = None,
         local_identity_verifier: LocalIdentityVerifier | None = None,
         source_kinds: tuple[SourceKind, ...] = (), executor_adapter: object | None = None,
         watchdog_limits: dict | None = None, planner: object | None = None,
-        system_profiles: Mapping[str, str] | None = None,
+        system_profiles: Mapping[str, str] | None = None, _runtime_stack=None,
     ) -> "CoordinatorHost":
         requested = Path(state_dir).expanduser()
         is_junction = getattr(requested, "is_junction", None)
@@ -666,19 +635,17 @@ class CoordinatorHost:
         root = requested.resolve()
         if root.exists() and not root.is_dir():
             raise ValueError("Coordinator state_dir must be a directory")
-        legacy = Path(legacy_state_dir).expanduser().resolve() if legacy_state_dir is not None else None
-        if legacy is not None and _paths_overlap(root, legacy):
-            raise _state_dir_conflict()
         # 先于创建锁文件拒绝已存在的 v1 目录，保证失败探测不改变旧账本目录。
         if _legacy_state_present(root):
             raise _state_dir_conflict()
 
         root.mkdir(parents=True, exist_ok=True)
-        stack = ExitStack()
+        stack = _runtime_stack if _runtime_stack is not None else ExitStack()
         try:
-            # 与 v1 SuperagentService 共用实例锁，禁止同一目录双宿主并发启动。
+            # 启动器先取得同一实例锁，再创建原生宿主；关闭统一释放。
             try:
-                stack.enter_context(event_write_lock(root / "superagent-runtime"))
+                if _runtime_stack is None:
+                    stack.enter_context(event_write_lock(root / "superagent-runtime"))
             except OSError as exc:
                 raise HarnessError(
                     tr("superagent.runtime-busy"), code="superagent/runtime-busy",
@@ -689,7 +656,7 @@ class CoordinatorHost:
                 root / "superagent.sqlite3", instance_id=instance_id, identity=identity,
             )
             return cls(
-                root, store, stack, instance_id=instance_id, legacy_state_dir=legacy, evidence_verifier=evidence_verifier,
+                root, store, stack, instance_id=instance_id, evidence_verifier=evidence_verifier,
                 secret_resolver=secret_resolver, local_identity_verifier=local_identity_verifier,
                 source_kinds=source_kinds, executor_adapter=executor_adapter,
                 watchdog_limits=watchdog_limits, planner=planner,
@@ -721,13 +688,6 @@ class CoordinatorHost:
     def authorization(self) -> _HostAuthorizationEngine:
         self._ensure_open()
         return self._authorization
-
-    @property
-    def shadow(self) -> _HostShadowComparison:
-        self._ensure_open()
-        if self._shadow is None:
-            raise HarnessError(tr("superagent.conflict"), code="superagent/shadow-unavailable")
-        return self._shadow
 
     @property
     def execution(self):
@@ -880,6 +840,8 @@ class CoordinatorHost:
                         tr("superagent.runtime-busy"), code="superagent/runtime-busy",
                     )
                 self._closing = True
+                if self._execution_service is not None:
+                    self._execution_service.stop_admission()
                 task = loop.create_task(self._aclose_impl(), name="superagent-host-close")
                 self._close_task = task
             elif task.get_loop() is not loop:
@@ -895,6 +857,11 @@ class CoordinatorHost:
             if self._execution_service is not None:
                 try:
                     await self._execution_service.aclose()
+                except BaseException as exc:
+                    errors.append(exc)
+            if self._before_release is not None:
+                try:
+                    self._before_release(tuple(errors))
                 except BaseException as exc:
                     errors.append(exc)
             try:

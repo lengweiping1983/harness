@@ -1,287 +1,176 @@
-"""可信本机目标提交和只读状态入口，不构造模型宿主或读取凭据。"""
+"""可信本机提交、状态、指令与控制均访问唯一协调账本，不读取模型凭据。"""
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-import stat
-import tempfile
-import uuid
 from pathlib import Path
+from uuid import uuid4
 
-from ..core.cleanup import raise_cleanup_errors
-from ..core.errors import HarnessError
-from .superagent_inbox import _error, _json, _text
-from .superagent_service import read_config
+from .superagent_common import _error, _json as strict_loads, _text
+from .superagent_config import read_config
+from .superagent_coordinator_store import _hash, _json, _now
+from .superagent_coordination import CoordinatorControl
+from .superagent_authorization import CoordinatorAuthorizationEngine
+from .superagent_state import open_state, configure
+from .superagent_status import snapshot
+
+
+_ACTOR = {'kind': 'human', 'id': 'local-cli'}
+
+
+def _choose(value, choices, field):
+    if value is None and len(choices) == 1:
+        value = next(iter(choices))
+    if not isinstance(value, str) or value not in choices:
+        raise _error('invalid', field=field)
+    return value
+
+
+def _event(spec, text, source_id, actor_id, thread_id, request_id, *, instruction=False):
+    _text(text, 'text', limit=65536)
+    source_id = _choose(source_id, {k for k, s in spec['sources'].items() if s['kind'] == 'local' and s['enabled']}, 'source_id')
+    source = spec['sources'][source_id]
+    actor_id = _choose(actor_id, source['actors'], 'actor_id')
+    thread_id = _choose(thread_id, source['threads'], 'thread_id')
+    request_id = uuid4().hex if request_id is None else _text(request_id, 'request_id', limit=96)
+    key = _hash(_json([spec['instance_id'], source_id, request_id, 'instruction' if instruction else 'submit']))
+    # 事件时间由稳定请求身份的首次接收固定；重复提交不引入新时间。
+    return source_id, request_id, {'event_id': 'local_' + key, 'thread_id': thread_id, 'text': text,
+        'metadata': {'source_instance_id': source_id, 'actor_id': actor_id, 'instruction_only': instruction}}
+
+
+def _receive(store, spec, source_id, event):
+    _, sources = configure(store, spec)
+    raw = _json(event)
+    with store.transaction(write=True) as db:
+        prior = db.execute('SELECT * FROM coordinator_local_events WHERE source_id=? AND event_id=?', (source_id, event['event_id'])).fetchone()
+        if prior is None:
+            db.execute('INSERT INTO coordinator_local_events VALUES(?,?,?,?,?)', (source_id, event['event_id'], raw, _hash(raw), _now()))
+            prior = db.execute('SELECT * FROM coordinator_local_events WHERE source_id=? AND event_id=?', (source_id, event['event_id'])).fetchone()
+        if prior['payload_json'] != raw or prior['payload_hash'] != _hash(raw):
+            raise _error('event-conflict')
+        original = db.execute('SELECT * FROM triggers WHERE source_instance_id=? AND external_event_id=?', (source_id, event['event_id'])).fetchone()
+        if original is not None:
+            return {'state': 'duplicate', 'trigger_id': original['trigger_id'], 'source_instance_id': source_id,
+                    'external_event_id': event['event_id'], 'thread_ids': [original['primary_thread_id']]}
+    event['occurred_at'] = prior['occurred_at']
+    return sources.receive_local(source_id, event)
 
 
 def submit_local(config_path, text, *, source_id=None, actor_id=None, thread_id=None, request_id=None):
-    """同目录准备后独占公开；同一请求身份仅允许完全一致的原文。"""
     spec = read_config(config_path)
-    _text(text, 'text', limit=65536)
-    remote = {spec[name]['source_id'] for name in ('github', 'feishu') if name in spec}
-    sources = {name: value for name, value in spec['sources'].items()
-               if name not in remote and value['mode'] != 'ignore'
-               and any(name in profile['sources'] for profile in spec['profiles'].values())}
-
-    def choose(value, options, field):
-        if value is None and len(options) == 1:
-            value = next(iter(options))
-        if not isinstance(value, str) or value not in options:
-            raise _error('invalid', field=field)
-        return value
-
-    source_id = choose(source_id, sources, 'source_id')
-    actor_id = choose(actor_id, sources[source_id]['actors'], 'actor_id')
-    thread_id = choose(thread_id, sources[source_id]['threads'], 'thread_id')
-    request_id = uuid.uuid4().hex if request_id is None else _text(request_id, 'request_id')
-    identity = hashlib.sha256(json.dumps([spec['instance_id'], source_id, request_id], ensure_ascii=False).encode('utf-8')).hexdigest()
-    value = {'source_id': source_id, 'event_id': 'local_' + identity, 'actor_id': actor_id,
-             'thread_ids': [thread_id], 'text': text, 'human': True, 'explicit': True}
-    raw = (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + '\n').encode('utf-8')
-    directory = Path(spec['state_dir']) / 'incoming'
-    directory.mkdir(parents=True, exist_ok=True)
-    if directory.is_symlink() or directory.is_junction() or not directory.is_dir():
-        raise _error('conflict')
-    target = directory / (identity + '.json')
-    duplicate = _publish(directory, target.name, raw)
-    return {'request_id': request_id, 'event_id': value['event_id'], 'path': str(target),
-            'duplicate': duplicate, 'queued': True}
+    source_id, request_id, event = _event(spec, text, source_id, actor_id, thread_id, request_id)
+    store = open_state(spec, initialize=True)
+    result = _receive(store, spec, source_id, event)
+    return {'request_id': request_id, **result, 'queued': True}
 
 
-def _publish(directory, name, raw):
-    """目录句柄绑定准备、发布与收尾；无句柄平台按文件身份保护清理。"""
-    owner = None
-    if all(operation in os.supports_dir_fd for operation in (os.open, os.unlink, os.link, os.stat)):
-        owner = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        temporary = directory / ('.submit-' + uuid.uuid4().hex + '.tmp')
-        try:
-            descriptor = os.open(temporary.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=owner)
-        except BaseException:
-            os.close(owner)
-            raise
-    else:
-        descriptor, filename = tempfile.mkstemp(prefix='.submit-', suffix='.tmp', dir=directory)
-        temporary = Path(filename)
-    identity = os.fstat(descriptor)
-    duplicate = False
-    errors = []
+def _runtime(spec):
+    path = Path(spec['state_dir']) / 'runtime-status.json'
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise _error('corrupt')
+    with path.open('rb') as stream:
+        raw = stream.read(2097153)
     try:
-        with os.fdopen(descriptor, 'wb') as stream:
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-        try:
-            if directory.is_symlink() or directory.is_junction():
-                raise _error('conflict')
-            if owner is not None:
-                current, opened = directory.stat(), os.fstat(owner)
-                if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
-                    raise _error('conflict')
-                os.link(temporary.name, name, src_dir_fd=owner, dst_dir_fd=owner, follow_symlinks=False)
-            else:
-                os.link(temporary, directory / name)
-        except FileExistsError:
-            try:
-                flags = os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0)
-                descriptor = os.open(name, flags, dir_fd=owner) if owner is not None else os.open(directory / name, flags)
-                with os.fdopen(descriptor, 'rb') as stream:
-                    if (directory / name).is_symlink() or not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                        raise _error('conflict')
-                    if stream.read(len(raw) + 1) != raw:
-                        raise _error('event-conflict')
-            except OSError as exc:
-                raise _error('conflict') from exc
-            duplicate = True
-    except BaseException as exc:
-        errors.append(exc)
-    finally:
-        try:
-            try:
-                current = (os.stat(temporary.name, dir_fd=owner, follow_symlinks=False)
-                           if owner is not None else temporary.stat(follow_symlinks=False))
-            except FileNotFoundError:
-                pass
-            else:
-                if (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
-                    if owner is not None:
-                        os.unlink(temporary.name, dir_fd=owner)
-                    else:
-                        temporary.unlink()
-        except BaseException as cleanup:
-            errors.append(cleanup)
-        finally:
-            if owner is not None:
-                try:
-                    os.close(owner)
-                except BaseException as cleanup:
-                    errors.append(cleanup)
-    raise_cleanup_errors(errors)
-    return duplicate
+        result = strict_loads(raw.decode('utf-8'))
+        if (len(raw) > 2097152 or not isinstance(result, dict) or result.get('instance_id') != spec['instance_id']
+                or result.get('runtime_state') not in {'running', 'stopped', 'failed'}):
+            raise ValueError
+        return result
+    except (ValueError, TypeError, UnicodeError) as exc:
+        raise _error('corrupt') from exc
 
 
 def read_status(config_path):
-    """读取最后投影，不将旧快照视作进程存活或重新启动运行。"""
     spec = read_config(config_path)
-    path = Path(spec['state_dir']) / 'status.json'
-    if not path.exists():
-        raise _error('status-unavailable')
-    if path.is_symlink():
-        raise _error('corrupt')
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0)
-                         | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0))
-    with os.fdopen(descriptor, 'rb') as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-            raise _error('corrupt')
-        raw = stream.read(2097153)
-    try:
-        value = _json(raw.decode('utf-8'))
-        if (len(raw) > 2097152 or not isinstance(value, dict)
-                or value.get('instance_id') != spec['instance_id'] or value.get('runtime_state') not in ('running', 'stopping', 'stopped', 'failed')):
-            raise ValueError
-        return value
-    except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
-        raise _error('corrupt') from exc
+    return snapshot(open_state(spec, read_only=True), runtime=_runtime(spec))
 
 
 def control_local(config_path, action, mission_id, *, request_id=None):
-    """在独立控制账本中公开一个幂等的暂停、继续或取消意图。"""
-    from .superagent_control import MissionControl, validate_request
     spec = read_config(config_path)
-    if 'autonomy' not in spec:
-        raise _error('guidance-unavailable')
-    request_id = uuid.uuid4().hex if request_id is None else request_id
-    validate_request(request_id, mission_id, action)
-    identity = json.dumps(spec, ensure_ascii=False, sort_keys=True)
-    control = MissionControl(Path(spec['state_dir']) / 'control.sqlite3',
-                             instance_id=spec['instance_id'], identity=identity)
-    receipt = control.enqueue(command_id=request_id, mission_id=mission_id, action=action)
-    return {'request_id': request_id, **receipt, 'queued': receipt['status'] == 'queued'}
+    store = open_state(spec)
+    request_id = uuid4().hex if request_id is None else _text(request_id, 'request_id', limit=96)
+    control = CoordinatorControl(store)
+    if control.receipt(request_id) is None and action == 'resume':
+        with store.transaction() as db:
+            mandate = db.execute('SELECT d.mandate_id FROM missions m JOIN mandates d ON d.ticket_id=m.ticket_id WHERE m.mission_id=?', (mission_id,)).fetchone()
+        if mandate is None or CoordinatorAuthorizationEngine(store).revalidate_mandate(mandate['mandate_id'], actor=_ACTOR)['status'] not in {'valid', 'affected'}:
+            raise _error('mandate.unavailable')
+    return control.command(mission_id, action, request_id=request_id, actor=_ACTOR)
 
 
 def read_control_receipt(config_path, request_id):
-    """只读核对原控制回执；不创建目录、空库、模型宿主或新命令。"""
-    from .superagent_control import MissionControl
-    _text(request_id, 'request_id', limit=200)
     spec = read_config(config_path)
-    if 'autonomy' not in spec:
-        raise _error('guidance-unavailable')
-    control = MissionControl(Path(spec['state_dir']) / 'control.sqlite3', instance_id=spec['instance_id'],
-        identity=json.dumps(spec, ensure_ascii=False, sort_keys=True), read_only=True)
-    return control.command(request_id)
-
-
-def _guidance_target(status, job_id, remote):
-    """仅从完整合法的当前投影选目标；截断不能作为全局唯一的依据。"""
-    from .superagent_inbox import _names
-    from .superagent_mission_store import JOB_STATES, MISSION_STATES, TERMINAL
-    targets = []
-    try:
-        missions = status['missions']
-        if not isinstance(missions, dict) or type(missions['has_more']) is not bool or not isinstance(missions['recent'], list):
-            raise ValueError
-        for mission in missions['recent']:
-            if (not isinstance(mission, dict) or mission['state'] not in MISSION_STATES
-                    or not isinstance(mission['jobs'], list) or type(mission['revision']) is not int or mission['revision'] < 1):
-                raise ValueError
-            if 'jobs_has_more' in mission and type(mission['jobs_has_more']) is not bool:
-                raise ValueError
-            for key in ('id', 'source_id'):
-                _text(mission[key], key)
-            _names(mission['thread_ids'], 'thread_ids', nonempty=True)
-            for job in mission['jobs']:
-                if not isinstance(job, dict) or job['role'] not in ('plan', 'work', 'integrate', 'review') or job['state'] not in JOB_STATES:
-                    raise ValueError
-                _text(job['id'], 'job_id')
-                if 'scheduling_halted' in job and type(job['scheduling_halted']) is not bool:
-                    raise ValueError
-                progress = job.get('run')
-                if progress is not None:
-                    if not isinstance(progress, dict) or not isinstance(progress['status'], str):
-                        raise ValueError
-                    _text(progress['id'], 'run_id')
-                    if progress['turn'] is not None and (type(progress['turn']) is not int or not 1 <= progress['turn'] <= 2**53 - 1):
-                        raise ValueError
-                if (job['role'] in ('work', 'integrate') and job['state'] == 'accepted' and progress
-                        and progress['status'] == 'running' and progress['turn'] is not None
-                        and mission['state'] not in TERMINAL
-                        and not job.get('scheduling_halted') and mission['source_id'] not in remote
-                        and (job_id is None or job['id'] == job_id)):
-                    if job['run_id'] != progress['id']:
-                        raise ValueError
-                    targets.append((mission, job))
-    except (ValueError, TypeError, KeyError, HarnessError) as exc:
-        raise _error('corrupt') from exc
-    if len(targets) != 1 or job_id is None and (missions['has_more'] or any(mission.get('jobs_has_more') for mission in missions['recent'])):
-        raise _error('guidance-unavailable')
-    return targets[0]
+    result = CoordinatorControl(open_state(spec, read_only=True)).receipt(request_id)
+    if result is None:
+        raise _error('status-unavailable')
+    return result
 
 
 def steer_local(config_path, text, *, job_id=None, source_id=None, actor_id=None, thread_id=None, request_id=None):
-    """绑定最后投影中的原运行；只排队，不猜测进程存活或把迟到输入投给新轮次。"""
-    from .superagent_guidance import command_id, validate_command
-    from .superagent_guidance_files import read_file
     spec = read_config(config_path)
-    _text(text, 'text', limit=65536)
-    request_id = uuid.uuid4().hex if request_id is None else _text(request_id, 'request_id')
-    identity = command_id(spec['instance_id'], request_id)
-    directory = Path(spec['state_dir']) / 'guidance' / 'incoming'
-    if any(path.is_symlink() or path.is_junction() for path in (directory.parent, directory)):
-        raise _error('conflict')
-    target = directory / (identity + '.json')
-    def queued(value, duplicate):
-        return {'request_id': request_id, 'job_id': value['job_id'], 'run_id': value['run_id'], 'turn': value['turn'],
-                'path': str(target), 'duplicate': duplicate, 'queued': True}
-    if target.exists() or target.is_symlink():
-        original = validate_command(read_file(target, 524288))
-        if (original['instance_id'] != spec['instance_id'] or original['request_id'] != request_id or original['text'] != text
-                or any(value is not None and original[key] != value for key, value in
-                       (('job_id', job_id), ('source_id', source_id), ('actor_id', actor_id), ('thread_id', thread_id)))):
+    source_id, request_id, event = _event(spec, text, source_id, actor_id, thread_id, request_id, instruction=True)
+    store = open_state(spec)
+    with store.transaction() as db:
+        old = db.execute('SELECT * FROM coordinator_requests WHERE request_id=?', (request_id,)).fetchone()
+    if old is not None:
+        payload = strict_loads(old['payload_json'])
+        if (payload['text'] != text or payload['source_id'] != source_id or payload['actor_id'] != event['metadata']['actor_id']
+                or payload['thread_id'] != event['thread_id'] or job_id is not None and payload['job_id'] != job_id):
             raise _error('event-conflict')
-        return queued(original, True)
-    status = read_status(config_path)
-    if 'autonomy' not in spec or status['runtime_state'] != 'running':
+        return read_guidance_receipt(config_path, request_id)
+    mission_id = None
+    if job_id is not None:
+        with store.transaction() as db:
+            target = db.execute('SELECT mission_id FROM jobs WHERE job_id=?', (job_id,)).fetchone()
+        if target is None:
+            raise _error('guidance-unavailable')
+        mission_id = target['mission_id']
+    current = snapshot(store, runtime=_runtime(spec), mission_id=mission_id)
+    targets = []
+    for mission in current['missions']['recent']:
+        if mission['state'] not in {'running', 'integrating', 'reviewing'} or (mission.get('control') or {}).get('mode') != 'running':
+            continue
+        for job in mission['jobs']:
+            assignment, run = job.get('assignment'), job.get('run')
+            if (job['role'] in {'work', 'integrate'} and (job_id is None or job_id == job['job_id'])
+                    and assignment and assignment['state'] in {'accepted', 'running'} and run
+                    and run.get('run_id') == assignment['run_id'] and type(run.get('turn')) is int and run['turn'] > 0):
+                targets.append((mission, job, assignment, run))
+    if len(targets) != 1 or job_id is None and (current['missions']['has_more'] or any(m['jobs_has_more'] for m in current['missions']['recent'])):
         raise _error('guidance-unavailable')
-    remote = {spec[name]['source_id'] for name in ('github', 'feishu') if name in spec}
-    mission, job = _guidance_target(status, job_id, remote)
-    source_id = mission['source_id'] if source_id is None else source_id
-    if source_id != mission['source_id'] or source_id not in spec['sources']:
+    mission, job, assignment, run = targets[0]
+    with store.transaction() as db:
+        thread = db.execute('SELECT t.primary_thread_id,t.source_instance_id FROM missions m JOIN triggers t ON t.trigger_id=m.goal_ref WHERE m.mission_id=?', (mission['mission_id'],)).fetchone()
+    expected_thread = 'thr_' + _hash(_json([source_id, 'local/' + spec['sources'][source_id]['config']['namespace'] + '/' + event['thread_id']]))
+    if thread is None or thread['source_instance_id'] != source_id or thread['primary_thread_id'] != expected_thread:
         raise _error('guidance-unauthorized')
-    source = spec['sources'][source_id]
-    if source['mode'] == 'ignore':
-        raise _error('guidance-unauthorized')
-    def choose(value, options, field):
-        if value is None and len(options) == 1:
-            value = next(iter(options))
-        if not isinstance(value, str) or value not in options:
-            raise _error('invalid', field=field)
-        return value
-    actor_id = choose(actor_id, source['actors'], 'actor_id')
-    thread_id = choose(thread_id, set(source['threads']) & set(mission['thread_ids']), 'thread_id')
-    value = validate_command({'version': 1, 'instance_id': spec['instance_id'], 'request_id': request_id,
-        'mission_id': mission['id'], 'job_id': job['id'], 'run_id': job['run']['id'], 'turn': job['run']['turn'],
-        'source_id': source_id, 'revision': mission['revision'], 'actor_id': actor_id, 'thread_id': thread_id, 'text': text})
-    directory.mkdir(parents=True, exist_ok=True)
-    if any(path.is_symlink() or path.is_junction() for path in (directory.parent, directory)):
-        raise _error('conflict')
-    duplicate = _publish(directory, identity + '.json', (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + '\n').encode('utf-8'))
-    return queued(value, duplicate)
+    received = _receive(store, spec, source_id, event)
+    payload = {'mission_id': mission['mission_id'], 'job_id': job['job_id'], 'assignment_id': assignment['assignment_id'],
+        'expected_run_id': assignment['run_id'], 'expected_turn_id': run['turn'], 'trigger_id': received['trigger_id'],
+        'source_id': source_id, 'actor_id': event['metadata']['actor_id'], 'thread_id': event['thread_id'], 'text': text}
+    raw = _json(payload)
+    with store.transaction(write=True) as db:
+        if db.execute('SELECT count(*) FROM coordinator_requests').fetchone()[0] >= 1024:
+            raise _error('control.capacity')
+        db.execute("INSERT OR IGNORE INTO coordinator_requests VALUES(?,?,?,'pending',NULL,?,?)", (request_id, raw, _hash(raw), _now(), _now()))
+        original = db.execute('SELECT payload_hash FROM coordinator_requests WHERE request_id=?', (request_id,)).fetchone()
+        if original['payload_hash'] != _hash(raw):
+            raise _error('event-conflict')
+    return read_guidance_receipt(config_path, request_id)
 
 
 def read_guidance_receipt(config_path, request_id):
-    """只读单条持久回执；排队、原生受理与应用分别呈现。"""
-    from .superagent_guidance import command_id, validate_receipt
-    from .superagent_guidance_files import read_file
     spec = read_config(config_path)
-    _text(request_id, 'request_id')
-    identity = command_id(spec['instance_id'], request_id)
-    root = Path(spec['state_dir']) / 'guidance'
-    if any(path.is_symlink() or path.is_junction() for path in (root, root / 'receipts')):
-        raise _error('conflict')
-    path = root / 'receipts' / (identity + '.json')
-    if not path.exists():
-        raise _error('status-unavailable')
-    value = validate_receipt(read_file(path, 65536))
-    if value['instance_id'] != spec['instance_id'] or value['id'] != identity or value['request_id'] != request_id:
-        raise _error('corrupt')
-    return value
+    store = open_state(spec, read_only=True)
+    with store.transaction() as db:
+        row = db.execute('SELECT * FROM coordinator_requests WHERE request_id=?', (request_id,)).fetchone()
+        if row is None:
+            raise _error('status-unavailable')
+        if _hash(row['payload_json']) != row['payload_hash']:
+            raise _error('corrupt')
+        native = db.execute('SELECT state,receipt_json FROM mission_instructions WHERE request_id=?', (request_id,)).fetchone()
+        return {'request_id': request_id, 'state': row['state'], 'queued': row['state'] == 'pending',
+                'receipt': strict_loads(native['receipt_json']) if native else strict_loads(row['receipt_json']) if row['receipt_json'] else None,
+                'instruction_state': native['state'] if native else None}

@@ -14,6 +14,7 @@ from harness.app.superagent_coordinator_host import CoordinatorHost
 from harness.app.superagent_coordinator_store import _hash, _json
 from harness.app.superagent_executor import HarnessExecutorAdapter, WorkerProfile
 from tests.agent_configuration_fixture import RecordingTransport
+from tests.superagent_product_fixture import review_contract
 
 
 class _TwoRootJoinPlanner:
@@ -116,7 +117,7 @@ class DagSchedulerArtifactIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.host.sources.create_instance(
             "local-source", kind="local", config={"namespace": "repo"},
-            legacy_source_id="legacy-local",
+
         )
 
     @staticmethod
@@ -424,13 +425,8 @@ class DagSchedulerArtifactIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         async def scripted_post_stream(url, *, headers, body, timeout):
             request = json.loads(body)
-            reviewer_message = next(
-                (message.get("content", "") for message in request.get("messages", [])
-                 if isinstance(message.get("content"), str)
-                 and "Host-owned independent Reviewer:" in message["content"]),
-                None,
-            )
-            if reviewer_message is None:
+            contract = review_contract(request)
+            if contract is None:
                 async for chunk in original_post_stream(
                     url, headers=headers, body=body, timeout=timeout,
                 ):
@@ -438,9 +434,6 @@ class DagSchedulerArtifactIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 return
 
             self.transport.requests.append(request)
-            marker = "Host-owned independent Reviewer:"
-            contract_text = reviewer_message.split(marker, 1)[1].split("\n", 1)[1]
-            contract, _ = json.JSONDecoder().raw_decode(contract_text.lstrip())
             available = contract.get("available_evidence") or []
             cited_evidence = next(
                 (item.get("evidence_id") for item in available if item.get("evidence_id")),
@@ -743,7 +736,7 @@ class DagSchedulerArtifactIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.transport.requests.append(request)
             messages = [m["content"] for m in request["messages"] if isinstance(m.get("content"), str)]
             staged = next((m for m in messages if '"max_work_turns":2' in m), None)
-            review = next((m for m in messages if "Host-owned independent Reviewer:" in m), None)
+            review = review_contract(request)
             if staged:
                 decoder = json.JSONDecoder()
                 frame = None
@@ -766,8 +759,7 @@ class DagSchedulerArtifactIntegrationTests(unittest.IsolatedAsyncioTestCase):
             elif review:
                 reviewer_entered.set()
                 await release_reviewer.wait()
-                contract_text = review.split("Host-owned independent Reviewer:", 1)[1].split("\n", 1)[1]
-                contract, _ = json.JSONDecoder().raw_decode(contract_text.lstrip())
+                contract = review
                 seen.append(("review", 1))
                 evidence = contract["available_evidence"][0]["evidence_id"]
                 output = {"schema_version": 1, "candidate_artifact_id": contract["candidate_artifact_id"],

@@ -954,7 +954,7 @@ class UnifiedExecutionTests(unittest.IsolatedAsyncioTestCase):
         host = service.coordinator
         host.sources.create_instance(
             "local-source", kind="local", config={"namespace": "repo"},
-            legacy_source_id="legacy-local",
+
         )
         thread_key = "unified-service-thread"
         thread_id = f._thread_id(thread_key)
@@ -1092,7 +1092,7 @@ class UnifiedExecutionTests(unittest.IsolatedAsyncioTestCase):
         host = service.coordinator
         host.sources.create_instance(
             "local-source", kind="local", config={"namespace": "repo"},
-            legacy_source_id="legacy-local",
+
         )
         thread_key = "unified-service-revoke-thread"
         thread_id = f._thread_id(thread_key)

@@ -1,7 +1,7 @@
 """下一代 Superagent 的来源插件契约、实例注册表和可信事件规范化。"""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import base64
 import hashlib
@@ -134,7 +134,6 @@ class SourceInstance:
     config: Mapping[str, Any]
     config_revision: int
     identity_hash: str
-    legacy_source_id: str | None
     installed: bool
 
 
@@ -345,16 +344,18 @@ class FeishuSourceKind:
         timestamp = _header(headers, "x-lark-request-timestamp")
         nonce = _header(headers, "x-lark-request-nonce")
         signature = _header(headers, "x-lark-signature")
-        if (
-            not isinstance(timestamp, str) or re.fullmatch(r"[0-9]{1,16}", timestamp) is None
-            or not isinstance(nonce, str) or not 1 <= len(nonce.encode("utf-8")) <= 256
-            or not isinstance(signature, str) or re.fullmatch(r"[0-9a-f]{64}", signature) is None
-            or not -300 <= time.time() - int(timestamp) <= 28_800
-        ):
-            raise PermissionError("Feishu request signature is invalid")
-        expected = hashlib.sha256(timestamp.encode() + nonce.encode() + encrypt_key + raw).hexdigest()
-        if not hmac.compare_digest(expected, signature):
-            raise PermissionError("Feishu request signature is invalid")
+        signed = any(item is not None for item in (timestamp, nonce, signature))
+        if signed:
+            if (
+                not isinstance(timestamp, str) or re.fullmatch(r"[0-9]{1,16}", timestamp) is None
+                or not isinstance(nonce, str) or not 1 <= len(nonce.encode("utf-8")) <= 256
+                or not isinstance(signature, str) or re.fullmatch(r"[0-9a-f]{64}", signature) is None
+                or not -300 <= time.time() - int(timestamp) <= 28_800
+            ):
+                raise PermissionError("Feishu request signature is invalid")
+            expected = hashlib.sha256(timestamp.encode() + nonce.encode() + encrypt_key + raw).hexdigest()
+            if not hmac.compare_digest(expected, signature):
+                raise PermissionError("Feishu request signature is invalid")
         try:
             envelope = _strict_json(raw.decode("utf-8"))
             if not isinstance(envelope, dict) or set(envelope) != {"encrypt"} or not isinstance(envelope["encrypt"], str):
@@ -383,6 +384,8 @@ class FeishuSourceKind:
                 raise PermissionError("Feishu verification token is invalid")
             if challenge:
                 return SourceChallenge(_bounded_text(data.get("challenge"), "challenge", limit=1024))
+            if not signed:
+                raise PermissionError(tr("superagent.feishu-signature"))
             if data.get("schema") != "2.0":
                 raise ValueError("unsupported Feishu event schema")
             header = data["header"]
@@ -520,7 +523,7 @@ class LocalSourceKind:
 
 
 class SourceRegistry:
-    """管理代码级 SourceKind 插件和持久化 SourceInstance；不接管 CLI/HTTP 默认路由。"""
+    """统一 CLI／HTTP 的来源实例、规范化事件、修订与持久游标边界。"""
 
     def __init__(
         self, store: CoordinatorStore, *, ingest: Callable[..., dict[str, Any]] | None = None,
@@ -648,13 +651,13 @@ class SourceRegistry:
             source_instance_id=row["source_instance_id"], kind=row["kind"],
             kind_api_version=row["kind_api_version"], enabled=bool(row["enabled"]),
             config=config, config_revision=row["config_revision"],
-            identity_hash=row["identity_hash"], legacy_source_id=row["legacy_source_id"],
+            identity_hash=row["identity_hash"],
             installed=installed,
         )
 
     def create_instance(
         self, source_instance_id: str, *, kind: str, config: object, enabled: bool = True,
-        legacy_source_id: str | None = None, actor: object | None = None,
+        actor: object | None = None,
     ) -> SourceInstance:
         source_instance_id = _bounded_text(source_instance_id, "source_instance_id", limit=128)
         plugin = self._kinds.get(_text(kind, "kind"))
@@ -666,26 +669,21 @@ class SourceRegistry:
         identity = dict(plugin.identity(parsed))
         identity_json = _json(identity)
         identity_hash = _hash(identity_json)
-        legacy = None if legacy_source_id is None else _bounded_text(legacy_source_id, "legacy_source_id", limit=256)
         now = _now()
         with self._store.transaction(write=True) as db:
-            if legacy is not None and db.execute(
-                "SELECT 1 FROM source_instances WHERE legacy_source_id=? LIMIT 1", (legacy,),
-            ).fetchone() is not None:
-                raise ValueError("legacy source ID is already mapped to another SourceInstance")
             db.execute(
                 """INSERT INTO source_instances(
                     source_instance_id,kind,kind_api_version,enabled,config_json,config_revision,
-                    identity_json,identity_hash,legacy_source_id,health_json,created_at,updated_at
-                ) VALUES(?,?,?,?,?,1,?,?,?,?,?,?)""",
+                    identity_json,identity_hash,health_json,created_at,updated_at
+                ) VALUES(?,?,?,?,?,1,?,?,?,?,?)""",
                 (source_instance_id, kind, plugin.api_version, int(enabled), _json(parsed),
-                 identity_json, identity_hash, legacy, _json({"state": "unknown"}), now, now),
+                 identity_json, identity_hash, _json({"state": "unknown"}), now, now),
             )
             CoordinatorStore.append_audit(
                 db, aggregate_type="source_instance", aggregate_id=source_instance_id,
                 event_type="source_instance.created",
                 payload={"kind": kind, "kind_api_version": plugin.api_version, "enabled": enabled,
-                         "config_revision": 1, "identity_hash": identity_hash, "legacy_source_id": legacy},
+                         "config_revision": 1, "identity_hash": identity_hash},
                 actor={"kind": "host"} if actor is None else actor,
             )
         return self.get_instance(source_instance_id)
@@ -693,7 +691,7 @@ class SourceRegistry:
     def update_instance(
         self, source_instance_id: str, *, expected_revision: int,
         config: object | None = None, enabled: bool | None = None,
-        legacy_source_id: str | None = None, actor: object | None = None,
+        actor: object | None = None,
     ) -> SourceInstance:
         source_instance_id = _bounded_text(source_instance_id, "source_instance_id", limit=128)
         if type(expected_revision) is not int or expected_revision < 1:
@@ -719,31 +717,21 @@ class SourceRegistry:
             target_enabled = bool(row["enabled"]) if enabled is None else enabled
             if type(target_enabled) is not bool:
                 raise ValueError("enabled must be a boolean")
-            target_legacy = row["legacy_source_id"] if legacy_source_id is None else _text(legacy_source_id, "legacy_source_id")
-            mapping_changed = target_legacy != row["legacy_source_id"]
-            if row["legacy_source_id"] is not None and mapping_changed:
-                raise PermissionError("legacy source mapping is immutable once bound")
-            if target_legacy is not None and mapping_changed and db.execute(
-                """SELECT 1 FROM source_instances
-                   WHERE legacy_source_id=? AND source_instance_id<>? LIMIT 1""",
-                (target_legacy, source_instance_id),
-            ).fetchone() is not None:
-                raise ValueError("legacy source ID is already mapped to another SourceInstance")
             changed = _json(parsed) != row["config_json"] or int(target_enabled) != row["enabled"]
             if changed:
                 new_revision = expected_revision + 1
                 now = _now()
                 db.execute(
                     """UPDATE source_instances SET config_json=?,enabled=?,config_revision=?,
-                       legacy_source_id=?,updated_at=? WHERE source_instance_id=? AND config_revision=?""",
-                    (_json(parsed), int(target_enabled), new_revision, target_legacy, now,
+                       updated_at=? WHERE source_instance_id=? AND config_revision=?""",
+                    (_json(parsed), int(target_enabled), new_revision, now,
                      source_instance_id, expected_revision),
                 )
                 CoordinatorStore.append_audit(
                     db, aggregate_type="source_instance", aggregate_id=source_instance_id,
                     event_type="source_instance.configured",
                     payload={"config_revision": new_revision, "enabled": target_enabled,
-                             "config_hash": _hash(_json(parsed)), "legacy_source_id": target_legacy},
+                             "config_hash": _hash(_json(parsed))},
                     actor={"kind": "host"} if actor is None else actor,
                 )
                 if self._on_config_changed is not None:
@@ -751,19 +739,6 @@ class SourceRegistry:
                         db, source_instance_id,
                         actor={"kind": "host"} if actor is None else actor,
                     )
-            elif mapping_changed:
-                now = _now()
-                db.execute(
-                    "UPDATE source_instances SET legacy_source_id=?,updated_at=? WHERE source_instance_id=?",
-                    (target_legacy, now, source_instance_id),
-                )
-            if mapping_changed:
-                CoordinatorStore.append_audit(
-                    db, aggregate_type="source_instance", aggregate_id=source_instance_id,
-                    event_type="source_instance.legacy_mapping_bound",
-                    payload={"legacy_source_id": target_legacy},
-                    actor={"kind": "host"} if actor is None else actor,
-                )
         return self.get_instance(source_instance_id)
 
     def get_instance(self, source_instance_id: str) -> SourceInstance:
@@ -1161,13 +1136,33 @@ class SourceRegistry:
             raise TypeError("SourceKind.normalize must return a normalized trigger, challenge or ignored event")
         if self._ingest is None:
             raise RuntimeError("SourceRegistry has no CoordinatorAuthorizationEngine intake")
-        return self._ingest(
+        delivery = None
+        if plugin.kind == 'github':
+            with self._store.transaction() as db:
+                prior = db.execute('SELECT trigger_id,metadata_json FROM triggers WHERE source_instance_id=? AND external_event_id=?', (source_instance_id, normalized.external_event_id)).fetchone()
+            if prior is not None:
+                metadata = json.loads(prior['metadata_json'])
+                incoming = normalized.metadata.get('delivery_id')
+                if incoming != metadata.get('delivery_id'):
+                    delivery = {'delivery_id':incoming, 'original_delivery_id':metadata.get('delivery_id')}
+                    # Provider 重投的传输身份单独审计，原 Trigger 的已验证事实不改写。
+                    normalized = replace(normalized, metadata={**normalized.metadata, 'delivery_id':metadata.get('delivery_id')},
+                        lifecycle=replace(normalized.lifecycle, provider_revision=metadata.get('delivery_id')) if normalized.lifecycle is not None else None)
+        result = self._ingest(
             source_instance_id=source_instance_id,
             expected_source_revision=instance.config_revision,
             kind=plugin.kind,
             adapter_version=f"{plugin.kind}/{plugin.api_version}",
             trigger=normalized,
         )
+        if delivery is not None and result.get('state') == 'duplicate':
+            payload = _json(delivery)
+            with self._store.transaction(write=True) as db:
+                if db.execute("SELECT 1 FROM audit_events WHERE aggregate_id=? AND event_type='trigger.redelivered' AND payload_json=?", (result['trigger_id'], payload)).fetchone() is None:
+                    self._store.append_audit(db, aggregate_type='trigger', aggregate_id=result['trigger_id'],
+                        event_type='trigger.redelivered', payload=delivery, actor={'kind':'source', 'source_instance_id':source_instance_id})
+        return result
+
 
     def receive_local(self, source_instance_id: str, event: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(event, Mapping):

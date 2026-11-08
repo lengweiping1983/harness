@@ -121,7 +121,7 @@ class GitHubIssueCommentLookupAdapter:
                     actual.scheme != root.scheme or actual.hostname != root.hostname
                     or actual_port != expected_port or actual.username is not None
                     or actual.password is not None or actual.query or actual.fragment
-                    or actual.path != issue_path
+                    or actual.path.casefold() != issue_path.casefold()
                 ):
                     raise ValueError("matching GitHub comment belongs to another Issue")
                 sent_at = _iso_time(comment.get("created_at"), "comment.created_at")

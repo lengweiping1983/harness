@@ -186,7 +186,7 @@ class Gate:
         allowed_scope = part.get("scope")
         if allowed_scope is not None and (
             source_id not in allowed_scope["source_instance_ids"]
-            or trigger.get("primary_thread_id") not in allowed_scope["thread_ids"]
+            or (allowed_scope["thread_ids"] != ["$current"] and trigger.get("primary_thread_id") not in allowed_scope["thread_ids"])
         ):
             return {"admissible": False, "reason": "outside_policy_scope"}
         actor_id = actor["actor_id"]
@@ -320,7 +320,10 @@ class CoordinatorAuthorizationEngine:
             "tools": [],
             "budget": {"max_turns": 1, "max_seconds": 600},
         }
-        return _validate_scope(part.get("scope", default), name="mandate_scope")
+        scope = dict(part.get("scope", default))
+        if scope.get("thread_ids") == ["$current"]:
+            scope["thread_ids"] = [thread_id]
+        return _validate_scope(scope, name="mandate_scope")
 
     @staticmethod
     def _mandate_status(db, mandate, *, actor: object, now: str, record: bool = True) -> str:
@@ -982,6 +985,14 @@ class CoordinatorAuthorizationEngine:
             ).fetchall()
             if not trigger_rows:
                 return {"state": "empty", "thread_id": thread_id}
+            unavailable = db.execute("SELECT * FROM evaluations WHERE thread_id=? AND state='unavailable' ORDER BY started_at DESC,evaluation_id DESC LIMIT 1", (thread_id,)).fetchone()
+            if (unavailable is not None and unavailable['retry_count'] == 0
+                    and unavailable['policy_version'] == policy_row['policy_version']
+                    and unavailable['thread_lifecycle_revision'] == thread['lifecycle_revision']):
+                original_ids = {row[0] for row in db.execute("SELECT trigger_id FROM evaluation_triggers WHERE evaluation_id=?", (unavailable['evaluation_id'],))}
+                unchanged_sources = all(db.execute("SELECT config_revision FROM source_instances WHERE source_instance_id=?", (row['source_instance_id'],)).fetchone()[0] == row['source_revision'] for row in trigger_rows)
+                if original_ids == {row['trigger_id'] for row in trigger_rows} and unchanged_sources:
+                    return {'state': 'unavailable', 'evaluation_id': unavailable['evaluation_id'], 'thread_id': thread_id}
             gate_results = []
             admissible = []
             for row in trigger_rows:

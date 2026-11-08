@@ -472,7 +472,7 @@ class CoordinatorMissionInstruction:
             raise _conflict()
 
     async def deliver(self, mission_id: str, job_id: str, assignment_id: str,
-                      request_id: str, trigger_id: str, text: str) -> dict:
+                      request_id: str, trigger_id: str, text: str, *, expected_run_id=None, expected_turn_id=None) -> dict:
         """首次调用持久化后最多受理一次；其余调用只回查原生回执。"""
         for value, name in (
             (mission_id, "mission_id"), (job_id, "job_id"),
@@ -506,6 +506,9 @@ class CoordinatorMissionInstruction:
             turn_id = self._executor.instruction_turn(
                 context["worker"], context["assignment"], operation_key,
             )
+            if (expected_run_id is not None and context["assignment"]["run_id"] != expected_run_id
+                    or expected_turn_id is not None and turn_id != expected_turn_id):
+                raise HarnessError(tr("superagent.conflict"), code="superagent/run-conflict")
             if type(turn_id) is not int or not 1 <= turn_id <= 2**53 - 1:
                 raise HarnessError(tr("superagent.conflict"), code="superagent/run-conflict")
             row, claimed = self._prepare(

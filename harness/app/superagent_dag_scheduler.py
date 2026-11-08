@@ -425,13 +425,7 @@ class CoordinatorDagScheduler:
         plan, _, _, _ = self._load_plan(mission)
         acceptance = plan["acceptance"]
         if job["role"] == "integrate":
-            prompt = base_prompt + (
-                "\n\nHost-owned Integrator contract: integrate the delivered Work artifacts "
-                "inside this repository workspace, preserve the frozen base, resolve conflicts, "
-                "and run relevant bounded tests. Do not deploy, publish, push, or perform external writes. "
-                "The host will freeze this workspace as the candidate; do not claim that it passed review."
-            )
-            prompt += "\nAcceptance criteria: " + _json(acceptance["criteria"])
+            prompt = base_prompt + "\n\n" + tr('superagent.coordinator.integrator', criteria=_json(acceptance['criteria']))
             if attempt_no > 1:
                 prior = self._execution._read_one(
                     "SELECT review.verdict_json FROM reviews AS review "
@@ -443,8 +437,7 @@ class CoordinatorDagScheduler:
                 )
                 if prior is None:
                     raise HarnessError("Repair Integrator has no frozen failed Review", code="superagent/review-missing")
-                prompt += "\n\nRepair only the failed acceptance criteria using the imported prior candidate. "
-                prompt += "Preserve unrelated Work changes. Prior Review feedback: " + prior["verdict_json"]
+                prompt += "\n\n" + tr('superagent.coordinator.repair', review=prior['verdict_json'])
             return prompt
 
         if job["role"] != "review":
@@ -480,12 +473,7 @@ class CoordinatorDagScheduler:
                               "reason": "specific finding", "evidence_ids": ["persisted-evidence-id"]}],
             },
         }
-        return base_prompt + (
-            "\n\nHost-owned independent Reviewer: inspect the delivered candidate read-only; "
-            "never edit files. Evaluate every Acceptance criterion exactly once. Cite only IDs from "
-            "available_evidence, at least one per criterion. Return only JSON matching output_shape; "
-            "verdict is passed only when every criterion passes.\n" + _json(contract)
-        )
+        return base_prompt + "\n\n" + tr('superagent.coordinator.reviewer', contract=_json(contract))
 
     def _assignment_for_job(self, job_id):
         row = self._execution._read_one(

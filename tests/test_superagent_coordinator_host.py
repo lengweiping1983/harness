@@ -84,9 +84,7 @@ class CoordinatorHostTests(unittest.TestCase):
         host = self.open_host()
         self.addCleanup(host.close)
         self.assertFalse((self.root / "legacy-v1").exists())
-        with self.assertRaises(HarnessError) as caught:
-            _ = host.shadow
-        self.assertEqual(caught.exception.code, "superagent/shadow-unavailable")
+        self.assertFalse(hasattr(host, "shadow"))
 
     def test_host_rejects_a_legacy_v1_state_directory_without_modifying_it(self):
         legacy = self.root / "legacy-v1"
@@ -110,44 +108,23 @@ class CoordinatorHostTests(unittest.TestCase):
     def test_host_rejects_overlapping_explicit_v1_and_v2_state_directories(self):
         legacy = self.root / "legacy-v1"
         target = legacy / "nested-v2"
-        with self.assertRaises(HarnessError) as caught:
+        with self.assertRaises(TypeError):
             self.open_host(target, legacy_state_dir=legacy)
-        self.assertEqual(caught.exception.code, "superagent/state-dir-conflict")
         self.assertFalse(target.exists())
 
     def test_host_rejects_v1_state_nested_inside_v2_directory(self):
         target = self.root / "v2-state"
         legacy = target / "legacy-v1"
-        with self.assertRaises(HarnessError) as caught:
+        with self.assertRaises(TypeError):
             self.open_host(target, legacy_state_dir=legacy)
-        self.assertEqual(caught.exception.code, "superagent/state-dir-conflict")
         self.assertFalse(target.exists())
 
-    def test_host_composition_does_not_construct_legacy_runtime_components(self):
-        target_names = (
-            "harness.app.superagent_service.Harness",
-            "harness.app.superagent_inbox.SuperagentInbox",
-            "harness.app.superagent_dispatch.SuperagentDispatcher",
-            "harness.app.superagent_router.SuperagentRouter",
-            "harness.app.superagent_workers.SuperagentWorkers",
-        )
-        sentinels = []
-        for target in target_names:
-            manager = patch(target, side_effect=AssertionError(
-                f"legacy component constructed: {target}"
-            ))
-            sentinels.append(manager)
-            manager.start()
-        try:
+    def test_host_composition_does_not_construct_model_runtime_components(self):
+        with patch('harness.app.superagent_bootstrap.Harness', side_effect=AssertionError('宿主组合不得构造模型')):
             host = self.open_host()
-        finally:
-            for manager in reversed(sentinels):
-                manager.stop()
         self.addCleanup(host.close)
-        self.assertFalse(hasattr(host, "harness"))
-        self.assertFalse(hasattr(host, "router"))
-        self.assertFalse(hasattr(host, "dispatcher"))
-        self.assertFalse(hasattr(host, "inbox"))
+        self.assertTrue(host.database_path.is_file())
+        self.assertFalse(hasattr(host, 'shadow'))
 
     def test_close_refuses_to_release_lease_while_unit_of_work_is_active(self):
         host = self.open_host()

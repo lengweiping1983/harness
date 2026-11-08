@@ -1,454 +1,406 @@
-"""本地文件信道、独立宿主、连续执行与显式 CLI 的端到端回归。"""
+"""CLI、当前配置和统一账本的实际生产入口回归。"""
+from __future__ import annotations
+
 import asyncio
-import io
 import json
 import os
-import sys
-import tempfile
-import threading
-import unittest
-from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+import tempfile
+import unittest
+from unittest.mock import patch
 
-from harness.cli import build_parser, main
-from harness.app.git_process import run_git
-from harness.app.superagent_service import SuperagentService, read_config
-from harness.app.superagent_coordinator_host import CoordinatorHost
-from harness.core.errors import HarnessError
-from harness.core.language import current_language
-from harness.i18n import tr
-from tests.agent_configuration_fixture import RecordingTransport
+from harness.app.superagent_service import SuperagentService
+from harness.app.superagent_config import read_config
+from harness.app.superagent_local import submit_local, read_status
+from tests.superagent_product_fixture import product_config, ProductTransport
 
 
-class SuperagentOnceDeadlineTests(unittest.IsolatedAsyncioTestCase):
-    async def test_batch_deadline_preserves_accepted_work_and_original_status(self):
-        release = asyncio.Event()
-        task = asyncio.create_task(release.wait())
-        status = {'inputs': {'pending': 1}, 'results': {}, 'batches': [], 'cursor': 0, 'input_errors': []}
-        service = SuperagentService.__new__(SuperagentService)
-        service.spec, service.closed = {'once_timeout': 10, 'interval': .01}, False
-        service.guidance_files, service._input_count, service._draft_cursor = None, 0, 0
-        service.hosts = [SimpleNamespace(runtime=SimpleNamespace(records=SimpleNamespace(active={'original': task})),
-                                        jobs=SimpleNamespace(active_owners=lambda: set()))]
-        service.results = SimpleNamespace(uncollected=lambda: False, drafts=lambda **_: [])
-        service.inbox = SimpleNamespace(events=lambda **_: {'events': []})
-        service.channels, service.router = [], SimpleNamespace()
-        service.tick = AsyncMock(return_value=status)
-        try:
-            for language in ('en', 'zh-CN', 'en'):
-                with current_language.set(language), \
-                        patch('harness.app.superagent_service.time', SimpleNamespace(monotonic=Mock(side_effect=[100, 111]))):
-                    with self.assertRaises(HarnessError) as caught:
-                        await service.serve(asyncio.Event(), once=True)
-                self.assertEqual(caught.exception.code, 'superagent/once-timeout')
-                self.assertIs(service._serve_error, caught.exception)
-                self.assertIs(service.hosts[0].runtime.records.active['original'], task)
-                self.assertFalse(task.done())
-                self.assertEqual(status['inputs']['pending'], 1)
-        finally:
-            release.set()
-            await task
-
-
-class ServiceRouterTransport(RecordingTransport):
-    @staticmethod
-    def reply(request):
-        frame = None
-        for message in reversed(request['messages']):
-            content = message.get('content','')
-            if isinstance(content, list):
-                content = ''.join(part.get('text','') for part in content)
-            if isinstance(content,str):
-                for marker in ('\n\n{"events":','\n\n{"report_id":'):
-                    if marker in content:
-                        frame = json.loads(content[content.index(marker) + 2:])
-                        break
-            if frame is not None:
-                break
-        if frame is None:
-            raise AssertionError('请求缺少协调批次或内部结果。')
-        return ({'assignments': [{'trigger_id': item['id'], 'task_id': 'new:coding'} for item in frame['events']]}
-                 if 'events' in frame else {'reply': 'The Worker reported a result for review.'})
-
-    async def post_stream(self, url, *, headers, body, timeout):
-        request = json.loads(body)
-        self.requests.append(request)
-        value = self.reply(request)
-        yield ('data: ' + json.dumps({'choices': [{'delta': {'content': json.dumps(value)}, 'finish_reason': 'stop'}]}) + '\n\n').encode('utf-8')
-        yield b'data: [DONE]\n\n'
-
-
-class SuperagentServiceTests(unittest.IsolatedAsyncioTestCase):
+class ProductEntryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        environment = patch.dict(os.environ, {'HARNESS_API_KEY':'fixture-only','OPENROUTER_API_KEY':'fixture-only',
-            'HARNESS_HOME':str(self.root / 'unused-personal-home')})
-        environment.start()
-        self.addCleanup(environment.stop)
-        self.repo = self.root / 'repo'
-        self.repo.mkdir()
-        self.git('init','--initial-branch=main')
-        self.git('config','user.name','Fixture')
-        self.git('config','user.email','fixture@example.invalid')
-        (self.repo / 'main.txt').write_text('fixture\n',encoding='utf-8')
-        self.git('add','main.txt')
-        self.git('commit','-m','fixture')
-        self.path = self.root / 'config.json'
-        self.spec = {'version':1,'instance_id':'team','state_dir':'state','language':'en',
-            'router_model':'router-model','worker_model':'worker-model','base_url':'https://fixture.invalid/v1',
-            'permission_policy':'read_only','interval':0.01,'once_timeout':10,
-            'sources':{'github':{'mode':'requests','actors':['alice'],'threads':['issue/1','issue/2']}},
-            'profiles':{'coding':{'repo':'repo','description':'Inspect project regressions','sources':['github'],'tools':['read']}}}
-        self.save()
-        self.work_transport, self.router_transport = RecordingTransport(), ServiceRouterTransport()
+        self.config, self.spec = product_config(self.root)
+        self.environment = patch.dict(os.environ, {'HARNESS_API_KEY': 'fixture-only'})
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
 
-    def git(self,*args):
-        result = run_git(self.repo,*args)
-        if result.returncode:
-            raise RuntimeError(result.stderr.decode('utf-8'))
+    async def _release_gate(self, gate):
+        gate.set()
 
-    def save(self):
-        self.path.write_text(json.dumps(self.spec),encoding='utf-8')
-
-    async def open(self, *, cleanup=True):
-        service = await SuperagentService.open(self.path, worker_transport=self.work_transport,
-                                               router_transport=self.router_transport)
-        if cleanup:
-            self.addAsyncCleanup(service.aclose)
+    async def open(self, roles, work):
+        service = await SuperagentService.open(self.config, coordinator_transport=roles, worker_transport=work)
+        self.addAsyncCleanup(service.aclose)
         return service
 
-    def event(self, service, name='one.json', **overrides):
-        value = {**dict(source_id='github',event_id=name,actor_id='alice',text='/goal source $skill',
-            thread_ids=['issue/1'],human=True,explicit=True), **overrides}
-        (service.root / 'incoming' / name).write_text(json.dumps(value),encoding='utf-8')
-
-    async def test_once_runs_full_local_pipeline_and_publishes_reviewable_draft(self):
-        service = await self.open()
-        self.event(service)
-        result = await asyncio.wait_for(service.serve(asyncio.Event(),once=True),10)
-        self.assertEqual(result,0)
-        self.assertEqual(len(self.work_transport.requests),1)
-        self.assertEqual(len(self.router_transport.requests),2)
-        drafts = list((service.root / 'drafts').glob('*.json'))
-        self.assertEqual(len(drafts),1)
-        draft = json.loads(drafts[0].read_text(encoding='utf-8'))
-        self.assertEqual(draft['state'],'draft')
-        self.assertEqual(draft['reply'],'The Worker reported a result for review.')
-        self.assertNotIn('sent',draft)
-        self.assertEqual(len(list((service.root / 'receipts').glob('*.json'))),1)
-        self.assertTrue((service.root / 'incoming' / 'one.json').exists())
-        status = json.loads((service.root / 'status.json').read_text(encoding='utf-8'))
-        self.assertEqual(status['results'],{'draft':1})
-        self.assertEqual(status['workers']['states'],{'ready':1})
-        self.assertEqual([tool['function']['name'] for tool in self.work_transport.requests[0]['tools']],['read'])
-        self.assertNotEqual(service.worker_host.config.home,service.router_host.config.home)
-
-    async def check_file_edit(self, policy):
-        self.spec['permission_policy'] = policy
-        self.spec['profiles']['coding']['tools'] = ['read','edit']
-        self.save()
-        class WriterTransport(RecordingTransport):
-            async def post_stream(self,url,*,headers,body,timeout):
-                self.requests.append(json.loads(body))
-                index = len(self.requests)
-                if index <= 2:
-                    name,args = (('read',{'path':'main.txt'}) if index == 1 else
-                                 ('edit',{'path':'main.txt','old_string':'fixture','new_string':'fixed'}))
-                    delta = {'tool_calls':[{'index':0,'id':'call-'+str(index),'type':'function',
-                        'function':{'name':name,'arguments':json.dumps(args)}}]}
-                    reason = 'tool_calls'
-                else:
-                    delta,reason = {'content':'Worker attempt complete; inspect the recorded tool results.'},'stop'
-                yield ('data: '+json.dumps({'choices':[{'delta':delta,'finish_reason':reason}]})+'\n\n').encode('utf-8')
-                yield b'data: [DONE]\n\n'
-        self.work_transport = WriterTransport()
-        service = await self.open()
-        self.event(service)
-        self.assertEqual(await service.serve(asyncio.Event(),once=True),0)
-        session = service.worker_host.get_session(service.factory.status()['recent'][0]['session_id'])
-        expected = 'fixed\n' if policy == 'full_access' else 'fixture\n'
-        self.assertEqual((Path(session.header.cwd) / 'main.txt').read_text(encoding='utf-8'),expected)
-        self.assertEqual((self.repo / 'main.txt').read_text(encoding='utf-8'),'fixture\n')
-        self.assertEqual(len(self.work_transport.requests),3)
-        self.assertEqual(session.latest('tool/result').data['results'][0]['is_error'],policy == 'read_only')
-        self.assertEqual(service.results.status(),{'draft':1})
-
-    async def test_authorized_worker_can_edit_its_worktree_using_real_file_tools(self):
-        await self.check_file_edit('full_access')
-
-    async def test_read_only_policy_rejects_a_tool_that_is_visible_in_the_profile(self):
-        await self.check_file_edit('read_only')
-
-    async def test_restart_reuses_original_conversations_and_does_not_reexecute(self):
-        service = await self.open()
-        self.event(service)
-        self.assertEqual(await service.serve(asyncio.Event(),once=True),0)
-        before = {str(path.relative_to(service.root)):path.read_bytes() for path in (service.root / 'drafts').glob('*.json')}
-        ids = [header.id for header in service.worker_host.sessions.list_sessions()]
-        router_id = service.router.session_id
+    async def test_production_entry_assesses_plans_executes_and_restarts_without_legacy_ledgers(self):
+        submitted = submit_local(self.config, 'Fix the existing typo.', request_id='original')
+        self.assertTrue(submitted['queued'])
+        roles, work = ProductTransport(), ProductTransport()
+        service = await self.open(roles, work)
+        result = await service.serve(asyncio.Event(), once=True)
+        self.assertEqual(result, 0, service.coordinator_status)
+        self.assertEqual(len(roles.requests), 2)
+        self.assertEqual(len(work.requests), 1)
+        self.assertTrue(all(not request.get('tools') for request in roles.requests))
+        status = read_status(self.config)
+        self.assertEqual(status['missions']['recent'][0]['state'], 'completed')
+        self.assertEqual(status['outbox'], {'sent': 1})
         await service.aclose()
-        reopened = await self.open()
-        with patch.object(reopened.worker_host.runtime,'submit',side_effect=AssertionError('工作被重放')), \
-                patch.object(reopened.router_host.runtime,'submit',side_effect=AssertionError('研判被重放')):
-            self.assertEqual(await reopened.serve(asyncio.Event(),once=True),0)
-        self.assertEqual([header.id for header in reopened.worker_host.sessions.list_sessions()],ids)
-        self.assertEqual(reopened.router.session_id,router_id)
-        self.assertEqual({str(path.relative_to(reopened.root)):path.read_bytes() for path in (reopened.root / 'drafts').glob('*.json')},before)
+        self.assertEqual(read_status(self.config)['runtime_state'], 'stopped')
+        repeated = submit_local(self.config, 'Fix the existing typo.', request_id='original')
+        self.assertEqual(repeated['trigger_id'], submitted['trigger_id'])
+        restarted = await self.open(roles, work)
+        self.assertEqual(await restarted.serve(asyncio.Event(), once=True), 0)
+        self.assertEqual((len(roles.requests), len(work.requests)), (2, 1))
+        self.assertEqual(len(list((self.root / 'state' / 'replies').glob('*.json'))), 1)
+        self.assertFalse(any((self.root / 'state' / name).exists() for name in
+            ('inbox.sqlite3', 'service.sqlite3', 'missions.sqlite3', 'control.sqlite3', 'guidance', 'incoming')))
 
-    async def test_runtime_lease_rejects_second_owner_before_host_construction(self):
-        await self.open()
-        with patch('harness.app.superagent_service.Harness',side_effect=AssertionError('第二个宿主被创建')):
-            with self.assertRaises(HarnessError) as caught:
-                await SuperagentService.open(self.path,worker_transport=self.work_transport,router_transport=self.router_transport)
-        self.assertEqual(caught.exception.code,'superagent/runtime-busy')
+    async def test_legacy_configuration_is_refused_before_credentials_or_state_writes(self):
+        self.spec['version'] = 1
+        self.spec['autonomy'] = {'enabled': True}
+        self.config.write_text(json.dumps(self.spec))
+        with self.assertRaises(Exception) as caught:
+            await self.open(ProductTransport(), ProductTransport())
+        self.assertEqual(caught.exception.code, 'superagent/invalid')
+        self.assertFalse((self.root / 'state').exists())
 
-    async def test_v1_service_refuses_v2_coordinator_directory_before_host_construction(self):
-        with CoordinatorHost.open(
-            self.root / "state", instance_id="v2-instance",
-            identity={"profile": "coordinator"},
-            legacy_state_dir=self.root / "legacy-v1",
-        ):
-            pass
-        with patch("harness.app.superagent_service.Harness",
-                   side_effect=AssertionError("v1 Harness must not be constructed")):
-            with self.assertRaises(HarnessError) as caught:
-                await self.open()
-        self.assertEqual(caught.exception.code, "superagent/conflict")
-        self.assertFalse((self.root / "state" / "service.sqlite3").exists())
+    async def test_current_example_and_configuration_bounds_are_validated_without_writes(self):
+        example = Path(__file__).resolve().parents[1] / 'examples' / 'superagent.json'
+        spec = read_config(example)
+        self.assertEqual(spec['version'], 2)
+        self.assertEqual(spec['profiles']['builder']['repo'], str(example.parent.parent))
+        self.assertEqual(spec['policy']['sources']['local']['scope']['thread_ids'], ['$current'])
+        for changes in ({'autonomy':{}}, {'once_timeout':.5}, {'interval':0}, {'max_workers':True}):
+            with self.subTest(changes=changes):
+                self.config.write_text(json.dumps({**self.spec, **changes}), encoding='utf-8')
+                with self.assertRaises(Exception) as caught:
+                    read_config(self.config)
+                self.assertEqual(caught.exception.code, 'superagent/invalid')
+        self.assertFalse((self.root / 'state').exists())
 
-    async def test_v1_service_refuses_v2_ancestor_directory_before_host_construction(self):
-        v2_root = self.root / "state"
-        with CoordinatorHost.open(
-            v2_root, instance_id="v2-instance",
-            identity={"profile": "coordinator"},
-            legacy_state_dir=self.root / "legacy-v1",
-        ):
-            pass
-        nested_v1_root = v2_root / "legacy-child"
-        self.spec["state_dir"] = str(nested_v1_root.relative_to(self.root))
-        self.save()
-        with patch("harness.app.superagent_service.Harness",
-                   side_effect=AssertionError("nested v1 Harness must not be constructed")):
-            with self.assertRaises(HarnessError) as caught:
-                await self.open()
-        self.assertEqual(caught.exception.code, "superagent/conflict")
-        self.assertFalse(nested_v1_root.exists())
-        self.assertTrue((v2_root / "superagent.sqlite3").is_file())
+    async def test_readonly_status_without_state_does_not_construct_harness_or_create_database(self):
+        with patch('harness.app.superagent_bootstrap.Harness', side_effect=AssertionError('不得构造宿主')):
+            with self.assertRaises(Exception) as caught:
+                read_status(self.config)
+        self.assertEqual(caught.exception.code, 'superagent/status-unavailable')
+        self.assertFalse((self.root / 'state').exists())
 
-    async def test_v1_and_v2_hosts_share_the_same_runtime_lease(self):
-        from harness.session.write_lock import event_write_lock
+    async def test_runtime_lease_rejects_second_owner_before_constructing_model_hosts(self):
+        first = await self.open(ProductTransport(), ProductTransport())
+        with patch('harness.app.superagent_bootstrap.Harness', side_effect=AssertionError('竞争宿主不得构造')):
+            with self.assertRaises(Exception) as caught:
+                await self.open(ProductTransport(), ProductTransport())
+        self.assertEqual(caught.exception.code, 'superagent/runtime-busy')
+        self.assertFalse(first.closed)
 
-        state_dir = self.root / "state"
-        state_dir.mkdir()
-        with event_write_lock(state_dir / "superagent-runtime"):
-            with self.assertRaises(HarnessError) as caught:
-                CoordinatorHost.open(
-                    state_dir, instance_id="v2-instance",
-                    identity={"profile": "coordinator"},
-                    legacy_state_dir=self.root / "legacy-v1",
-                )
-            self.assertEqual(caught.exception.code, "superagent/runtime-busy")
-        self.assertFalse((state_dir / "service.sqlite3").exists())
-        self.assertFalse((state_dir / "superagent.sqlite3").exists())
+    async def test_concurrent_local_submissions_keep_one_trigger_and_conflicting_body_is_preserved(self):
+        from concurrent.futures import ThreadPoolExecutor
+        submit_local(self.config, 'Initial request.', request_id='initialize')
+        def submit():
+            return submit_local(self.config, 'Fix the existing typo.', request_id='concurrent')
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = await asyncio.gather(*(asyncio.wrap_future(pool.submit(submit)) for _ in range(4)))
+        self.assertEqual(len({row['trigger_id'] for row in results}), 1)
+        with self.assertRaises(Exception):
+            submit_local(self.config, 'Different body', request_id='concurrent')
+        from harness.app.superagent_state import open_state
+        with open_state(read_config(self.config), read_only=True).transaction() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM triggers').fetchone()[0], 2)
+            self.assertEqual(db.execute('SELECT count(*) FROM coordinator_local_events').fetchone()[0], 2)
 
-    async def test_bad_event_is_retained_and_does_not_prevent_other_work(self):
-        service = await self.open()
-        malformed = service.root / 'incoming' / 'bad.json'
-        malformed.write_text('{"source_id":"github","source_id":"other"}',encoding='utf-8')
-        self.event(service)
-        self.assertEqual(await service.serve(asyncio.Event(),once=True),2)
-        self.assertEqual(malformed.read_text(encoding='utf-8'),'{"source_id":"github","source_id":"other"}')
-        status = json.loads((service.root / 'status.json').read_text(encoding='utf-8'))
-        self.assertEqual(status['input_errors'],[{'file':'bad.json','code':'superagent/invalid'}])
-        self.assertEqual(status['results'],{'draft':1})
-
-    async def test_filtered_event_generates_receipt_without_any_model_request(self):
-        service = await self.open()
-        self.event(service,actor_id='outsider')
-        self.assertEqual(await service.serve(asyncio.Event(),once=True),0)
-        receipt = json.loads(next((service.root / 'receipts').glob('*.json')).read_text(encoding='utf-8'))
-        self.assertEqual(receipt['receipt']['disposition'],'actor_denied')
-        self.assertEqual(self.work_transport.requests,[])
-        self.assertEqual(self.router_transport.requests,[])
-
-    async def test_changed_configuration_is_rejected_without_rebinding_state(self):
-        service = await self.open()
-        await service.aclose()
-        self.spec['profiles']['coding']['tools'] = ['read','write']
-        self.save()
-        with patch('harness.app.superagent_service.Harness',side_effect=AssertionError('旧配置被替换')):
-            with self.assertRaises(HarnessError) as caught:
-                await SuperagentService.open(self.path,worker_transport=self.work_transport,router_transport=self.router_transport)
-        self.assertEqual(caught.exception.code,'superagent/conflict')
-
-    async def test_shutdown_waits_for_creation_and_prevents_late_execution(self):
-        service = await self.open()
-        self.event(service)
+    async def test_pause_resume_and_instruction_queue_use_original_native_run(self):
+        from harness.app.superagent_local import control_local, read_control_receipt, steer_local, read_guidance_receipt
+        submit_local(self.config, 'Fix the existing typo.', request_id='original')
+        work = ProductTransport()
+        work.entered, work.gate = asyncio.Event(), asyncio.Event()
+        self.addAsyncCleanup(self._release_gate, work.gate)
+        service = await self.open(ProductTransport(), work)
+        self.addAsyncCleanup(self._release_gate, work.gate)
         await service.tick()
-        await asyncio.gather(*(record.task for record in tuple(service.router_host.runtime.records.active.values())))
-        entered, release = threading.Event(),threading.Event()
-        create = service.worker_host.worktrees.create_team
-        def gated(*args,**kwargs):
-            entered.set()
-            if not release.wait(5):
-                raise TimeoutError('创建屏障未释放。')
-            return create(*args,**kwargs)
-        with patch.object(service.worker_host.worktrees,'create_team',side_effect=gated):
-            tick = asyncio.create_task(service.tick())
-            self.assertTrue(await asyncio.wait_for(asyncio.to_thread(entered.wait),2))
-            close = asyncio.create_task(service.aclose())
-            await asyncio.sleep(0)
-            self.assertFalse(close.done())
-            release.set()
-            await asyncio.wait_for(asyncio.gather(tick,close),5)
-        self.assertEqual(len(service.worker_host.worktrees.list()),1)
-        self.assertEqual(service.worker_host.sessions.list_sessions(),[])
-        self.assertEqual(self.work_transport.requests,[])
-        self.assertEqual(json.loads((service.root / 'status.json').read_text(encoding='utf-8'))['runtime_state'],'stopped')
-
-    async def test_existing_modified_draft_is_preserved_with_explicit_conflict(self):
-        service = await self.open(cleanup=False)
-        async def close_failed_publication():
-            with self.assertRaises(HarnessError):
-                await service.aclose()
-            self.assertTrue(all(host.runtime.closed for host in service.hosts))
-        self.addAsyncCleanup(close_failed_publication)
-        self.event(service)
-        await service.serve(asyncio.Event(),once=True)
-        path = next((service.root / 'drafts').glob('*.json'))
-        path.write_text('user edits',encoding='utf-8')
-        service._draft_cursor = 0
-        with self.assertRaises(HarnessError) as caught:
-            await service.tick()
-        self.assertEqual(caught.exception.code,'superagent/conflict')
-        self.assertEqual(path.read_text(encoding='utf-8'),'user edits')
-        # 已观察的发布失败仍由关闭入口报告，不能以重跑覆盖原件。
-        with self.assertRaises(HarnessError):
-            await service.aclose()
-
-    async def test_config_validation_rejects_unknown_fields_without_creating_state(self):
-        self.spec['unexpected'] = True
-        self.save()
-        with self.assertRaises(HarnessError):
-            read_config(self.path)
-        self.assertFalse((self.root / 'state').exists())
-
-    async def test_missing_explicit_credentials_does_not_read_personal_state_or_create_hosts(self):
-        with patch.dict(os.environ,{'HARNESS_API_KEY':'','OPENROUTER_API_KEY':''}), \
-                patch('harness.app.superagent_service.Harness',side_effect=AssertionError('模型宿主被创建')):
-            with self.assertRaises(HarnessError) as caught:
-                await SuperagentService.open(self.path)
-        self.assertEqual(caught.exception.code,'superagent/credentials-required')
-        self.assertFalse((self.root / 'state').exists())
-
-    async def test_unconsumed_input_pages_are_not_mistaken_for_a_drained_batch(self):
-        service = await self.open()
-        for index in range(20):
-            self.event(service,name=str(index).zfill(2)+'.json',actor_id='outsider')
-        self.assertEqual(await service.serve(asyncio.Event(),once=True),0)
-        self.assertEqual(len(list((service.root / 'receipts').glob('*.json'))),20)
-        self.assertEqual(len(service.inbox.events(limit=100)['events']),20)
-        self.assertEqual(service.router.status()['cursor'],20)
-        self.assertEqual(self.router_transport.requests,[])
-
-    async def test_real_cli_subprocess_drives_loopback_model_and_writes_draft(self):
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-        requests = []
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self,*args):
-                pass
-            def do_GET(self):
-                body = json.dumps({'data':[{'id':name,'context_length':65536,'max_output_tokens':4096}
-                                           for name in ('router-model','worker-model')]}).encode('utf-8')
-                self.send_response(200)
-                self.send_header('Content-Type','application/json')
-                self.send_header('Content-Length',str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            def do_POST(self):
-                value = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-                requests.append(value)
-                text = 'Worker report for review' if value['model'] == 'worker-model' else json.dumps(ServiceRouterTransport.reply(value))
-                body = ('data: '+json.dumps({'choices':[{'delta':{'content':text},'finish_reason':'stop'}]})+'\n\ndata: [DONE]\n\n').encode('utf-8')
-                self.send_response(200)
-                self.send_header('Content-Type','text/event-stream')
-                self.send_header('Content-Length',str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-        server = ThreadingHTTPServer(('127.0.0.1',0),Handler)
-        thread = threading.Thread(target=server.serve_forever)
-        thread.start()
-        self.spec['base_url'] = 'http://127.0.0.1:' + str(server.server_port) + '/v1'
-        self.save()
-        incoming = self.root / 'state' / 'incoming'
-        incoming.mkdir(parents=True)
-        (incoming / 'one.json').write_text(json.dumps(dict(source_id='github',event_id='one',actor_id='alice',
-            text='Inspect this repository',thread_ids=['issue/1'],human=True,explicit=True)),encoding='utf-8')
-        process = None
+        await asyncio.wait_for(work.entered.wait(), 10)
+        await service.tick()
+        mission = read_status(self.config)['missions']['recent'][0]
+        job = mission['jobs'][0]
+        with patch('harness.app.superagent_bootstrap.Harness', side_effect=AssertionError('本机控制不得构造模型')):
+            paused = control_local(self.config, 'pause', mission['mission_id'], request_id='pause')
+            self.assertEqual(paused['state'], 'applied')
+            self.assertEqual(read_control_receipt(self.config, 'pause'), paused)
+            self.assertEqual(control_local(self.config, 'resume', mission['mission_id'], request_id='resume')['state'], 'applied')
+            queued = steer_local(self.config, 'Preserve the public name.', job_id=job['job_id'], request_id='steer')
+            self.assertTrue(queued['queued'])
         try:
-            process = await asyncio.create_subprocess_exec(sys.executable,'-m','harness.cli','--language','en',
-                '--superagent',str(self.path),'--superagent-once',cwd=Path(__file__).resolve().parents[1],
-                stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE,env=dict(os.environ))
-            output,error = await asyncio.wait_for(process.communicate(),20)
-            self.assertEqual(process.returncode,0,error.decode('utf-8'))
-            self.assertEqual(output,b'')
-            self.assertIn('Superagent state directory',error.decode('utf-8'))
-            self.assertEqual([request['model'] for request in requests],['router-model','worker-model','router-model'])
-            drafts = list((self.root / 'state' / 'drafts').glob('*.json'))
-            self.assertEqual(len(drafts),1)
-            self.assertEqual(json.loads(drafts[0].read_text(encoding='utf-8'))['state'],'draft')
-            self.assertFalse((self.root / 'unused-personal-home').exists())
+            await service.tick()
+            receipt = read_guidance_receipt(self.config, 'steer')
+            self.assertEqual(receipt['state'], 'accepted', receipt)
+            self.assertEqual(receipt['instruction_state'], 'accepted')
+            original = service.coordinator.execution.instruction_receipt('steer')
+            self.assertEqual(original['run_id'], job['assignment']['run_id'])
+            self.assertEqual(original['turn_id'], job['run']['turn'])
+            repeated = steer_local(self.config, 'Preserve the public name.', job_id=job['job_id'], request_id='steer')
+            self.assertEqual(repeated['state'], 'accepted')
+            with self.assertRaises(Exception):
+                steer_local(self.config, 'Another instruction.', job_id=job['job_id'], request_id='steer')
+            self.assertEqual(len(work.requests), 1)
         finally:
-            if process is not None and process.returncode is None:
-                process.kill()
-                await process.communicate()
-            await asyncio.to_thread(server.shutdown)
-            server.server_close()
-            await asyncio.to_thread(thread.join)
+            work.gate.set()
+        await service.serve(asyncio.Event(), once=True)
+        await service.aclose()
+        self.assertEqual(read_guidance_receipt(self.config, 'steer')['request_id'], 'steer')
 
+    async def test_planning_await_releases_database_and_rechecks_revocation_before_workers(self):
+        submit_local(self.config, 'Fix the existing typo.', request_id='original')
+        entered, release = asyncio.Event(), asyncio.Event()
+        class Roles(ProductTransport):
+            async def post_stream(self, url, **kwargs):
+                request = json.loads(kwargs['body'])
+                text = next(m['content'] for m in reversed(request['messages']) if m.get('role') == 'user')
+                if '"default_profile"' in str(text):
+                    entered.set()
+                    await release.wait()
+                async for chunk in super().post_stream(url, **kwargs):
+                    yield chunk
+        work = ProductTransport()
+        service = await self.open(Roles(), work)
+        task = asyncio.create_task(service.tick())
+        try:
+            await asyncio.wait_for(entered.wait(), 10)
+            service.coordinator.sources.update_instance('local', expected_revision=1, enabled=False)
+        finally:
+            release.set()
+        await task
+        self.assertFalse(work.requests)
+        with service.coordinator._store.transaction() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM missions').fetchone()[0], 0)
 
-class SuperagentCliTests(unittest.TestCase):
-    def test_help_tracks_english_chinese_english_before_constructing_hosts(self):
-        for language in ('en','zh-CN','en'):
-            with current_language.set(language):
-                parser = build_parser()
-                actions = {action.dest:action for action in parser._actions}
-                self.assertEqual(actions['superagent'].help,tr('superagent.cli.help'))
-                self.assertEqual(actions['superagent_once'].help,tr('superagent.cli.once'))
+    async def test_lost_coordinator_submit_ack_finds_original_run_and_never_replays(self):
+        submit_local(self.config, 'Fix the existing typo.', request_id='original')
+        roles, work = ProductTransport(), ProductTransport()
+        service = await self.open(roles, work)
+        runtime = service._owned_harnesses[1].runtime
+        submit = runtime.submit
+        calls = []
+        def lose(*args, **kwargs):
+            calls.append(kwargs['key'])
+            submit(*args, **kwargs)
+            raise RuntimeError('accepted; acknowledgement lost')
+        with patch.object(runtime, 'submit', side_effect=lose):
+            self.assertEqual(await service.serve(asyncio.Event(), once=True), 0)
+            await service.tick()
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(set(calls)), 2)
+        self.assertEqual((len(roles.requests), len(work.requests)), (2, 1))
 
-    def test_mode_conflicts_are_rejected_before_constructing_standard_host(self):
-        for args in (['--superagent-once'],['--superagent','config.json','--ui'],
-                     ['--superagent','config.json','--memory-export','file.jsonl'],
-                     ['--superagent','config.json','--model','other']):
-            with self.subTest(args=args),redirect_stdout(io.StringIO()),redirect_stderr(io.StringIO()), \
-                    patch('harness.cli.make_harness',side_effect=AssertionError('普通宿主被创建')):
-                with self.assertRaises(SystemExit) as caught:
-                    main(args)
-                self.assertEqual(caught.exception.code,2)
+    async def test_absent_unknown_coordinator_submission_is_not_resubmitted(self):
+        submit_local(self.config, 'Fix the existing typo.', request_id='original')
+        service = await self.open(ProductTransport(), ProductTransport())
+        roles = service._owned_harnesses[1]
+        with patch.object(roles.runtime, 'submit', side_effect=RuntimeError('unknown outcome')) as submit:
+            self.assertEqual(await service.serve(asyncio.Event(), once=True), 2)
+            with service.coordinator._store.transaction() as db:
+                row = db.execute('SELECT * FROM coordinator_model_calls').fetchone()
+            with self.assertRaises(Exception):
+                await service._coordinator_assessor._call('assess', row['call_key'], {})
+            self.assertEqual(submit.call_count, 1)
+        self.assertFalse(roles.runtime.records.active)
 
-    def test_cli_routes_to_dedicated_runner(self):
-        from unittest.mock import AsyncMock
-        with redirect_stderr(io.StringIO()),patch('harness.cli.make_harness',side_effect=AssertionError('普通宿主被创建')), \
-                patch('harness.superagent_cli.run',new=AsyncMock(return_value=0)) as runner:
-            self.assertEqual(main(['--superagent','state.json','--superagent-once']),0)
-        runner.assert_awaited_once_with(Path('state.json'),once=True)
+    async def test_real_followup_receipt_binds_original_run_and_is_applied_without_extra_mission(self):
+        submit_local(self.config, 'Fix the existing typo.', request_id='original')
+        work = ProductTransport()
+        work.entered, work.gate = asyncio.Event(), asyncio.Event()
+        roles = ProductTransport()
+        service = await self.open(roles, work)
+        self.addAsyncCleanup(self._release_gate, work.gate)
+        await service.tick()
+        await asyncio.wait_for(work.entered.wait(), 10)
+        followup = submit_local(self.config, 'Preserve the public name.', request_id='followup')
+        status = await service.tick()
+        deliveries = status['routes'][0]['receipt']['deliveries']
+        self.assertEqual(len(deliveries), 1)
+        self.assertIn(deliveries[0]['state'], {'accepted', 'applied'})
+        with service.coordinator._store.transaction() as db:
+            before = db.execute('SELECT * FROM assignments').fetchone()
+            self.assertEqual(db.execute('SELECT count(*) FROM missions').fetchone()[0], 1)
+        await service.tick()
+        self.assertEqual(len(work.requests), 1)
+        work.gate.set()
+        self.assertEqual(await service.serve(asyncio.Event(), once=True), 0, service.coordinator_status)
+        with service.coordinator._store.transaction() as db:
+            target = db.execute('SELECT d.* FROM input_deliveries d JOIN ticket_inputs i ON i.input_id=d.input_id WHERE i.trigger_id=?', (followup['trigger_id'],)).fetchone()
+            self.assertEqual(target['state'], 'applied')
+            self.assertEqual(target['assignment_id'], before['assignment_id'])
+            self.assertEqual(db.execute('SELECT count(*) FROM missions').fetchone()[0], 1)
+        self.assertEqual(len(roles.requests), 2)
 
-    def test_dedicated_runner_still_opens_the_v1_superagent_service(self):
-        from harness.superagent_cli import run
-        from unittest.mock import AsyncMock
-        service = SimpleNamespace(
-            root=Path("legacy-state"), github=None, feishu=None,
-            serve=AsyncMock(return_value=0), aclose=AsyncMock(),
-        )
-        with redirect_stderr(io.StringIO()), patch(
-            "harness.superagent_cli.SuperagentService.open",
-            new=AsyncMock(return_value=service),
-        ) as opener:
-            self.assertEqual(asyncio.run(run(Path("legacy-config.json"), once=True)), 0)
-        opener.assert_awaited_once_with(Path("legacy-config.json"))
-        service.serve.assert_awaited_once()
-        service.aclose.assert_awaited_once()
+    def artifact_transports(self):
+        class Roles(ProductTransport):
+            async def post_stream(self, url, **kwargs):
+                request = json.loads(kwargs['body'])
+                text = next(m['content'] for m in reversed(request['messages']) if m.get('role') == 'user')
+                if '"default_profile"' not in str(text):
+                    async for chunk in super().post_stream(url, **kwargs):
+                        yield chunk
+                    return
+                self.requests.append(request)
+                answer = {'plan': {'nodes':[{'node_id':'work', 'role':'work', 'profile_id':'work', 'instruction':'Write result.txt with verified content.', 'dependencies':[]}]},
+                    'acceptance': {'kind':'artifact_review', 'schema_version':1, 'criteria':[{'id':'file', 'kind':'inspection'}], 'max_repair_rounds':1}}
+                yield ('data: '+json.dumps({'choices':[{'delta':{'content':json.dumps(answer)}, 'finish_reason':'stop'}]})+'\n\ndata: [DONE]\n\n').encode()
+        class Work(ProductTransport):
+            async def post_stream(self, url, **kwargs):
+                request = json.loads(kwargs['body'])
+                self.requests.append(request)
+                messages = [m.get('content','') for m in request['messages'] if isinstance(m.get('content'), str)]
+                review = next((m for m in messages if 'Host-owned independent Reviewer:' in m), None)
+                integrate = any('Host-owned Integrator contract:' in m for m in messages)
+                has_results = any(m.get('role') == 'tool' for m in request['messages'])
+                if not has_results:
+                    name = 'read' if review or integrate else 'write'
+                    args = {'path':'result.txt'} if name == 'read' else {'path':'result.txt', 'content':'verified content\n'}
+                    delta = {'tool_calls':[{'index':0, 'id':'file-evidence', 'type':'function', 'function':{'name':name, 'arguments':json.dumps(args)}}]}
+                    finish = 'tool_calls'
+                else:
+                    if review:
+                        contract, _ = json.JSONDecoder().raw_decode(review.split('Host-owned independent Reviewer:',1)[1].split('\n',1)[1].lstrip())
+                        evidence = contract['available_evidence'][0]['evidence_id']
+                        answer = {'schema_version':1, 'candidate_artifact_id':contract['candidate_artifact_id'],
+                            'acceptance_hash':contract['acceptance_hash'], 'verdict':'passed',
+                            'criteria':[{'id':item['id'], 'status':'passed', 'reason':'Inspected frozen file.', 'evidence_ids':[evidence]} for item in contract['criteria']]}
+                    else:
+                        answer = {'summary':'Verified file delivered.'}
+                    delta, finish = {'content':json.dumps(answer)}, 'stop'
+                yield ('data: '+json.dumps({'choices':[{'delta':delta, 'finish_reason':finish}]})+'\n\ndata: [DONE]\n\n').encode()
+        return Roles(), Work()
+
+    async def test_readonly_policy_refuses_a_visible_write_in_the_native_worker(self):
+        self.spec['permission_policy'] = 'read_only'
+        self.spec['profiles']['work']['tools'] = ['read', 'write']
+        self.config.write_text(json.dumps(self.spec), encoding='utf-8')
+        roles, work = self.artifact_transports()
+        submit_local(self.config, 'Create result.txt with verified content.', request_id='readonly')
+        service = await self.open(roles, work)
+        await service.serve(asyncio.Event(), once=True)
+        tool_results = [message for request in work.requests for message in request['messages'] if message.get('role') == 'tool']
+        self.assertTrue(tool_results)
+        self.assertIn('read-only', str(tool_results).lower())
+        self.assertFalse(any(path.name == 'result.txt' for path in (self.root/'state').rglob('result.txt')))
+        self.assertFalse((self.root/'repo'/'result.txt').exists())
+
+    async def test_production_file_task_uses_integrator_independent_review_and_frozen_result(self):
+        self.spec['profiles']['work']['tools'] = ['read', 'write']
+        self.config.write_text(json.dumps(self.spec))
+        roles, work = self.artifact_transports()
+        submit_local(self.config, 'Create result.txt with verified content.', request_id='artifact')
+        service = await self.open(roles, work)
+        self.assertEqual(await service.serve(asyncio.Event(), once=True), 0, service.coordinator_status)
+        with service.coordinator._store.transaction() as db:
+            mission = db.execute('SELECT * FROM missions').fetchone()
+            review = db.execute('SELECT * FROM reviews').fetchone()
+            assignments = db.execute('SELECT * FROM assignments').fetchall()
+            outbox = db.execute('SELECT * FROM outbox_messages').fetchall()
+        self.assertEqual((mission['state'], review['state']), ('completed', 'passed'))
+        self.assertEqual(len(assignments), 3)
+        self.assertEqual(len({row['session_id'] for row in assignments}), 3)
+        self.assertEqual(len({row['workspace_id'] for row in assignments}), 3)
+        self.assertEqual(len(outbox), 1)
+        self.assertEqual(outbox[0]['state'], 'sent')
+        self.assertIn(review['candidate_artifact_id'], next((self.root/'state'/'replies').glob('*.json')).read_text())
+        self.assertFalse((self.root/'repo'/'result.txt').exists())
+        before = len(work.requests)
+        await service.tick()
+        self.assertEqual(len(work.requests), before)
+
+    async def test_close_during_planning_waits_original_model_and_starts_no_worker(self):
+        submit_local(self.config, 'Fix the existing typo.', request_id='closing')
+        entered, release = asyncio.Event(), asyncio.Event()
+        class Roles(ProductTransport):
+            async def post_stream(self, url, **kwargs):
+                request = json.loads(kwargs['body'])
+                if any('"default_profile"' in str(m.get('content')) for m in request['messages']):
+                    entered.set()
+                    await release.wait()
+                async for chunk in super().post_stream(url, **kwargs):
+                    yield chunk
+        work = ProductTransport()
+        service = await self.open(Roles(), work)
+        self.addAsyncCleanup(self._release_gate, release)
+        tick = asyncio.create_task(service.tick())
+        await asyncio.wait_for(entered.wait(), 10)
+        close = asyncio.create_task(service.aclose())
+        await asyncio.sleep(0)
+        self.assertFalse(close.done())
+        release.set()
+        await tick
+        await close
+        self.assertFalse(work.requests)
+        self.assertEqual(read_status(self.config)['runtime_state'], 'stopped')
+        with service._coordinator_host._store.transaction() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM workers').fetchone()[0], 0)
+            self.assertEqual(db.execute('SELECT count(*) FROM assignments').fetchone()[0], 0)
+
+    async def test_native_model_prompts_consume_language_roundtrip_and_freeze_original_body(self):
+        roles = ProductTransport()
+        service = await self.open(roles, ProductTransport())
+        prompts = []
+        models = service._coordinator_assessor
+        frame = {'trigger_id':'language', 'default_profile':'work', 'request':'原文 remains unchanged', 'profiles':{}}
+        for index, language in enumerate(('en', 'zh-CN', 'en')):
+            models.harness.config.language = language
+            await models._call('plan', 'language-' + str(index), frame)
+            request = roles.requests[-1]
+            prompts.append(next(m['content'] for m in reversed(request['messages']) if m.get('role') == 'user'))
+        self.assertEqual(prompts[0], prompts[2])
+        self.assertNotEqual(prompts[0], prompts[1])
+        self.assertTrue(all('原文 remains unchanged' in text for text in prompts))
+        models.harness.config.language = 'zh-CN'
+        await models._call('plan', 'language-0', frame)
+        self.assertEqual(len(roles.requests), 3)
+
+    async def test_changed_configuration_rejects_before_constructing_or_mutating_native_hosts(self):
+        service = await self.open(ProductTransport(), ProductTransport())
+        await service.aclose()
+        self.spec['model'] = 'different-model'
+        self.config.write_text(json.dumps(self.spec))
+        with patch('harness.app.superagent_bootstrap.Harness', side_effect=AssertionError('身份冲突不得打开原生宿主')):
+            with self.assertRaises(Exception) as caught:
+                await self.open(ProductTransport(), ProductTransport())
+        self.assertEqual(caught.exception.code, 'superagent/instance-conflict')
+
+    async def test_coordinator_model_refuses_a_native_receipt_from_another_session(self):
+        from types import SimpleNamespace
+        service = await self.open(ProductTransport(), ProductTransport())
+        models = service._coordinator_assessor
+        def foreign(session_id, key):
+            with service.coordinator._store.transaction() as db:
+                row = db.execute('SELECT * FROM coordinator_model_calls WHERE call_key=?', (key,)).fetchone()
+            return SimpleNamespace(session_id='foreign', id='foreign-run', text=row['prompt'], request_id=key)
+        with patch.object(models.harness.runtime, 'find_submission', side_effect=foreign), patch.object(models.harness.runtime, 'submit', side_effect=AssertionError('外来回执不能触发执行')):
+            with self.assertRaises(Exception) as caught:
+                await models._call('assess', 'original-request', {})
+        self.assertEqual(caught.exception.code, 'superagent/conflict')
+        with service.coordinator._store.transaction() as db:
+            row = db.execute('SELECT state,run_id FROM coordinator_model_calls').fetchone()
+        self.assertEqual(tuple(row), ('prepared', None))
+
+    async def test_instance_lease_is_held_until_owned_native_harnesses_finish_closing(self):
+        service = await self.open(ProductTransport(), ProductTransport())
+        roles = service._owned_harnesses[1]
+        close = roles.close
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def delayed():
+            entered.set()
+            await release.wait()
+            await close()
+        self.addAsyncCleanup(self._release_gate, release)
+        with patch.object(roles, 'close', side_effect=delayed):
+            closing = asyncio.create_task(service.aclose())
+            await asyncio.wait_for(entered.wait(), 10)
+            try:
+                with patch('harness.app.superagent_bootstrap.Harness', side_effect=AssertionError('旧宿主尚未收尾')):
+                    with self.assertRaises(Exception) as caught:
+                        await self.open(ProductTransport(), ProductTransport())
+                self.assertEqual(caught.exception.code, 'superagent/runtime-busy')
+            finally:
+                release.set()
+            await closing
+        self.assertEqual(read_status(self.config)['runtime_state'], 'stopped')

@@ -244,8 +244,7 @@ class HarnessExecutorAdapter:
         self._budget_watchers: dict[str, asyncio.Task] = {}
         self._budget_failures: dict[str, str] = {}
         for service in harness._superagent_workers:
-            inbox = getattr(service, "inbox", None)
-            service_instance = getattr(service, "instance_id", None) or getattr(inbox, "instance_id", None)
+            service_instance = service.instance_id
             if service_instance == self.instance_id and not service.closed:
                 raise ValueError("another Superagent Worker service already owns this instance")
         harness._superagent_workers.append(self)
@@ -606,14 +605,14 @@ class HarnessExecutorAdapter:
         self._validate_input_key(assignment, operation_key)
         session_id = self._input_session_id(worker, assignment)
         session = self.harness.get_session(session_id)
-        active_run_id = self.harness.runtime.active.get(session_id)
-        if active_run_id is None:
+        active_task = self.harness.runtime.active.get(session_id)
+        if active_task is None:
             return {"accepted": False, "deferred": True}
-        record = getattr(self.harness.runtime, "_executions", {}).get(active_run_id)
+        record = getattr(self.harness.runtime, "_executions", {}).get(active_task)
         agent = self.harness._agents.get(session_id)
         original_run_id = assignment.get("run_id")
         if (
-            not isinstance(original_run_id, str) or active_run_id != original_run_id
+            not isinstance(original_run_id, str) or active_task is None
             or record is None or getattr(record, "id", None) != original_run_id
             or getattr(record, "session_id", None) != session_id
             or agent is None or getattr(agent, "run_id", None) != original_run_id
@@ -621,9 +620,13 @@ class HarnessExecutorAdapter:
             raise HarnessError(tr("superagent.conflict"), code="superagent/run-conflict")
         if session.open_turn is None:
             return {"accepted": False, "deferred": True}
+        turn_id = session.open_turn
+        def guard():
+            self._instruction_target(worker, assignment, turn_id)
+            before_accept()
         return await self.harness.steer(
-            session_id, text, expected_turn=session.open_turn,
-            request_id=operation_key, original_text=text, before_accept=before_accept,
+            session_id, text, expected_turn=turn_id,
+            request_id=operation_key, original_text=text, before_accept=guard,
         )
 
     def reconcile_input(self, worker: dict, assignment: dict, operation_key: str) -> dict | None:
@@ -647,12 +650,12 @@ class HarnessExecutorAdapter:
     def _instruction_target(self, worker: dict, assignment: dict, turn_id: int | None = None):
         session_id = self._input_session_id(worker, assignment)
         session = self.harness.get_session(session_id)
-        active_run_id = self.harness.runtime.active.get(session_id)
-        record = getattr(self.harness.runtime, "_executions", {}).get(active_run_id)
+        active_task = self.harness.runtime.active.get(session_id)
+        record = getattr(self.harness.runtime, "_executions", {}).get(active_task)
         agent = self.harness._agents.get(session_id)
         original_run_id = assignment.get("run_id")
         if (
-            not isinstance(original_run_id, str) or active_run_id != original_run_id
+            not isinstance(original_run_id, str) or active_task is None
             or record is None or getattr(record, "id", None) != original_run_id
             or getattr(record, "session_id", None) != session_id
             or agent is None or getattr(agent, "run_id", None) != original_run_id
