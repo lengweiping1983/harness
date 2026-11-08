@@ -347,7 +347,13 @@ class BrowserService:
     @staticmethod
     def _number(args, key, limit):
         value = args.get(key)
-        if type(value) not in {int, float} or not math.isfinite(value) or abs(value) > limit:
+        if type(value) not in {int, float}:
+            raise HarnessError(tr('python.browser.ad4ca5e91ba8'), code='browser/input')
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            finite = False
+        if not finite or abs(value) > limit:
             raise HarnessError(tr('python.browser.ad4ca5e91ba8'), code='browser/input')
         return value
 

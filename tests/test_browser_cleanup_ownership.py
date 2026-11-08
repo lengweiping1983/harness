@@ -34,6 +34,14 @@ class BrowserCleanupOwnershipTests(unittest.IsolatedAsyncioTestCase):
         service.contexts['fixture'] = context
         return service, context, page
 
+    def test_number_rejects_overflow_and_non_finite_browser_inputs(self):
+        for value in (10 ** 4000, float('nan'), float('inf'), float('-inf'), 101, True, None, '12'):
+            with self.subTest(value=type(value).__name__), self.assertRaises(HarnessError) as error:
+                BrowserService._number({'x': value}, 'x', 100)
+            self.assertEqual(error.exception.code, 'browser/input')
+        self.assertEqual(BrowserService._number({'x': 12}, 'x', 100), 12)
+        self.assertEqual(BrowserService._number({'x': 12.5}, 'x', 100), 12.5)
+
     async def test_observation_attempts_all_handles_and_retains_only_failed_for_retry(self):
         failure = OSError('Original disposal failure')
         first = SimpleNamespace(dispose=AsyncMock(side_effect=failure))
