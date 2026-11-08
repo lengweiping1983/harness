@@ -39,9 +39,9 @@ export async function tick() {
       if (canonicalChat(tab.url) !== binding.url) return await status('wrong_chat', false);
     } catch {return await status('wrong_chat', false);}
     let page;
-    try {page = await chrome.tabs.sendMessage(binding.tabId, {type: 'probe', url: binding.url, allowInterrupted: binding.continueAfterTerminal === true});}
+    try {page = await chrome.tabs.sendMessage(binding.tabId, {type: 'probe', url: binding.url, allowInterrupted: true});}
     catch {return await status('page_unavailable', false);}
-    const replyKey = binding.continueAfterTerminal === true && (page.hasAssistant || page.interrupted) ? page.assistantKey : null;
+    const replyKey = page.hasAssistant || page.interrupted ? page.assistantKey : null;
     const state = await api(settings, '/state?binding_id=' + encodeURIComponent(binding.id)
       + (replyKey ? '&reply_key=' + encodeURIComponent(replyKey) : ''));
     if (state.url !== binding.url) return await status('wrong_chat', false);
@@ -59,7 +59,7 @@ export async function tick() {
       }
       return await status('send_unconfirmed', false);
     }
-    if (['complete', 'interrupted'].includes(state.state) && binding.continueAfterTerminal !== true) return await status(state.state, false);
+    if (state.state === 'complete' && binding.continueAfterTerminal !== true) return await status('complete', false);
     if (['blocked', 'paused'].includes(state.state)) return await status(state.state, false);
     if (page.reason === 'unsupported_page') return await status('unsupported_page', false);
     if (state.state === 'offline') return await status('offline');
@@ -89,7 +89,7 @@ export async function tick() {
     await chrome.storage.local.set({pending: dispatch});
     if (phase === 'generate') await editBinding(binding.id, value => ({...value, imageBaseline: page.assistantKey}));
     let result;
-    try {result = await chrome.tabs.sendMessage(binding.tabId, {type: 'dispatch', url: binding.url, prompt: dispatch.prompt, allowInterrupted: binding.continueAfterTerminal === true, ...(replyKey ? {assistantKey: replyKey} : {})});}
+    try {result = await chrome.tabs.sendMessage(binding.tabId, {type: 'dispatch', url: binding.url, prompt: dispatch.prompt, allowInterrupted: true, ...(replyKey ? {assistantKey: replyKey} : {})});}
     catch {result = {outcome: 'unknown', reason: 'send_unconfirmed'};}
     await chrome.storage.local.set({pending: {...dispatch, outcome: result.outcome || 'unknown'}});
     await api(settings, '/receipt', {binding_id: binding.id, id: dispatch.id, outcome: result.outcome || 'unknown'});

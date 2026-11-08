@@ -154,7 +154,7 @@ test('the popup and expanded tab can control checks while other sender pages rem
  assert.equal(claims,0);assert.equal(sends,0)
 })
 
-test('a confirmed continuation is not sent again without new durable progress',async()=>{
+test('a confirmed continuation is not sent again for the same reply and durable progress',async()=>{
  reset();await tick();await tick();assert.equal(sends,1);assert.equal(claims,1)
 })
 test('uncertain sends stay paused even when an identical historical continuation exists',async()=>{
@@ -213,38 +213,64 @@ test('continuous mode can continue a new idle reply even while the same executor
  await tick();assert.equal(sends,2);assert.equal(saved.binding.reason,'waiting_next_task')
 })
 
-test('a ChatGPT turn cancelled before assistant text can continue once with explicit page permission',async()=>{
- reset();saved.binding.continueAfterTerminal=true
- page.hasAssistant=false;page.interrupted=true;page.assistantKey='c'.repeat(16)
- saved.binding.idleKey=page.assistantKey
- await tick();assert.equal(sends,1)
- assert.equal(pageMessages.find(message=>message.type==='probe').allowInterrupted,true)
- const dispatch=pageMessages.find(message=>message.type==='dispatch')
- assert.equal(dispatch.allowInterrupted,true);assert.equal(dispatch.assistantKey,page.assistantKey)
- await tick();assert.equal(sends,1)
- reset();page.hasAssistant=false;page.interrupted=true;page.assistantKey='c'.repeat(16)
- await tick();assert.equal(sends,0)
- assert.equal(pageMessages[0].allowInterrupted,false)
+test('a ChatGPT turn cancelled before assistant text recovers regardless of the completion preference',async()=>{
+ for(const preference of [undefined,false,true]){
+  reset();saved.binding.continueAfterTerminal=preference
+  page.hasAssistant=false;page.interrupted=true;page.assistantKey='c'.repeat(16)
+  saved.binding.idleKey=page.assistantKey
+  await tick();assert.equal(sends,1)
+  assert.equal(pageMessages.find(message=>message.type==='probe').allowInterrupted,true)
+  const dispatch=pageMessages.find(message=>message.type==='dispatch')
+  assert.equal(dispatch.allowInterrupted,true);assert.equal(dispatch.assistantKey,page.assistantKey)
+  await tick();assert.equal(sends,1);assert.equal(saved.binding.enabled,true)
+ }
 })
 
 test('a confirmed continuation can recover from a response error while an unknown receipt remains paused',async()=>{
- reset();saved.binding.continueAfterTerminal=true
- page.interrupted=true;page.hasAssistant=false;page.assistantKey='e'.repeat(16)
- state.pending={id:'previous-intent',prompt:'继续'}
- saved.pending={...state.pending,outcome:'confirmed'}
- await tick()
- assert.equal(state.pending,null);assert.equal(saved.pending,undefined)
- assert.equal(sends,0);assert.equal(claims,0);assert.equal(saved.binding.enabled,true)
- await tick();assert.equal(saved.binding.reason,'stabilizing')
- saved.binding.idleSince=Date.now()-4000
- await tick();assert.equal(sends,1);assert.equal(claimInputs[0].reply_key,page.assistantKey)
- reset();saved.binding.continueAfterTerminal=true
- page.interrupted=true;page.hasAssistant=false;page.assistantKey='e'.repeat(16)
- state.pending={id:'unconfirmed-intent',prompt:'继续'}
- saved.pending={...state.pending,outcome:'unknown'}
- await tick()
- assert.equal(sends,0);assert.equal(saved.binding.reason,'send_unconfirmed');assert.equal(saved.binding.enabled,false)
- assert.equal(state.pending.id,'unconfirmed-intent')
+ for(const preference of [false,true]){
+  reset();saved.binding.continueAfterTerminal=preference
+  page.interrupted=true;page.hasAssistant=false;page.assistantKey='e'.repeat(16)
+  state.pending={id:'previous-intent',prompt:'继续'}
+  saved.pending={...state.pending,outcome:'confirmed'}
+  await tick()
+  assert.equal(state.pending,null);assert.equal(saved.pending,undefined)
+  assert.equal(sends,0);assert.equal(claims,0);assert.equal(saved.binding.enabled,true)
+  await tick();assert.equal(saved.binding.reason,'stabilizing')
+  saved.binding.idleSince=Date.now()-4000
+  await tick();assert.equal(sends,1);assert.equal(claimInputs[0].reply_key,page.assistantKey)
+  reset();saved.binding.continueAfterTerminal=preference
+  page.interrupted=true;page.hasAssistant=false;page.assistantKey='e'.repeat(16)
+  state.pending={id:'unconfirmed-intent',prompt:'继续'}
+  saved.pending={...state.pending,outcome:'unknown'}
+  await tick()
+  assert.equal(sends,0);assert.equal(saved.binding.reason,'send_unconfirmed');assert.equal(saved.binding.enabled,false)
+  assert.equal(state.pending.id,'unconfirmed-intent')
+ }
+})
+
+test('unchecked continuation recovers new errors and idle replies until verified completion',async()=>{
+ reset();saved.binding.continueAfterTerminal=false
+ for(const [index,interrupted] of [false,true,true,false].entries()){
+  page.assistantKey=String(index).repeat(16);page.interrupted=interrupted
+  page.hasAssistant=!interrupted
+  await tick();assert.equal(saved.binding.reason,'stabilizing');assert.equal(sends,index)
+  saved.binding.idleSince=Date.now()-4000
+  await tick();assert.equal(sends,index+1);assert.equal(saved.binding.enabled,true)
+  assert.equal(claimInputs[index].reply_key,page.assistantKey)
+  assert.equal(claimInputs[index].phase,'continue')
+  await tick();assert.equal(sends,index+1)
+ }
+ state.state='complete';state.milestone='accepted'
+ await tick();assert.equal(sends,4);assert.equal(saved.binding.enabled,false)
+ assert.equal(saved.binding.reason,'complete')
+})
+
+test('a known executor interruption recovers without selecting continuation after completion',async()=>{
+ for(const preference of [undefined,false,true]){
+  reset();saved.binding.continueAfterTerminal=preference;state.state='interrupted'
+  await tick();assert.equal(claimedPhase,'resume');assert.equal(sends,1)
+  await tick();assert.equal(sends,1);assert.equal(saved.binding.enabled,true)
+ }
 })
 
 test('continuous image tasks keep generation and delivery deduplicated across replies',async()=>{
@@ -258,7 +284,7 @@ test('continuous image tasks keep generation and delivery deduplicated across re
 })
 
 test('a cancelled image reply requests recovery once without repeating the generation phase',async()=>{
- reset();saved.binding.continueAfterTerminal=true;state.state='image'
+ reset();saved.binding.continueAfterTerminal=false;state.state='image'
  page.assistantKey='a'.repeat(16);saved.binding.idleKey=page.assistantKey
  await tick();assert.deepEqual(state.sent_phases,['generate'])
  page.assistantKey='b'.repeat(16);page.interrupted=true
@@ -277,11 +303,11 @@ test('a cancelled image reply requests recovery once without repeating the gener
   assert.deepEqual(state.sent_phases,['generate','deliver'])
 })
 
-test('terminal continuation requires explicit boolean selection and still respects stops and unknown outcomes',async()=>{
- for(const value of [undefined,false,'true',1])for(const kind of ['complete','interrupted']){
-  reset();saved.binding.continueAfterTerminal=value;state.state=kind
+test('only continuation after completion requires explicit selection and stops still apply',async()=>{
+ for(const value of [undefined,false,'true',1]){
+  reset();saved.binding.continueAfterTerminal=value;state.state='complete'
   await tick();assert.equal(sends,0);assert.equal(saved.binding.enabled,false)
-  assert.equal(saved.binding.reason,kind)
+  assert.equal(saved.binding.reason,'complete')
  }
  for(const kind of ['blocked','paused']){
   reset();saved.binding.continueAfterTerminal=true;state.state=kind
@@ -293,13 +319,13 @@ test('terminal continuation requires explicit boolean selection and still respec
  await tick();assert.equal(sends,0);assert.equal(saved.binding.reason,'time_limit')
 })
 
-test('continuous terminal messages protect page input and never replay an uncertain send',async()=>{
- for(const kind of ['complete','interrupted']){
+test('recovery and next-task messages protect page input and never replay an uncertain send',async()=>{
+ for(const [kind,preference] of [['complete',true],['interrupted',true],['interrupted',false]]){
   for(const reason of ['draft','composing','busy','user_active']){
-   reset();saved.binding.continueAfterTerminal=true;state.state=kind;page.ready=false;page.reason=reason
+   reset();saved.binding.continueAfterTerminal=preference;state.state=kind;page.ready=false;page.reason=reason
    await tick();assert.equal(claims,0);assert.equal(saved.binding.enabled,true)
   }
-  reset();saved.binding.continueAfterTerminal=true;state.state=kind;mode='unknown'
+  reset();saved.binding.continueAfterTerminal=preference;state.state=kind;mode='unknown'
   await tick();assert.equal(sends,1);assert.equal(saved.binding.enabled,false)
   saved.binding.enabled=true
   await tick();assert.equal(sends,1);assert.equal(saved.binding.reason,'send_unconfirmed')

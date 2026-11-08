@@ -68,7 +68,9 @@ test('the same popup renders randomized timing help in English, Chinese and Engl
   assert.equal(opener.textContent,messages.open_tab.message)
   assert.equal(element('continuous-copy').textContent,messages.continuous.message)
   assert.equal(element('continuous-help').textContent,messages.continuous_help.message)
-  assert.match(element('continuous-help').textContent,language==='en'?/ChatGPT marks it as cancelled/:/ChatGPT 已将被打断/)
+  assert.equal(element('continuous-copy').textContent,language==='en'?'Continue after task completion':'任务完成后仍继续')
+  assert.match(element('continuous-help').textContent,language==='en'?/Even when unchecked.*interrupted.*until the task passes acceptance/:/不勾选时也会.*中断.*直到任务验收完成/)
+  assert.match(element('continuous-help').textContent,language==='en'?/When checked, continue after acceptance/:/勾选后，验收完成也会继续/)
   assert.equal(element('continuous').checked,false)
   for(const reason of ['waiting_next_task','interrupted','send_unconfirmed']){
    calls.onChanged({binding:{newValue:{reason}}},'local')
@@ -166,7 +168,7 @@ test('a failed tab opening keeps the input draft, removes only its transfer and 
  assert.equal(popup.calls.writes,0);assert.deepEqual(popup.calls.controls,[])
 })
 
-test('continuous mode is persisted and captured only when enabling a new binding',async t=>{
+test('the completion preference is persisted and captured only when enabling a new binding',async t=>{
  const popup=await mountPopup(t,{settings:{language:'en',continueAfterTerminal:true}})
  assert.equal(popup.element('continuous').checked,true)
  popup.element('token').value='fixture-token'
