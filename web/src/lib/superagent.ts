@@ -1,5 +1,5 @@
 import {create} from 'zustand'
-import {request, unwrap} from './http'
+import {ApiError, request} from './http'
 import {ResourceError, failureText} from './resourceError'
 import type {ResourceText} from '@/types'
 import type {SuperagentConnection, SuperagentCommand, SuperagentWrite} from './protocol.generated'
@@ -24,15 +24,18 @@ async function call<T>(path: string, options: Parameters<typeof request>[1] = {}
       && (details.copy.params === undefined || isRow(details.copy.params) && Object.keys(details.copy.params).length === 0)) {
       throw new ResourceError({key: details.copy.key})
     }
+    throw new ApiError(result)
   }
-  return unwrap(result)
+  return result.data
 }
 
 function connection(value: unknown): Connection {
-  if (!isRow(value) || !identity(value.connection_id) || !identity(value.instance_id) || !identity(value.config_path)
-    || !['running','stopped','failed','unavailable'].includes(String(value.runtime))
-    || value.error_code !== null && typeof value.error_code !== 'string') return bad()
-  return value as Connection
+  if (!isRow(value)) return bad()
+  const {connection_id, instance_id, config_path, runtime, error_code} = value
+  if (!identity(connection_id) || !identity(instance_id) || !identity(config_path)
+    || runtime !== 'running' && runtime !== 'stopped' && runtime !== 'failed' && runtime !== 'unavailable'
+    || error_code !== null && typeof error_code !== 'string') return bad()
+  return {connection_id, instance_id, config_path, runtime, error_code}
 }
 export async function listConnections(signal?: AbortSignal) {
   const data = await call<{connections: unknown[] }>(root, {signal})

@@ -51,6 +51,7 @@ Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/de
 | `python scripts/generate_i18n.py --check` | 双语资源生成同步 |
 | `python scripts/generate_protocol.py --check` | OpenAPI 和 TypeScript 契约生成同步 |
 | `npm --prefix web run typecheck` | TypeScript 与语言资源检查 |
+| `npm --prefix web run build` | 模型运行时生成同步、语言资源及 UI 规则检查，随后 TypeScript 编译检查、Vite 生产构建与本地静态资源发布 |
 | `npm --prefix web run test:unit` | HTTP／响应协议、复制、命令展示、恢复回执、目标／计划／停止及终端摘录隔离回归 |
 | `npm --prefix web run test:browser` | 自动发现全部默认浏览器场景；使用临时后端及受控传输 |
 | `npm --prefix web test` | Web／桥接单测及完整生产构建；不启动浏览器 |
@@ -59,6 +60,8 @@ Windows 已准备好仓库 `.venv` 时，可从资源管理器双击 `scripts/de
 | `make verify-plan PYTHON=.venv/bin/python` | 只解释本次选择，不运行检查、不签发通过回执 |
 | `make test-full PYTHON=.venv/bin/python` | 全部后端与 Web 常规回归及完整构建；不启动桌面或浏览器 |
 | `make test PYTHON=.venv/bin/python` | Python 与 Web 聚合入口；不启动桌面或浏览器 |
+
+完整 Web 构建使用 `npm --prefix web run build`。直接运行 Vite 与 `scripts/publish_web_build.mjs` 只完成打包及本地资源发布，不能作为完整构建门禁通过的证据；类型错误须修复后重新执行正式入口。构建通过不等于浏览器功能或桌面实机验收。
 
 新增 Python 用例放在 `tests/test_*.py`；前端用例放在 `web/src/**/*.test.ts` 或 `.test.tsx`；桌面用例放在 `desktop/tests/**/*.test.mjs`。Node 发现脚本递归收集 .test.mjs 后传入显式文件列表，空目录不会启动 Node 默认发现。Python 和浏览器发现为空时失败；Node 独立发现器对空目录明确提示，不把空套件作为业务验收。Vitest 当前没有启用 --passWithNoTests。
 

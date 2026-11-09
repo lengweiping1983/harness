@@ -3,6 +3,7 @@ import * as sg from '../superagent'
 import {setLocale} from '@/i18n'
 import {noticeText} from '../noticeText'
 import {failureText} from '../resourceError'
+import {ApiError} from '../http'
 
 const connection: sg.Connection = {connection_id:'sg_fixture',instance_id:'fixture',config_path:'/fixture.json',runtime:'stopped',error_code:null}
 const envelope = (resource: string, data: sg.Row) => ({connection_id:connection.connection_id,instance_id:'fixture',resource,data:{instance_id:'fixture',...data}})
@@ -10,6 +11,49 @@ const page = (overrides: sg.Row = {}) => ({resource:'missions',mission_id:null,i
 
 beforeEach(() => sg.useWorkbenchStore.setState({configPath:'',selected:'',connections:[],writes:{},drafts:{}}))
 afterEach(async () => {vi.unstubAllGlobals(); await setLocale('en')})
+
+it('returns validated connections through listing, connecting and state reads for every runtime', async () => {
+  for (const runtime of ['running','stopped','failed','unavailable'] as const) {
+    const expected = {...connection,runtime,error_code:runtime === 'failed' ? 'fixture/error' : null}
+    const fetch = vi.fn(async (path: string, _options: RequestInit) => Response.json(path === '/api/v1/superagents' ? {connections:[expected]} : expected))
+    vi.stubGlobal('fetch',fetch)
+    await expect(sg.listConnections()).resolves.toEqual([expected])
+    await expect(sg.connect(connection.config_path)).resolves.toEqual(expected)
+    await expect(sg.connectionState(connection)).resolves.toEqual(expected)
+    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(JSON.parse(String(fetch.mock.calls[1][1]?.body))).toEqual({config_path:connection.config_path})
+  }
+})
+
+it('rejects malformed connection fields, duplicate identities and foreign connection states', async () => {
+  for (const invalid of [
+    {...connection,connection_id:' '}, {...connection,instance_id:''}, {...connection,config_path:' '},
+    {...connection,runtime:'done'}, {...connection,error_code:false},
+  ]) {
+    vi.stubGlobal('fetch',vi.fn(async () => Response.json({connections:[invalid]})))
+    await expect(sg.listConnections()).rejects.toBeDefined()
+  }
+  vi.stubGlobal('fetch',vi.fn(async () => Response.json({connections:[connection,connection]})))
+  await expect(sg.listConnections()).rejects.toMatchObject({copy:{key:'ui.sg.error.protocol'}})
+  for (const invalid of [{...connection,connection_id:'foreign'}, {...connection,instance_id:'foreign'}]) {
+    vi.stubGlobal('fetch',vi.fn(async () => Response.json(invalid)))
+    await expect(sg.connectionState(connection)).rejects.toMatchObject({copy:{key:'ui.sg.error.protocol'}})
+  }
+})
+
+it('preserves generic API failure diagnostics without retrying when a workbench resource is absent or invalid', async () => {
+  for (const details of [
+    {reason:'fixture'}, {copy:{key:'ui.sg.error.not-registered'}},
+    {copy:{key:'ui.sg.error.operation',params:{unexpected:'fixture'}}},
+  ]) {
+    const fetch = vi.fn(async () => Response.json({code:'fixture/denied',message:'Original diagnostic',details},{status:403}))
+    vi.stubGlobal('fetch',fetch)
+    const failure = await sg.connect(connection.config_path).catch(error => error)
+    expect(failure).toBeInstanceOf(ApiError)
+    expect(failure).toMatchObject({status:403,code:'fixture/denied',message:'Original diagnostic',details})
+    expect(fetch).toHaveBeenCalledTimes(1)
+  }
+})
 
 it('rejects a foreign instance, resource, duplicate identity and inconsistent terminal page before publishing it', async () => {
   for (const payload of [
