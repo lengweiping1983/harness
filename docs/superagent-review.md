@@ -191,6 +191,8 @@ Phase 5.2–5.6 增量从只读查询提交 `146b202` 接续。`SuperagentServic
 
 | 触发条件 | 当前源码措施 | 对应回归 |
 |---|---|---|
+| HTTP 分发向工作台路由传入路径参数，处理器签名不接收参数，导致状态／列表／命令／媒体在业务入口前返回 500 | `Handler._dispatch` 按路由契约传入关键字参数；Superagent 的四个带参数处理器显式接收 `connection_id`／`media_id`。API 回归统一通过真实分发方法，不再直接调用处理器绕过签名 | `test_superagent_workbench_api.py` 的连接状态、资源列表、命令、媒体及拒绝路径用例 |
+| 首次连接无账本实例时提示不明确，列表读取失败还使本机身份选项无法显示 | `superagent/status-unavailable` 映射为显式双语 `ui.sg.error.uninitialized`；组件在同一实例及页面代次验证后先发布本机选项和运行状态，列表失败仍保留来源及提交入口，不伪造空列表或隐式初始化数据 | `test_new_connection_keeps_local_options_without_initializing_state_or_models`、`test_api_error_keeps_resource_identity_in_english_chinese_english`，组件 `keeps local submission available when the ledger is uninitialized and translates its guidance without rereading` |
 | 工作台重复启动、启动过程中停止或关闭页面 | 固定请求身份，按实例串行启动／停止；所属请求独立于 HTTP 等待，主宿主等待运行收尾 | `test_workbench_submits_starts_and_stops_the_real_unified_service_once`、`test_start_stop_race_waits_for_the_original_factory_and_close_owns_it`、`test_owned_loop_closes_services_after_mcp_failure` |
 | 共享／远端请求读取配置路径，重复 JSON 字段或跨实例连接 | 本机 IP、Host／Origin 和主体边界；严格解析，在业务写入前拒绝 | `test_remote_shared_and_cross_origin_requests_cannot_connect_or_read_paths`、`test_malformed_and_duplicate_parameters_are_rejected_before_business_writes`、`test_changed_config_and_foreign_connection_are_rejected_without_rebinding` |
 | 来源、策略或回复授权修订过期，重启用初始配置覆盖当前设置 | 领域服务与固定操作者回执共用事务；已有来源身份固定、可变配置及启停以账本为准，当前回复能力独立显式重授 | `test_source_and_policy_changes_commit_original_receipts_atomically_and_survive_restart`、`test_explicit_reply_grant_is_revision_bound_atomic_and_preserves_original_address`、`test_stored_enabled_revision_is_authoritative_over_disabled_local_seed` |

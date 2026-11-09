@@ -14,7 +14,7 @@ const identity = (value: unknown): value is string => typeof value === 'string' 
 const count = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0
 const bad = (): never => {throw new ResourceError({key: 'ui.sg.error.protocol'})}
 const errorKeys = new Set(['ui.sg.error.local','ui.sg.error.operation','ui.sg.error.config','ui.sg.error.cursor',
-  'ui.sg.error.missing','ui.sg.error.credentials','ui.sg.error.busy','ui.sg.error.invalid'])
+  'ui.sg.error.missing','ui.sg.error.credentials','ui.sg.error.busy','ui.sg.error.invalid','ui.sg.error.uninitialized'])
 
 async function call<T>(path: string, options: Parameters<typeof request>[1] = {}): Promise<T> {
   const result = await request<T>(path, options)

@@ -73,6 +73,9 @@ export function SuperagentPanel({active = true}: {active?: boolean}) {
         || !Array.isArray(item.actors) || !Array.isArray(item.threads) || [...item.actors,...item.threads].some(value => typeof value !== 'string'))) {
         throw new ResourceError({key:'ui.sg.error.protocol'})
       }
+      if (!mounted.current || !visibleRef.current || abort.signal.aborted || generation.current !== version || owner !== scopeRef.current) return
+      sg.useWorkbenchStore.setState(state => ({connections:state.connections.map(item => item.connection_id === connection.connection_id ? connection : item)}))
+      setOptions(locals.sources as sg.Row[])
       let next: sg.Page | null = null, nextDetail: sg.MissionDetail | null = null, nextPolicy: {revision: number; text: string} | null = null
       if (missionId) {
         nextDetail = await sg.mission(current,missionId,abort.signal)
@@ -83,8 +86,6 @@ export function SuperagentPanel({active = true}: {active?: boolean}) {
         nextPolicy = {revision:Number(result.policy.revision),text:JSON.stringify(result.policy.policy,null,2)}
       } else next = await sg.page(current,tab,undefined,more ? rows?.next_cursor ?? undefined : undefined,abort.signal)
       if (!mounted.current || !visibleRef.current || abort.signal.aborted || generation.current !== version || owner !== scopeRef.current) return
-      sg.useWorkbenchStore.setState(state => ({connections:state.connections.map(item => item.connection_id === connection.connection_id ? connection : item)}))
-      setOptions(locals.sources as sg.Row[])
       if (next) setRows(more && rows ? sg.appendPage(rows,next) : next)
       else setRows(null)
       setDetail(nextDetail); if (nextPolicy) setPolicy(nextPolicy)

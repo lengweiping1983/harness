@@ -60,6 +60,7 @@ def build_router(ctx):
             code = getattr(exc,'code','superagent/workbench-operation')
             resource = {'superagent/query.cursor':'ui.sg.error.cursor','superagent/query.missing':'ui.sg.error.missing',
                 'superagent/credentials-required':'ui.sg.error.credentials','superagent/runtime-busy':'ui.sg.error.busy',
+                'superagent/status-unavailable':'ui.sg.error.uninitialized',
                 'superagent/invalid':'ui.sg.error.invalid','superagent/workbench.connection':'ui.sg.error.config',
                 'superagent/instance-conflict':'ui.sg.error.config'}.get(code,'ui.sg.error.operation')
             status = 404 if isinstance(exc,(FileNotFoundError,LookupError)) else 400 if isinstance(exc,(ValueError,TypeError)) else 409
@@ -82,11 +83,11 @@ def build_router(ctx):
         return response(invoke(request,lambda manager:manager.connect(data['config_path'])))
 
     @router.get('/api/v1/superagents/{connection_id}')
-    def connection(request):
-        return response(invoke(request,lambda manager:manager.connection(request.params['connection_id'])))
+    def connection(request,connection_id):
+        return response(invoke(request,lambda manager:manager.connection(connection_id)))
 
     @router.get('/api/v1/superagents/{connection_id}/read')
-    def read(request):
+    def read(request,connection_id):
         local(request)
         try:
             values = read_query(request,READ_QUERY)
@@ -97,28 +98,28 @@ def build_router(ctx):
             'effect':{'resource','identifier'},'receipt':{'resource','identifier'}}.get(resource,{'resource','mission_id','limit','cursor'})
         if set(request.query)-allowed:
             raise ApiError(tr('ui.sg.error.invalid'),status=400,code='superagent/invalid',details={'copy':{'key':'ui.sg.error.invalid'}})
-        key = request.params['connection_id']
+        key = connection_id
         def query(manager):
             entry = manager.connection(key)
             return {'connection_id':key,'instance_id':entry['instance_id'],'resource':resource,'data':manager.read(key,resource,**values)}
         return response(invoke(request,query))
 
     @router.post('/api/v1/superagents/{connection_id}/commands')
-    def command(request):
+    def command(request,connection_id):
         local(request)
         data = payload(request)
         if not isinstance(data,dict) or set(data)!={'request_id','action','payload'}:
             raise ApiError(tr('ui.sg.error.invalid'),status=400,code='superagent/invalid',details={'copy':{'key':'ui.sg.error.invalid'}})
-        key = request.params['connection_id']
+        key = connection_id
         async def dispatch(manager):
             return {'connection_id':key,**await manager.dispatch(key,**data)}
         return response(invoke(request,dispatch))
 
     @router.get('/api/v1/superagents/{connection_id}/media/{media_id}')
-    def media(request):
+    def media(request,connection_id,media_id):
         def cached(manager):
-            entry = manager._entry(request.params['connection_id'])
-            return SourceMedia(open_state(entry['spec'],read_only=True),entry['spec']).cached(request.params['media_id'])
+            entry = manager._entry(connection_id)
+            return SourceMedia(open_state(entry['spec'],read_only=True),entry['spec']).cached(media_id)
         row,raw,resource = invoke(request,cached)
         name = resource['name'] or row['media_id']
         disposition = 'inline' if row['content_type'].startswith('image/') else 'attachment'

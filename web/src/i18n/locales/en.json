@@ -5059,6 +5059,7 @@
   "ui.sg.state": "State",
   "ui.sg.error.local": "The workbench is available only through the local application.",
   "ui.sg.error.operation": "The operation could not be confirmed. Refresh the current state or check the original request receipt.",
+  "ui.sg.error.uninitialized": "No readable coordination ledger is available for this instance yet. Submit an objective, or configure the model and required credentials and start the runtime, then refresh.",
   "ui.sg.error.protocol": "The workbench response does not match this instance or query. The previous view is preserved.",
   "ui.sg.error.config": "The configuration cannot be opened or has changed. Reconnect the current configuration.",
   "ui.sg.error.cursor": "This page cursor is invalid for the current query. Refresh the list.",

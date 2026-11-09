@@ -15,6 +15,7 @@ from harness.web.api.superagent import build_router
 from harness.web.context import WebContext
 from harness.web.errors import ApiError
 from harness.web.router import Request
+from harness.web.server import Handler
 from harness.tools.schema import validate
 from tests.superagent_product_fixture import product_config
 
@@ -31,14 +32,17 @@ class WorkbenchApiTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.manager.close)
         self.ctx = WebContext(SimpleNamespace(superagent_workbench=self.manager),asyncio.get_running_loop())
         self.router = build_router(self.ctx)
+        self.ctx._router = self.router
+        self.handler = Handler.__new__(Handler)
+        self.handler._web_ctx = self.ctx
+        self.handler._origin_allowed = lambda: True
 
     async def request(self,method,url,body=None,*,headers=None,ip='127.0.0.1',raw=None):
         parsed = urlsplit(url)
-        handler,params = self.router.resolve(method,parsed.path)
         request = Request(method,parsed.path,parse_qs(parsed.query,keep_blank_values=True),
             {'Host':'127.0.0.1:8765','Origin':'http://127.0.0.1:8765',**(headers or {})},
-            raw if raw is not None else json.dumps(body).encode() if body is not None else b'',params=params,client_ip=ip)
-        response = await asyncio.to_thread(handler,request)
+            raw if raw is not None else json.dumps(body).encode() if body is not None else b'',client_ip=ip)
+        response = await asyncio.to_thread(self.handler._dispatch,request)
         self.assertEqual(response.headers.get('Cache-Control'),'no-store')
         return json.loads(response.body)
 
@@ -74,8 +78,11 @@ class WorkbenchApiTests(unittest.IsolatedAsyncioTestCase):
                 await self.request('POST','/api/v1/superagents/connect',{'config_path':str(self.path)},headers=headers,ip=ip)
             self.assertEqual(caught.exception.status,403)
             self.assertEqual(caught.exception.details['copy']['key'],'ui.sg.error.local')
-        self.ctx.shared_access=object()
-        with self.assertRaises(ApiError): await self.connect()
+        def authorize(request,params):
+            return SimpleNamespace(subject='shared'),frozenset()
+        self.ctx.shared_access=SimpleNamespace(browser_endpoint=lambda request:False,authorize_http=authorize)
+        with self.assertRaises(ApiError) as caught: await self.connect()
+        self.assertEqual(caught.exception.code,'superagent/local-only')
         self.assertEqual(self.manager._connections,{})
         self.assertFalse((self.root/'state').exists())
 
@@ -97,8 +104,20 @@ class WorkbenchApiTests(unittest.IsolatedAsyncioTestCase):
             with current_language.set(language),self.assertRaises(ApiError) as caught:
                 await self.request('GET',base+'/read?resource=missions')
             messages.append(str(caught.exception))
-            self.assertEqual(caught.exception.details['copy']['key'],'ui.sg.error.operation')
+            self.assertEqual(caught.exception.code,'superagent/status-unavailable')
+            self.assertEqual(caught.exception.details['copy']['key'],'ui.sg.error.uninitialized')
         self.assertEqual(messages[0],messages[2]); self.assertNotEqual(messages[0],messages[1])
+
+    async def test_new_connection_keeps_local_options_without_initializing_state_or_models(self):
+        connection=await self.connect(); base='/api/v1/superagents/'+connection['connection_id']
+        self.assertEqual(await self.request('GET',base),connection)
+        options=await self.request('GET',base+'/read?resource=local_options')
+        self.assertEqual(options['data']['sources'],[{'source_id':'local','actors':['human:1'],'threads':['work']}])
+        with self.assertRaises(ApiError) as caught:
+            await self.request('GET',base+'/read?resource=missions&limit=32')
+        self.assertEqual(caught.exception.details['copy']['key'],'ui.sg.error.uninitialized')
+        self.assertFalse((self.root/'state').exists())
+        self.assertEqual(self.created,[])
 
     async def test_generated_protocol_describes_the_actual_connect_and_command_receipts(self):
         document=json.loads((Path(__file__).resolve().parents[1]/'docs/openapi-v1.json').read_text())
@@ -116,10 +135,9 @@ class WorkbenchApiTests(unittest.IsolatedAsyncioTestCase):
         connection=await self.connect(); key=connection['connection_id']
         await self.request('POST','/api/v1/superagents/'+key+'/commands',{'request_id':'seed','action':'submit','payload':{'text':'Fix typo.'}})
         path='/api/v1/superagents/'+key+'/media/media_'+'a'*64
-        handler,params=self.router.resolve('GET',path)
-        request=Request('GET',path,{}, {'Host':'127.0.0.1:8765'},b'',params=params,client_ip='127.0.0.1')
+        request=Request('GET',path,{}, {'Host':'127.0.0.1:8765'},b'',client_ip='127.0.0.1')
         with patch('harness.web.api.superagent.SourceMedia.cached',return_value=({'content_type':'application/octet-stream'},b'<script>original</script>',{'name':'user.html'})) as cached:
-            response=await asyncio.to_thread(handler,request)
+            response=await asyncio.to_thread(self.handler._dispatch,request)
         cached.assert_called_once_with('media_'+'a'*64)
         self.assertEqual(response.body,b'<script>original</script>')
         self.assertEqual(response.headers['X-Content-Type-Options'],'nosniff')

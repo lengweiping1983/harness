@@ -5059,6 +5059,7 @@
   "ui.sg.state": "状态",
   "ui.sg.error.local": "工作台仅可通过本机应用访问。",
   "ui.sg.error.operation": "操作结果未能确认。请刷新当前状态或回查原请求回执。",
+  "ui.sg.error.uninitialized": "此实例尚无可读取的协调账本。可先提交目标，或配置好模型及所需凭据后启动运行，再刷新查看。",
   "ui.sg.error.protocol": "工作台响应与当前实例或查询不符，已保留此前视图。",
   "ui.sg.error.config": "配置无法打开或已发生变化，请重新连接当前配置。",
   "ui.sg.error.cursor": "此分页游标不适用于当前查询，请刷新列表。",

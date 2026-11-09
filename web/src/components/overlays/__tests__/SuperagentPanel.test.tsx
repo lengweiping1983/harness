@@ -149,6 +149,32 @@ it('loads the actual workbench and appends later pages without dropping earlier 
   expect(button('ui.sg.more')).toBeUndefined()
 })
 
+it('keeps local submission available when the ledger is uninitialized and translates its guidance without rereading',async () => {
+  delayed=resource => resource === 'missions' ? Promise.resolve(Response.json({code:'superagent/status-unavailable',
+    error:'Original server message',details:{copy:{key:'ui.sg.error.uninitialized'}}},{status:409})) : undefined
+  await vi.waitFor(() => expect(text(render())).toContain(t('ui.sg.error.uninitialized')))
+  const selectors=nodes(render()).filter(node => node.type === 'select')
+  expect(selectors.map(node => node.props.value)).toEqual(['a','local','operator','work'])
+  nodes(render()).find(node => node.type === 'textarea').props.onChange({target:{value:'Fix the original typo.'}})
+  expect(button('ui.sg.submit').props.disabled).toBeFalsy()
+  expect(button('ui.sg.start').props.disabled).toBeFalsy()
+  expect(text(render())).not.toContain(t('ui.sg.empty'))
+  const count=reads.length,labels=[]
+  for (const locale of ['en','zh-CN','en'] as const) {
+    await setLocale(locale)
+    labels.push(text(nodes(render()).find(node => node.props.role === 'alert')))
+    expect(labels.at(-1)).toBe(t('ui.sg.error.uninitialized'))
+  }
+  expect(labels[0]).toBe(labels[2]); expect(labels[0]).not.toBe(labels[1])
+  expect(reads).toHaveLength(count); expect(writes).toHaveLength(0)
+  delayed=undefined
+  button('ui.sg.submit').props.onClick()
+  await vi.waitFor(() => expect(writes).toHaveLength(1))
+  expect(writes[0].body).toMatchObject({action:'submit',payload:{text:'Fix the original typo.',source_id:'local',actor_id:'operator',thread_id:'work'}})
+  await loaded()
+  expect(nodes(render()).find(node => node.props.role === 'alert')).toBeUndefined()
+})
+
 it('discards an old instance response and keeps objective drafts with their own instance',async () => {
   await loaded()
   const objective=nodes(render()).find(node => node.type === 'textarea')
