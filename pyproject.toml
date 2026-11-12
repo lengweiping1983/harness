@@ -29,7 +29,7 @@ dependencies = [
 test = ["httpx>=0.28.1,<1", "setuptools>=77.0.3", "wheel", "cryptography>=50.0.2,<51"]
 browser = ["playwright>=1.63,<2"]
 # 本地语义候选只在宿主显式装配后使用，基础安装不包含向量运行时。
-memory = ["fastembed==0.9.0"]
+memory = ["fastembed==0.9.1"]
 # Windows 使用其分发的微软 ConPTY 运行库，不使用旧 WinPTY 后端。
 terminal = ["pywinpty>=3.0.5,<4; sys_platform == 'win32'"]
 # 加密飞书 Webhook 仅在显式 Superagent 信道启用时使用。
