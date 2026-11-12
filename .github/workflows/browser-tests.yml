@@ -1,0 +1,52 @@
+name: Browser regression
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  browser:
+    name: Browser tests (${{ matrix.shard }}/4)
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            model-runtime/package-lock.json
+            web/package-lock.json
+            desktop/package-lock.json
+      - run: python -m pip install --require-hashes -r desktop/requirements.lock
+      - run: python -m pip install --no-deps -e .
+      - run: npm --prefix model-runtime ci
+      - run: npm --prefix web ci
+      - run: npm --prefix desktop ci
+      - name: 准备课程执行沙箱
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y bubblewrap apparmor-profiles
+          sudo apparmor_parser -r /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+          bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev -- /bin/true
+      - name: 安装浏览器及系统依赖
+        working-directory: web
+        run: npx playwright-core install --with-deps chromium
+      - name: 完整前端生产构建
+        run: npm --prefix web run build
+      - name: 浏览器完整场景分组
+        run: npm --prefix web run test:browser -- --shard=${{ matrix.shard }}/4

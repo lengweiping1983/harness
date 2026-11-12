@@ -1,0 +1,32 @@
+{
+  "rows": [
+    {"id": "api", "topic": "network", "content": "Public API calls require a timeout.", "evidence": "network protocol"},
+    {"id": "rapid", "topic": "render", "content": "Rapid rendering uses cached textures.", "evidence": "rendering decision"},
+    {"id": "port", "topic": "network", "content": "Port allocation is isolated per session.", "evidence": "socket design"},
+    {"id": "export", "topic": "storage", "content": "Export preserves memory identities.", "evidence": "snapshot format"},
+    {"id": "sqlite", "topic": "storage", "content": "SQLite connections serialize writes.", "evidence": "sqlite transaction"},
+    {"id": "revision", "topic": "memory", "content": "Updates require expected_revision.", "evidence": "optimistic concurrency"},
+    {"id": "python", "topic": "runtime", "content": "The Python fixture uses a temporary directory.", "evidence": "tests/fixture.py"},
+    {"id": "path", "topic": "sources", "content": "Source fingerprint verification.", "evidence": "harness/core/sqlite.py"},
+    {"id": "queue", "topic": "queue", "content": "队列重排必须比较完整快照。", "evidence": "队列设计"},
+    {"id": "replay", "topic": "recovery", "content": "写请求结果未知时先回查，不自动重放副作用。", "evidence": "恢复约定"}
+  ],
+  "cases": [
+    {"name": "API完整词", "query": "API", "expected": ["api"]},
+    {"name": "rapid完整词", "query": "rapid", "expected": ["rapid"]},
+    {"name": "port完整词", "query": "port", "expected": ["port"]},
+    {"name": "export完整词", "query": "export", "expected": ["export"]},
+    {"name": "SQL不是SQLite", "query": "SQL", "expected": []},
+    {"name": "标识符完整", "query": "expected_revision", "expected": ["revision"]},
+    {"name": "标识符片段不猜测", "query": "expected_rev", "expected": []},
+    {"name": "单词片段不猜测", "query": "thon", "expected": []},
+    {"name": "完整路径", "query": "harness/core/sqlite.py", "expected": ["path"]},
+    {"name": "路径缺失不靠目录词命中", "query": "harness/core/missing.py", "expected": []},
+    {"name": "中文短语", "query": "队列重排", "expected": ["queue"]},
+    {"name": "中文长问句", "query": "为什么队列重排必须比较完整快照", "expected": ["queue"]},
+    {"name": "同义表达保留挑战", "query": "操作超时后能不能再执行一遍", "expected": ["replay"]},
+    {"name": "跨语种保留挑战", "query": "Should an ambiguous write be retried?", "expected": ["replay"]},
+    {"name": "英文无答案", "query": "weather tomorrow", "expected": []},
+    {"name": "中文无答案", "query": "木星磁场", "expected": []}
+  ]
+}

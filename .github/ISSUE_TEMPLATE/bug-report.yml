@@ -1,0 +1,66 @@
+name: 缺陷报告
+description: 报告可复现的错误、回归或异常行为。
+title: '[Bug] '
+body:
+  - type: markdown
+    attributes:
+      value: 提交前请搜索已有问题，并阅读 [贡献指南](https://github.com/lengweiping1983/harness/blob/main/CONTRIBUTING.md)。请勿提交凭据、用户会话或数据库。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      options:
+        - 后端 / Python
+        - Web 工作台
+        - 桌面客户端
+        - 构建与 CI
+        - 文档与示例
+        - 其他 / 尚未确定
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 版本与运行环境
+      description: 填写提交 SHA 或版本、操作系统、Python/Node 版本，以及 CLI、Web 或桌面运行方式。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 提供最小复现；涉及数据写入时使用临时目录。
+      placeholder: |-
+        1. 准备环境
+        2. 执行操作
+        3. 观察结果
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+      description: 说明正确结果及判断依据。
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 说明实际结果、发生频率及影响。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 日志与截图
+      description: 仅提供脱敏日志、截图或最小示例；不要上传密钥、真实会话或数据库。
+    validations:
+      required: false
+  - type: textarea
+    id: regression
+    attributes:
+      label: 回归线索
+      description: 如已知，填写最后正常版本、首次异常版本或相关 Issue。
+    validations:
+      required: false

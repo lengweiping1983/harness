@@ -1,0 +1,30 @@
+{
+  "E1": {
+    "verdict": "supported",
+    "source": "summary.md"
+  },
+  "E2": {
+    "verdict": "unknown",
+    "source": "summary.md"
+  },
+  "E3": {
+    "verdict": "unknown",
+    "source": "summary.md"
+  },
+  "E4": {
+    "verdict": "contradicted",
+    "source": "summary.md"
+  },
+  "E5": {
+    "verdict": "unknown",
+    "source": "summary.md"
+  },
+  "E6": {
+    "verdict": "unknown",
+    "source": "summary.md"
+  },
+  "E7": {
+    "verdict": "unknown",
+    "source": "summary.md"
+  }
+}

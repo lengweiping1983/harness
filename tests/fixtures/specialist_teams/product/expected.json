@@ -1,0 +1,14 @@
+{
+  "P1": {
+    "verdict": "supported",
+    "source": "source.md"
+  },
+  "P2": {
+    "verdict": "unknown",
+    "source": "source.md"
+  },
+  "P3": {
+    "verdict": "contradicted",
+    "source": "source.md"
+  }
+}

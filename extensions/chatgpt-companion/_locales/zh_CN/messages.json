@@ -1,0 +1,239 @@
+{
+  "extensionName": {
+    "message": "Harness 聊天接续"
+  },
+  "extensionDescription": {
+    "message": "在绑定的 ChatGPT 普通聊天中接续已授权开发，保护草稿并核对发送回执。"
+  },
+  "title": {
+    "message": "聊天自动接续"
+  },
+  "language": {
+    "message": "语言"
+  },
+  "open_tab": {
+    "message": "在标签页打开"
+  },
+  "hero_subtitle": {
+    "message": "让 Harness 在普通聊天中稳定衔接开发进度。"
+  },
+  "bridge_label": {
+    "message": "接续桥状态"
+  },
+  "connection_heading": {
+    "message": "连接 Harness"
+  },
+  "connection_caption": {
+    "message": "从 MCP 页面复制地址和配对码。"
+  },
+  "session_heading": {
+    "message": "绑定开发项目"
+  },
+  "session_caption": {
+    "message": "选择要继续开发的项目。"
+  },
+  "endpoint": {
+    "message": "本机接续桥地址"
+  },
+  "token": {
+    "message": "配对码"
+  },
+  "connect": {
+    "message": "连接并读取项目"
+  },
+  "session": {
+    "message": "Harness 开发项目"
+  },
+  "target_session": {
+    "message": "开启目标：{title}（{project}）。"
+  },
+  "start": {
+    "message": "开启当前聊天接续"
+  },
+  "stop": {
+    "message": "停止自动接续"
+  },
+  "continuous": {
+    "message": "任务完成后仍继续"
+  },
+  "continuous_help": {
+    "message": "不勾选时也会在回复结束、中断或出现可恢复的回复错误后，等页面持续空闲再发送“继续”，直到任务验收完成。勾选后，验收完成也会继续，让 AI 处理下一个任务；选择在开启接续时生效。同一回复和同一执行进展只请求一次。停止自动接续请使用扩展的停止按钮；消息发送未确认及 8 小时、100 条消息上限仍会暂停接续。"
+  },
+  "waiting_next_task": {
+    "message": "已请求继续，正在等待下一个任务或新的执行进展。"
+  },
+  "interrupted": {
+    "message": "任务已中断，正在等待页面空闲后接续。"
+  },
+  "explanation": {
+    "message": "绑定当前 ChatGPT 普通聊天，最多 8 小时、100 条接续消息。保护草稿，发送结果不明时停止。停止后，已受理的消息仍可能完成。"
+  },
+  "connected": {
+    "message": "已连接，请选择对应的 Harness 开发项目。"
+  },
+  "enabled": {
+    "message": "已开启当前聊天接续。"
+  },
+  "working": {
+    "message": "正在等待当前任务或回复。"
+  },
+  "waiting_executor": {
+    "message": "Harness 本机工具、作业或流水线尚未结束，完成后再接续。"
+  },
+  "waiting_reply": {
+    "message": "正在等待 ChatGPT 当前回复结束。"
+  },
+  "reply_unrecognized": {
+    "message": "尚未识别到助手回复，暂不发送。若页面已有回复，请更新扩展并刷新聊天页。"
+  },
+  "stabilizing": {
+    "message": "已识别回复，正在确认页面持续空闲；将在后续检查中接续。"
+  },
+  "timing": {
+    "message": "开启时立即检查一次，此后每次检查结束都重新随机等待 120～180 秒。回复结束且页面持续空闲时，通常在后续一到两次检查中接续（约 2～6 分钟）；浏览器休眠或调度延迟可能更久。"
+  },
+  "last_checked": {
+    "message": "上次检查：{time}"
+  },
+  "complete": {
+    "message": "验证已完成，自动接续已停止。"
+  },
+  "paused": {
+    "message": "自动接续已暂停。"
+  },
+  "blocked": {
+    "message": "存在需要核实的未知结果，自动接续已暂停。"
+  },
+  "offline": {
+    "message": "执行器未运行，正在等待恢复。"
+  },
+  "bridge_unavailable": {
+    "message": "接续桥不可用，将继续只读检查连接，不重发消息。"
+  },
+  "send_unconfirmed": {
+    "message": "未确认上一条“继续”是否已发送，已暂停以防重复。请核对聊天记录后重新开启接续。"
+  },
+  "unsupported_page": {
+    "message": "页面控件已变化，自动接续已暂停，请更新适配器。"
+  },
+  "wrong_chat": {
+    "message": "绑定的聊天已切换，自动接续已停止。"
+  },
+  "draft": {
+    "message": "正在保护您的草稿或附件，暂不接续。"
+  },
+  "composing": {
+    "message": "正在等待输入法组合结束。"
+  },
+  "user_active": {
+    "message": "您正在操作此聊天，暂不接续。"
+  },
+  "busy": {
+    "message": "正在等待生成完成或对话框关闭。"
+  },
+  "waiting_progress": {
+    "message": "此步骤已请求接续，正在等待新进展。"
+  },
+  "time_limit": {
+    "message": "已达到 8 小时上限，请审查进展后再开启。"
+  },
+  "invalid_endpoint": {
+    "message": "请使用本机 http://127.0.0.1 地址。"
+  },
+  "choose_session": {
+    "message": "请先选择 Harness 开发项目。"
+  },
+  "page_changed": {
+    "message": "页面已变化，请核对草稿后继续。"
+  },
+  "request_failed": {
+    "message": "请求失败，请检查本机接续桥与配对码。"
+  },
+  "setup_title": {
+    "message": "连接与使用帮助"
+  },
+  "setup_bridge": {
+    "message": "在 Harness 的 MCP 页面启动服务，在下方开启自动接续桥；从同一页面复制本机地址和配对码。"
+  },
+  "setup_pair": {
+    "message": "在下面填写接续桥地址和配对码，点击连接。配对码不要粘贴到 ChatGPT 聊天中。"
+  },
+  "setup_chat": {
+    "message": "打开已有的 ChatGPT 普通聊天，更新扩展后刷新网页，选择开发项目并核对下一次开启目标，再开启接续。"
+  },
+  "setup_remote": {
+    "message": "这里的本机地址属于运行浏览器的电脑。Harness 在远程电脑时，需要单独配置安全的本地隧道。"
+  },
+  "not_enabled": {
+    "message": "自动接续尚未开启。仅连接不会发送消息。"
+  },
+  "not_connected": {
+    "message": "请填写接续桥地址和配对码，检查连接。"
+  },
+  "checking_connection": {
+    "message": "正在检查本机接续桥与执行器……"
+  },
+  "pairing_required": {
+    "message": "请填写 Harness MCP 页面“普通聊天自动接续”区域的配对码，不要发送到 ChatGPT。"
+  },
+  "pairing_denied": {
+    "message": "接续桥拒绝了此配对码。请从使用同一份 MCP 执行器配置启动的接续桥复制配对码。"
+  },
+  "bridge_request_failed": {
+    "message": "接续桥拒绝了请求，请核对接续桥版本、执行器配置和对话权限。"
+  },
+  "bridge_response_invalid": {
+    "message": "接续桥响应与当前扩展不匹配，请更新 Harness 接续桥后重新检查。"
+  },
+  "executor_missing": {
+    "message": "接续桥已连通，但此配置下没有执行器数据库。请先用同一份配置启动 Harness MCP。"
+  },
+  "executor_invalid": {
+    "message": "接续桥已连通，但无法读取执行器数据。原始数据已保留，请检查执行器诊断。"
+  },
+  "executor_offline": {
+    "message": "接续桥已配对，但 Harness MCP 尚未运行。请用同一份配置启动 MCP；下方保留已有开发对话。"
+  },
+  "no_sessions": {
+    "message": "接续桥已配对，但尚无可访问的开发对话。请先在 ChatGPT 连接 Harness MCP 并打开项目对话。"
+  },
+  "page_unavailable": {
+    "message": "扩展暂时无法读取当前网页。安装或更新扩展后，请先刷新目标 ChatGPT 标签页，再重新开启。"
+  },
+  "open_chat": {
+    "message": "请在此浏览器打开 chatgpt.com 上的已有聊天，再从该标签页点击此扩展。"
+  },
+  "source_chat_unavailable": {
+    "message": "原 ChatGPT 标签页已关闭或聊天地址已变化。请在目标 ChatGPT 对话中重新打开扩展。"
+  },
+  "install_title": {
+    "message": "Harness 聊天接续——从这里开始"
+  },
+  "install_unpack": {
+    "message": "把 ZIP 解压到一个长期保留的文件夹。浏览器选择的文件夹内必须直接看到 manifest.json。安装后请保留这个文件夹。"
+  },
+  "install_chrome": {
+    "message": "Chrome 打开 chrome://extensions，Edge 打开 edge://extensions。开启“开发者模式”，点击“加载已解压的扩展”，选择直接含 manifest.json 的文件夹。"
+  },
+  "install_pin": {
+    "message": "在浏览器的扩展菜单中固定“Harness 聊天接续”。先刷新目标 ChatGPT 聊天页，再点击已固定的扩展。"
+  },
+  "install_backend": {
+    "message": "本安装包包含浏览器扩展；本机接续桥由 Harness 提供，必须与已连接的 MCP 服务使用同一份执行器配置。"
+  },
+  "install_command": {
+    "message": "在 Harness 的 MCP 页面启动 MCP，再点击下方独立功能块的“启用接续”。启用后接续桥随 MCP 自动启动。该区域显示地址、配对码及项目内扩展目录；无需单独运行 CMD。"
+  },
+  "install_safety": {
+    "message": "接续桥保持在 127.0.0.1。配对码不要公开，也不要粘贴到 ChatGPT。登录、工具审批、验证码及用量限制仍可能需要您处理。"
+  },
+  "install_readme": {
+    "message": "请打开 INSTALL.html，按完整的中英文安装与配对步骤操作。"
+  },
+  "show_token": {
+    "message": "显示配对码"
+  },
+  "hide_token": {
+    "message": "隐藏配对码"
+  }
+}

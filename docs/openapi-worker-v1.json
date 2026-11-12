@@ -1,0 +1,240 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Harness Worker Executor",
+    "version": "1"
+  },
+  "paths": {
+    "/executor/v1": {
+      "post": {
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Harness-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerFrame"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed receipt",
+            "headers": {
+              "X-Harness-Signature": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected before admission",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "WorkerFrame": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "const": 1
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "identity_hash": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "apply_artifact_delivery",
+              "artifact_manifest",
+              "capture_workspace",
+              "create_session",
+              "create_workspace",
+              "deliver_input",
+              "deliver_instruction",
+              "find_worker",
+              "heartbeat",
+              "identity",
+              "inspect",
+              "instruction_turn",
+              "operation_receipt",
+              "plan_artifact_delivery",
+              "reconcile",
+              "reconcile_input",
+              "reconcile_instruction",
+              "revoke",
+              "snapshot_workspace",
+              "stop",
+              "submit"
+            ]
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "lease": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "mission_id": {
+                "type": "string"
+              },
+              "device_id": {
+                "type": "string"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "expires_at": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "mission_id",
+              "device_id",
+              "generation",
+              "expires_at"
+            ]
+          },
+          "nonce": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "issued_at": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "instance_id",
+          "device_id",
+          "identity_hash",
+          "operation",
+          "operation_id",
+          "params",
+          "lease",
+          "nonce",
+          "issued_at"
+        ]
+      },
+      "WorkerReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "const": 1
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "result": {},
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "device_id",
+          "nonce",
+          "operation_id",
+          "result",
+          "error"
+        ]
+      },
+      "WorkerIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol": {
+            "type": "integer",
+            "const": 1
+          },
+          "profiles": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "runner": {
+            "type": "string",
+            "enum": [
+              "native",
+              "docker"
+            ]
+          },
+          "sandbox": {
+            "type": "string",
+            "enum": [
+              "none",
+              "docker"
+            ]
+          },
+          "runtime": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "protocol",
+          "profiles",
+          "runner",
+          "sandbox",
+          "runtime"
+        ]
+      }
+    }
+  }
+}

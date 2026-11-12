@@ -1,0 +1,142 @@
+{
+  "version": 2,
+  "instance_id": "project-native-worker",
+  "state_dir": "~/.harness-superagent/project-native-worker",
+  "language": "zh-CN",
+  "model": "YOUR_MODEL_ID",
+  "base_url": "https://openrouter.ai/api/v1",
+  "permission_policy": "full_access",
+  "sources": {
+    "local": {
+      "kind": "local",
+      "config": {
+        "namespace": "project"
+      },
+      "actors": [
+        "operator"
+      ],
+      "threads": [
+        "project"
+      ]
+    }
+  },
+  "profiles": {
+    "builder": {
+      "repo": "..",
+      "description": "在独立工作树内实现获准目标。",
+      "source_instance_ids": [
+        "local"
+      ],
+      "actions": [
+        "read"
+      ],
+      "tools": [
+        "read",
+        "write",
+        "bash"
+      ],
+      "max_turns": 16,
+      "max_seconds": 600
+    },
+    "integrator": {
+      "repo": "..",
+      "description": "集成冻结交付并执行有界验证。",
+      "source_instance_ids": [
+        "local"
+      ],
+      "actions": [
+        "read"
+      ],
+      "tools": [
+        "read",
+        "write",
+        "bash"
+      ],
+      "max_turns": 16,
+      "max_seconds": 600
+    },
+    "reviewer": {
+      "repo": "..",
+      "description": "只读独立检查冻结候选与证据。",
+      "source_instance_ids": [
+        "local"
+      ],
+      "actions": [
+        "read"
+      ],
+      "tools": [
+        "read"
+      ],
+      "max_turns": 8,
+      "max_seconds": 300
+    }
+  },
+  "default_profiles": {
+    "local": "builder"
+  },
+  "system_profiles": {
+    "integrate": "integrator",
+    "review": "reviewer"
+  },
+  "policy": {
+    "mode": "auto",
+    "rules": [
+      {
+        "id": "implementation",
+        "name": "明确实现请求",
+        "enabled": true,
+        "instruction": "仅接受操作者明确要求、目标方向已经确定的项目实现或修复，不接受部署、发布、推送或外部账户操作。"
+      }
+    ],
+    "sources": {
+      "local": {
+        "allowed": [
+          {
+            "id": "operator"
+          }
+        ],
+        "scope": {
+          "source_instance_ids": [
+            "local"
+          ],
+          "thread_ids": [
+            "$current"
+          ],
+          "actions": [
+            "read",
+            "reply"
+          ],
+          "tools": [
+            "read",
+            "write",
+            "bash"
+          ],
+          "budget": {
+            "max_turns": 64,
+            "max_seconds": 1800
+          }
+        }
+      }
+    }
+  },
+  "watchdog": {
+    "stale_after": 900,
+    "max_stale_ticks": 3,
+    "action": "attention"
+  },
+  "secrets": {
+    "worker": "PROJECT_WORKER_KEY"
+  },
+  "execution": {
+    "lease_seconds": 60,
+    "devices": [
+      {
+        "device_id": "worker",
+        "url": "http://127.0.0.1:18766",
+        "runner": "native",
+        "key_ref": "secret://worker",
+        "capacity": 1
+      }
+    ]
+  }
+}

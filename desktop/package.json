@@ -1,0 +1,26 @@
+{
+  "name": "harness-desktop",
+  "version": "0.1.9",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node ../scripts/run_node_tests.mjs tests",
+    "test:about-panel": "node tests/about-panel-smoke.mjs",
+    "package:prepare": "node ../scripts/bootstrap-desktop-build.mjs --clean-staging && npm --prefix ../web run build && node prepare-release.mjs",
+    "package:dir": "node ../scripts/bootstrap-desktop-build.mjs && node ./node_modules/electron-builder/cli.js --config electron-builder.config.cjs --dir --publish never",
+    "package": "npm run package:prepare && node ./node_modules/electron-builder/cli.js --config electron-builder.config.cjs --publish never"
+  },
+  "devDependencies": {
+    "builder-util": "26.15.3",
+    "electron": "^44.7.0",
+    "electron-builder": "26.15.3",
+    "js-yaml": "4.3.2"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9"
+  },
+  "description": "Harness desktop agent workspace",
+  "author": "Harness contributors"
+}

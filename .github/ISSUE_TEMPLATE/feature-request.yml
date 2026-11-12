@@ -1,0 +1,55 @@
+name: 功能提案
+description: 讨论用户问题、方案边界与验收标准。
+title: '[Feature] '
+body:
+  - type: markdown
+    attributes:
+      value: 提交前请搜索已有问题，并阅读 [贡献指南](https://github.com/lengweiping1983/harness/blob/main/CONTRIBUTING.md)。请勿提交凭据、用户会话或数据库。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      options:
+        - 后端 / Python
+        - Web 工作台
+        - 桌面客户端
+        - 构建与 CI
+        - 文档与示例
+        - 其他 / 尚未确定
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 用户问题
+      description: 说明谁在什么场景遇到什么障碍；避免仅描述希望增加的按钮或技术。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 描述期望的使用流程和结果，明确本次范围。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案
+      description: 说明现有做法、其他方案及取舍。
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 列出可观察、可复核的完成条件，包括必要的错误与边界状态。
+    validations:
+      required: true
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: 范围之外
+      description: 明确暂不解决的问题或后续工作。
+    validations:
+      required: false

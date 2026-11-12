@@ -1,0 +1,91 @@
+name: Desktop installers
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 两个平台都直接使用 harness/resources/hex/<平台>-<架构>/ 下随版本库分发的
+          # 官方预编译引擎（3.3.0），CI 上不编译引擎源码：不需要 Rust / CMake /
+          # MSVC / Vulkan SDK，也不设置 HARNESS_HEX_BINARY。
+          # 官方 v3.3.0 未提供 macOS x64（Intel）资产，故 intel 目标暂不发布；
+          # 官方日后提供时，登记 harness/resources/hex/macos-x86_64/ 即可恢复该矩阵项。
+          - os: macos-15
+            arch: arm64
+            certificate: DESKTOP_MAC_CSC_LINK
+            password: DESKTOP_MAC_CSC_KEY_PASSWORD
+          - os: windows-latest
+            arch: x64
+            certificate: DESKTOP_WINDOWS_CSC_LINK
+            password: DESKTOP_WINDOWS_CSC_KEY_PASSWORD
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            desktop/package-lock.json
+            web/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.6'
+      - run: npm --prefix model-runtime ci
+      - run: npm --prefix web ci
+      - run: npm --prefix desktop ci
+      - run: npm --prefix web run typecheck
+      - run: npm --prefix desktop test
+      # 打包直接用随版本库分发的预编译引擎，全平台都不执行任何引擎编译步骤。
+      # macOS 仍需 Xcode 命令行工具，但那只是 prepare-voice.mjs 用 swiftc 编译
+      # 原生输入辅助程序（desktop/voice-native.swift），与语音引擎本身无关。
+      - name: Verify vendored voice engine (no toolchain)
+        run: node desktop/hex-engine-manifest.mjs --check .
+      - name: Build bundled runtime and installers
+        run: npm --prefix desktop run package -- --${{ matrix.arch }}
+        env:
+          HARNESS_UPDATE_REPOSITORY: ${{ vars.HARNESS_UPDATE_REPOSITORY }}
+          HARNESS_UPDATE_URL: ${{ vars.HARNESS_UPDATE_URL }}
+          HARNESS_RELEASE_BUILD: '1'
+          # 不设置 HARNESS_HEX_BINARY：打包统一走 harness/resources/hex/<平台>-<架构>/
+          # 的官方预编译引擎，由 prepare-voice.mjs 按当前平台取件并核对版本清单。
+          CSC_LINK: ${{ secrets[matrix.certificate] }}
+          CSC_KEY_PASSWORD: ${{ secrets[matrix.password] }}
+          APPLE_ID: ${{ secrets.DESKTOP_APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.DESKTOP_APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.DESKTOP_APPLE_TEAM_ID }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Harness-${{ runner.os }}-${{ matrix.arch }}
+          path: |
+            .run/installers/*.dmg
+            .run/installers/*.zip
+            .run/installers/*.exe
+            .run/installers/*.blockmap
+            .run/installers/latest*.yml
+          if-no-files-found: error
+          retention-days: 14
+  assemble:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm --prefix desktop ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Harness-*
+          path: .run/artifacts
+      - run: node desktop/release-assets.mjs .run/artifacts .run/release-assets
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Harness-release-assets
+          path: .run/release-assets/*
+          if-no-files-found: error
+          retention-days: 14

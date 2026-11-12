@@ -1,0 +1,5 @@
+include build_support.py
+graft harness/resources/hex
+graft .harness/skills
+recursive-exclude .harness/skills *.pyc *.pyo .DS_Store
+include scripts/python_bootstrap.py

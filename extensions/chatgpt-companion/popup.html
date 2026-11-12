@@ -1,0 +1,26 @@
+<!doctype html>
+<html data-view="popup"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Harness Companion</title><link rel="stylesheet" href="popup.css"></head>
+<body><main>
+  <header class="hero">
+    <div class="hero-copy"><div class="eyebrow">Harness / Chat <span id="version"></span></div><h1 data-key="title"></h1></div>
+    <div class="hero-actions"><button id="open-tab" data-key="open_tab" data-aria-key="open_tab"></button><select id="language" data-aria-key="language"><option value="zh_CN">中文</option><option value="en">English</option></select></div>
+  </header>
+  <section class="status-card" aria-live="polite"><div class="status-dot" aria-hidden="true"></div><output id="connection-status" role="status"></output></section>
+  <div class="panels">
+  <section class="panel connection-panel">
+    <div class="section-heading"><span class="section-number">01</span><div><h2 data-key="connection_heading"></h2><p data-key="connection_caption"></p></div></div>
+    <label data-key="endpoint" for="endpoint"></label><input id="endpoint" value="http://127.0.0.1:8877/" spellcheck="false">
+    <label data-key="token" for="token"></label><div class="secret-input"><input id="token" type="password" autocomplete="off"><button id="token-toggle" type="button" data-aria-key="show_token" aria-controls="token" aria-pressed="false"><svg data-secret-icon="show" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><svg data-secret-icon="hide" hidden aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A11 11 0 0 1 12 5c7 0 10 7 10 7a15 15 0 0 1-3 4M6.5 6.5A17 17 0 0 0 2 12s3 7 10 7a12 12 0 0 0 5.5-1.5"/></svg></button></div>
+    <button id="connect" data-key="connect" disabled></button>
+  </section>
+  <section class="panel session-panel">
+    <div class="section-heading"><span class="section-number">02</span><div><h2 data-key="session_heading"></h2><p data-key="session_caption"></p></div></div>
+    <label data-key="session" for="session"></label><select id="session"></select>
+    <p class="explanation" id="target-session"></p>
+    <label class="continuation-option"><input id="continuous" type="checkbox"><span data-key="continuous"></span></label>
+    <div class="actions"><button id="start" data-key="start" disabled></button><button id="stop" data-key="stop" disabled></button></div>
+  </section>
+  </div>
+  <output id="status" role="status"></output>
+  <footer><details id="help"><summary data-key="setup_title"></summary><ol><li data-key="setup_bridge"></li><li data-key="setup_pair"></li><li data-key="setup_chat"></li></ol><p data-key="explanation"></p><p data-key="continuous_help"></p><p data-key="timing"></p><p data-key="setup_remote"></p></details><p class="explanation" id="checked-at"></p></footer>
+</main><script type="module" src="popup.mjs"></script></body></html>

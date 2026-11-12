@@ -1,0 +1,12 @@
+{
+  "title": "产品探索团队 Terra 在线验收：操作步骤与收益边界",
+  "team": "team-product-custom",
+  "required_members": [
+    "discovery",
+    "critic"
+  ],
+  "member_read_paths": [
+    "source.md"
+  ],
+  "prompt": "这是构造案例。只允许读取当前目录的source.md。请实际委派discovery,critic分别研究与反证，最后核对结论；成员只允许调用read工具读取上述文件，不得调用其他工具或读取其他资料、历史、记忆、项目板；不联网、不执行命令、不写入、不提问。最终输出一个JSON代码块：claims数组逐项含id、verdict（supported/contradicted/unknown）、reason及sources数组（path相对文件名、quote逐字连续原文）；member_sources列出指定各成员的member与真实agent_id。分类针对事实真值，未知不等于否证。需核对主张：P1=所列保存任务的新路径操作次数相对旧路径减少50%；P2=新原型使真实用户转化率因果提升50%；P3=已完成键盘、输入法、小屏和读屏器验收。"
+}

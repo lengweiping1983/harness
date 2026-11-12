@@ -1,0 +1,1118 @@
+{
+  "schema": 1,
+  "id": "harness-foundations",
+  "version": "2.1.0",
+  "source_revision": "ea5f3a2e1980559f9fbb6f16029f49401c1b7991",
+  "title_key": "course.title",
+  "description_key": "course.description",
+  "references": [
+    "https://github.com/walkinglabs/learn-harness-engineering",
+    "https://github.com/deusyu/harness-engineering",
+    "https://github.com/ai-boost/awesome-harness-engineering",
+    "https://github.com/walkinglabs/awesome-harness-engineering"
+  ],
+  "lessons": [
+    {
+      "id": "day-01-input-output",
+      "order": 1,
+      "milestone": false,
+      "title_key": "lesson.day-01-input-output.title",
+      "goal_key": "lesson.day-01-input-output.goal",
+      "reading_key": "lesson.day-01-input-output.reading",
+      "exercise_key": "lesson.day-01-input-output.exercise",
+      "rubric_key": "lesson.day-01-input-output.rubric",
+      "stage_key": "stage.see",
+      "duration_minutes": 15,
+      "starter": "lessons/day-01-input-output/starter",
+      "check": "lessons/day-01-input-output/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [],
+      "trace_labels": {},
+      "knowledge_checks": [
+        {
+          "id": "predict",
+          "prompt_key": "lesson.day-01-input-output.knowledge.predict.prompt",
+          "options": [
+            {
+              "id": "same",
+              "label_key": "lesson.day-01-input-output.knowledge.predict.same.label",
+              "feedback_key": "lesson.day-01-input-output.knowledge.predict.same.feedback"
+            },
+            {
+              "id": "auto",
+              "label_key": "lesson.day-01-input-output.knowledge.predict.auto.label",
+              "feedback_key": "lesson.day-01-input-output.knowledge.predict.auto.feedback"
+            },
+            {
+              "id": "silent",
+              "label_key": "lesson.day-01-input-output.knowledge.predict.silent.label",
+              "feedback_key": "lesson.day-01-input-output.knowledge.predict.silent.feedback"
+            }
+          ],
+          "answer_id": "same",
+          "hint_keys": [
+            "lesson.day-01-input-output.knowledge.predict.hint1",
+            "lesson.day-01-input-output.knowledge.predict.hint2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "clear-goal",
+      "order": 2,
+      "milestone": false,
+      "title_key": "lesson.clear-goal.title",
+      "goal_key": "lesson.clear-goal.goal",
+      "reading_key": "lesson.clear-goal.reading",
+      "exercise_key": "lesson.clear-goal.exercise",
+      "rubric_key": "lesson.clear-goal.rubric",
+      "stage_key": "stage.see",
+      "duration_minutes": 15,
+      "starter": "lessons/clear-goal/starter",
+      "check": "lessons/clear-goal/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "day-01-input-output"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "model-boundary",
+      "order": 3,
+      "milestone": false,
+      "title_key": "lesson.model-boundary.title",
+      "goal_key": "lesson.model-boundary.goal",
+      "reading_key": "lesson.model-boundary.reading",
+      "exercise_key": "lesson.model-boundary.exercise",
+      "rubric_key": "lesson.model-boundary.rubric",
+      "stage_key": "stage.see",
+      "duration_minutes": 15,
+      "starter": "lessons/model-boundary/starter",
+      "check": "lessons/model-boundary/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "clear-goal"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "message-role",
+      "order": 4,
+      "milestone": false,
+      "title_key": "lesson.message-role.title",
+      "goal_key": "lesson.message-role.goal",
+      "reading_key": "lesson.message-role.reading",
+      "exercise_key": "lesson.message-role.exercise",
+      "rubric_key": "lesson.message-role.rubric",
+      "stage_key": "stage.see",
+      "duration_minutes": 15,
+      "starter": "lessons/message-role/starter",
+      "check": "lessons/message-role/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "model-boundary"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "message-history",
+      "order": 5,
+      "milestone": true,
+      "title_key": "lesson.message-history.title",
+      "goal_key": "lesson.message-history.goal",
+      "reading_key": "lesson.message-history.reading",
+      "exercise_key": "lesson.message-history.exercise",
+      "rubric_key": "lesson.message-history.rubric",
+      "stage_key": "stage.see",
+      "duration_minutes": 15,
+      "starter": "lessons/message-history/starter",
+      "check": "lessons/message-history/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "message-role"
+      ],
+      "trace_labels": {},
+      "knowledge_checks": [
+        {
+          "id": "context",
+          "prompt_key": "lesson.message-history.knowledge.context.prompt",
+          "options": [
+            {
+              "id": "background",
+              "label_key": "lesson.message-history.knowledge.context.background.label",
+              "feedback_key": "lesson.message-history.knowledge.context.background.feedback"
+            },
+            {
+              "id": "permission",
+              "label_key": "lesson.message-history.knowledge.context.permission.label",
+              "feedback_key": "lesson.message-history.knowledge.context.permission.feedback"
+            },
+            {
+              "id": "forever",
+              "label_key": "lesson.message-history.knowledge.context.forever.label",
+              "feedback_key": "lesson.message-history.knowledge.context.forever.feedback"
+            }
+          ],
+          "answer_id": "background",
+          "hint_keys": [
+            "lesson.message-history.knowledge.context.hint1",
+            "lesson.message-history.knowledge.context.hint2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "first-tool",
+      "order": 6,
+      "milestone": false,
+      "title_key": "lesson.first-tool.title",
+      "goal_key": "lesson.first-tool.goal",
+      "reading_key": "lesson.first-tool.reading",
+      "exercise_key": "lesson.first-tool.exercise",
+      "rubric_key": "lesson.first-tool.rubric",
+      "stage_key": "stage.act",
+      "duration_minutes": 20,
+      "starter": "lessons/first-tool/starter",
+      "check": "lessons/first-tool/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "message-history"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "tool-description",
+      "order": 7,
+      "milestone": false,
+      "title_key": "lesson.tool-description.title",
+      "goal_key": "lesson.tool-description.goal",
+      "reading_key": "lesson.tool-description.reading",
+      "exercise_key": "lesson.tool-description.exercise",
+      "rubric_key": "lesson.tool-description.rubric",
+      "stage_key": "stage.act",
+      "duration_minutes": 20,
+      "starter": "lessons/tool-description/starter",
+      "check": "lessons/tool-description/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "first-tool"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "tool-dispatch",
+      "order": 8,
+      "milestone": false,
+      "title_key": "lesson.tool-dispatch.title",
+      "goal_key": "lesson.tool-dispatch.goal",
+      "reading_key": "lesson.tool-dispatch.reading",
+      "exercise_key": "lesson.tool-dispatch.exercise",
+      "rubric_key": "lesson.tool-dispatch.rubric",
+      "stage_key": "stage.act",
+      "duration_minutes": 20,
+      "starter": "lessons/tool-dispatch/starter",
+      "check": "lessons/tool-dispatch/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "tool-description"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "tool-observation",
+      "order": 9,
+      "milestone": false,
+      "title_key": "lesson.tool-observation.title",
+      "goal_key": "lesson.tool-observation.goal",
+      "reading_key": "lesson.tool-observation.reading",
+      "exercise_key": "lesson.tool-observation.exercise",
+      "rubric_key": "lesson.tool-observation.rubric",
+      "stage_key": "stage.act",
+      "duration_minutes": 20,
+      "starter": "lessons/tool-observation/starter",
+      "check": "lessons/tool-observation/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "tool-dispatch"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "agent-loop",
+      "order": 10,
+      "milestone": true,
+      "title_key": "lesson.agent-loop.title",
+      "goal_key": "lesson.agent-loop.goal",
+      "reading_key": "lesson.agent-loop.reading",
+      "exercise_key": "lesson.agent-loop.exercise",
+      "rubric_key": "lesson.agent-loop.rubric",
+      "stage_key": "stage.act",
+      "duration_minutes": 20,
+      "starter": "lessons/agent-loop/starter",
+      "check": "lessons/agent-loop/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [
+        {
+          "path": "harness/core/agent.py",
+          "symbol": "AgentLoop"
+        }
+      ],
+      "prerequisites": [
+        "tool-observation"
+      ],
+      "trace_labels": {},
+      "knowledge_checks": [
+        {
+          "id": "observation",
+          "prompt_key": "lesson.agent-loop.knowledge.observation.prompt",
+          "options": [
+            {
+              "id": "result",
+              "label_key": "lesson.agent-loop.knowledge.observation.result.label",
+              "feedback_key": "lesson.agent-loop.knowledge.observation.result.feedback"
+            },
+            {
+              "id": "guess",
+              "label_key": "lesson.agent-loop.knowledge.observation.guess.label",
+              "feedback_key": "lesson.agent-loop.knowledge.observation.guess.feedback"
+            },
+            {
+              "id": "finish",
+              "label_key": "lesson.agent-loop.knowledge.observation.finish.label",
+              "feedback_key": "lesson.agent-loop.knowledge.observation.finish.feedback"
+            }
+          ],
+          "answer_id": "result",
+          "hint_keys": [
+            "lesson.agent-loop.knowledge.observation.hint1",
+            "lesson.agent-loop.knowledge.observation.hint2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "step-budget",
+      "order": 11,
+      "milestone": false,
+      "title_key": "lesson.step-budget.title",
+      "goal_key": "lesson.step-budget.goal",
+      "reading_key": "lesson.step-budget.reading",
+      "exercise_key": "lesson.step-budget.exercise",
+      "rubric_key": "lesson.step-budget.rubric",
+      "stage_key": "stage.context",
+      "duration_minutes": 20,
+      "starter": "lessons/step-budget/starter",
+      "check": "lessons/step-budget/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "agent-loop"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "context-window",
+      "order": 12,
+      "milestone": false,
+      "title_key": "lesson.context-window.title",
+      "goal_key": "lesson.context-window.goal",
+      "reading_key": "lesson.context-window.reading",
+      "exercise_key": "lesson.context-window.exercise",
+      "rubric_key": "lesson.context-window.rubric",
+      "stage_key": "stage.context",
+      "duration_minutes": 20,
+      "starter": "lessons/context-window/starter",
+      "check": "lessons/context-window/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [
+        {
+          "path": "harness/session/events.py",
+          "symbol": "SessionEvent"
+        }
+      ],
+      "prerequisites": [
+        "step-budget"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "context-budget",
+      "order": 13,
+      "milestone": false,
+      "title_key": "lesson.context-budget.title",
+      "goal_key": "lesson.context-budget.goal",
+      "reading_key": "lesson.context-budget.reading",
+      "exercise_key": "lesson.context-budget.exercise",
+      "rubric_key": "lesson.context-budget.rubric",
+      "stage_key": "stage.context",
+      "duration_minutes": 20,
+      "starter": "lessons/context-budget/starter",
+      "check": "lessons/context-budget/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "context-window"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "context-summary",
+      "order": 14,
+      "milestone": false,
+      "title_key": "lesson.context-summary.title",
+      "goal_key": "lesson.context-summary.goal",
+      "reading_key": "lesson.context-summary.reading",
+      "exercise_key": "lesson.context-summary.exercise",
+      "rubric_key": "lesson.context-summary.rubric",
+      "stage_key": "stage.context",
+      "duration_minutes": 20,
+      "starter": "lessons/context-summary/starter",
+      "check": "lessons/context-summary/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "context-budget"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "memory",
+      "order": 15,
+      "milestone": true,
+      "title_key": "lesson.memory.title",
+      "goal_key": "lesson.memory.goal",
+      "reading_key": "lesson.memory.reading",
+      "exercise_key": "lesson.memory.exercise",
+      "rubric_key": "lesson.memory.rubric",
+      "stage_key": "stage.context",
+      "duration_minutes": 20,
+      "starter": "lessons/memory/starter",
+      "check": "lessons/memory/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "context-summary"
+      ],
+      "trace_labels": {},
+      "knowledge_checks": [
+        {
+          "id": "unknown",
+          "prompt_key": "lesson.memory.knowledge.unknown.prompt",
+          "options": [
+            {
+              "id": "unknown",
+              "label_key": "lesson.memory.knowledge.unknown.unknown.label",
+              "feedback_key": "lesson.memory.knowledge.unknown.unknown.feedback"
+            },
+            {
+              "id": "false",
+              "label_key": "lesson.memory.knowledge.unknown.false.label",
+              "feedback_key": "lesson.memory.knowledge.unknown.false.feedback"
+            },
+            {
+              "id": "persistent",
+              "label_key": "lesson.memory.knowledge.unknown.persistent.label",
+              "feedback_key": "lesson.memory.knowledge.unknown.persistent.feedback"
+            }
+          ],
+          "answer_id": "unknown",
+          "hint_keys": [
+            "lesson.memory.knowledge.unknown.hint1",
+            "lesson.memory.knowledge.unknown.hint2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explicit-state",
+      "order": 16,
+      "milestone": false,
+      "title_key": "lesson.explicit-state.title",
+      "goal_key": "lesson.explicit-state.goal",
+      "reading_key": "lesson.explicit-state.reading",
+      "exercise_key": "lesson.explicit-state.exercise",
+      "rubric_key": "lesson.explicit-state.rubric",
+      "stage_key": "stage.control",
+      "duration_minutes": 25,
+      "starter": "lessons/explicit-state/starter",
+      "check": "lessons/explicit-state/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "memory"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "small-plan",
+      "order": 17,
+      "milestone": false,
+      "title_key": "lesson.small-plan.title",
+      "goal_key": "lesson.small-plan.goal",
+      "reading_key": "lesson.small-plan.reading",
+      "exercise_key": "lesson.small-plan.exercise",
+      "rubric_key": "lesson.small-plan.rubric",
+      "stage_key": "stage.control",
+      "duration_minutes": 25,
+      "starter": "lessons/small-plan/starter",
+      "check": "lessons/small-plan/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "explicit-state"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "approval",
+      "order": 18,
+      "milestone": false,
+      "title_key": "lesson.approval.title",
+      "goal_key": "lesson.approval.goal",
+      "reading_key": "lesson.approval.reading",
+      "exercise_key": "lesson.approval.exercise",
+      "rubric_key": "lesson.approval.rubric",
+      "stage_key": "stage.control",
+      "duration_minutes": 25,
+      "starter": "lessons/approval/starter",
+      "check": "lessons/approval/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "small-plan"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "workspace-path",
+      "order": 19,
+      "milestone": false,
+      "title_key": "lesson.workspace-path.title",
+      "goal_key": "lesson.workspace-path.goal",
+      "reading_key": "lesson.workspace-path.reading",
+      "exercise_key": "lesson.workspace-path.exercise",
+      "rubric_key": "lesson.workspace-path.rubric",
+      "stage_key": "stage.control",
+      "duration_minutes": 25,
+      "starter": "lessons/workspace-path/starter",
+      "check": "lessons/workspace-path/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [
+        {
+          "path": "harness/execution/policy.py",
+          "symbol": "PathPolicy"
+        }
+      ],
+      "prerequisites": [
+        "approval"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "honest-errors",
+      "order": 20,
+      "milestone": true,
+      "title_key": "lesson.honest-errors.title",
+      "goal_key": "lesson.honest-errors.goal",
+      "reading_key": "lesson.honest-errors.reading",
+      "exercise_key": "lesson.honest-errors.exercise",
+      "rubric_key": "lesson.honest-errors.rubric",
+      "stage_key": "stage.control",
+      "duration_minutes": 25,
+      "starter": "lessons/honest-errors/starter",
+      "check": "lessons/honest-errors/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "workspace-path"
+      ],
+      "trace_labels": {},
+      "knowledge_checks": [
+        {
+          "id": "failure",
+          "prompt_key": "lesson.honest-errors.knowledge.failure.prompt",
+          "options": [
+            {
+              "id": "explicit",
+              "label_key": "lesson.honest-errors.knowledge.failure.explicit.label",
+              "feedback_key": "lesson.honest-errors.knowledge.failure.explicit.feedback"
+            },
+            {
+              "id": "empty",
+              "label_key": "lesson.honest-errors.knowledge.failure.empty.label",
+              "feedback_key": "lesson.honest-errors.knowledge.failure.empty.feedback"
+            },
+            {
+              "id": "success",
+              "label_key": "lesson.honest-errors.knowledge.failure.success.label",
+              "feedback_key": "lesson.honest-errors.knowledge.failure.success.feedback"
+            }
+          ],
+          "answer_id": "explicit",
+          "hint_keys": [
+            "lesson.honest-errors.knowledge.failure.hint1",
+            "lesson.honest-errors.knowledge.failure.hint2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "request-receipt",
+      "order": 21,
+      "milestone": false,
+      "title_key": "lesson.request-receipt.title",
+      "goal_key": "lesson.request-receipt.goal",
+      "reading_key": "lesson.request-receipt.reading",
+      "exercise_key": "lesson.request-receipt.exercise",
+      "rubric_key": "lesson.request-receipt.rubric",
+      "stage_key": "stage.reliable",
+      "duration_minutes": 25,
+      "starter": "lessons/request-receipt/starter",
+      "check": "lessons/request-receipt/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "honest-errors"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "checkpoint",
+      "order": 22,
+      "milestone": false,
+      "title_key": "lesson.checkpoint.title",
+      "goal_key": "lesson.checkpoint.goal",
+      "reading_key": "lesson.checkpoint.reading",
+      "exercise_key": "lesson.checkpoint.exercise",
+      "rubric_key": "lesson.checkpoint.rubric",
+      "stage_key": "stage.reliable",
+      "duration_minutes": 25,
+      "starter": "lessons/checkpoint/starter",
+      "check": "lessons/checkpoint/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "request-receipt"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "event-trace",
+      "order": 23,
+      "milestone": false,
+      "title_key": "lesson.event-trace.title",
+      "goal_key": "lesson.event-trace.goal",
+      "reading_key": "lesson.event-trace.reading",
+      "exercise_key": "lesson.event-trace.exercise",
+      "rubric_key": "lesson.event-trace.rubric",
+      "stage_key": "stage.reliable",
+      "duration_minutes": 25,
+      "starter": "lessons/event-trace/starter",
+      "check": "lessons/event-trace/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [
+        {
+          "path": "harness/session/events.py",
+          "symbol": "SessionEvent"
+        }
+      ],
+      "prerequisites": [
+        "checkpoint"
+      ],
+      "trace_labels": {
+        "request/start": "lesson.event-trace.trace.requestStart",
+        "tool/start": "lesson.event-trace.trace.toolStart",
+        "tool/result": "lesson.event-trace.trace.toolResult",
+        "request/end": "lesson.event-trace.trace.requestEnd"
+      }
+    },
+    {
+      "id": "usage-cost",
+      "order": 24,
+      "milestone": false,
+      "title_key": "lesson.usage-cost.title",
+      "goal_key": "lesson.usage-cost.goal",
+      "reading_key": "lesson.usage-cost.reading",
+      "exercise_key": "lesson.usage-cost.exercise",
+      "rubric_key": "lesson.usage-cost.rubric",
+      "stage_key": "stage.reliable",
+      "duration_minutes": 25,
+      "starter": "lessons/usage-cost/starter",
+      "check": "lessons/usage-cost/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "event-trace"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "load-skill",
+      "order": 25,
+      "milestone": true,
+      "title_key": "lesson.load-skill.title",
+      "goal_key": "lesson.load-skill.goal",
+      "reading_key": "lesson.load-skill.reading",
+      "exercise_key": "lesson.load-skill.exercise",
+      "rubric_key": "lesson.load-skill.rubric",
+      "stage_key": "stage.reliable",
+      "duration_minutes": 25,
+      "starter": "lessons/load-skill/starter",
+      "check": "lessons/load-skill/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "usage-cost"
+      ],
+      "trace_labels": {},
+      "knowledge_checks": [
+        {
+          "id": "authority",
+          "prompt_key": "lesson.load-skill.knowledge.authority.prompt",
+          "options": [
+            {
+              "id": "instructions",
+              "label_key": "lesson.load-skill.knowledge.authority.instructions.label",
+              "feedback_key": "lesson.load-skill.knowledge.authority.instructions.feedback"
+            },
+            {
+              "id": "grant",
+              "label_key": "lesson.load-skill.knowledge.authority.grant.label",
+              "feedback_key": "lesson.load-skill.knowledge.authority.grant.feedback"
+            },
+            {
+              "id": "install",
+              "label_key": "lesson.load-skill.knowledge.authority.install.label",
+              "feedback_key": "lesson.load-skill.knowledge.authority.install.feedback"
+            }
+          ],
+          "answer_id": "instructions",
+          "hint_keys": [
+            "lesson.load-skill.knowledge.authority.hint1",
+            "lesson.load-skill.knowledge.authority.hint2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mcp-message",
+      "order": 26,
+      "milestone": false,
+      "title_key": "lesson.mcp-message.title",
+      "goal_key": "lesson.mcp-message.goal",
+      "reading_key": "lesson.mcp-message.reading",
+      "exercise_key": "lesson.mcp-message.exercise",
+      "rubric_key": "lesson.mcp-message.rubric",
+      "stage_key": "stage.build",
+      "duration_minutes": 25,
+      "starter": "lessons/mcp-message/starter",
+      "check": "lessons/mcp-message/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "load-skill"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "delegate",
+      "order": 27,
+      "milestone": false,
+      "title_key": "lesson.delegate.title",
+      "goal_key": "lesson.delegate.goal",
+      "reading_key": "lesson.delegate.reading",
+      "exercise_key": "lesson.delegate.exercise",
+      "rubric_key": "lesson.delegate.rubric",
+      "stage_key": "stage.build",
+      "duration_minutes": 25,
+      "starter": "lessons/delegate/starter",
+      "check": "lessons/delegate/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "mcp-message"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "regression-test",
+      "order": 28,
+      "milestone": false,
+      "title_key": "lesson.regression-test.title",
+      "goal_key": "lesson.regression-test.goal",
+      "reading_key": "lesson.regression-test.reading",
+      "exercise_key": "lesson.regression-test.exercise",
+      "rubric_key": "lesson.regression-test.rubric",
+      "stage_key": "stage.build",
+      "duration_minutes": 25,
+      "starter": "lessons/regression-test/starter",
+      "check": "lessons/regression-test/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "delegate"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "evaluate-behavior",
+      "order": 29,
+      "milestone": false,
+      "title_key": "lesson.evaluate-behavior.title",
+      "goal_key": "lesson.evaluate-behavior.goal",
+      "reading_key": "lesson.evaluate-behavior.reading",
+      "exercise_key": "lesson.evaluate-behavior.exercise",
+      "rubric_key": "lesson.evaluate-behavior.rubric",
+      "stage_key": "stage.build",
+      "duration_minutes": 25,
+      "starter": "lessons/evaluate-behavior/starter",
+      "check": "lessons/evaluate-behavior/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [],
+      "prerequisites": [
+        "regression-test"
+      ],
+      "trace_labels": {}
+    },
+    {
+      "id": "mini-harness",
+      "order": 30,
+      "milestone": true,
+      "title_key": "lesson.mini-harness.title",
+      "goal_key": "lesson.mini-harness.goal",
+      "reading_key": "lesson.mini-harness.reading",
+      "exercise_key": "lesson.mini-harness.exercise",
+      "rubric_key": "lesson.mini-harness.rubric",
+      "stage_key": "stage.build",
+      "duration_minutes": 25,
+      "starter": "lessons/mini-harness/starter",
+      "check": "lessons/mini-harness/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ],
+      "references": [
+        {
+          "path": "harness/core/agent.py",
+          "symbol": "AgentLoop"
+        },
+        {
+          "path": "harness/tools/registry.py",
+          "symbol": "ToolRegistry"
+        }
+      ],
+      "prerequisites": [
+        "evaluate-behavior"
+      ],
+      "trace_labels": {
+        "model/request": "lesson.mini-harness.trace.modelRequest",
+        "tool/result": "lesson.mini-harness.trace.toolResult",
+        "turn/end": "lesson.mini-harness.trace.turnEnd"
+      },
+      "knowledge_checks": [
+        {
+          "id": "transfer",
+          "prompt_key": "lesson.mini-harness.knowledge.transfer.prompt",
+          "options": [
+            {
+              "id": "bounded",
+              "label_key": "lesson.mini-harness.knowledge.transfer.bounded.label",
+              "feedback_key": "lesson.mini-harness.knowledge.transfer.bounded.feedback"
+            },
+            {
+              "id": "production",
+              "label_key": "lesson.mini-harness.knowledge.transfer.production.label",
+              "feedback_key": "lesson.mini-harness.knowledge.transfer.production.feedback"
+            },
+            {
+              "id": "mastered",
+              "label_key": "lesson.mini-harness.knowledge.transfer.mastered.label",
+              "feedback_key": "lesson.mini-harness.knowledge.transfer.mastered.feedback"
+            }
+          ],
+          "answer_id": "bounded",
+          "hint_keys": [
+            "lesson.mini-harness.knowledge.transfer.hint1",
+            "lesson.mini-harness.knowledge.transfer.hint2"
+          ]
+        }
+      ]
+    }
+  ]
+}

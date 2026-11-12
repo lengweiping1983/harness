@@ -1,0 +1,11 @@
+/** 模块加载入口集中声明，检查器与子代理详情共享浏览器的模块缓存。 */
+export const loadRequests = () => import('./RequestTracePanel').then(module => ({ default: module.RequestTracePanel }))
+export const loadContext = () => import('./ContextAuditPanel').then(module => ({ default: module.ContextAuditPanel }))
+export const loadPlans = () => import('./PlanHistory').then(module => ({ default: module.PlanHistory }))
+export const loadFile = () => import('./FilePreview').then(module => ({ default: module.FilePreview }))
+export const loadTasks = () => import('./TaskPanel').then(module => ({ default: module.TaskPanel }))
+export const loadRuntime = () => import('./RuntimeTab').then(module => ({ default: module.RuntimeTab }))
+export const loadGitWorkspace = () => import('../overlays/WorktreesPanel').then(module => ({ default: module.WorktreesPanel }))
+export const loadTerminalWorkspace = () => import('./TerminalWorkbench').then(module => ({ default: module.TerminalWorkbench }))
+export const loadBrowserWorkspace = () => import('./BrowserPanel').then(module => ({ default: module.BrowserPanel }))
+export const loadAcademy = () => import('./AcademyPanel').then(module => ({ default: module.AcademyPanel }))

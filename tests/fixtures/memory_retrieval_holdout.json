@@ -1,0 +1,28 @@
+{
+  "rows": [
+    {"id": "cancel", "topic": "lifecycle", "content": "调用者取消等待不能再次取消正在收尾的进程清理任务。", "evidence": "join_cleanup负责收敛"},
+    {"id": "isolation", "topic": "browser", "content": "原生浏览器截图和下载保持会话来源与生命周期隔离。", "evidence": "session_id绑定"},
+    {"id": "unknown", "topic": "transport", "content": "写请求响应丢失时先查询实际状态，不自动重发副作用。", "evidence": "read before retry"},
+    {"id": "format", "topic": "storage", "content": "已有数据库损坏时保留原文件并返回明确错误，不自动迁移。", "evidence": "schema验证"},
+    {"id": "draft", "topic": "interface", "content": "编辑已发消息在原位置进行，不覆盖底部未发送草稿。", "evidence": "composer隔离"},
+    {"id": "protocol", "topic": "api", "content": "公共协议由生成器同步调用方与测试，生成文件不手工编辑。", "evidence": "scripts/generate_protocol.py"},
+    {"id": "queue", "topic": "queue", "content": "队列重排使用后端完整快照比较，响应未知时读回状态。", "evidence": "optimistic snapshot"},
+    {"id": "font", "topic": "ui", "content": "系统中文字体及统一等宽字体，不引入远程字体加载。", "evidence": "typography约定"}
+  ],
+  "cases": [
+    {"name": "取消语义英文", "query": "Should a cancelled caller interrupt process teardown again?", "expected": ["cancel"]},
+    {"name": "取消同义中文", "query": "等待者退出后怎样保证资源回收继续完成", "expected": ["cancel"]},
+    {"name": "浏览器跨语种", "query": "Can one conversation receive another chat's downloaded files?", "expected": ["isolation"]},
+    {"name": "写入丢回复", "query": "The write timed out. Is repeating the operation safe?", "expected": ["unknown"]},
+    {"name": "存储损坏跨语种", "query": "May we replace a corrupt existing database automatically?", "expected": ["format"]},
+    {"name": "消息编辑跨语种", "query": "Where should sent-message edits happen without losing unsent text?", "expected": ["draft"]},
+    {"name": "生成文件跨语种", "query": "Should generated API contracts be changed by hand?", "expected": ["protocol"]},
+    {"name": "队列中文重述", "query": "调换待执行任务顺序后没有收到响应怎么办", "expected": ["queue"]},
+    {"name": "精确路径存在", "query": "scripts/generate_protocol.py", "expected": ["protocol"]},
+    {"name": "精确路径不存在", "query": "scripts/generate_network.py", "expected": []},
+    {"name": "代码前缀无答案", "query": "session_ident", "expected": []},
+    {"name": "自然问题无答案英文", "query": "Which GPU model provides the best image generation speed?", "expected": []},
+    {"name": "自然问题无答案中文", "query": "如何计算火星公转周期和大气密度", "expected": []},
+    {"name": "近域无答案", "query": "What is the configured database backup retention period?", "expected": []}
+  ]
+}

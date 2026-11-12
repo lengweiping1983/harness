@@ -1,0 +1,239 @@
+{
+  "extensionName": {
+    "message": "Harness Chat Companion"
+  },
+  "extensionDescription": {
+    "message": "Resume authorized Harness development in a bound ChatGPT Chat with receipts and draft protection."
+  },
+  "title": {
+    "message": "Chat continuation"
+  },
+  "language": {
+    "message": "Language"
+  },
+  "open_tab": {
+    "message": "Open in tab"
+  },
+  "hero_subtitle": {
+    "message": "Keep Harness development moving in an ordinary Chat."
+  },
+  "bridge_label": {
+    "message": "COMPANION BRIDGE"
+  },
+  "connection_heading": {
+    "message": "Connect Harness"
+  },
+  "connection_caption": {
+    "message": "Copy the address and token from the MCP page."
+  },
+  "session_heading": {
+    "message": "Bind development project"
+  },
+  "session_caption": {
+    "message": "Choose the project to continue."
+  },
+  "endpoint": {
+    "message": "Local bridge address"
+  },
+  "token": {
+    "message": "Pairing token"
+  },
+  "connect": {
+    "message": "Connect and load projects"
+  },
+  "session": {
+    "message": "Harness development project"
+  },
+  "target_session": {
+    "message": "Target on start: {title} ({project})."
+  },
+  "start": {
+    "message": "Enable for this chat"
+  },
+  "stop": {
+    "message": "Stop continuation"
+  },
+  "continuous": {
+    "message": "Continue after task completion"
+  },
+  "continuous_help": {
+    "message": "Even when unchecked, send “继续” after a reply ends, is interrupted, or shows a recoverable response error once the page stays idle, until the task passes acceptance. When checked, continue after acceptance so the AI can handle the next task. Your selection applies when you enable continuation. Each reply and execution milestone is requested only once. To stop automation, use Stop continuation in this extension. An unconfirmed message send and the 8-hour and 100-message limits still pause continuation."
+  },
+  "waiting_next_task": {
+    "message": "Continuation requested. Waiting for the next task or new execution progress."
+  },
+  "interrupted": {
+    "message": "The task was interrupted. Waiting for the page to become idle before continuing."
+  },
+  "explanation": {
+    "message": "Binds the current ChatGPT Chat for 8 hours, up to 100 continuation messages. Protects drafts and stops on uncertain sends. Already accepted messages may finish after stopping."
+  },
+  "connected": {
+    "message": "Connected. Choose the correct Harness project."
+  },
+  "enabled": {
+    "message": "Continuation enabled for this chat."
+  },
+  "working": {
+    "message": "Waiting for the current task or reply."
+  },
+  "waiting_executor": {
+    "message": "A Harness tool, job or pipeline has not finished. Continuation waits for it to settle."
+  },
+  "waiting_reply": {
+    "message": "Waiting for the current ChatGPT reply to finish."
+  },
+  "reply_unrecognized": {
+    "message": "No assistant reply was recognized; no message will be sent. If a reply is visible, update the extension and refresh the Chat."
+  },
+  "stabilizing": {
+    "message": "Reply recognized. Confirming that the page stays idle before continuation."
+  },
+  "timing": {
+    "message": "Checks immediately when enabled, then waits a newly randomized 120–180 seconds after each check. Once a reply ends and the page stays idle, continuation usually takes one or two checks (about 2–6 minutes); browser sleep or scheduling delays can take longer."
+  },
+  "last_checked": {
+    "message": "Last check: {time}"
+  },
+  "complete": {
+    "message": "Verification completed. Continuation stopped."
+  },
+  "paused": {
+    "message": "Continuation paused."
+  },
+  "blocked": {
+    "message": "An uncertain result needs review. Continuation paused."
+  },
+  "offline": {
+    "message": "Executor is offline. Waiting for it to return."
+  },
+  "bridge_unavailable": {
+    "message": "Bridge unavailable. Read-only reconnection checks continue; no message is resent."
+  },
+  "send_unconfirmed": {
+    "message": "The previous “继续” message has not been confirmed. Continuation paused to avoid a duplicate. Check the chat history before enabling again."
+  },
+  "unsupported_page": {
+    "message": "Page controls changed. Continuation paused; update the adapter."
+  },
+  "wrong_chat": {
+    "message": "The bound chat changed. Continuation stopped."
+  },
+  "draft": {
+    "message": "Your draft or attachment is protected. Waiting."
+  },
+  "composing": {
+    "message": "Waiting for text composition to finish."
+  },
+  "user_active": {
+    "message": "Waiting while you interact with this chat."
+  },
+  "busy": {
+    "message": "Waiting for generation or an open dialog."
+  },
+  "waiting_progress": {
+    "message": "This step was already requested. Waiting for new progress."
+  },
+  "time_limit": {
+    "message": "The 8-hour session ended. Review progress before enabling again."
+  },
+  "invalid_endpoint": {
+    "message": "Use a local http://127.0.0.1 address."
+  },
+  "choose_session": {
+    "message": "Choose a Harness development project first."
+  },
+  "page_changed": {
+    "message": "The page changed. Check the draft before continuing."
+  },
+  "request_failed": {
+    "message": "Request failed. Check the local bridge and pairing token."
+  },
+  "setup_title": {
+    "message": "Connection and usage help"
+  },
+  "setup_bridge": {
+    "message": "Start MCP on the Harness MCP page and enable the automatic companion below it. Copy the local address and pairing token from that page."
+  },
+  "setup_pair": {
+    "message": "Paste the bridge address and pairing token below, then connect. Keep the token out of ChatGPT messages."
+  },
+  "setup_chat": {
+    "message": "Open an existing ChatGPT Chat, refresh it after updating the extension, choose the project, review the next enable target, then enable continuation."
+  },
+  "setup_remote": {
+    "message": "The bridge address belongs to the computer running this browser. A remote Harness needs a separately configured secure local tunnel."
+  },
+  "not_enabled": {
+    "message": "Continuation is off. Connecting alone does not send a message."
+  },
+  "not_connected": {
+    "message": "Enter the bridge address and pairing token to check the connection."
+  },
+  "checking_connection": {
+    "message": "Checking the local bridge and executor…"
+  },
+  "pairing_required": {
+    "message": "Enter the pairing token from Chat continuation on the Harness MCP page. Do not paste it into ChatGPT."
+  },
+  "pairing_denied": {
+    "message": "The bridge rejected this pairing token. Copy the token from the bridge started with your MCP executor configuration."
+  },
+  "bridge_request_failed": {
+    "message": "The bridge rejected the request. Confirm the bridge version, executor configuration and conversation permissions."
+  },
+  "bridge_response_invalid": {
+    "message": "The bridge response does not match this extension. Update the Harness companion bridge and check again."
+  },
+  "executor_missing": {
+    "message": "The bridge is reachable, but this configuration has no executor database. Start Harness MCP with the same configuration first."
+  },
+  "executor_invalid": {
+    "message": "The bridge is reachable, but executor data could not be read. The original data was preserved; check the executor diagnostics."
+  },
+  "executor_offline": {
+    "message": "The bridge is paired, but Harness MCP is offline. Start MCP with the same configuration; existing conversations are listed below."
+  },
+  "no_sessions": {
+    "message": "The bridge is paired, but no authorized development conversation exists. In ChatGPT, connect Harness MCP and open a project conversation first."
+  },
+  "page_unavailable": {
+    "message": "The extension cannot read this page yet. Refresh the target ChatGPT tab after installing or updating the extension, then try again."
+  },
+  "open_chat": {
+    "message": "Open an existing conversation at chatgpt.com in this browser, then click this extension from that tab."
+  },
+  "source_chat_unavailable": {
+    "message": "The original ChatGPT tab was closed or changed. Open the extension again from the intended ChatGPT conversation."
+  },
+  "install_title": {
+    "message": "Harness Chat Companion — start here"
+  },
+  "install_unpack": {
+    "message": "Extract this ZIP to a permanent folder. The folder you select in the browser must contain manifest.json directly. Keep this folder after installation."
+  },
+  "install_chrome": {
+    "message": "In Chrome, open chrome://extensions. In Edge, open edge://extensions. Turn on Developer mode, click Load unpacked, and select the folder containing manifest.json."
+  },
+  "install_pin": {
+    "message": "Pin Harness Chat Companion from the browser Extensions menu. Refresh the target ChatGPT conversation once, then click the pinned extension."
+  },
+  "install_backend": {
+    "message": "This package contains the browser extension. The local bridge is part of Harness and must use the same executor configuration as the connected MCP service."
+  },
+  "install_command": {
+    "message": "Start MCP on the Harness MCP page, then click Enable continuation in the separate block below. Once enabled, the companion starts automatically with MCP. Copy its address, pairing token and project extension folder from this block. No separate CMD file is needed."
+  },
+  "install_safety": {
+    "message": "The bridge stays on 127.0.0.1. Never publish its pairing token or put it in ChatGPT messages. Login, tool approvals, CAPTCHA and usage limits may still need your action."
+  },
+  "install_readme": {
+    "message": "Open INSTALL.html for the complete bilingual installation and pairing steps."
+  },
+  "show_token": {
+    "message": "Show pairing token"
+  },
+  "hide_token": {
+    "message": "Hide pairing token"
+  }
+}

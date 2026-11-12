@@ -1,0 +1,12 @@
+{
+  "title": "实验推断回归：观察、缺证、否证与取证成本",
+  "team": "experiment-lab-evaluation",
+  "required_members": [
+    "measurement",
+    "skeptic"
+  ],
+  "prompt": "只允许读取当前目录summary.md，这是构造案例。请实际委派measurement独立核对描述量与口径、skeptic独立复核事实主张与推断边界，不派design。成员仅允许调用read工具读取summary.md，不得调用其他任何工具；不能读取其他文件、历史、记忆或项目板；不联网、不执行命令、不写文件、不提问。只复核现有主张，不安排实验、成本排序或样本量计划。最终输出一个JSON代码块：claims数组逐条含id、verdict（supported/contradicted/unknown）、reason及sources数组（path为相对文件名、quote为逐字连续原文）；member_sources列出两成员的member与真实agent_id。分类针对主张的事实真值，不能把证据不足或推理无效当作事实被否证；算术差也不能直接升级为因果效果。以下主张各出现一次：{\"E1\": \"分析表中A完成比例为10%，B为15%，绝对差5个百分点，描述性相对差50%。\", \"E2\": \"新版本使所有随机分配用户的目标完成率因果提升了50%。\", \"E3\": \"B组真实业务完成延迟p95恰为A组的一半。\", \"E4\": \"分析表中的活跃用户总人数超过1000人。\", \"E5\": \"实际随机分配实现发生了错误。\", \"E6\": \"实验中的真实数据丢失率为零。\", \"E7\": \"分配日志现成可取，而且是成本最低的补证据方式。\"}",
+  "member_read_paths": [
+    "summary.md"
+  ]
+}

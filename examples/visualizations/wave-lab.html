@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wave Lab · 两束波，合成了一个新形状</title>
+<style>
+  :root {
+    --ink: var(--color-text-primary, #0f172a);
+    --muted: var(--color-text-secondary, #64748b);
+    --line: var(--color-border-tertiary, rgba(15, 23, 42, .12));
+    --panel: var(--color-background-primary, #ffffff);
+    --accent-a: #0e93a8;
+    --accent-b: #d63f92;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    padding: 26px 20px 34px;
+    background: var(--panel);
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+
+  .eyebrow {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .eyebrow .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #06b6d4; box-shadow: 0 0 0 3px rgba(6, 182, 212, .16);
+  }
+  h1 {
+    margin: 12px 0 8px;
+    font-size: clamp(22px, 3.4vw, 31px);
+    font-weight: 650; letter-spacing: -.025em; line-height: 1.2;
+  }
+  .sub {
+    margin: 0 0 22px; max-width: 64ch;
+    font-size: 14px; line-height: 1.7; color: var(--muted);
+  }
+  .sub em { font-style: normal; color: var(--ink); font-weight: 600; }
+
+  .scope {
+    position: relative; overflow: hidden;
+    border-radius: 18px;
+    background: radial-gradient(95% 140% at 50% -10%, #14263a 0%, #0a111b 56%, #060a10 100%);
+    border: 1px solid rgba(148, 197, 255, .16);
+    box-shadow: 0 24px 48px -24px rgba(3, 10, 22, .75), inset 0 1px 0 rgba(255, 255, 255, .06);
+  }
+  .scope-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 11px 16px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+    color: #8098b3;
+    border-bottom: 1px solid rgba(148, 197, 255, .1);
+  }
+  .bar-right { display: flex; align-items: center; gap: 12px; }
+  .live { display: inline-flex; align-items: center; gap: 6px; color: #5eead4; }
+  .live i {
+    width: 6px; height: 6px; border-radius: 50%; background: #2dd4bf;
+    box-shadow: 0 0 8px #2dd4bf; animation: breathe 2.6s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .28; } }
+  .pause-btn {
+    appearance: none; cursor: pointer;
+    font: inherit; font-size: 10px; letter-spacing: .14em;
+    color: #cfe4ff; background: rgba(148, 197, 255, .08);
+    border: 1px solid rgba(148, 197, 255, .22);
+    border-radius: 999px; padding: 5px 12px;
+    transition: background .18s ease;
+  }
+  .pause-btn:hover { background: rgba(148, 197, 255, .18); }
+  .pause-btn:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
+  #scope { display: block; width: 100%; height: clamp(204px, 33vw, 286px); }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 8px 22px;
+    margin: 0; padding: 11px 16px 14px;
+    list-style: none;
+    border-top: 1px solid rgba(148, 197, 255, .08);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; color: #93a9c2;
+  }
+  .legend li { display: inline-flex; align-items: center; gap: 7px; }
+  .legend .swatch { width: 7px; height: 7px; border-radius: 2px; }
+  .legend .num { color: #dbe9f7; font-variant-numeric: tabular-nums; }
+
+  .controls {
+    margin-top: 22px;
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 18px;
+  }
+  .group {
+    border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px 16px 10px;
+  }
+  .group h2 {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0 0 4px; font-size: 12.5px; font-weight: 650;
+  }
+  .group h2 .swatch { width: 8px; height: 8px; border-radius: 2px; }
+  .group h2 .tag {
+    margin-left: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 9.5px; letter-spacing: .16em; color: var(--muted); font-weight: 400;
+  }
+  .slider-row { padding-top: 10px; }
+  .row-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12px; color: var(--muted); margin-bottom: 2px;
+  }
+  .row-head .val {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  input[type="range"] {
+    width: 100%; margin: 0; height: 22px;
+    accent-color: var(--accent); cursor: pointer;
+    background: transparent;
+  }
+  input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+  .readout {
+    margin-top: 20px;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+  }
+  .metric { padding: 13px 16px 14px; }
+  .metric + .metric { border-left: 1px solid var(--line); }
+  .metric .k {
+    font-size: 10px; font-weight: 650; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .metric .v {
+    margin-top: 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 21px; font-weight: 600; letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .insight {
+    margin: 18px 0 0; padding: 12px 14px;
+    border-left: 2px solid #f0b429;
+    background: linear-gradient(90deg, rgba(240, 180, 41, .1), transparent 72%);
+    border-radius: 0 10px 10px 0;
+    font-size: 13px; line-height: 1.65;
+  }
+  .insight b { font-weight: 650; }
+  .foot { margin: 16px 0 0; font-size: 11px; color: var(--muted); }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  @media (max-width: 620px) {
+    .controls { grid-template-columns: 1fr; }
+    .scope-bar { padding: 10px 12px; letter-spacing: .1em; }
+    .legend { gap: 6px 16px; padding: 10px 12px 12px; }
+  }
+  @media (max-width: 520px) {
+    .metric { padding: 11px 12px 12px; }
+    .metric .v { font-size: 17px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow"><span class="dot"></span><span>Wave Lab · 交互演示</span></div>
+    <h1>两束波，合成了一个新形状。</h1>
+    <p class="sub">拖动滑块调整两束正弦波的频率与振幅，下面的合成波会实时重算。当两者频率接近时，留意振幅的周期性起伏——那就是<em>拍</em>。</p>
+  </header>
+
+  <section class="scope" aria-labelledby="scopeTitle">
+    <div class="scope-bar">
+      <span id="scopeTitle">OSC-1 · 双通道合成</span>
+      <span class="bar-right">
+        <span class="live"><i></i>LIVE</span>
+        <button id="toggle" class="pause-btn" type="button" aria-pressed="false">暂停</button>
+      </span>
+    </div>
+    <svg id="scope" viewBox="0 0 800 260" preserveAspectRatio="none" role="img"
+         aria-label="青色波 A、粉色波 B 与黄色合成波的实时波形图">
+      <defs>
+        <pattern id="grid" width="40" height="32.5" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 H 0 V 32.5" fill="none" stroke="rgba(125, 180, 240, 0.09)" stroke-width="1"/>
+        </pattern>
+        <filter id="glow" x="-25%" y="-60%" width="150%" height="220%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="3.4" result="blur"/>
+          <feMerge>
+            <feMergeNode in="blur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+      </defs>
+      <rect width="800" height="260" fill="url(#grid)"/>
+      <line x1="0" y1="130" x2="800" y2="130" stroke="rgba(148, 197, 255, 0.2)" stroke-dasharray="2 7"/>
+      <path id="waveA" fill="none" stroke="#38e8ff" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity=".9"/>
+      <path id="waveB" fill="none" stroke="#ff7ac6" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity=".9"/>
+      <path id="waveC" fill="none" stroke="#ffd166" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" filter="url(#glow)"/>
+    </svg>
+    <ul class="legend" aria-label="通道图例">
+      <li><span class="swatch" style="background:#38e8ff"></span>波 A <span class="num" id="legendA">2.0 Hz · 0.90 V</span></li>
+      <li><span class="swatch" style="background:#ff7ac6"></span>波 B <span class="num" id="legendB">3.2 Hz · 0.55 V</span></li>
+      <li><span class="swatch" style="background:#ffd166"></span>合成 A+B</li>
+    </ul>
+  </section>
+
+  <section class="controls" aria-label="波形参数">
+    <div class="group" style="--accent: var(--accent-a)">
+      <h2><span class="swatch" style="background:#0e93a8"></span>波 A<span class="tag">CH 1</span></h2>
+      <div class="slider-row">
+        <div class="row-head"><label for="fA">频率</label><span class="val" id="fAVal">2.0 Hz</span></div>
+        <input id="fA" type="range" min="1" max="6" step="0.1" value="2">
+      </div>
+      <div class="slider-row">
+        <div class="row-head"><label for="aA">振幅</label><span class="val" id="aAVal">0.90 V</span></div>
+        <input id="aA" type="range" min="0" max="1" step="0.01" value="0.9">
+      </div>
+    </div>
+    <div class="group" style="--accent: var(--accent-b)">
+      <h2><span class="swatch" style="background:#d63f92"></span>波 B<span class="tag">CH 2</span></h2>
+      <div class="slider-row">
+        <div class="row-head"><label for="fB">频率</label><span class="val" id="fBVal">3.2 Hz</span></div>
+        <input id="fB" type="range" min="1" max="6" step="0.1" value="3.2">
+      </div>
+      <div class="slider-row">
+        <div class="row-head"><label for="aB">振幅</label><span class="val" id="aBVal">0.55 V</span></div>
+        <input id="aB" type="range" min="0" max="1" step="0.01" value="0.55">
+      </div>
+    </div>
+  </section>
+
+  <section class="readout" aria-label="合成波指标">
+    <div class="metric"><div class="k">峰峰值</div><div class="v" id="ppVal">2.90 V</div></div>
+    <div class="metric"><div class="k">拍频</div><div class="v" id="beatVal">1.20 Hz</div></div>
+    <div class="metric"><div class="k">拍周期</div><div class="v" id="periodVal">0.83 s</div></div>
+  </section>
+
+  <p class="insight" id="insight"><b>拍频区</b>：两束波的频率差可见，合成波的振幅在做周期性起伏。</p>
+  <p class="sr-only" aria-live="polite" id="liveStatus"></p>
+  <p class="foot">示意模型 · 理想正弦叠加，未含噪声与衰减；两束波之间固定 0.9 弧度相位差。</p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var TAU = Math.PI * 2;
+  var W = 800, MID = 130, N = 320, AMP_PX = 100, SPEED = 2.0, PHASE_B = 0.9;
+
+  var state = { fA: 2, aA: 0.9, fB: 3.2, aB: 0.55, phase: 0 };
+  var raf = null, lastTs = 0, running = false;
+
+  var els = {
+    waveA: document.getElementById('waveA'),
+    waveB: document.getElementById('waveB'),
+    waveC: document.getElementById('waveC'),
+    fA: document.getElementById('fA'),
+    aA: document.getElementById('aA'),
+    fB: document.getElementById('fB'),
+    aB: document.getElementById('aB'),
+    fAVal: document.getElementById('fAVal'),
+    aAVal: document.getElementById('aAVal'),
+    fBVal: document.getElementById('fBVal'),
+    aBVal: document.getElementById('aBVal'),
+    legendA: document.getElementById('legendA'),
+    legendB: document.getElementById('legendB'),
+    ppVal: document.getElementById('ppVal'),
+    beatVal: document.getElementById('beatVal'),
+    periodVal: document.getElementById('periodVal'),
+    insight: document.getElementById('insight'),
+    toggle: document.getElementById('toggle'),
+    live: document.getElementById('liveStatus')
+  };
+
+  var ranges = [
+    { el: els.fA, key: 'fA' },
+    { el: els.aA, key: 'aA' },
+    { el: els.fB, key: 'fB' },
+    { el: els.aB, key: 'aB' }
+  ];
+
+  ranges.forEach(function (r) {
+    state[r.key] = parseFloat(r.el.value);
+  });
+
+  function buildPaths() {
+    var gain = AMP_PX / Math.max(1, state.aA + state.aB);
+    var da = '', db = '', dc = '';
+    for (var i = 0; i <= N; i++) {
+      var t = i / N;
+      var x = (t * W).toFixed(2);
+      var a = Math.sin(TAU * state.fA * t + state.phase) * state.aA;
+      var b = Math.sin(TAU * state.fB * t + state.phase + PHASE_B) * state.aB;
+      var cmd = i ? 'L' : 'M';
+      da += cmd + x + ' ' + (MID - a * gain).toFixed(2);
+      db += cmd + x + ' ' + (MID - b * gain).toFixed(2);
+      dc += cmd + x + ' ' + (MID - (a + b) * gain).toFixed(2);
+    }
+    els.waveA.setAttribute('d', da);
+    els.waveB.setAttribute('d', db);
+    els.waveC.setAttribute('d', dc);
+  }
+
+  function insightText(beat) {
+    if (beat < 0.25) {
+      return ['近同频', '两束波几乎合拍，包络起伏极慢，合成结果接近一束纯音。'];
+    }
+    if (beat < 1.6) {
+      return ['拍频区', '两束波的频率差可见，合成波的振幅在做周期性起伏——这就是“拍”。'];
+    }
+    return ['复杂叠加', '两束波差异明显，一个窗口内出现多个周期，波形结构更复杂。'];
+  }
+
+  function refresh() {
+    els.fAVal.textContent = state.fA.toFixed(1) + ' Hz';
+    els.aAVal.textContent = state.aA.toFixed(2) + ' V';
+    els.fBVal.textContent = state.fB.toFixed(1) + ' Hz';
+    els.aBVal.textContent = state.aB.toFixed(2) + ' V';
+    els.legendA.textContent = state.fA.toFixed(1) + ' Hz · ' + state.aA.toFixed(2) + ' V';
+    els.legendB.textContent = state.fB.toFixed(1) + ' Hz · ' + state.aB.toFixed(2) + ' V';
+
+    var pp = 2 * (state.aA + state.aB);
+    var beat = Math.abs(state.fA - state.fB);
+    els.ppVal.textContent = pp.toFixed(2) + ' V';
+    els.beatVal.textContent = beat < 0.05 ? '—' : beat.toFixed(2) + ' Hz';
+    els.periodVal.textContent = beat < 0.05 ? '—' : (1 / beat).toFixed(2) + ' s';
+
+    var info = insightText(beat);
+    els.insight.innerHTML = '<b>' + info[0] + '</b>：' + info[1];
+  }
+
+  function announce() {
+    var pp = 2 * (state.aA + state.aB);
+    var beat = Math.abs(state.fA - state.fB);
+    els.live.textContent =
+      '波 A ' + state.fA.toFixed(1) + ' 赫兹，振幅 ' + state.aA.toFixed(2) + ' 伏；' +
+      '波 B ' + state.fB.toFixed(1) + ' 赫兹，振幅 ' + state.aB.toFixed(2) + ' 伏；' +
+      '合成峰峰值 ' + pp.toFixed(2) + ' 伏，' +
+      (beat < 0.05 ? '两波同频，无拍频。' : '拍频 ' + beat.toFixed(2) + ' 赫兹。');
+  }
+
+  ranges.forEach(function (r) {
+    r.el.addEventListener('input', function () {
+      state[r.key] = parseFloat(r.el.value);
+      refresh();
+      buildPaths();
+    });
+    r.el.addEventListener('change', announce);
+  });
+
+  function tick(ts) {
+    if (!lastTs) lastTs = ts;
+    var dt = Math.min(0.05, (ts - lastTs) / 1000);
+    lastTs = ts;
+    state.phase += dt * SPEED;
+    buildPaths();
+    raf = requestAnimationFrame(tick);
+  }
+
+  function start() {
+    if (raf !== null) return;
+    lastTs = 0;
+    raf = requestAnimationFrame(tick);
+  }
+
+  function stop() {
+    if (raf !== null) cancelAnimationFrame(raf);
+    raf = null;
+  }
+
+  function setRunning(on) {
+    running = on;
+    els.toggle.textContent = on ? '暂停' : '播放';
+    els.toggle.setAttribute('aria-pressed', on ? 'false' : 'true');
+    if (on) start(); else stop();
+  }
+
+  els.toggle.addEventListener('click', function () {
+    setRunning(!running);
+  });
+
+  refresh();
+  buildPaths();
+
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  setRunning(!reduce);
+})();
+</script>
+</body>
+</html>

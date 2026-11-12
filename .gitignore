@@ -1,0 +1,95 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 打包 / 构建
+build/
+dist_build/
+dist/
+*.egg-info/
+.eggs/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 测试与工具缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 会话日志（运行时产生，含用户对话，不应入库）
+sessions/
+*.jsonl
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+
+# 密钥：绝不提交
+.env
+.env.*
+*.key
+*.pem
+connection-secrets.json
+chatgpt-account.json
+codex-gateway.json
+codex-gateway.json.*.tmp
+codex-gateway*.lock
+api-keys.txt
+
+.playwright-cli
+
+# UI 服务运行时日志
+.ui.log
+.ui.err
+
+# E2E / 验证脚本的运行产物
+e2e_run_code_task.txt
+e2e_cat03.jpg
+Cat03.jpg
+e2e_probe.png
+
+# 本地服务运行日志（UI 8766）
+.server8766.log
+.server8766.err
+.run/
+
+# git bundle 归档（临时快照，不入库）
+*.bundle
+
+# 前端依赖与构建缓存
+web/node_modules/
+web/.vite/
+web/dist/
+web/*.tsbuildinfo
+
+# harness 运行时工作区（会话、附件落盘、缓存；含用户内容，不入库）
+.harness/*
+!.harness/skills/
+.workbuddy/
+# 人工/探针放置的散落素材
+tmp_img.jpg
+web/shots/
+web/ui_probe*.cjs
+web/echo_*.png
+web/echo_*.md
+
+# Browser verification artifacts
+output/
+dsh-superagent-prototype/
+
+# Desktop dependencies
+desktop/node_modules/
+node_modules/
+
+# Playwright MCP 验证产物
+.playwright-mcp/
+
+# Hex 官方预编译引擎统一存放在 harness/resources/hex/，随源码库分发。

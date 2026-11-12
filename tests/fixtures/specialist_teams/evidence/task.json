@@ -1,0 +1,14 @@
+{
+  "title": "证据研究团队 Terra 在线验收：独立来源与未知事实",
+  "team": "team-research-custom",
+  "required_members": [
+    "researcher",
+    "counterpart",
+    "verifier"
+  ],
+  "member_read_paths": [
+    "primary.md",
+    "coverage.md"
+  ],
+  "prompt": "这是构造案例。只允许读取当前目录的primary.md,coverage.md。请实际委派researcher,counterpart,verifier分别研究与反证，最后核对结论；成员只允许调用read工具读取上述文件，不得调用其他工具或读取其他资料、历史、记忆、项目板；不联网、不执行命令、不写入、不提问。最终输出一个JSON代码块：claims数组逐项含id、verdict（supported/contradicted/unknown）、reason及sources数组（path相对文件名、quote逐字连续原文）；member_sources列出指定各成员的member与真实agent_id。分类针对事实真值，未知不等于否证。需核对主张：R1=构造厂商报告声称有10000名用户；R2=原始报告与两篇报道构成三个独立用户规模测量；R3=产品真实准确率达到99%。"
+}

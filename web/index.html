@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Harness</title>
+    <link rel="icon" type="image/svg+xml" href="/brand/harness.svg" />
+    <link rel="apple-touch-icon" href="/brand/harness-180.png" />
+    <script>
+      // 在首帧前落主题，避免刷新时白闪。
+      try {
+        var saved = localStorage.getItem('harness.ui-theme')
+        var dark = saved === 'dark' || saved !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches
+        document.documentElement.classList.toggle('dark', dark)
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        var size = Number(localStorage.getItem('harness.ui-font-size'))
+        if (size >= 10 && size <= 22) document.documentElement.style.fontSize = Math.round(size) + 'px'
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/bootstrap.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "3.3.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "sha256": "6d0d13073dfdfc93eda8211c1c005ccb496f8c536ca856641b00e970b8a826e1",
+  "source": "https://anoma.ly/hex/download/macos-arm64-dmg",
+  "standalone_signature": "adhoc",
+  "vendored_at": "2026-11-03",
+  "binary": "hex",
+  "notes": "官方预编译 Hex 语音引擎，随源码库分发；由 scripts/vendor-hex-engine.mjs 登记。请勿手工编辑 sha256。"
+}

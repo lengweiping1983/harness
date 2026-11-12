@@ -1,0 +1,49 @@
+appId: io.github.lengweiping1983.harness
+productName: Harness
+electronDist: node_modules/electron/dist
+asar: true
+asarUnpack:
+  - capture-screen.ps1
+beforePack: ./verify-runtime.mjs
+directories:
+  output: ../.run/installers
+files:
+  - '*.mjs'
+  - '*.cjs'
+  - '!prepare-release.mjs'
+  - '!prepare-voice.mjs'
+  - '!verify-runtime.mjs'
+  - '!mac-signing.mjs'
+  - '!hex-engine-manifest.mjs'
+  - '!release-assets.mjs'
+  - '!electron-builder.config.cjs'
+  - '!update-source.cjs'
+  - '!setup.mjs'
+  - '!launch.mjs'
+  - capture-screen.ps1
+  - assets/harness.png
+  - assets/harness-macos.png
+extraResources:
+  - from: ../.run/desktop-release/resources
+    to: runtime
+mac:
+  extraResources:
+    - from: ../.run/desktop-release/resources/voice/en.lproj
+      to: en.lproj
+    - from: ../.run/desktop-release/resources/voice/zh-Hans.lproj
+      to: zh-Hans.lproj
+  icon: assets/harness.icns
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+win:
+  icon: assets/harness.ico
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  deleteAppDataOnUninstall: false
+artifactName: Harness-${version}-${os}-${arch}.${ext}

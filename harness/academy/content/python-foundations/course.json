@@ -1,0 +1,712 @@
+{
+  "schema": 1,
+  "id": "python-foundations",
+  "version": "1.0.0",
+  "source_revision": "team-course-2026-10-29",
+  "title_key": "course.title",
+  "description_key": "course.description",
+  "assumptions_key": "course.assumptions",
+  "references": [
+    "https://docs.python.org/3.14/tutorial/introduction.html",
+    "https://docs.python.org/3.14/tutorial/controlflow.html",
+    "https://docs.python.org/3.14/tutorial/datastructures.html",
+    "https://docs.python.org/3.14/tutorial/inputoutput.html",
+    "https://docs.python.org/3.14/tutorial/errors.html"
+  ],
+  "lessons": [
+    {
+      "id": "values",
+      "order": 1,
+      "mode": "python",
+      "milestone": false,
+      "references": [
+        {
+          "path": "lessons/values/solution.py",
+          "symbol": ""
+        }
+      ],
+      "prerequisites": [],
+      "stage_key": "stage.0.title",
+      "stage_goal_key": "stage.0.goal",
+      "duration_minutes": 15,
+      "title_key": "lesson.values.title",
+      "goal_key": "lesson.values.goal",
+      "reading_key": "lesson.values.reading",
+      "exercise_key": "lesson.values.exercise",
+      "rubric_key": "lesson.values.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.values.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "guess",
+              "label_key": "lesson.values.guess",
+              "feedback_key": "lesson.values.guess.feedback"
+            },
+            {
+              "id": "observe",
+              "label_key": "lesson.values.observe",
+              "feedback_key": "lesson.values.observe.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.values.hint.1",
+            "lesson.values.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/values/starter",
+      "check": "lessons/values/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ]
+    },
+    {
+      "id": "calculations",
+      "order": 2,
+      "mode": "python",
+      "milestone": false,
+      "references": [
+        {
+          "path": "lessons/calculations/solution.py",
+          "symbol": ""
+        }
+      ],
+      "prerequisites": [
+        "values"
+      ],
+      "stage_key": "stage.0.title",
+      "stage_goal_key": "stage.0.goal",
+      "duration_minutes": 20,
+      "title_key": "lesson.calculations.title",
+      "goal_key": "lesson.calculations.goal",
+      "reading_key": "lesson.calculations.reading",
+      "exercise_key": "lesson.calculations.exercise",
+      "rubric_key": "lesson.calculations.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.calculations.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "observe",
+              "label_key": "lesson.calculations.observe",
+              "feedback_key": "lesson.calculations.observe.feedback"
+            },
+            {
+              "id": "guess",
+              "label_key": "lesson.calculations.guess",
+              "feedback_key": "lesson.calculations.guess.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.calculations.hint.1",
+            "lesson.calculations.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/calculations/starter",
+      "check": "lessons/calculations/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ]
+    },
+    {
+      "id": "clean-text",
+      "order": 3,
+      "mode": "python",
+      "milestone": true,
+      "references": [
+        {
+          "path": "lessons/clean-text/solution.py",
+          "symbol": ""
+        }
+      ],
+      "prerequisites": [
+        "calculations"
+      ],
+      "stage_key": "stage.0.title",
+      "stage_goal_key": "stage.0.goal",
+      "duration_minutes": 20,
+      "title_key": "lesson.clean-text.title",
+      "goal_key": "lesson.clean-text.goal",
+      "reading_key": "lesson.clean-text.reading",
+      "exercise_key": "lesson.clean-text.exercise",
+      "rubric_key": "lesson.clean-text.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.clean-text.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "guess",
+              "label_key": "lesson.clean-text.guess",
+              "feedback_key": "lesson.clean-text.guess.feedback"
+            },
+            {
+              "id": "observe",
+              "label_key": "lesson.clean-text.observe",
+              "feedback_key": "lesson.clean-text.observe.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.clean-text.hint.1",
+            "lesson.clean-text.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/clean-text/starter",
+      "check": "lessons/clean-text/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": ""
+        }
+      ]
+    },
+    {
+      "id": "functions",
+      "order": 4,
+      "mode": "python",
+      "milestone": false,
+      "references": [
+        {
+          "path": "lessons/functions/solution.py",
+          "symbol": "duration"
+        }
+      ],
+      "prerequisites": [
+        "clean-text"
+      ],
+      "stage_key": "stage.1.title",
+      "stage_goal_key": "stage.1.goal",
+      "duration_minutes": 20,
+      "title_key": "lesson.functions.title",
+      "goal_key": "lesson.functions.goal",
+      "reading_key": "lesson.functions.reading",
+      "exercise_key": "lesson.functions.exercise",
+      "rubric_key": "lesson.functions.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.functions.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "observe",
+              "label_key": "lesson.functions.observe",
+              "feedback_key": "lesson.functions.observe.feedback"
+            },
+            {
+              "id": "guess",
+              "label_key": "lesson.functions.guess",
+              "feedback_key": "lesson.functions.guess.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.functions.hint.1",
+            "lesson.functions.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/functions/starter",
+      "check": "lessons/functions/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": "duration"
+        }
+      ]
+    },
+    {
+      "id": "decisions",
+      "order": 5,
+      "mode": "python",
+      "milestone": false,
+      "references": [
+        {
+          "path": "lessons/decisions/solution.py",
+          "symbol": "ready"
+        }
+      ],
+      "prerequisites": [
+        "functions"
+      ],
+      "stage_key": "stage.1.title",
+      "stage_goal_key": "stage.1.goal",
+      "duration_minutes": 20,
+      "title_key": "lesson.decisions.title",
+      "goal_key": "lesson.decisions.goal",
+      "reading_key": "lesson.decisions.reading",
+      "exercise_key": "lesson.decisions.exercise",
+      "rubric_key": "lesson.decisions.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.decisions.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "guess",
+              "label_key": "lesson.decisions.guess",
+              "feedback_key": "lesson.decisions.guess.feedback"
+            },
+            {
+              "id": "observe",
+              "label_key": "lesson.decisions.observe",
+              "feedback_key": "lesson.decisions.observe.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.decisions.hint.1",
+            "lesson.decisions.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/decisions/starter",
+      "check": "lessons/decisions/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": "ready"
+        }
+      ]
+    },
+    {
+      "id": "sequences",
+      "order": 6,
+      "mode": "python",
+      "milestone": true,
+      "references": [
+        {
+          "path": "lessons/sequences/solution.py",
+          "symbol": "first_task"
+        }
+      ],
+      "prerequisites": [
+        "decisions"
+      ],
+      "stage_key": "stage.1.title",
+      "stage_goal_key": "stage.1.goal",
+      "duration_minutes": 20,
+      "title_key": "lesson.sequences.title",
+      "goal_key": "lesson.sequences.goal",
+      "reading_key": "lesson.sequences.reading",
+      "exercise_key": "lesson.sequences.exercise",
+      "rubric_key": "lesson.sequences.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.sequences.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "observe",
+              "label_key": "lesson.sequences.observe",
+              "feedback_key": "lesson.sequences.observe.feedback"
+            },
+            {
+              "id": "guess",
+              "label_key": "lesson.sequences.guess",
+              "feedback_key": "lesson.sequences.guess.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.sequences.hint.1",
+            "lesson.sequences.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/sequences/starter",
+      "check": "lessons/sequences/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": "first_task"
+        }
+      ]
+    },
+    {
+      "id": "loops",
+      "order": 7,
+      "mode": "python",
+      "milestone": false,
+      "references": [
+        {
+          "path": "lessons/loops/solution.py",
+          "symbol": "total_minutes"
+        }
+      ],
+      "prerequisites": [
+        "sequences"
+      ],
+      "stage_key": "stage.2.title",
+      "stage_goal_key": "stage.2.goal",
+      "duration_minutes": 20,
+      "title_key": "lesson.loops.title",
+      "goal_key": "lesson.loops.goal",
+      "reading_key": "lesson.loops.reading",
+      "exercise_key": "lesson.loops.exercise",
+      "rubric_key": "lesson.loops.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.loops.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "guess",
+              "label_key": "lesson.loops.guess",
+              "feedback_key": "lesson.loops.guess.feedback"
+            },
+            {
+              "id": "observe",
+              "label_key": "lesson.loops.observe",
+              "feedback_key": "lesson.loops.observe.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.loops.hint.1",
+            "lesson.loops.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/loops/starter",
+      "check": "lessons/loops/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": "total_minutes"
+        }
+      ]
+    },
+    {
+      "id": "records",
+      "order": 8,
+      "mode": "python",
+      "milestone": false,
+      "references": [
+        {
+          "path": "lessons/records/solution.py",
+          "symbol": "pending_titles"
+        }
+      ],
+      "prerequisites": [
+        "loops"
+      ],
+      "stage_key": "stage.2.title",
+      "stage_goal_key": "stage.2.goal",
+      "duration_minutes": 20,
+      "title_key": "lesson.records.title",
+      "goal_key": "lesson.records.goal",
+      "reading_key": "lesson.records.reading",
+      "exercise_key": "lesson.records.exercise",
+      "rubric_key": "lesson.records.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.records.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "observe",
+              "label_key": "lesson.records.observe",
+              "feedback_key": "lesson.records.observe.feedback"
+            },
+            {
+              "id": "guess",
+              "label_key": "lesson.records.guess",
+              "feedback_key": "lesson.records.guess.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.records.hint.1",
+            "lesson.records.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/records/starter",
+      "check": "lessons/records/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": "pending_titles"
+        }
+      ]
+    },
+    {
+      "id": "validation",
+      "order": 9,
+      "mode": "python",
+      "milestone": true,
+      "references": [
+        {
+          "path": "lessons/validation/solution.py",
+          "symbol": "validate_minutes"
+        }
+      ],
+      "prerequisites": [
+        "records"
+      ],
+      "stage_key": "stage.2.title",
+      "stage_goal_key": "stage.2.goal",
+      "duration_minutes": 20,
+      "title_key": "lesson.validation.title",
+      "goal_key": "lesson.validation.goal",
+      "reading_key": "lesson.validation.reading",
+      "exercise_key": "lesson.validation.exercise",
+      "rubric_key": "lesson.validation.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.validation.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "guess",
+              "label_key": "lesson.validation.guess",
+              "feedback_key": "lesson.validation.guess.feedback"
+            },
+            {
+              "id": "observe",
+              "label_key": "lesson.validation.observe",
+              "feedback_key": "lesson.validation.observe.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.validation.hint.1",
+            "lesson.validation.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/validation/starter",
+      "check": "lessons/validation/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": "validate_minutes"
+        }
+      ]
+    },
+    {
+      "id": "json-data",
+      "order": 10,
+      "mode": "python",
+      "milestone": false,
+      "references": [
+        {
+          "path": "lessons/json-data/solution.py",
+          "symbol": "round_trip"
+        }
+      ],
+      "prerequisites": [
+        "validation"
+      ],
+      "stage_key": "stage.3.title",
+      "stage_goal_key": "stage.3.goal",
+      "duration_minutes": 20,
+      "title_key": "lesson.json-data.title",
+      "goal_key": "lesson.json-data.goal",
+      "reading_key": "lesson.json-data.reading",
+      "exercise_key": "lesson.json-data.exercise",
+      "rubric_key": "lesson.json-data.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.json-data.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "observe",
+              "label_key": "lesson.json-data.observe",
+              "feedback_key": "lesson.json-data.observe.feedback"
+            },
+            {
+              "id": "guess",
+              "label_key": "lesson.json-data.guess",
+              "feedback_key": "lesson.json-data.guess.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.json-data.hint.1",
+            "lesson.json-data.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/json-data/starter",
+      "check": "lessons/json-data/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": "round_trip"
+        }
+      ]
+    },
+    {
+      "id": "test-cases",
+      "order": 11,
+      "mode": "python",
+      "milestone": false,
+      "references": [
+        {
+          "path": "lessons/test-cases/solution.py",
+          "symbol": "check_validator"
+        }
+      ],
+      "prerequisites": [
+        "json-data"
+      ],
+      "stage_key": "stage.3.title",
+      "stage_goal_key": "stage.3.goal",
+      "duration_minutes": 20,
+      "title_key": "lesson.test-cases.title",
+      "goal_key": "lesson.test-cases.goal",
+      "reading_key": "lesson.test-cases.reading",
+      "exercise_key": "lesson.test-cases.exercise",
+      "rubric_key": "lesson.test-cases.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.test-cases.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "guess",
+              "label_key": "lesson.test-cases.guess",
+              "feedback_key": "lesson.test-cases.guess.feedback"
+            },
+            {
+              "id": "observe",
+              "label_key": "lesson.test-cases.observe",
+              "feedback_key": "lesson.test-cases.observe.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.test-cases.hint.1",
+            "lesson.test-cases.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/test-cases/starter",
+      "check": "lessons/test-cases/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": "check_validator"
+        }
+      ]
+    },
+    {
+      "id": "study-plan",
+      "order": 12,
+      "mode": "python",
+      "milestone": true,
+      "references": [
+        {
+          "path": "lessons/study-plan/solution.py",
+          "symbol": "summarize"
+        }
+      ],
+      "prerequisites": [
+        "test-cases"
+      ],
+      "stage_key": "stage.3.title",
+      "stage_goal_key": "stage.3.goal",
+      "duration_minutes": 30,
+      "title_key": "lesson.study-plan.title",
+      "goal_key": "lesson.study-plan.goal",
+      "reading_key": "lesson.study-plan.reading",
+      "exercise_key": "lesson.study-plan.exercise",
+      "rubric_key": "lesson.study-plan.rubric",
+      "knowledge_checks": [
+        {
+          "id": "reason",
+          "prompt_key": "lesson.study-plan.question",
+          "answer_id": "observe",
+          "options": [
+            {
+              "id": "observe",
+              "label_key": "lesson.study-plan.observe",
+              "feedback_key": "lesson.study-plan.observe.feedback"
+            },
+            {
+              "id": "guess",
+              "label_key": "lesson.study-plan.guess",
+              "feedback_key": "lesson.study-plan.guess.feedback"
+            }
+          ],
+          "hint_keys": [
+            "lesson.study-plan.hint.1",
+            "lesson.study-plan.hint.2"
+          ]
+        }
+      ],
+      "starter": "lessons/study-plan/starter",
+      "check": "lessons/study-plan/check.py",
+      "run_command": [
+        "python",
+        "main.py"
+      ],
+      "source_manifest": [
+        {
+          "path": "main.py",
+          "symbol": "summarize"
+        }
+      ]
+    }
+  ]
+}

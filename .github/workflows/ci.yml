@@ -1,0 +1,97 @@
+name: CI
+
+# 默认分支与 PR 执行常规回归；浏览器套件仅由独立手动工作流运行。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  unittest:
+    name: Python tests
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 准备语言资源回归所需的 TypeScript 依赖
+        run: npm --prefix web ci
+      - name: 安装包（含 MCP 默认依赖）
+        run: python -m pip install -e ".[test]"
+      - name: 构建待验发行包
+        run: python -m pip wheel --no-deps --wheel-dir .run/wheel .
+      - name: 隔离验证发行技能与创建工具
+        run: python scripts/verify_skill_distribution.py .run/wheel/*.whl
+      - name: 后端测试发现入口
+        run: python -W error::RuntimeWarning scripts/run_python_tests.py
+      - name: 检查生成文件同步
+        run: |
+          python scripts/generate_protocol.py --check
+          python scripts/generate_i18n.py --check
+      - name: 语法与未使用 import 检查
+        run: |
+          python scripts/check_text_encoding.py
+          python scripts/lint.py
+
+  web:
+    name: Web tests
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            model-runtime/package-lock.json
+            web/package-lock.json
+      - name: PR 流程回归
+        run: node --test .github/tests/*.test.mjs
+      - name: 安装锁定的后端依赖
+        run: python -m pip install --require-hashes -r desktop/requirements.lock
+      - run: python -m pip install --no-deps -e .
+      - run: npm --prefix model-runtime ci
+      - run: npm --prefix web ci
+      - name: 前端类型检查
+        run: npm --prefix web run typecheck
+      - name: 前端与桥接运行时单测
+        run: npm --prefix web run test:unit
+      - name: 完整前端生产构建
+        run: npm --prefix web run build
+
+  required:
+    name: CI required
+    if: ${{ always() }}
+    needs: [unittest, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every regression job
+        env:
+          BACKEND: ${{ needs.unittest.result }}
+          CLIENT: ${{ needs.web.result }}
+        run: test "$BACKEND" = success && test "$CLIENT" = success

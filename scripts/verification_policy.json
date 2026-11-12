@@ -1,0 +1,114 @@
+{
+  "always": [
+    "check",
+    "build"
+  ],
+  "full": [
+    "python",
+    "web-unit"
+  ],
+  "rules": [
+    {
+      "patterns": [
+        "AGENTS.md",
+        "docs/**",
+        "README.md",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md"
+      ],
+      "tasks": [],
+      "reason": "说明文档；仍检查生成同步并完成生产构建"
+    },
+    {
+      "patterns": [
+        "README.md"
+      ],
+      "tasks": [
+        "python"
+      ],
+      "reason": "README 是发行构建输入"
+    },
+    {
+      "patterns": [
+        "harness/llm/**",
+        "harness/net/**",
+        "harness/prompt/**",
+        "harness/i18n/**",
+        "tests/test_*.py"
+      ],
+      "tasks": [
+        "python"
+      ],
+      "reason": "后端及其回归使用完整 Python 套件"
+    },
+    {
+      "patterns": [
+        "harness/app/**",
+        "harness/core/**",
+        "harness/session/**",
+        "harness/tools/**",
+        "harness/execution/**",
+        "harness/web/**",
+        "harness/mcp_server/**",
+        "harness/collaboration/**",
+        "harness/subagent/**",
+        "harness/cli.py",
+        "harness/__init__.py",
+        "tests/*fixture*",
+        "tests/__init__.py"
+      ],
+      "tasks": [
+        "full"
+      ],
+      "reason": "公共协议、运行生命周期、权限、动态工具或跨层夹具变更"
+    },
+    {
+      "patterns": [
+        "web/**"
+      ],
+      "tasks": [
+        "web-unit"
+      ],
+      "reason": "前端变更执行完整 Web 单测；浏览器矩阵由手动入口运行"
+    },
+    {
+      "patterns": [
+        "desktop/**"
+      ],
+      "tasks": [
+        "full"
+      ],
+      "reason": "桌面源码变化只选择后端与 Web 常规回归；桌面专项须明确指定"
+    },
+    {
+      "patterns": [
+        "scripts/**",
+        ".github/**",
+        ".harness/**",
+        "examples/**",
+        "Makefile",
+        "pyproject.toml",
+        "MANIFEST.in",
+        "build_support.py",
+        ".python-version",
+        ".gitignore",
+        "web/package*.json",
+        "web/*config*",
+        "desktop/package*.json",
+        "desktop/requirements.lock",
+        "desktop/*builder*",
+        "tests/test_verification.py",
+        "tests/test_test_discovery.py",
+        "web/tests/run-core.mjs",
+        "web/tests/browser-scenario.mjs",
+        "web/tests/browser-executable.mjs",
+        "web/tests/python-fixture.mjs",
+        "web/tests/browser-selection.test.mjs"
+      ],
+      "tasks": [
+        "full"
+      ],
+      "reason": "构建、依赖、生成、分发或验证基础设施变更"
+    }
+  ]
+}

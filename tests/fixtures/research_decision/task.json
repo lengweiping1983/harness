@@ -1,0 +1,10 @@
+{
+  "title": "研究决策固定评测：六条主张与原文证据",
+  "team": "evidence-review-review",
+  "required_members": [
+    "research",
+    "crosscheck",
+    "challenge"
+  ],
+  "prompt": "只读取当前目录 facts.md、cmd.md、sqlite.md 的固定资料，禁止联网、执行命令、修改文件或扩展研究。这是构造案例，不能推广为真实用户事实。请真实委派 research 与 crosscheck 独立检查同一组主张，然后 challenge 通过 dependencies 接收两份原文并核对原文引用与竞争解释。判定仅用 supported、contradicted、unknown；未知需求不要按不存在处理，名字相同不要猜平台。主理人最终输出一个 JSON 代码块，格式为 {\"claims\":[{\"id\":\"C1\",\"verdict\":\"...\",\"sources\":[{\"path\":\"cmd.md\",\"quote\":\"逐字原文\"}]}],\"member_sources\":[{\"member\":\"research\",\"agent_id\":\"真实运行ID\"}]}。六条主张全部保留且各一次；逐字引用必须来自对应文件，来源为相对文件名；列出三名成员的真实运行ID，以宿主字段为准。不要输出未被资料支持的结论。主张如下：\n{\"C1\": \"本案例的 cmd 只能在 Windows 使用，因为它就是 Windows 命令行。\", \"C2\": \"本案例使用 sqlite3 必须新增 pip 包或独立数据库服务器。\", \"C3\": \"本案例用户不需要故障恢复或持久化。\", \"C4\": \"方案 B 必然违反本地单用户和零新增依赖的硬约束。\", \"C5\": \"方案 B 的实际执行速度比方案 A 更快。\", \"C6\": \"cmd.md 的资料来源是 Python 官方 cmd 文档。\"}"
+}

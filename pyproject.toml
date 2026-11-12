@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harness"
+version = "1.0.0"
+description = "Agent Harness：模块化、可嵌入业务系统"
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+keywords = ["agent", "harness", "llm", "openrouter", "ai"]
+classifiers = [
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# 基础 Python 安装的依赖列表；功能扩展依赖见下方可选配置，前端依赖见 web/package.json。
+# 嵌入安装允许保守范围内的版本协商；桌面发行的精确版本由 desktop/requirements.lock 固定。
+dependencies = [
+  "mcp>=2.3.0,<2.4",
+  "starlette>=0.48,<2",
+  "uvicorn>=0.54.0,<0.55",
+  "Pillow>=12.1,<13",
+  "regex>=2026.4.4,<2026.5",
+  "PyYAML>=6.0.3,<7",
+]
+
+[project.optional-dependencies]
+test = ["httpx>=0.28.1,<1", "setuptools>=77.0.3", "wheel", "cryptography>=50.0.2,<51"]
+browser = ["playwright>=1.63,<2"]
+# 本地语义候选只在宿主显式装配后使用，基础安装不包含向量运行时。
+memory = ["fastembed==0.9.0"]
+# Windows 使用其分发的微软 ConPTY 运行库，不使用旧 WinPTY 后端。
+terminal = ["pywinpty>=3.0.5,<4; sys_platform == 'win32'"]
+# 加密飞书 Webhook 仅在显式 Superagent 信道启用时使用。
+superagent = ["cryptography>=50.0.2,<51"]
+
+[project.scripts]
+harness = "harness.cli:main"
+harness-mcp = "harness.mcp_server.cli:main"
+harness-voice = "harness.voice:main"
+
+[project.urls]
+Homepage = "https://github.com/lengweiping1983/harness"
+
+[tool.setuptools.cmdclass]
+build_py = "build_support.BuildPy"
+bdist_wheel = "build_support.BdistWheel"
+
+[tool.setuptools.packages.find]
+include = ["harness*"]
+
+[tool.setuptools.package-data]
+harness = [
+  "py.typed",
+  "i18n/locales/*.json",
+  # workflow 工具的 JS guest 引擎：workflow_host.py 以 Path(__file__) 同级路径加载，
+  # 必须随包分发，否则打包版应用启动工作流脚本时找不到入口。
+  "tools/builtin/*.mjs",
+  "llm/*.mjs",
+  "llm/runtime/*",
+  "academy/content/**/*.json",
+  "academy/content/**/*.md",
+  "academy/content/**/*.py",
+  # Hex 官方预编译引擎与许可证直接使用包内唯一资源目录。
+  # sdist 保留所有平台资源，build_support.BuildPy 只将本机平台资源写入 wheel。
+  # hex_tools.py 以包内固定路径加载，缺失即是安装包不完整。
+  "resources/hex/**/*",
+]
