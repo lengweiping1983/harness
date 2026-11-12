@@ -29,7 +29,7 @@
     "echarts": "^6.1.0",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.47",
-    "lucide-react": "^0.474.0",
+    "lucide-react": "^1.70.0",
     "mermaid": "^11.17.2",
     "plotly.js-basic-dist-min": "^3.3.0",
     "react": "^18.3.1",
