@@ -61,7 +61,7 @@ export function RecoveryReview({ sessionId, record, onClose, onSubmitted, onOrig
     return () => { ++epoch.current; controller.abort(); pageRequest.current?.abort(); pageRequest.current = undefined }
   }, [sessionId, record.id, refresh])
   const known = preview?.known_continuations[mode]
-  const failure = modelFailure(preview?.error, record.error?.code)
+  const failure = modelFailure(preview?.error, record.error?.code, record.error?.details)
   const canSubmit = preview && !readError && !known && drafts[mode].trim() && !posting &&
     (mode === 'inspect' || !preview.verification_required || verified && note.trim())
   async function submit() {

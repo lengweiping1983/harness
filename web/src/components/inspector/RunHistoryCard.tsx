@@ -57,7 +57,7 @@ export function RunHistoryCard({ record, sessionId, busy, context, onContinue, o
   const result = detail?.result
   const message = record.error?.message ?? record.error?.error ?? result?.error
   const copy = record.error?.copy ?? record.error?.details?.copy
-  const modelError = modelFailure(message, record.error?.code)
+  const modelError = modelFailure(message, record.error?.code, record.error?.details)
   const duration = runDuration(record)
   return <article data-run-id={record.id} className="min-w-0 border-b border-line/75 py-3 last:border-b-0">
     <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>

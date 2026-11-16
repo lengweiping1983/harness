@@ -75,6 +75,8 @@ def _provider_failure(value, request):
     for name in ('error_type', 'error_code', 'provider_trace_id'):
         if name in details:
             details[name] = details[name][:128]
+    if details.get('error_code') == 'data_inspection_failed':
+        return LlmError(tr('models.request.failed', reason=message), code='llm/content-filter', **details)
     transport_failure = status < 400 and (details.get('error_code') in _NETWORK_CODES
         or not details.get('error_code') and details.get('error_type') in {'APIConnectionError', *_TIMEOUT_TYPES})
     if transport_failure and (details.get('error_code') in _TIMEOUT_CODES or details.get('error_type') in _TIMEOUT_TYPES):
@@ -364,6 +366,9 @@ async def provider_stream(adapter, messages, *, config, tools=None, on_attempt=N
             return
         except LlmError as exc:
             failure = exc
+            # 内容审核拒绝不能通过换 Key 恢复，也不能据状态码将凭据标为失效。
+            if exc.code == 'llm/content-filter':
+                raise
             status = exc.details.get('status', 0)
             if key and status in {401, 402, 403}:
                 await asyncio.to_thread(store.fail_key, connection, key, operation_revision)

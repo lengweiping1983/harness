@@ -1,7 +1,11 @@
 import { t } from '@/i18n'
 /** Human-facing projection; keep original diagnostics available for inspection. */
-export function modelFailure(message: unknown, code?: unknown): { title: string; hint: string } | null {
+export function modelFailure(message: unknown, code?: unknown, details?: unknown): { title: string; hint: string } | null {
   const text = String(message ?? '')
+  if (code === 'llm/content-filter' || code === 'llm/provider' && details !== null && typeof details === 'object'
+    && Object.hasOwn(details, 'error_code') && (details as Record<string, unknown>).error_code === 'data_inspection_failed') {
+    return { title: t('ui.modelFailure.contentFilterRejected'), hint: t('ui.modelFailure.contentFilterHint') }
+  }
   if (code === 'llm/provider-model-call-failed') {
     return { title: t('ui.modelFailure.providerModelCallFailed'), hint: t('ui.modelFailure.providerModelCallHint') }
   }

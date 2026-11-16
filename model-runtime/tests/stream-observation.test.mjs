@@ -77,3 +77,18 @@ test('provider error observation preserves raw bytes and bounded traces while co
     assert.equal(response.headers.get('x-should-retry'), null);
   }
 });
+
+test('content inspection rejection suppresses SDK retries without changing error bytes or identity', async () => {
+  for (const status of [400, 403, 429, 503]) {
+    const raw = JSON.stringify({error: {code: 'data_inspection_failed', message: 'Original diagnostic', traceId: 'inspection-fixture'}});
+    let diagnostic;
+    const response = await observeFetch(async () => new Response(raw, {status}), () => {}, value => {diagnostic = value;})();
+    assert.equal(await response.text(), raw);
+    assert.equal(response.headers.get('x-should-retry'), 'false');
+    assert.deepEqual(diagnostic, {status, code: 'data_inspection_failed', traceId: 'inspection-fixture'});
+  }
+  const response = await observeFetch(async () => new Response(JSON.stringify({error: {code: 'unknown',
+    message: 'Output data may contain inappropriate content.'}}), {status: 503}), () => {})();
+  await response.text();
+  assert.equal(response.headers.get('x-should-retry'), null);
+});

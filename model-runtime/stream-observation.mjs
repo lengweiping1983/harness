@@ -34,8 +34,8 @@ export function observeFetch(fetch, activity, onFailure) {
       } catch {return;}
       const code = parsed?.error?.code ?? parsed?.code;
       const traceId = parsed?.traceId ?? parsed?.error?.traceId;
-      // SDK 默认重试所有 409；明确的模型调用失败没有可自动恢复的依据。
-      if (response.status === 409 && code === 'MODEL_CALL_FAILED') observed.headers.set('x-should-retry', 'false');
+      // 明确的内容审核拒绝和模型调用冲突没有可自动恢复的依据。
+      if (code === 'data_inspection_failed' || response.status === 409 && code === 'MODEL_CALL_FAILED') observed.headers.set('x-should-retry', 'false');
       onFailure?.({status: response.status, ...(typeof code === 'string' ? {code} : {}),
         ...(typeof traceId === 'string' ? {traceId} : {})});
     };

@@ -2047,7 +2047,7 @@ function observeFetch(fetch3, activity, onFailure) {
       }
       const code = parsed?.error?.code ?? parsed?.code;
       const traceId = parsed?.traceId ?? parsed?.error?.traceId;
-      if (response.status === 409 && code === "MODEL_CALL_FAILED") observed.headers.set("x-should-retry", "false");
+      if (code === "data_inspection_failed" || response.status === 409 && code === "MODEL_CALL_FAILED") observed.headers.set("x-should-retry", "false");
       onFailure?.({
         status: response.status,
         ...typeof code === "string" ? { code } : {},

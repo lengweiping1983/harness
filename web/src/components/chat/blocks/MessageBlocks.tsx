@@ -411,7 +411,7 @@ export const ErrorBlock = memo(function ErrorBlock({ block, sessionId, readOnly 
 
   const original = block.messageCopy ? noticeText(block.messageCopy) : block.messageKey ? t(block.messageKey) : block.message
   const message = readOnly ? collaborationErrorMessage(block.code || 'run/error') : block.code ? collaborationErrorMessage(block.code, original) : original
-  const failure = modelFailure(message, block.code)
+  const failure = modelFailure(message, block.code, readOnly ? undefined : block.details)
   const details = !readOnly && block.details && typeof block.details === 'object'
     ? Object.fromEntries(Object.entries(block.details).filter(([key]) => key !== 'copy')) : null
   const diagnostic = details && Object.keys(details).length ? JSON.stringify(details, null, 2) : null

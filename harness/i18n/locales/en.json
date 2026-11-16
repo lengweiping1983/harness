@@ -4873,6 +4873,8 @@
   "ui.modelFailure.continuationHint": "Partial text was preserved. Check output settings or change the model, then continue after reviewing completed operations.",
   "ui.modelFailure.requestIncomplete": "Model request did not finish",
   "ui.modelFailure.requestHint": "Execution tasks were preserved. Check the model connection before continuing the current task.",
+  "ui.modelFailure.contentFilterRejected": "Model content review rejected",
+  "ui.modelFailure.contentFilterHint": "The provider's content review blocked this request or generated output. Review the request and context, and contact the provider with the technical details if needed. Execution records were preserved; check completed operations before continuing.",
   "ui.modelFailure.providerModelCallFailed": "Provider model call failed",
   "ui.modelFailure.providerModelCallHint": "The provider could not complete the selected model call. Send the traceId from the technical details to the provider for investigation, then continue once the model is available. Existing execution tasks have been preserved.",
   "ui.goal.editExplanation": "Changing the goal or acceptance criteria requires re-verification; used turns and tokens are not reset. Saving preserves the current paused or active state.",

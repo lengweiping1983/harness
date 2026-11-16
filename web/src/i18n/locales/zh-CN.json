@@ -2821,6 +2821,8 @@
   "ui.modelFailure.continuationHint": "部分正文已保留。检查输出设置或更换模型后继续，并先核对已完成的操作。",
   "ui.modelFailure.requestIncomplete": "模型服务请求未完成",
   "ui.modelFailure.requestHint": "已有执行任务已保留。请检查模型连接后继续当前任务。",
+  "ui.modelFailure.contentFilterRejected": "模型内容审核未通过",
+  "ui.modelFailure.contentFilterHint": "提供商的内容审核拦截了本次请求或生成结果。请检查请求及上下文，必要时向服务商反馈技术详情。执行记录已保留；继续前请核实已完成的操作。",
   "ui.modelFailure.providerModelCallFailed": "提供商模型调用失败",
   "ui.modelFailure.providerModelCallHint": "提供商未能完成所选模型的调用。请将技术详情中的 traceId 提供给服务商核查，确认模型可用后继续当前任务。已有执行任务已保留。",
   "ui.goal.editExplanation": "修改目标或验收条件后需重新验证；已用轮次和 token 不会清零。保存后保持当前暂停或推进状态。",
