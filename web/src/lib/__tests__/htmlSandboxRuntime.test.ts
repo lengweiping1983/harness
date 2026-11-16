@@ -1,6 +1,6 @@
 import {runInNewContext} from 'node:vm'
 import {describe, expect, it, vi} from 'vitest'
-import {sandboxBootstrap} from '../htmlSandboxRuntime'
+import {SANDBOX_INITIAL_HEIGHT, sandboxBootstrap} from '../htmlSandboxRuntime'
 
 function runtime() {
   const messages: Record<string, unknown>[] = []
@@ -8,13 +8,14 @@ function runtime() {
   const frames: (() => void)[] = []
   const observe = vi.fn(), disconnect = vi.fn()
   let resize!: () => void
-  const window: Record<string, unknown> = {}
+  const window: Record<string, unknown> = {innerHeight: SANDBOX_INITIAL_HEIGHT, innerWidth: 1000}
   const parent = {postMessage: (message: Record<string, unknown>) => messages.push(message)}
-  const document = {body: {scrollHeight: 120, getBoundingClientRect: () => ({height: 120})}, readyState: 'loading',
+  const document = {body: {scrollHeight: 120, getBoundingClientRect: () => ({height: 120}), querySelectorAll: () => [] as any[]}, readyState: 'interactive',
     documentElement: {classList: {toggle: vi.fn()}, style: {setProperty: vi.fn(), colorScheme: ''}},
     querySelectorAll: () => [], activeElement: null}
   runInNewContext(sandboxBootstrap('document-a'), {
     parent, document, window,
+    getComputedStyle: (node: {position: string}) => ({position: node.position}),
     requestAnimationFrame: (callback: () => void) => frames.push(callback),
     ResizeObserver: class { constructor(callback: () => void) {resize = callback} observe = observe; disconnect = disconnect },
     addEventListener: (name: string, listener: (event?: any) => void) => events.set(name, listener),
@@ -29,11 +30,12 @@ function runtime() {
 describe('emitted sandbox bootstrap', () => {
   it('boots before model execution, preserves early errors, and waits for document paint', () => {
     const r = runtime()
+    r.document.readyState = 'loading'
     expect(r.messages.map(message => message.kind)).toEqual(['boot'])
     r.events.get('error')!({message: 'early failure'})
     r.messages.length = 0
     r.send()
-    expect(r.messages.map(message => message.kind)).toEqual(['resize', 'error'])
+    expect(r.messages.map(message => message.kind)).toEqual(['error'])
     expect(r.messages.at(-1)?.message).toBe('early failure')
     r.document.readyState = 'interactive'
     r.events.get('DOMContentLoaded')!()
@@ -52,13 +54,13 @@ describe('emitted sandbox bootstrap', () => {
   })
   it('coalesces resize bursts, deduplicates heights, and clamps extreme content', () => {
     const r = runtime()
-    r.send()
+    r.send(); r.flush()
     r.messages.length = 0
     r.document.body.scrollHeight = 640
     for (let i = 0; i < 1000; i++) r.resize()
     expect(r.frames).toHaveLength(1)
     r.flush()
-    expect(r.messages).toEqual([{channel: 'harness-widget', id: 'document-a', kind: 'resize', height: 640}])
+    expect(r.messages).toEqual([{channel: 'harness-widget', id: 'document-a', kind: 'resize', height: 640, paint: 'paint-a'}])
     r.resize(); r.flush()
     expect(r.messages).toHaveLength(1)
     r.document.body.scrollHeight = 1000000
@@ -83,6 +85,77 @@ describe('emitted sandbox bootstrap', () => {
     r.flush()
     expect(r.messages.at(-1)).toMatchObject({kind: 'ready', paint: 'paint-b'})
     expect(r.observe).toHaveBeenCalledTimes(2)
+  })
+  it.each([0.5, 1, 1.5])('keeps a stable usable viewport for %s vh-based body heights', factor => {
+    const r = runtime()
+    Object.defineProperty(r.document.body, 'scrollHeight', {get: () => Number(r.window.innerHeight) * factor})
+    r.document.body.getBoundingClientRect = () => ({height: Number(r.window.innerHeight) * factor})
+    r.send()
+    for (let i = 0; i < 5; i++) {
+      r.window.innerHeight = r.messages.filter(message => message.kind === 'resize').at(-1)!.height
+      r.events.get('resize')!(); r.flush()
+    }
+    expect(r.window.innerHeight).toBe(SANDBOX_INITIAL_HEIGHT)
+    expect(r.messages.filter(message => message.kind === 'resize').length).toBeLessThanOrEqual(2)
+  })
+  it.each(['fixed', 'absolute'])('reserves a viewport for visible %s content outside body flow', position => {
+    const r = runtime()
+    r.document.body.scrollHeight = 40
+    r.document.body.getBoundingClientRect = () => ({height: 40})
+    r.document.body.querySelectorAll = () => [{position, getBoundingClientRect: () => ({width: 800, height: 480, bottom: 480})}]
+    r.send()
+    expect(r.messages.at(-1)).toMatchObject({kind: 'resize', height: SANDBOX_INITIAL_HEIGHT, paint: 'paint-a'})
+  })
+  it('fits natural fragments without treating a small absolute decoration or hidden fixed screen as a viewport', () => {
+    const r = runtime()
+    r.document.body.querySelectorAll = () => [
+      {position: 'absolute', getBoundingClientRect: () => ({width: 20, height: 20, bottom: 20})},
+      {position: 'fixed', getBoundingClientRect: () => ({width: 0, height: 0, bottom: 0})},
+    ]
+    r.send()
+    expect(r.messages.at(-1)?.height).toBe(120)
+    r.window.innerHeight = 120
+    r.events.get('resize')!(); r.flush()
+    r.document.body.scrollHeight = 640
+    r.resize(); r.flush()
+    expect(r.messages.at(-1)?.height).toBe(640)
+    r.window.innerHeight = 640
+    r.events.get('resize')!(); r.flush()
+    r.document.body.scrollHeight = 120
+    r.resize(); r.flush()
+    expect(r.messages.at(-1)?.height).toBe(120)
+  })
+  it('suspends measurement while expanded or hidden and resumes inline sizing with the current paint ticket', () => {
+    const r = runtime()
+    r.send()
+    r.messages.length = 0
+    r.send({expanded: true, paint: 'expanded'})
+    r.window.innerHeight = 900
+    r.resize(); r.flush()
+    expect(r.messages.filter(message => message.kind === 'resize')).toHaveLength(0)
+    r.send({expanded: false, paint: 'inline-again'})
+    expect(r.messages.at(-1)).toMatchObject({kind: 'resize', height: 120, paint: 'inline-again'})
+    r.messages.length = 0
+    r.send({active: false, paint: null})
+    r.window.innerHeight = 500
+    r.events.get('resize')!(); r.flush()
+    expect(r.messages).toHaveLength(0)
+    expect(r.frames).toHaveLength(0)
+  })
+  it('keeps the initial viewport until parsing finishes and resends an unchanged size for the new visible view', () => {
+    const r = runtime()
+    r.document.readyState = 'loading'
+    r.document.body.scrollHeight = 40
+    r.document.body.getBoundingClientRect = () => ({height: Number(r.window.innerHeight)})
+    r.send()
+    expect(r.messages.filter(message => message.kind === 'resize')).toHaveLength(0)
+    r.document.readyState = 'interactive'
+    r.events.get('DOMContentLoaded')!(); r.flush()
+    expect(r.messages.filter(message => message.kind === 'resize').at(-1)).toMatchObject({height: SANDBOX_INITIAL_HEIGHT, paint: 'paint-a'})
+    r.send({active: false, paint: null})
+    r.messages.length = 0
+    r.send({paint: 'resumed-view'})
+    expect(r.messages.at(-1)).toMatchObject({kind: 'resize', height: SANDBOX_INITIAL_HEIGHT, paint: 'resumed-view'})
   })
   it('updates theme in place and relays only trusted, non-composing keyboard events', () => {
     const r = runtime()

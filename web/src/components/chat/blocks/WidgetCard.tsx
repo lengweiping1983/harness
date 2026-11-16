@@ -138,7 +138,7 @@ const WidgetContent = memo(function WidgetContent({ payload, previewCode, active
   }
 
   const header = (
-    <figcaption className="flex h-9 items-center gap-2 border-b border-line bg-raised/60 px-3">
+    <figcaption className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-raised/60 px-3">
       <span className="min-w-0 flex-1 truncate text-compact font-medium text-ink" title={payload.title}>{payload.title}</span>
       <span className="shrink-0 rounded-md bg-brand/[0.12] px-1.5 py-0.5 font-mono text-2xs font-medium uppercase tracking-wide text-brand">{payload.kind}</span>
       {parsed?.repaired ? (
@@ -193,12 +193,12 @@ const WidgetContent = memo(function WidgetContent({ payload, previewCode, active
       tabIndex={zoom ? -1 : undefined}
       className={cn(
         'group/widget overflow-hidden rounded-xl border border-line bg-surface',
-        zoom && 'fixed inset-4 z-expanded my-0 shadow-pop',
+        zoom && 'fixed inset-4 z-expanded my-0 flex min-h-0 flex-col shadow-pop',
       )}
     >
       {header}
-      <div className={cn(zoom && 'h-zoom overflow-auto')}>
-        <div hidden={showCode}>{body}</div>
+      <div className={cn(zoom && 'min-h-0 flex-1 overflow-auto')}>
+        <div hidden={showCode} className={cn(zoom && 'h-full')}>{body}</div>
         <pre hidden={!showCode} tabIndex={0} className="max-h-dialog overflow-auto whitespace-pre-wrap break-words bg-surface/60 px-4 py-3 font-mono text-compact leading-code text-muted">{payload.code}</pre>
       </div>
       {zoom ? (

@@ -1,6 +1,7 @@
 import {afterEach, beforeEach, expect, it, vi} from 'vitest'
 import type {ReactElement} from 'react'
 import {HtmlSandboxFrame} from '@/components/ui/HtmlSandboxFrame'
+import {SANDBOX_INITIAL_HEIGHT} from '@/lib/htmlSandboxRuntime'
 import {setLocale, t} from '@/i18n'
 
 const hooks = vi.hoisted(() => ({cursor: 0, slots: [] as any[], pending: [] as (() => void)[], cleanups: new Map<number, () => void>()}))
@@ -17,9 +18,9 @@ let listener: ((event: unknown) => void) | undefined
 let parses = 0
 const child = {postMessage: vi.fn()}
 const root = {classList: {contains: () => false}, lang: ''}
-function render(code = '<button>original</button>', active = true) {
+function render(code = '<button>original</button>', active = true, viewKey = 'inline') {
   hooks.cursor = 0
-  const node = (HtmlSandboxFrame as unknown as {type: (props: unknown) => ReactElement<any>}).type({code, active, title: 'Preview'})
+  const node = (HtmlSandboxFrame as unknown as {type: (props: unknown) => ReactElement<any>}).type({code, active, viewKey, title: 'Preview'})
   const iframe = node.props.children.find((child: any) => child?.type === 'iframe')
   iframe.ref.current = {contentWindow: child}
   while (hooks.pending.length) hooks.pending.shift()!()
@@ -75,9 +76,31 @@ it('keeps source stable across theme, visibility and source switches, rejects ol
   message({...old, kind: 'error', message: 'stale failure'})
   message({...old, kind: 'resize', height: 1900})
   const current = render('<button>replacement</button>')
-  expect(current.iframe.props.style.height).toBe(40)
+  expect(current.iframe.props.style.height).toBe(SANDBOX_INITIAL_HEIGHT)
   expect(current.node.props.children.some((child: any) => child?.props?.role === 'alert')).toBe(false)
   expect(parses).toBe(2)
+})
+
+it('fills the expanded area without replacing the document or accepting resize messages from a previous view', () => {
+  const first = render(), inline = latestTheme()
+  expect(first.iframe.props.style.height).toBe(SANDBOX_INITIAL_HEIGHT)
+  message({...inline, kind: 'resize', height: 120})
+  expect(render().iframe.props.style.height).toBe(120)
+  const enlarged = render(undefined, true, 'expanded'), expanded = latestTheme()
+  expect(expanded.expanded).toBe(true)
+  expect(enlarged.iframe.props.style).toMatchObject({height: '100%', minHeight: 0, flex: '1 1 0%'})
+  expect(enlarged.node.props.className).toContain('h-full')
+  message({...expanded, kind: 'resize', height: 900})
+  const restored = render(), current = latestTheme()
+  expect(current.expanded).toBe(false)
+  message({...inline, kind: 'resize', height: 40})
+  message({...expanded, kind: 'resize', height: 900})
+  expect(render().iframe.props.style.height).toBe(120)
+  message({...current, kind: 'resize', height: 240})
+  expect(render().iframe.props.style.height).toBe(240)
+  expect(restored.iframe.props.srcDoc).toBe(first.iframe.props.srcDoc)
+  expect(restored.iframe.key).toBe(first.iframe.key)
+  expect(parses).toBe(1)
 })
 
 it('localizes explicit chart failures in place and refuses unregistered resource identities', () => {
