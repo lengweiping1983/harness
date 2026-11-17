@@ -6,6 +6,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -136,3 +137,33 @@ class AcademyAuthoringTests(unittest.IsolatedAsyncioTestCase):
         invalid['lessons'][0]['prerequisites'] = ['transfer']
         with self.assertRaisesRegex(AcademyError, 'authoring-invalid'):
             validate_plan(invalid)
+
+    async def test_school_topic_publishes_learnable_study_course_with_memory_and_teach(self):
+        with current_language.set('zh-CN'):
+            receipt = self.service.designer.create('k12-topic', '小学三年级分数入门：认识几分之一', model=self.config.model, schedule=self.schedule)
+        design = receipt['result']['design']
+        adapter = DesignAdapter()
+        await self.service.designer.generate(design['id'], adapter, self.config)
+        self.assertEqual(self.service.designer.design(design['id'])['status'], 'ready')
+        course_id = design['course_id']
+        course = self.service.course(course_id)
+        self.assertEqual(course['origin'], 'personal')
+        self.assertTrue(all(lesson['mode'] == 'study' for lesson in course['lessons']))
+        project = self.service.create_project('k12-project', course_id)['result']['project']
+        pid = project['id']
+        now = time.time()
+        with patch('time.time', side_effect=lambda: now):
+            complete = self.service.complete_study(pid, 'k12-complete', 'notice', project['fingerprint'],
+                                                 '我把一个圆平均分成两份，每份是二分之一。', [{'check_id': 'concept', 'option_id': 'evidence'}])
+            self.assertEqual(complete['status'], 'ready')
+            skill = next(row for row in self.service.mastery.view(pid)['skills'] if row['lesson_id'] == 'notice')
+            self.assertEqual(skill['state'], 'learning')
+            now += 3 * 86400
+            queue = self.service.mastery.queue(pid)
+            self.assertEqual(queue[0]['lesson_id'], 'notice')
+            review = self.service.mastery.review(pid, 'k12-review', 'notice', [{'check_id': 'concept', 'option_id': 'evidence'}])
+            self.assertTrue(review['result']['review']['correct'])
+            teach = self.service.tutor.start(pid, 'k12-teach', 'notice', self.service.project(pid)['fingerprint'],
+                                           '我来教你分数。', False, mode='teach')
+            self.assertEqual(teach['status'], 'ready')
+            self.assertEqual(teach['result']['tutor_turn']['misconception']['option_id'], 'guess')
