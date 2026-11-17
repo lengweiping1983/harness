@@ -14,7 +14,7 @@ from harness.core.events import EventBus
 from harness.core.cleanup import join_cleanup, preserve_cleanup_errors
 from harness.core.language import current_language
 from harness.i18n import tr
-from harness.llm.types import TextBlock, ToolSchema
+from harness.llm.types import SystemMessage, TextBlock, ToolSchema, UserMessage
 from harness.prompt.registry import SystemPromptRegistry
 from harness.session.store import SessionStore
 from harness.tools.registry import ToolDefinition, ToolRegistry, ToolResult
@@ -22,6 +22,7 @@ from harness.tools.schema import validate
 
 from .errors import AcademyError
 from .files import fingerprint, read_files, version
+from .mastery import fold
 from .protocol import SCHEMAS
 
 
@@ -35,6 +36,7 @@ class AcademyTutor:
         self._drafts = {}
         self._scheduled = {}
         self._stopping = set()
+        self._quiz_active = set()
         self._lock = threading.RLock()
 
     def _stream(self, identity, session_id, event, payload):
@@ -80,6 +82,10 @@ class AcademyTutor:
             json.dumps(public, ensure_ascii=False).encode('utf-8')
         except UnicodeError as exc:
             raise AcademyError('store-invalid') from exc
+        if public.get('mode', 'tutor') == 'teach' and (public['allow_execution'] or public['require_execution']
+                or any(key in public for key in ('knowledge_check', 'model_run_id', 'evidence_run_id', 'proposal_path', 'comparison_run_id', 'comparison_model_run_id'))
+                or validate(public.get('misconception'), SCHEMAS['AcademyTeachMisconception'])):
+            raise AcademyError('store-invalid')
         if (not public['prompt'].strip() or public['language'] not in {'en', 'zh-CN'}
                 or len(public['prompt']) > 4000 or len(public['response'].encode('utf-8')) > 65536
                 or len(public.get('partial_response', '').encode('utf-8')) > 65536
@@ -128,7 +134,13 @@ class AcademyTutor:
                 raise AcademyError('store-invalid')
             return [self._view(value) for value in values]
 
-    def start(self, project_id, request_id, lesson_id, expected_fingerprint, prompt, allow_execution, *, require_execution=False, source=None, evidence_run_id=None, comparison_run_id=None, proposal_path=None, model_run_id=None, comparison_model_run_id=None, knowledge_check=None, model='', schedule=None):
+    def start(self, project_id, request_id, lesson_id, expected_fingerprint, prompt, allow_execution, *, require_execution=False, source=None, evidence_run_id=None, comparison_run_id=None, proposal_path=None, model_run_id=None, comparison_model_run_id=None, knowledge_check=None, mode='tutor', model='', schedule=None):
+        if mode not in {'tutor', 'teach'}:
+            raise AcademyError('invalid-request')
+        if mode == 'teach' and (allow_execution or require_execution or source is not None or evidence_run_id is not None
+                or comparison_run_id is not None or proposal_path is not None or model_run_id is not None
+                or comparison_model_run_id is not None or knowledge_check is not None):
+            raise AcademyError('invalid-request')
         if (not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000 or type(allow_execution) is not bool
                 or type(require_execution) is not bool or (require_execution and not allow_execution)
                 or (source is not None and validate(source, SCHEMAS['AcademyExecutionSource']))
@@ -181,6 +193,20 @@ class AcademyTutor:
             lesson = next(item for item in self.service.course(record['course_id'])['lessons'] if item['id'] == lesson_id)
             if require_execution and lesson['mode'] != 'python':
                 raise AcademyError('lesson-not-runnable')
+            misconception = None
+            if mode == 'teach':
+                # 教 AI 前先有独立学习证据；误解来自课程自测的错误选项，不由模型即兴编造。
+                state = fold(self.store, project_id).get(lesson_id)
+                if not state or state['evidence_count'] == 0:
+                    raise AcademyError('teach-not-ready')
+                for check in lesson.get('knowledge_checks', []):
+                    wrong = next((option for option in check['options'] if option['id'] != check['answer_id']), None)
+                    if wrong is not None:
+                        misconception = {'check_id': check['id'], 'option_id': wrong['id'], 'prompt': check['prompt'],
+                                         'label': wrong['label'], 'feedback': wrong['feedback']}
+                        break
+                if misconception is None:
+                    raise AcademyError('teach-unavailable')
             if proposal_path is not None:
                 if lesson['mode'] != 'python':
                     raise AcademyError('lesson-not-runnable')
@@ -221,6 +247,8 @@ class AcademyTutor:
                     raise AcademyError('invalid-request')
                 snapshot['knowledge_check'] = {'id': check['id'], 'prompt': check['prompt'],
                                                'selected': {key: option[key] for key in ('id', 'label', 'feedback')}}
+            if mode == 'teach':
+                snapshot['misconception'] = misconception
             if model_run_id is not None and lesson['mode'] != 'model':
                 raise AcademyError('lesson-not-runnable')
             if lesson['mode'] == 'model':
@@ -265,10 +293,12 @@ class AcademyTutor:
                 saved = self.service.source(project_id, source['path'])
             value = {'id': 'tutor_' + uuid.uuid4().hex, 'project_id': project_id, 'lesson_id': lesson_id,
                      'request_id': request_id, 'input_fingerprint': fingerprint(files), 'prompt': prompt,
-                     'allow_execution': allow_execution, 'require_execution': require_execution, 'response': '', 'model': model, 'language': current_language.get(),
+                     'allow_execution': allow_execution, 'require_execution': require_execution, 'mode': mode, 'response': '', 'model': model, 'language': current_language.get(),
                      'status': 'running', 'actions': [], 'created_at': time.time(), 'snapshot': snapshot}
             if knowledge_check is not None:
                 value['knowledge_check'] = dict(knowledge_check)
+            if mode == 'teach':
+                value['misconception'] = misconception
             if comparison_model_run_id is not None:
                 value['comparison_model_run_id'] = comparison_model_run_id
             if model_run_id is not None:
@@ -298,7 +328,7 @@ class AcademyTutor:
             return {'project': self.service.project(project_id), 'tutor_turn': self._view(value),
                     **({'source': saved} if saved is not None else {})}
         receipt = self.service._change(request_id, 'tutor-turn', project_id,
-            {'lesson_id': lesson_id, 'expected_fingerprint': expected_fingerprint, 'prompt': prompt,
+            {'lesson_id': lesson_id, 'expected_fingerprint': expected_fingerprint, 'prompt': prompt, 'mode': mode,
              'allow_execution': allow_execution, 'require_execution': require_execution, **({'source': source} if source is not None else {}),
              **({'knowledge_check': knowledge_check} if knowledge_check is not None else {}),
              **({'comparison_model_run_id': comparison_model_run_id} if comparison_model_run_id is not None else {}),
@@ -451,7 +481,7 @@ class AcademyTutor:
         except (UnicodeError, RecursionError) as exc:
             raise AcademyError('store-invalid') from exc
         if (not isinstance(snapshot, dict) or not {'lesson', 'files', 'history', 'runs'} <= set(snapshot)
-                or set(snapshot) - {'lesson', 'files', 'history', 'runs', 'model_run', 'knowledge_check', 'comparison_model_run'}
+                or set(snapshot) - {'lesson', 'files', 'history', 'runs', 'model_run', 'knowledge_check', 'comparison_model_run', 'misconception'}
                 or snapshot_size > 96 * 1024
                 or not isinstance(snapshot['files'], dict) or any(not isinstance(path, str) or not isinstance(content, str) for path, content in snapshot['files'].items())
                 or fingerprint(snapshot['files']) != value['input_fingerprint']
@@ -466,6 +496,13 @@ class AcademyTutor:
                     or not isinstance(check['selected'], dict) or set(check['selected']) != {'id', 'label', 'feedback'}
                     or any(not isinstance(text, str) for text in check['selected'].values()) or check['selected']['id'] != selection['option_id']):
                 raise AcademyError('store-invalid')
+        if 'misconception' in snapshot:
+            if value.get('mode') != 'teach' or validate(snapshot['misconception'], SCHEMAS['AcademyTeachMisconception']):
+                raise AcademyError('store-invalid')
+        elif value.get('mode') == 'teach':
+            raise AcademyError('store-invalid')
+        if value.get('mode') == 'teach' and any(key in snapshot for key in ('knowledge_check', 'model_run', 'comparison_model_run')):
+            raise AcademyError('store-invalid')
         if 'model_run' in snapshot:
             if not isinstance(snapshot['model_run'], dict):
                 raise AcademyError('store-invalid')
@@ -592,10 +629,11 @@ class AcademyTutor:
     def _registry(self, value):
         registry = ToolRegistry()
         names = ['inspect_file'] if value['snapshot']['files'] else []
-        if value.get('proposal_path'):
-            names += ['propose_edit']
-        if value['allow_execution'] and value['snapshot']['lesson']['mode'] == 'python':
-            names += ['run_example', 'check_lesson']
+        if value.get('mode', 'tutor') == 'tutor':
+            if value.get('proposal_path'):
+                names += ['propose_edit']
+            if value['allow_execution'] and value['snapshot']['lesson']['mode'] == 'python':
+                names += ['run_example', 'check_lesson']
         for name in names:
             parameters = {'type': 'object', 'properties': {}, 'additionalProperties': False}
             if name == 'inspect_file':
@@ -628,7 +666,9 @@ class AcademyTutor:
         primary = None
         try:
             prompts = SystemPromptRegistry()
-            prompts.add_section('academy:tutor', tr('academy.tutor.instructions'), interpolate=False)
+            teach = value.get('mode', 'tutor') == 'teach'
+            prompts.add_section('academy:teach' if teach else 'academy:tutor',
+                                tr('academy.teach.instructions' if teach else 'academy.tutor.instructions'), interpolate=False)
             session = SessionStore().create()
             bus = EventBus()
             for event in ('request/start', 'assistant/delta', 'assistant/message'):
@@ -697,3 +737,119 @@ class AcademyTutor:
                 errors.append(exc)
             with preserve_cleanup_errors(errors, primary):
                 pass
+
+    def _quiz_view(self, value):
+        """重启后的未结束测验显示未确认，不恢复模型请求。"""
+        public = {key: item for key, item in value.items() if key != 'snapshot'}
+        if validate(public, SCHEMAS['AcademyTeachQuiz']):
+            raise AcademyError('store-invalid')
+        if public['status'] == 'running' and public['id'] not in self._quiz_active:
+            public.update(status='unknown', error_code='quiz-interrupted')
+        return public
+
+    def quizzes(self, project_id):
+        self.service._record(project_id)
+        with self.store.lock:
+            return [self._quiz_view(value) for value in self.store.list('teach-quiz', max_bytes=1024 * 1024)
+                    if value.get('project_id') == project_id]
+
+    def quiz(self, project_id, turn_id, request_id, *, model='', schedule=None):
+        """教完一次后让 AI 学生独立测验；宿主按冻结答案评分，结果成为教学证据。"""
+        def create():
+            record = self.service._record(project_id)
+            self.service._require_course(record)
+            raw = self.store.get(self._kind(project_id), turn_id, max_bytes=1024 * 1024)
+            if raw is None:
+                raise AcademyError('run-not-found')
+            turn = self._view(raw)
+            if turn.get('mode') != 'teach' or turn['status'] != 'completed':
+                raise AcademyError('quiz-not-ready')
+            existing = [self._quiz_view(value) for value in self.store.list('teach-quiz', max_bytes=1024 * 1024)
+                        if value.get('project_id') == project_id and value.get('turn_id') == turn_id]
+            # 失败可重试；已完成或结果未知的测验不允许重复发起。
+            if any(value['status'] in {'running', 'unknown', 'completed'} for value in existing):
+                raise AcademyError('quiz-exists')
+            lesson = next(item for item in self.service.course(record['course_id'])['lessons'] if item['id'] == turn['lesson_id'])
+            checks = lesson.get('knowledge_checks', [])
+            if not checks:
+                raise AcademyError('teach-unavailable')
+            transcript = []
+            for entry in raw['snapshot'].get('history', []):
+                transcript.append({'role': 'learner', 'text': entry['prompt']})
+                transcript.append({'role': 'student', 'text': entry['response']})
+            transcript.append({'role': 'learner', 'text': turn['prompt']})
+            transcript.append({'role': 'student', 'text': turn['response']})
+            snapshot = {'misconception': raw['snapshot']['misconception'], 'transcript': transcript,
+                        'checks': [{'id': check['id'], 'prompt': check['prompt'],
+                                    'options': [{'id': option['id'], 'label': option['label']} for option in check['options']]} for check in checks],
+                        'key': {check['id']: check['answer_id'] for check in checks}}
+            if len(json.dumps(snapshot, ensure_ascii=False).encode('utf-8')) > 96 * 1024:
+                raise AcademyError('tutor-too-large')
+            value = {'id': 'teachquiz_' + uuid.uuid4().hex, 'project_id': project_id, 'lesson_id': turn['lesson_id'],
+                     'turn_id': turn_id, 'request_id': request_id, 'status': 'running', 'answers': [], 'results': [],
+                     'correct': False, 'model': model, 'language': turn['language'], 'created_at': time.time(), 'snapshot': snapshot}
+            self.service._mark_started()
+            self.store.put('teach-quiz', value)
+            if schedule is None:
+                value.update(status='failed', error_code='quiz-unavailable', completed_at=time.time())
+                self.store.put('teach-quiz', value)
+            else:
+                self._quiz_active.add(value['id'])
+                try:
+                    future = schedule(value['id'])
+                    future.add_done_callback(lambda completed: self._quiz_active.discard(value['id']))
+                except Exception:
+                    self._quiz_active.discard(value['id'])
+                    value.update(status='failed', error_code='quiz-unavailable', completed_at=time.time())
+                    self.store.put('teach-quiz', value)
+            return {'quiz': self._quiz_view(value)}
+        return self.service._change(request_id, 'teach-quiz', project_id, {'turn_id': turn_id}, create)
+
+    async def evaluate_quiz(self, identity, adapter, config):
+        """学生按对话后的真实理解作答；单次请求、无工具、不执行代码。"""
+        value = self.store.get('teach-quiz', identity, max_bytes=1024 * 1024)
+        if value is None or value['status'] != 'running' or identity not in self._quiz_active:
+            raise AcademyError('quiz-interrupted')
+        token = current_language.set(value['language'])
+        primary = None
+        try:
+            payload = {key: value['snapshot'][key] for key in ('misconception', 'transcript', 'checks')}
+            payload['response_schema'] = {'type': 'object', 'additionalProperties': False,
+                                          'properties': {'answers': {'type': 'array', 'items': SCHEMAS['AcademyStudyAnswer']}}, 'required': ['answers']}
+            async with asyncio.timeout(60):
+                response = await adapter.complete(
+                    [SystemMessage(tr('academy.teach.quiz.system')), UserMessage(json.dumps(payload, ensure_ascii=False))],
+                    config=config.merged(max_tokens=1000), tools=[])
+            if response.tool_uses:
+                raise AcademyError('quiz-invalid')
+            try:
+                parsed = json.loads(response.text)
+                if validate(parsed, payload['response_schema']):
+                    raise ValueError
+                actual = {answer['check_id']: answer['option_id'] for answer in parsed['answers']}
+                checks = value['snapshot']['checks']
+                if len(actual) != len(parsed['answers']) or set(actual) != {check['id'] for check in checks}:
+                    raise ValueError
+                options = {check['id']: {option['id'] for option in check['options']} for check in checks}
+                if any(option not in options[check] for check, option in actual.items()):
+                    raise ValueError
+            except (ValueError, TypeError, KeyError) as exc:
+                raise AcademyError('quiz-invalid') from exc
+            results = [{'check_id': check['id'], 'correct': actual[check['id']] == value['snapshot']['key'][check['id']]} for check in checks]
+            value.update(status='completed', answers=parsed['answers'], results=results,
+                         correct=all(item['correct'] for item in results), model=response.model or config.model, completed_at=time.time())
+        except asyncio.CancelledError as exc:
+            primary = exc
+            value.update(status='unknown', error_code='quiz-interrupted', completed_at=time.time())
+            raise
+        except TimeoutError:
+            value.update(status='unknown', error_code='quiz-timeout', completed_at=time.time())
+        except AcademyError as exc:
+            value.update(status='failed', error_code=exc.code, completed_at=time.time())
+        except Exception:
+            value.update(status='failed', error_code='quiz-failed', completed_at=time.time())
+        finally:
+            current_language.reset(token)
+            self._quiz_active.discard(identity)
+            with preserve_cleanup_errors([], primary):
+                self.store.put('teach-quiz', value)

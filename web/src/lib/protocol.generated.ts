@@ -1873,6 +1873,8 @@ export interface AcademyTutorTurn {
   evidence_run_id?: string
   comparison_run_id?: string
   proposal_path?: string
+  mode?: 'tutor' | 'teach'
+  misconception?: AcademyTeachMisconception
   response: string
   model: string
   language: string
@@ -1945,6 +1947,32 @@ export interface AcademyDesign {
   phase: 'planning' | 'writing' | 'reviewing'
   error_code?: string
   review_notes: Array<string>
+}
+export interface AcademyTeachMisconception {
+  check_id: string
+  option_id: string
+  prompt: string
+  label: string
+  feedback: string
+}
+export interface AcademyTeachQuiz {
+  id: string
+  project_id: string
+  lesson_id: string
+  turn_id: string
+  request_id: string
+  status: 'running' | 'completed' | 'failed' | 'unknown'
+  answers: Array<AcademyStudyAnswer>
+  results: Array<AcademyReviewCheckResult>
+  correct: boolean
+  model: string
+  language: string
+  error_code?: string
+  created_at: number
+  completed_at?: number
+}
+export interface AcademyTeachQuizRequest {
+  request_id: string
 }
 export interface AcademyStudyAnswer {
   check_id: string
@@ -2020,6 +2048,7 @@ export interface AcademyOperationResult {
   design?: AcademyDesign
   review?: AcademyReview
   skill?: AcademySkillState
+  quiz?: AcademyTeachQuiz
   backup_checkpoint_id?: string
   error_code?: string
 }
@@ -2110,6 +2139,7 @@ export interface AcademyTutorRequest {
   evidence_run_id?: string
   proposal_path?: string
   comparison_run_id?: string
+  mode?: 'tutor' | 'teach'
 }
 export interface SuperagentConnection {
   connection_id: string

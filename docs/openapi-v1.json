@@ -19727,6 +19727,144 @@
         ]
       }
     },
+    "/api/v1/academy/projects/{project_id}/tutor-turns/{turn_id}/quiz": {
+      "post": {
+        "operationId": "post_api_v1_academy_projects_project_id_tutor_turns_turn_id_quiz",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademyTeachQuizRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/academy/projects/{project_id}/teach-quizzes": {
+      "get": {
+        "operationId": "get_api_v1_academy_projects_project_id_teach_quizzes",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "quizzes": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AcademyTeachQuiz"
+                      }
+                    }
+                  },
+                  "required": [
+                    "quizzes"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/academy/projects/{project_id}/files": {
       "get": {
         "operationId": "get_api_v1_academy_projects_project_id_files",
@@ -30392,6 +30530,16 @@
           "proposal_path": {
             "type": "string"
           },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "tutor",
+              "teach"
+            ]
+          },
+          "misconception": {
+            "$ref": "#/components/schemas/AcademyTeachMisconception"
+          },
           "response": {
             "type": "string"
           },
@@ -30743,6 +30891,122 @@
           "review_notes"
         ]
       },
+      "AcademyTeachMisconception": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "check_id": {
+            "type": "string"
+          },
+          "option_id": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "feedback": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "check_id",
+          "option_id",
+          "prompt",
+          "label",
+          "feedback"
+        ]
+      },
+      "AcademyTeachQuiz": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "lesson_id": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "unknown"
+            ]
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStudyAnswer"
+            }
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyReviewCheckResult"
+            }
+          },
+          "correct": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "completed_at": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "lesson_id",
+          "turn_id",
+          "request_id",
+          "status",
+          "answers",
+          "results",
+          "correct",
+          "model",
+          "language",
+          "created_at"
+        ]
+      },
+      "AcademyTeachQuizRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "request_id"
+        ]
+      },
       "AcademyStudyAnswer": {
         "type": "object",
         "additionalProperties": false,
@@ -31077,6 +31341,9 @@
           },
           "skill": {
             "$ref": "#/components/schemas/AcademySkillState"
+          },
+          "quiz": {
+            "$ref": "#/components/schemas/AcademyTeachQuiz"
           },
           "backup_checkpoint_id": {
             "type": "string"
@@ -31476,6 +31743,13 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 128
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "tutor",
+              "teach"
+            ]
           }
         },
         "required": [

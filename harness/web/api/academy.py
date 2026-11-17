@@ -94,6 +94,13 @@ def build_router(ctx):
     endpoint('POST', prefix + '/projects/{project_id}/tutor-turns', tutor_turn)
     endpoint('GET', prefix + '/projects/{project_id}/tutor-turns', lambda service, body, params, request: {'tutor_turns': service.tutor.turns(**params)})
     endpoint('POST', prefix + '/projects/{project_id}/tutor-turns/{turn_id}/stop', lambda service, body, params, request: service.tutor.stop(**params, **body))
+    def teach_quiz(service, body, params, request):
+        adapter = getattr(ctx.harness, 'adapter', None)
+        config = getattr(getattr(ctx.harness, 'agent', None), 'config', LlmCallConfig())
+        schedule = (lambda identity: ctx.spawn(service.tutor.evaluate_quiz(identity, adapter, config))) if adapter is not None else None
+        return service.tutor.quiz(**params, **body, model=config.model, schedule=schedule)
+    endpoint('POST', prefix + '/projects/{project_id}/tutor-turns/{turn_id}/quiz', teach_quiz)
+    endpoint('GET', prefix + '/projects/{project_id}/teach-quizzes', lambda service, body, params, request: {'quizzes': service.tutor.quizzes(**params)})
     endpoint('GET', prefix + '/projects/{project_id}/files', lambda service, body, params, request: {'files': service.files(**params)})
     endpoint('GET', prefix + '/projects/{project_id}/source', lambda service, body, params, request: service.source(**params, raw_path=request.get('path')), query=('path',))
     endpoint('POST', prefix + '/projects/{project_id}/files', lambda service, body, params, request: service.write_file(**params, **body))
