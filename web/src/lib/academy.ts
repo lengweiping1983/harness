@@ -52,6 +52,7 @@ export const academyApi = {
   submission: (project: string, submission: string, signal?: AbortSignal) => request<{submission: AcademySubmission}>(prefix + '/projects/' + id(project) + '/submissions/' + id(submission), {signal}),
   mastery: (project: string, signal?: AbortSignal) => request<{mastery: AcademyMastery}>(prefix + '/projects/' + id(project) + '/mastery', {signal}),
   reviews: (project: string, signal?: AbortSignal) => request<{reviews: AcademyReviewItem[]}>(prefix + '/projects/' + id(project) + '/reviews', {signal}),
+  cumulative: (project: string, signal?: AbortSignal) => request<{reviews: AcademyReviewItem[]}>(prefix + '/projects/' + id(project) + '/cumulative', {signal}),
   review: (project: string, body: AcademyReviewRequest) => post('/projects/' + id(project) + '/reviews', body),
   teachQuiz: (project: string, turn: string, body: AcademyTeachQuizRequest) => post('/projects/' + id(project) + '/tutor-turns/' + id(turn) + '/quiz', body),
   teachQuizzes: (project: string, signal?: AbortSignal) => request<{quizzes: AcademyTeachQuiz[]}>(prefix + '/projects/' + id(project) + '/teach-quizzes', {signal}),

@@ -260,6 +260,7 @@ ENDPOINTS = {
     ('GET', PREFIX + '/projects/{project_id}/teach-quizzes'): (None, obj({'quizzes': array(ref('AcademyTeachQuiz'))})),
     ('GET', PREFIX + '/projects/{project_id}/mastery'): (None, obj({'mastery': ref('AcademyMastery')})),
     ('GET', PREFIX + '/projects/{project_id}/reviews'): (None, obj({'reviews': array(ref('AcademyReviewItem'))})),
+    ('GET', PREFIX + '/projects/{project_id}/cumulative'): (None, obj({'reviews': array(ref('AcademyReviewItem'))})),
     ('POST', PREFIX + '/projects/{project_id}/reviews'): ('AcademyReviewRequest', ref('AcademyReceipt')),
     ('GET', PREFIX + '/receipts/{request_id}'): (None, ref('AcademyReceipt')),
 }

@@ -284,8 +284,8 @@ class AcademyMastery:
                            if value.get('project_id') == project_id and value.get('correct') is False][:3]
         return {'skill': skill, 'prerequisites': prerequisites, 'review_due': review_due[:5], 'recent_failures': recent_failures}
 
-    def queue(self, project_id: str) -> list[dict]:
-        """到期技能按阶段交错排列；公开题目不含答案、反馈与提示。"""
+    def queue(self, project_id: str, cumulative: bool = False) -> list[dict]:
+        """到期技能按阶段交错排列；cumulative=True 时为结业挑战，覆盖所有已学课次（不受到期过滤）。公开题目不含答案、反馈与提示。"""
         record, lessons = self._lessons(project_id)
         states = fold(self.service.store, project_id)
         now = time.time()
@@ -296,7 +296,7 @@ class AcademyMastery:
                 continue
             elapsed = max(0.0, (now - state['last_at']) / DAY)
             recall = retrievability(elapsed, state['stability'])
-            if recall >= TARGET_RETENTION:
+            if not cumulative and recall >= TARGET_RETENTION:
                 continue
             due.append({'lesson': lesson, 'recall': recall, 'overdue': elapsed - state['stability']})
         due.sort(key=lambda item: item['recall'])

@@ -158,6 +158,18 @@ class StepSessionTests(unittest.TestCase):
         projected = {row['step_id']: row for row in self.service.steps.view(self.pid, LESSON)['responses']}
         self.assertTrue(projected['denominator']['blindspot'])
         self.assertTrue(projected['denominator']['repaired'])
+    def test_cumulative_challenge_covers_studied_not_due_lessons(self):
+        """结业挑战覆盖已学但尚未到期的课次；到期队列仍只列到期项。"""
+        self.open_lesson()
+        self.answer('worked', 'Equal parts share one fraction name.')
+        self.answer('denominator', 4)
+        self.answer('which-half', 'b')
+        self.answer('third-sequence', ['cut', 'take', 'write'])
+        self.assertEqual(self.service.mastery.queue(self.pid), [])
+        cumulative = self.service.mastery.queue(self.pid, cumulative=True)
+        self.assertEqual([item['lesson_id'] for item in cumulative], [LESSON])
+        self.assertTrue(cumulative[0]['checks'])
+        self.assertNotIn('answer_id', cumulative[0]['checks'][0])
     def test_diagnosis_recorded_and_projected(self):
         """错误自诊断随作答记录持久化并投影；重试修复后仍保留诊断原文。"""
         self.open_lesson()

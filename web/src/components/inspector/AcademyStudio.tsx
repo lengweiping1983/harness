@@ -35,6 +35,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   const [dueCount, setDueCount] = useState(0)
   const [skills, setSkills] = useState<Readonly<Record<string, string>>>({})
   const [masteryView, setMasteryView] = useState<AcademyMasteryView | null>(null)
+  const [cumulativeMode, setCumulativeMode] = useState(false)
   const manual = useRef(false)
   const phases = useMemo(() => academyStudioPhases(lesson, dueCount > 0), [lesson, dueCount])
   const checks = lesson.knowledge_checks ?? []
@@ -124,7 +125,10 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   }
 
   const renderPhase = () => {
-    if (phase === 'review') return <AcademyReviewSession projectId={project.id} active={active} disabled={disabled} onCompleted={() => markDone('review')} onOpenLesson={onOpenLesson} />
+    if (phase === 'review') return <div className="space-y-2">
+      <Button size="xs" variant="ghost" data-academy-cumulative-toggle aria-pressed={cumulativeMode} onClick={() => setCumulativeMode(value => !value)}>{t(cumulativeMode ? 'ui.academy.mastery.backToDue' : 'ui.academy.mastery.cumulative')}</Button>
+      <AcademyReviewSession projectId={project.id} active={active} disabled={disabled} onCompleted={() => markDone('review')} onOpenLesson={onOpenLesson} mode={cumulativeMode ? 'cumulative' : 'due'} />
+    </div>
     if (phase === 'struggle') return <AcademyStruggle projectId={project.id} lesson={lesson} active={active} disabled={disabled} onPhase={onStrugglePhase} />
     if (phase === 'world') return <AcademyWorld projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('world')} />
     if (phase === 'steps') return <AcademySteps projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('steps')} onCalibration={code => {if (code === 'blindspot') setNudge('blindspot')}} />

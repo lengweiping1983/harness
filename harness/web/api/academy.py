@@ -134,6 +134,7 @@ def build_router(ctx):
     endpoint('POST', prefix + '/projects/{project_id}/struggle/reveal', lambda service, body, params, request: service.struggle.reveal(**params, **body))
     endpoint('GET', prefix + '/projects/{project_id}/mastery', lambda service, body, params, request: {'mastery': service.mastery.view(**params)})
     endpoint('GET', prefix + '/projects/{project_id}/reviews', lambda service, body, params, request: {'reviews': service.mastery.queue(**params)})
+    endpoint('GET', prefix + '/projects/{project_id}/cumulative', lambda service, body, params, request: {'reviews': service.mastery.queue(cumulative=True)})
     endpoint('POST', prefix + '/projects/{project_id}/reviews', lambda service, body, params, request: service.mastery.review(**params, **body))
     endpoint('GET', prefix + '/receipts/{request_id}', lambda service, body, params, request: service.receipt(**params))
     return router

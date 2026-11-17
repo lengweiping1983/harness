@@ -105,6 +105,14 @@ try {
   await studio.locator('[data-academy-export]').click()
   const download = await downloadPromise
   assert.equal(download.suggestedFilename(), 'harness-academy-evidence.json')
+  // 结业挑战：覆盖已学但尚未到期的课次（到期队列为空时仍有题）；经面板掌握区切换。
+  await studio.locator('[data-academy-studio-exit]').click()
+  await panel.locator('details[data-academy-section="mastery"] > summary').click()
+  const toggle = panel.locator('[data-academy-cumulative-toggle]')
+  await toggle.waitFor()
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'false')
+  await toggle.click()
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'true')
   assert.deepEqual(errors, [])
   console.log('Academy home: grade-band cards and filter, same-instance en/zh/en, course start into default focus studio and exit verified')
 } catch (error) {failure = error}

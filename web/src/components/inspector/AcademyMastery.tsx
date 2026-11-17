@@ -104,7 +104,7 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
 }
 
 /** 独立重测会话：到期队列逐题作答、幂等回执、未知只回查；面板与专注舞台共用同一行为。 */
-export function AcademyReviewSession({projectId, active, disabled = false, onCompleted, onOpenLesson}: {projectId: string; active: boolean; disabled?: boolean; onCompleted?: () => void; onOpenLesson?: (lessonId: string) => void}) {
+export function AcademyReviewSession({projectId, active, disabled = false, onCompleted, onOpenLesson, mode = 'due'}: {projectId: string; active: boolean; disabled?: boolean; onCompleted?: () => void; onOpenLesson?: (lessonId: string) => void; mode?: 'due' | 'cumulative'}) {
   useLocale()
   const [queue, setQueue] = useState<AcademyReviewItem[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -134,13 +134,13 @@ export function AcademyReviewSession({projectId, active, disabled = false, onCom
     if (!active) return
     const controller = new AbortController()
     void (async () => {
-      const reviews = await academyApi.reviews(projectId, controller.signal)
+      const reviews = await (mode === 'cumulative' ? academyApi.cumulative(projectId, controller.signal) : academyApi.reviews(projectId, controller.signal))
       if (controller.signal.aborted) return
       if (reviews.ok) {setQueue(reviews.data.reviews); setLoaded(true)}
       else setError(reviews.copy ?? reviews.message)
     })()
     return () => controller.abort()
-  }, [active, projectId, revision])
+  }, [active, projectId, revision, mode])
 
   useEffect(() => {if (loaded && queue.length === 0) completedRef.current?.()}, [loaded, queue.length])
 
@@ -195,8 +195,8 @@ export function AcademyReviewSession({projectId, active, disabled = false, onCom
       <p className="text-xs text-muted">{t('ui.academy.mastery.stability', {days: result.skill.stability_days})}</p>
       {!result.review.correct && onOpenLesson ? <Button size="xs" variant="subtle" data-academy-restudy onClick={() => onOpenLesson(result.review.lesson_id)}>{t('ui.academy.mastery.restudy')}</Button> : null}
     </div> : null}
-    {queue.length ? <Section title={t('ui.academy.mastery.reviewHeading')}>
-      {queue.length > 1 ? <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.interleavedHint')}</p> : null}
+    {queue.length ? <Section title={t(mode === 'cumulative' ? 'ui.academy.mastery.cumulative' : 'ui.academy.mastery.reviewHeading')}>
+      {mode === 'cumulative' ? <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.cumulativeHint')}</p> : queue.length > 1 ? <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.interleavedHint')}</p> : null}
       <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.reviewHint')}</p>
       <AcademyReviewCard key={queue[0].lesson_id + ':' + revision} item={queue[0]} busy={busy || disabled || pending !== null} onSubmit={answers => void submit(answers)} />
     </Section> : loaded ? <p className="text-sm leading-reading text-muted">{t('ui.academy.mastery.queueEmpty')}</p> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
@@ -205,6 +205,7 @@ export function AcademyReviewSession({projectId, active, disabled = false, onCom
 export function AcademyMastery({projectId, active, onOpenLesson}: {projectId: string; active: boolean; onOpenLesson?: (lessonId: string) => void}) {
   useLocale()
   const [open, setOpen] = useState(false)
+  const [cumulative, setCumulative] = useState(false)
   const [view, setView] = useState<AcademyMasteryView | null>(null)
   const [revision, setRevision] = useState(0)
   const [error, setError] = useState<NoticeText | ''>('')
@@ -235,7 +236,8 @@ export function AcademyMastery({projectId, active, onOpenLesson}: {projectId: st
         <AcademySkillList skills={view.skills} />
       </> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
       {view ? <AcademyReport mastery={view} /> : null}
-      <AcademyReviewSession projectId={projectId} active={active && open} onCompleted={() => setRevision(value => value + 1)} onOpenLesson={onOpenLesson} />
+      <Button size="xs" variant="ghost" data-academy-cumulative-toggle aria-pressed={cumulative} onClick={() => setCumulative(value => !value)}>{t(cumulative ? 'ui.academy.mastery.backToDue' : 'ui.academy.mastery.cumulative')}</Button>
+      <AcademyReviewSession projectId={projectId} active={active && open} onCompleted={() => setRevision(value => value + 1)} onOpenLesson={onOpenLesson} mode={cumulative ? 'cumulative' : 'due'} />
     </div>
   </details>
 }

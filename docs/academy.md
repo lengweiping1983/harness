@@ -159,7 +159,7 @@ Python 课的阶段迁移任务包括整理问候、处理空列表、拒绝无�
 
 团队课程另含小学测量与单位（`primary-measurement`，4 课，学段 primary）：长度→质量→时间（60 进制挣扎）→选合理单位，含迁移挑战（电影结束时刻、门高估计）。
 
-团队课程另含小学分数运算（`primary-fraction-operations`，4 课，学段 primary）：同分母加减→通分（分数条微世界）→匹配份数比较（挣扎）→分数小数互化，含迁移挑战（配方够不够、一半是多少）。重测队列按阶段交错排列（round-robin），相邻重测来自不同阶段/课次，利用交错练习的辨别效应；重测失败后提供“重学本课，然后再测”入口（test-potentiated restudy），把失败转化为重学动机而非终点。重测区在多于一项时显式说明交错理由。技能列表对已有证据的技能显示下次重测日期（due_at），把遗忘曲线调度透明化，学习者知道“何时会再被考”。
+团队课程另含小学分数运算（`primary-fraction-operations`，4 课，学段 primary）：同分母加减→通分（分数条微世界）→匹配份数比较（挣扎）→分数小数互化，含迁移挑战（配方够不够、一半是多少）。重测队列按阶段交错排列（round-robin），相邻重测来自不同阶段/课次，利用交错练习的辨别效应；掌握区与舞台重测环节提供“结业挑战”切换：混排所有已学课次的题目（不受到期过滤），作为整门课的总结性检验；提交仍走独立重测评分与证据账本。重测失败后提供“重学本课，然后再测”入口（test-potentiated restudy），把失败转化为重学动机而非终点。重测区在多于一项时显式说明交错理由。技能列表对已有证据的技能显示下次重测日期（due_at），把遗忘曲线调度透明化，学习者知道“何时会再被考”。
 
 团队课程另含小学科学“沉与浮”（`primary-science-foundations`，4 课，学段 primary）：预测沉浮→密度微世界→钢铁轮船平均密度→给工程师讲清楚，含挣扎窗口、迁移挑战（潜艇注水、冰浮饮料）与教 AI 学生可用性。课程包合同（步骤/微世界/挣扎/迁移/学段）不变，证明内容可扩展到数学之外的学科。
 
@@ -185,6 +185,7 @@ Python 课的阶段迁移任务包括整理问候、处理空列表、拒绝无�
 | 调度透明＋交错重测 | Bjork desirable difficulties；Rohrer interleaving | 技能 due_at／队列 round-robin＋理由 | 已落地，待实测 |
 | 检索练习（重测而非重读） | Roediger & Karpicke testing effect | 独立重测回执 | 已落地，待实测 |
 | 失败后重学再测 | Test-potentiated restudy | 重测失败→重学本课→再测 | 已落地，待实测 |
+| 结业挑战（累计评估） | Summative / cumulative assessment | GET cumulative／混排已学课次 | 已落地，待实测 |
 | 生产性失败／挣扎窗口 | Kapur productive failure | struggle.py 恒温器＋防救场 | 已落地，待实测 |
 | 预测—操作—观察—解释微世界 | Bret Victor explorable explanations；POE | worlds.py 四内核 | 已落地，待实测 |
 | 例题→补全→独立 fading／CRA | Sweller worked-example effect；Bruner CRA | steps.py 序列＋contingent scaffold | 已落地，待实测 |
