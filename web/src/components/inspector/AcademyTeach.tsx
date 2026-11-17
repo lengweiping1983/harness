@@ -21,14 +21,14 @@ export function AcademyQuizResult({quiz}: {quiz: AcademyTeachQuiz}) {
 }
 
 /** 教 AI 学生：教学对话复用带练观察列表，测验独立评分；未知写入只回查原请求。 */
-export function AcademyTeach({projectId, lesson, fingerprint, turns, disabled, active, onRefresh}: {
+export function AcademyTeach({projectId, lesson, fingerprint, turns, disabled, active, onRefresh, embedded = false, onCompleted}: {
   projectId: string; lesson: AcademyLesson; fingerprint: string; turns: AcademyTutorTurn[]
-  disabled: boolean; active: boolean; onRefresh: () => void
+  disabled: boolean; active: boolean; onRefresh: () => void; embedded?: boolean; onCompleted?: () => void
 }) {
   useLocale()
   const draftKey = 'academy.teach.draft.' + JSON.stringify([projectId, lesson.id])
   const pendingKey = 'academy.teach.pending.' + projectId
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(embedded)
   const [draft, setDraft] = useState(() => {try {return sessionStorage.getItem(draftKey) ?? ''} catch {return ''}})
   const [quizzes, setQuizzes] = useState<AcademyTeachQuiz[]>([])
   const [revision, setRevision] = useState(0)
@@ -68,6 +68,8 @@ export function AcademyTeach({projectId, lesson, fingerprint, turns, disabled, a
       pending: true,
     })
   }, [active, open, projectId, revision])
+
+  useEffect(() => {if (latestQuiz?.status === 'completed' && latestQuiz.correct) onCompleted?.()}, [latestQuiz?.status, latestQuiz?.correct, onCompleted])
 
   const clearPending = () => {
     try {sessionStorage.removeItem(pendingKey)} catch {setPending(null)}
@@ -120,10 +122,10 @@ export function AcademyTeach({projectId, lesson, fingerprint, turns, disabled, a
     setBusy(false)
   }
 
-  return <details data-academy-section="teach" open={open} onToggle={event => setOpen(event.currentTarget.open)} className="rounded-xl border border-line p-3">
-    <summary className="cursor-pointer rounded-lg text-sm text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.teach.title')}</summary>
-    <div className="mt-3 space-y-4">
+  const content = <div className={embedded ? 'space-y-4' : 'mt-3 space-y-4'}>
       <p className="text-xs leading-reading text-muted">{t('ui.academy.teach.hint')}</p>
+      <p className="text-xs leading-reading text-brand">{t('ui.academy.teach.why')}</p>
+      <ol className="flex flex-wrap gap-1 text-xs text-muted">{['loop1', 'loop2', 'loop3'].map(key => <li key={key} className="rounded-full border border-line px-2 py-0.5">{t('ui.academy.teach.' + key)}</li>)}</ol>
       {error ? <p role="alert" className="text-sm text-danger">{noticeText(error)}</p> : null}
       {pending ? <div role="status" className="space-y-2 rounded-xl border border-warn/40 p-3 text-sm">
         <p>{t('ui.academy.teach.pending')}</p>
@@ -131,9 +133,9 @@ export function AcademyTeach({projectId, lesson, fingerprint, turns, disabled, a
         <Button size="xs" disabled={busy} onClick={() => void recheck(pending)}>{t('ui.academy.recheckReceipt')}</Button>
       </div> : null}
       {misconception ? <div className="rounded-lg border border-line p-3 text-sm">
-        <p className="text-xs font-medium text-muted">{t('ui.academy.teach.misconception')}</p>
+        <p className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted">{t('ui.academy.teach.misconception')}<span className="rounded-full bg-warn/15 px-2 py-0.5 text-warn">{t('ui.academy.teach.misconceptionTag')}</span></p>
         <p className="mt-1 whitespace-pre-wrap leading-reading">{misconception.prompt}</p>
-        <p className="mt-1 whitespace-pre-wrap leading-reading text-warn">{misconception.label}</p>
+        <p className="mt-1 whitespace-pre-wrap leading-reading text-warn">{t('ui.academy.teach.studentBelieves', {label: misconception.label})}</p>
       </div> : null}
       {teachTurns.length ? <ol className="space-y-3">{teachTurns.map(turn => <li key={turn.id} data-teach-turn-id={turn.id} className="space-y-2">
         <div className="rounded-lg bg-canvas p-3 text-sm"><p className="text-xs font-medium text-muted">{t('ui.academy.teach.learnerLabel')}</p><p className="mt-1 whitespace-pre-wrap leading-reading">{turn.prompt}</p></div>
@@ -157,5 +159,9 @@ export function AcademyTeach({projectId, lesson, fingerprint, turns, disabled, a
         <Button type="submit" size="sm" disabled={disabled || busy || pending !== null || !draft.trim()} icon={<Send className="h-3.5 w-3.5" />}>{t('ui.academy.teach.send')}</Button>
       </form>
     </div>
+  if (embedded) return <div data-academy-section="teach">{content}</div>
+  return <details data-academy-section="teach" open={open} onToggle={event => setOpen(event.currentTarget.open)} className="rounded-xl border border-line p-3">
+    <summary className="cursor-pointer rounded-lg text-sm text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.teach.title')}</summary>
+    {content}
   </details>
 }

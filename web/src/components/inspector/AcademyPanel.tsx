@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { BookOpen, Check, ChevronLeft, ChevronRight, Maximize2, Minimize2, RotateCcw, Send } from 'lucide-react'
+import { BookOpen, Check, ChevronLeft, ChevronRight, Maximize2, Minimize2, RotateCcw, Send, Sparkles } from 'lucide-react'
 import { t, useLocale } from '@/i18n'
 import type { AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyFile, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorProposal, AcademyTutorTurn, ResourceText } from '@/types'
 import type {AcademyTutorCheckSelection} from '@/lib/protocol.generated'
@@ -18,6 +18,7 @@ import {AcademyTeach} from './AcademyTeach'
 import {AcademyStruggle} from './AcademyStruggle'
 import {AcademyWorld} from './AcademyWorld'
 import {AcademySteps} from './AcademySteps'
+import {AcademyStudio} from './AcademyStudio'
 import {AcademyTopicStudio} from './AcademyTopicStudio'
 import {AcademyModelLab} from './AcademyModelLab'
 import {AcademyTutor} from './AcademyTutor'
@@ -29,6 +30,8 @@ import {useAppStore} from '@/store/app'
 
 const modelFocusPath = 'model-prompt'
 const viewKey = 'harness.academy.view.v1'
+const studioKey = 'harness.academy.studio.v1'
+const noAnswers: ReadonlyMap<string, string> = new Map()
 const draftKey = (project: string, path: string) => 'harness.academy.draft.v1:' + JSON.stringify([project, path])
 const pendingKey = 'harness.academy.pending.v1'
 const noteKey = (project: string, lesson: string) => 'harness.academy.note.v1:' + JSON.stringify([project, lesson])
@@ -105,6 +108,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
   const [preview, setPreview] = useState<AcademyRestorePreview | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
   const [storageError, setStorageError] = useState(savedView.invalid === 'true')
+  const [studioOpen, setStudioOpen] = useState(() => {try {return localStorage.getItem(studioKey) === 'open'} catch {return false}})
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [feedbackView, setFeedbackView] = useState({scope: '', open: false})
@@ -546,6 +550,15 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
     const answers = lesson!.knowledge_checks!.map(check => ({check_id: check.id, option_id: studyAnswers.answers.get(check.id)!}))
     void perform(requestId => academyApi.complete(project.id, {request_id: requestId, lesson_id: lessonId, expected_fingerprint: project.fingerprint, note, answers}))
   }
+  const recordNote = (value: string) => {
+    setNote(value)
+    try {localStorage.setItem(noteKey(projectId, lessonId), value)} catch {setStorageError(true)}
+  }
+  const recordCheckAnswer = (id: string, answer: string) => setStudyAnswers(previous => {
+    const answers = new Map(previous.scope === studyScope ? previous.answers : [])
+    answers.set(id, answer)
+    return {scope: studyScope, answers}
+  })
   const startCourse = (identity: string) => {
     if (dirty) {setError({key: 'ui.academy.unsaved'}); return}
     void perform(requestId => academyApi.create({course_id: identity, request_id: requestId}), false, identity)
@@ -556,6 +569,12 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
       setCourseId(saved.course_id); setProjectId(saved.id); setLessonId(saved.active_lesson_id); setPath('')
       setSubmissions([]); setSubmissionId(''); setManageOpen(false)
     })
+  }
+  /** 开关专注舞台；关闭时把焦点还给入口按钮，偏好持久化到本地。 */
+  const toggleStudio = (open: boolean) => {
+    setStudioOpen(open)
+    try {localStorage.setItem(studioKey, open ? 'open' : 'closed')} catch {setStorageError(true)}
+    if (!open) document.querySelector<HTMLButtonElement>('[data-academy-studio-enter]')?.focus()
   }
   const openLesson = (targetLessonId: string) => {
     if (!project || locked || loading || dirty || composing.current) return
@@ -585,17 +604,14 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
 
   const currentExercise = lesson?.exercise ? <div data-academy-task role="note" aria-label={t('ui.academy.experiment')} className="min-w-0 text-sm leading-reading"><Markdown workspaceLinks={false}>{lesson.exercise}</Markdown></div> : null
 
-  const knowledgeChecks = lesson?.knowledge_checks?.length ? <details key={studyScope} data-academy-section="quiz" open={reflectionReady || !project || !current} className="border-t border-line pt-3"><summary className="cursor-pointer text-sm text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.quickCheck')}</summary><div className="mt-3"><AcademyKnowledgeChecks key={studyScope} embedded checks={lesson.knowledge_checks} disabled={locked || loading} asking={tutorTurns.some(turn => turn.project_id === projectId && turn.status === 'running')} onAsk={project && current ? (check_id, option_id) => {if (!composing.current) {askTutor(t('ui.academy.tutor.quizPrompt'), false, false, {knowledge_check: {check_id, option_id}}); jump(tutorRef.current)}} : undefined} onChecked={study && current ? (id, answer) => setStudyAnswers(previous => {
-        const answers = new Map(previous.scope === studyScope ? previous.answers : [])
-        answers.set(id, answer)
-        return {scope: studyScope, answers}
-      }) : undefined} /></div></details> : null
+  const knowledgeChecks = lesson?.knowledge_checks?.length ? <details key={studyScope} data-academy-section="quiz" open={reflectionReady || !project || !current} className="border-t border-line pt-3"><summary className="cursor-pointer text-sm text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.quickCheck')}</summary><div className="mt-3"><AcademyKnowledgeChecks key={studyScope} embedded checks={lesson.knowledge_checks} disabled={locked || loading} asking={tutorTurns.some(turn => turn.project_id === projectId && turn.status === 'running')} onAsk={project && current ? (check_id, option_id) => {if (!composing.current) {askTutor(t('ui.academy.tutor.quizPrompt'), false, false, {knowledge_check: {check_id, option_id}}); jump(tutorRef.current)}} : undefined} onChecked={study && current ? recordCheckAnswer : undefined} /></div></details> : null
 
   if (!active) return null
   return <div className="refresh-action-container space-y-5" aria-label={t('ui.academy.title')}
     onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}
     onKeyDown={event => {if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault()}}>
     <div className="flex items-start justify-between gap-2"><div className="min-w-0"><h2 className="ui-section-title break-words">{project ? course?.title ?? t('ui.academy.title') : t('ui.academy.title')}</h2>{project && course && project.course_id === course.id ? <><p className="mt-1 text-xs text-muted">{t('ui.academy.progress', {done: completedLessons, total: course.lessons.length})}</p><progress className="sr-only" value={academyProgressPercent(course, project)} max={100} aria-label={t('ui.academy.progress', {done: completedLessons, total: course.lessons.length})} /></> : null}</div><div className="flex shrink-0 items-center gap-1">
+      {project && current && lesson && (readingLesson || hasActivePractice) ? <Button size="xs" variant="subtle" data-academy-studio-enter icon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => {if (!composing.current) toggleStudio(true)}}>{t('ui.academy.studio.enter')}</Button> : null}
       <Button size="xs" variant="ghost" icon={expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />} aria-pressed={expanded}
         onClick={() => {if (!composing.current) useAppStore.getState().toggleInspectorExpanded()}}>{t(expanded ? 'ui.academy.exitFocus' : 'ui.academy.focus')}</Button>
       <RefreshButton size="xs" variant="ghost" label={t('ui.academy.refresh')} disabled={busy || dirty} onClick={() => setRevision(value => value + 1)} /></div></div>
@@ -697,7 +713,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
       {project && current && lesson ? <AcademyTeach key={'teach:' + JSON.stringify([projectId, lessonId])} projectId={projectId} lesson={lesson} fingerprint={project.fingerprint} turns={tutorTurns} disabled={locked || loading} active={active} onRefresh={() => setRevision(value => value + 1)} /> : null}
       {project && current ? <section ref={reflectionRef} aria-label={t('ui.academy.studyPractice')} className="academy-workbench-reflection space-y-5">
       {knowledgeChecks}
-      <details key={'notes:' + studyScope} data-academy-section="notes" open={reflectionReady} className="border-t border-line pt-3"><summary className="cursor-pointer text-sm text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.notesDisclosure')}</summary><div className="mt-3"><Section><label className="block text-sm"><span className="sr-only">{t('ui.academy.note')}</span><textarea aria-label={t('ui.academy.note')} placeholder={t(readingLesson ? 'ui.academy.studyNoteHint' : modelLesson ? 'ui.academy.modelNoteHint' : 'ui.academy.noteHint')} value={note} maxLength={4000} disabled={locked} rows={4} className="ui-field w-full resize-y leading-reading" onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}} onChange={event => {setNote(event.target.value); try {localStorage.setItem(noteKey(projectId, lessonId), event.target.value)} catch {setStorageError(true)}}} /></label></Section></div></details>
+      <details key={'notes:' + studyScope} data-academy-section="notes" open={reflectionReady} className="border-t border-line pt-3"><summary className="cursor-pointer text-sm text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.notesDisclosure')}</summary><div className="mt-3"><Section><label className="block text-sm"><span className="sr-only">{t('ui.academy.note')}</span><textarea aria-label={t('ui.academy.note')} placeholder={t(readingLesson ? 'ui.academy.studyNoteHint' : modelLesson ? 'ui.academy.modelNoteHint' : 'ui.academy.noteHint')} value={note} maxLength={4000} disabled={locked} rows={4} className="ui-field w-full resize-y leading-reading" onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}} onChange={event => recordNote(event.target.value)} /></label></Section></div></details>
 
       {reflectionReady ? <Section>
         {studyCompleted ? <p role="status" className="text-sm text-ok">{t('ui.academy.studyCompleted')}</p> : null}
@@ -731,5 +747,15 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
       </section> : null}
       </div></div>
     </> : null}
+    {studioOpen && project && course && lesson && current && (readingLesson || hasActivePractice) ? <AcademyStudio key={'studio:' + JSON.stringify([projectId, lessonId])}
+      course={course} project={project} lesson={lesson} active={active} disabled={locked || loading} tutorTurns={tutorTurns}
+      struggleRevealed={Boolean(struggleGate && struggleGate.lessonId === lessonId && struggleGate.revealed)}
+      checkAnswers={studyAnswers.scope === studyScope ? studyAnswers.answers : noAnswers}
+      note={note} studyReady={studyReady} studyCompleted={studyCompleted}
+      onClose={() => toggleStudio(false)} onOpenLesson={openLesson}
+      onAskCoach={prompt => askTutor(prompt, false, false)}
+      onStrugglePhase={revealed => setStruggleGate(previous => previous && previous.lessonId === lesson.id && previous.revealed === revealed ? previous : {lessonId: lesson.id, revealed})}
+      onCheckAnswer={recordCheckAnswer} onNote={recordNote} onComplete={completeStudy}
+      onRefresh={() => setRevision(value => value + 1)} /> : null}
   </div>
 }

@@ -50,9 +50,6 @@ try {
   for (const options of [{ctrlKey: true, isComposing: true}, {metaKey: true, keyCode: 229}, {ctrlKey: true, repeat: true}]) {
     assert.equal(await editor.evaluate((node, options) => !node.dispatchEvent(new KeyboardEvent('keydown', {key: 's', bubbles: true, cancelable: true, ...options})), options), true)
   }
-  for (const options of [{ctrlKey: true, shiftKey: true}, {ctrlKey: true, altKey: true}]) {
-    assert.equal(await editor.evaluate((node, options) => node.dispatchEvent(new KeyboardEvent('keydown', {key: 's', bubbles: true, cancelable: true, ...options})), options), true)
-  }
   await editor.evaluate(node => {
     const event = new KeyboardEvent('keydown', {key: 's', ctrlKey: true, bubbles: true, cancelable: true})
     Object.defineProperty(event, 'getModifierState', {value: key => key === 'AltGraph'})
@@ -116,6 +113,12 @@ try {
   assert.equal((await get('/projects/' + project.id + '/source?path=main.py')).content, current)
   assert.deepEqual((await get('/projects/' + project.id + '/runs')).runs, [])
   assert.deepEqual((await get('/projects/' + project.id + '/tutor-turns')).tutor_turns, [])
+  // Mod+Shift+S 属全局截图快捷键（主干新增），其捕获尝试会干扰无头环境后续可信按键；
+  // 故非保存组合的核对放在全部键盘保存回归之后：编辑器不得因这些组合产生写入。
+  const writesBeforeCombos = writes
+  await editor.evaluate(node => node.dispatchEvent(new KeyboardEvent('keydown', {key: 's', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true})))
+  await editor.evaluate(node => node.dispatchEvent(new KeyboardEvent('keydown', {key: 's', ctrlKey: true, altKey: true, bubbles: true, cancelable: true})))
+  assert.equal(writes, writesBeforeCombos, 'Non-save Ctrl combinations must not write files')
   assert.deepEqual(errors, [])
   console.log('Academy keyboard save: actual Ctrl/Meta saves without execution, confirmed caret/scroll return, clean/IME/repeat/Alt guards, editor-only scope, en/zh/en and no focus revival or write replay after unknown receipt verified')
 } catch (error) {failure = error}

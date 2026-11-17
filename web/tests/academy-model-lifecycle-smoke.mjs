@@ -36,7 +36,7 @@ await browserScenario(async({server,browser})=>{
       await options.locator(':scope > summary').click()
       await page.getByText(language==='en'?'System instructions':'系统指令',{exact:true}).waitFor()
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
-      await page.getByRole('button',{name:strings['ui.academy.modelRefresh'],exact:true}).click()
+      await page.getByRole('button',{name:strings['ui.worktrees.refresh']+' · '+strings['ui.academy.modelRefresh'],exact:true}).click()
       await options.locator(':scope > summary').click()
       assert.equal(await page.getByRole('textbox',{name:strings['ui.academy.modelPrompt'],exact:true}).inputValue(),'User prompt 原文 / {literal}')
       assert.deepEqual(await page.evaluate(()=>window.prompts),[],'Language changes cannot replay a model request')

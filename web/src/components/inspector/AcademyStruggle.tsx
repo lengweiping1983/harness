@@ -132,7 +132,7 @@ export function AcademyStruggle({projectId, lesson, active, disabled, onPhase}: 
     try {sessionStorage.setItem(pendingKey, JSON.stringify({...identity, projectId}))} catch {setError({key: 'ui.academy.error.store-invalid'})}
     setPending(identity)
   }
-  const write = async (identity: PendingStruggle, call: () => Promise<ReturnType<typeof academyApi.struggleStart>>) => {
+  const write = async (identity: PendingStruggle, call: () => ReturnType<typeof academyApi.struggleStart>) => {
     if (disabled || busy || pending) return
     remember(identity); setBusy(true); setError('')
     const outcome = await call()

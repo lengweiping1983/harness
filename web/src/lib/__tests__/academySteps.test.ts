@@ -4,11 +4,11 @@ import {afterEach, expect, it} from 'vitest'
 import {setLocale} from '@/i18n'
 import {AcademyNumberLine, AcademyStepCard, AcademySteps} from '@/components/inspector/AcademySteps'
 import {academyNextStep, academyReceiptMatches} from '../academy'
-import type {AcademyLesson, AcademyReceipt, AcademyStepPublic} from '@/types'
+import type {AcademyLesson, AcademyReceipt, AcademyStep} from '@/types'
 
 afterEach(async () => {await setLocale('zh-CN')})
 
-const step = (patch: Partial<AcademyStepPublic> = {}): AcademyStepPublic => ({id: 'worked', kind: 'explain', prompt: 'Why must parts be equal?', content: 'Cut a circle into 2 equal parts.', ...patch})
+const step = (patch: Partial<AcademyStep> = {}): AcademyStep => ({id: 'worked', kind: 'explain', prompt: 'Why must parts be equal?', feedback: 'Because equal parts share one name.', content: 'Cut a circle into 2 equal parts.', ...patch})
 const card = (overrides: Partial<Parameters<typeof AcademyStepCard>[0]> = {}) => createElement(AcademyStepCard, {
   step: step(), busy: false, feedback: null, onSubmit: () => {}, onNext: () => {}, ...overrides,
 })
@@ -24,7 +24,7 @@ it('renders each step kind without revealing answers', async () => {
   expect(explain).toContain('disabled=""')
   const numeric = renderToStaticMarkup(card({step: step({kind: 'numeric', prompt: 'Denominator?', content: undefined, tolerance: 0})}))
   expect(numeric).toContain('type="number"')
-  const choice = renderToStaticMarkup(card({step: step({kind: 'choice', prompt: 'Which half?', content: undefined, options: [{id: 'a', label: 'Unequal'}, {id: 'b', label: 'Equal'}]})}))
+  const choice = renderToStaticMarkup(card({step: step({kind: 'choice', prompt: 'Which half?', content: undefined, options: [{id: 'a', label: 'Unequal', feedback: 'Unequal parts cannot be a half.'}, {id: 'b', label: 'Equal', feedback: 'One of two equal parts.'}]})}))
   expect(choice).toContain('Unequal')
   expect(choice).not.toContain('answer_id')
   const ordering = renderToStaticMarkup(card({step: step({kind: 'ordering', prompt: 'Order it', content: undefined, items: [{id: 'y', label: 'Second'}, {id: 'x', label: 'First'}]})}))
@@ -113,7 +113,7 @@ it('routes adaptively to a support step on wrong and back after mastery', () => 
     step({id: 'worked', kind: 'explain'}),
     step({id: 'denominator', kind: 'numeric', prompt: 'Denominator?', content: undefined, tolerance: 0, on_wrong: 'support'}),
     step({id: 'support', kind: 'numeric', prompt: 'Count parts', content: undefined, tolerance: 0}),
-    step({id: 'which-half', kind: 'choice', prompt: 'Which?', content: undefined, options: [{id: 'b', label: 'Equal'}]}),
+    step({id: 'which-half', kind: 'choice', prompt: 'Which?', content: undefined, options: [{id: 'b', label: 'Equal', feedback: 'One of two equal parts.'}]}),
   ]
   expect(academyNextStep(steps, [])?.id).toBe('worked')
   expect(academyNextStep(steps, [{step_id: 'worked', correct: true}])?.id).toBe('denominator')

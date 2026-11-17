@@ -101,7 +101,7 @@ export function AcademyWorldCard({kind, session, params, note, busy, onParams, o
 }
 
 /** 微世界容器：读取会话、持久草稿、未知回执只回查。 */
-export function AcademyWorld({projectId, lesson, active, disabled}: {projectId: string; lesson: AcademyLesson; active: boolean; disabled: boolean}) {
+export function AcademyWorld({projectId, lesson, active, disabled, onCompleted}: {projectId: string; lesson: AcademyLesson; active: boolean; disabled: boolean; onCompleted?: () => void}) {
   useLocale()
   const task = lesson.world
   const noteKey = 'academy.world.note.' + JSON.stringify([projectId, lesson.id])
@@ -142,12 +142,14 @@ export function AcademyWorld({projectId, lesson, active, disabled}: {projectId: 
       if (result.ok) {
         setView(result.data)
         const current = result.data.world
-        if (current) setParams({...current.params})
+        if (current) setParams({...current.params} as Record<string, number>)
         else setParams(Object.fromEntries((academyWorldParams[task.kind] ?? []).map(item => [item.key, item.min])))
       } else setError(result.copy ?? result.message)
     })()
     return () => controller.abort()
   }, [active, task, projectId, lesson.id, revision])
+
+  useEffect(() => {if (session?.status === 'completed') onCompleted?.()}, [session?.status, onCompleted])
 
   if (!task) return null
   const clearPending = () => {
@@ -165,7 +167,7 @@ export function AcademyWorld({projectId, lesson, active, disabled}: {projectId: 
     clearPending()
     setRevision(value => value + 1)
   }
-  const write = async (identity: PendingWorld, call: () => Promise<ReturnType<typeof academyApi.worldStart>>) => {
+  const write = async (identity: PendingWorld, call: () => ReturnType<typeof academyApi.worldStart>) => {
     if (disabled || busy || pending) return
     try {sessionStorage.setItem(pendingKey, JSON.stringify({...identity, projectId}))} catch {setError({key: 'ui.academy.error.store-invalid'})}
     setPending(identity); setBusy(true); setError('')

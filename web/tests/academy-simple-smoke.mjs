@@ -67,7 +67,7 @@ try {
     try {await route.fulfill({response})} catch (error) {if (!route.request().failure()) throw error} finally {handledDesigns()}
   })
   const designAborted = page.waitForEvent('requestfailed', {predicate: request => request.method() === 'GET' && request.url().endsWith('/academy/designs')})
-  await panel.getByRole('button', {name: '刷新我的制课记录', exact: true}).click()
+  await panel.getByRole('button', {name: '刷新 · 刷新我的制课记录', exact: true}).click()
   await designObserved
   await topicSection.locator(':scope > summary').click()
   await designAborted

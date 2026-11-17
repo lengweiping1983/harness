@@ -1986,7 +1986,7 @@ export interface AcademyNumberLineMark {
 }
 export interface AcademyStep {
   id: string
-  kind: 'explain' | 'numeric' | 'choice' | 'ordering'
+  kind: 'explain' | 'numeric' | 'choice' | 'ordering' | 'matching'
   prompt: string
   feedback: string
   hints?: Array<string>
@@ -2004,10 +2004,10 @@ export interface AcademyStep {
 }
 export interface AcademyStepPublic {
   id: string
-  kind: 'explain' | 'numeric' | 'choice' | 'ordering'
+  kind: 'explain' | 'numeric' | 'choice' | 'ordering' | 'matching'
   prompt: string
   content?: string
-  options?: Array<Record<string, unknown>>
+  options?: Array<AcademyStepItem>
   items?: Array<AcademyStepItem>
   tolerance?: number
   left?: Array<AcademyStepItem>
@@ -2158,10 +2158,14 @@ export interface AcademyStudyAnswer {
   check_id: string
   option_id: string
 }
+export interface AcademyReviewOption {
+  id: string
+  label: string
+}
 export interface AcademyReviewCheck {
   id: string
   prompt: string
-  options: Array<Record<string, unknown>>
+  options: Array<AcademyReviewOption>
 }
 export interface AcademyReviewItem {
   lesson_id: string

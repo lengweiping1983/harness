@@ -48,7 +48,7 @@ await browserScenario(async({server,browser})=>{
     }
     // 原挂载实例隐藏后停止观察，迟到列表不能更新隐藏页面。
     await page.evaluate(()=>{window.holdRead=true})
-    await page.getByRole('button',{name:'Refresh my course designs',exact:true}).click()
+    await page.getByRole('button',{name:'Refresh · Refresh my course designs',exact:true}).click()
     await page.waitForFunction(()=>typeof window.releaseRead==='function')
     await page.evaluate(()=>window.active(false))
     await page.locator('main[data-active="false"]').waitFor()

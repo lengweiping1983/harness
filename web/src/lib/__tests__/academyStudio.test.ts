@@ -1,0 +1,112 @@
+import {createElement} from 'react'
+import {renderToStaticMarkup} from 'react-dom/server'
+import {afterEach, expect, it} from 'vitest'
+import {setLocale} from '@/i18n'
+import {AcademyStudio} from '@/components/inspector/AcademyStudio'
+import {academyStudioChecksDone, academyStudioCoachPrompt, academyStudioCoachTurns, academyStudioJourney, academyStudioNextPhase, academyStudioPhases} from '../academyStudio'
+import type {AcademyCourse, AcademyLesson, AcademyProject, AcademyStep, AcademyTutorTurn} from '@/types'
+
+afterEach(async () => {await setLocale('zh-CN')})
+
+const step = (id: string): AcademyStep => ({id, kind: 'numeric', prompt: 'How many?', feedback: 'Think about equal parts.', tolerance: 0})
+const check = {id: 'c1', prompt: 'Which is half?', options: [{id: 'a', label: 'One of two equal parts', feedback: 'Equal parts share one name.'}, {id: 'b', label: 'Any two pieces', feedback: 'Pieces must be equal.'}], answer_id: 'a', hints: ['Equal parts matter.']}
+const lesson = (patch: Partial<AcademyLesson> = {}): AcademyLesson => ({id: 'fractions', mode: 'study', order: 2, title: 'Fractions', goal: 'Understand halves',
+  reading: 'A half is one of two equal parts.', milestone: false, run_command: [], source_manifest: [], references: [], prerequisites: [], trace_labels: {},
+  knowledge_checks: [check], steps: [step('s1'), step('s2')], struggle: {challenge: 'Show half without numbers.', window_minutes: 3}, world: {kind: 'fraction-bar'}, ...patch})
+const nextLesson: AcademyLesson = {...lesson({id: 'decimals', order: 3, title: 'Decimals', struggle: undefined, world: undefined, steps: undefined})}
+const course: AcademyCourse = {id: 'math', version: '1', origin: 'provided', source_revision: 'fixture', title: 'Math foundations', description: '', references: [],
+  lessons: [lesson({id: 'place-value', order: 1, title: 'Place value', struggle: undefined, world: undefined, steps: undefined}), lesson(), nextLesson]}
+const project: AcademyProject = {id: 'project', course_id: 'math', course_version: '1', name: 'Learner', revision: 1, active_lesson_id: 'fractions',
+  course_fingerprint: 'a'.repeat(64), created_at: 1, progress: [{lesson_id: 'place-value', state: 'completed', checkpoint_id: '', evidence_ids: [], attempt_count: 1}],
+  root: '/fixture', fingerprint: 'a'.repeat(64), sandbox: 'unavailable'}
+const studio = (overrides: Partial<Parameters<typeof AcademyStudio>[0]> = {}) => createElement(AcademyStudio, {
+  course, project, lesson: lesson(), active: false, disabled: false, tutorTurns: [], struggleRevealed: false,
+  checkAnswers: new Map(), note: '', studyReady: false, studyCompleted: false,
+  onClose: () => {}, onOpenLesson: () => {}, onAskCoach: () => {}, onStrugglePhase: () => {}, onCheckAnswer: () => {}, onNote: () => {}, onComplete: () => {}, onRefresh: () => {},
+  ...overrides,
+})
+
+it('orders phases problem-first and marks teach and practice-backed reading optional', () => {
+  expect(academyStudioPhases(lesson()).map(phase => phase.id)).toEqual(['struggle', 'world', 'steps', 'reading', 'teach', 'checks', 'note', 'finish'])
+  const phases = academyStudioPhases(lesson())
+  expect(phases.find(phase => phase.id === 'teach')?.optional).toBe(true)
+  expect(phases.find(phase => phase.id === 'reading')?.optional).toBe(true)
+  const readingOnly = academyStudioPhases(lesson({struggle: undefined, world: undefined, steps: undefined}))
+  expect(readingOnly.map(phase => phase.id)).toEqual(['reading', 'teach', 'checks', 'note', 'finish'])
+  expect(readingOnly.find(phase => phase.id === 'reading')?.optional).toBe(false)
+})
+
+it('builds journey states and advances to the next unfinished phase only', () => {
+  const journey = academyStudioJourney(course.lessons, project.progress, 'fractions')
+  expect(journey.map(node => node.state)).toEqual(['completed', 'active', 'open'])
+  const phases = academyStudioPhases(lesson())
+  expect(academyStudioNextPhase(phases, new Set(['struggle']), 'struggle')).toBe('world')
+  expect(academyStudioNextPhase(phases, new Set(['world', 'steps', 'reading', 'teach', 'checks', 'note']), 'note')).toBe('finish')
+  expect(academyStudioNextPhase(phases, new Set(['finish']), 'finish')).toBeNull()
+})
+
+it('requires every check answered correctly before checks count as done', () => {
+  expect(academyStudioChecksDone([check], new Map([['c1', 'b']]))).toBe(false)
+  expect(academyStudioChecksDone([check], new Map([['c1', 'a']]))).toBe(true)
+  expect(academyStudioChecksDone([], new Map())).toBe(false)
+})
+
+it('builds coach prompts per autonomy level in both languages and appends the learner question', async () => {
+  await setLocale('en')
+  const tryPrompt = academyStudioCoachPrompt(0, '  Why equal parts?  ', 'Fractions')
+  expect(tryPrompt).toContain('Fractions')
+  expect(tryPrompt).toContain('one short question')
+  expect(tryPrompt.endsWith('Why equal parts?')).toBe(true)
+  expect(academyStudioCoachPrompt(1, '', 'Fractions')).toContain('one hint')
+  expect(academyStudioCoachPrompt(2, '', 'Fractions')).toContain('step by step')
+  await setLocale('zh-CN')
+  expect(academyStudioCoachPrompt(0, '', '分数')).toContain('一个简短问题')
+  expect(academyStudioCoachPrompt(1, '', '分数')).toContain('不要直接给答案')
+  expect(academyStudioCoachPrompt(2, '', '分数')).toContain('一步步讲解')
+})
+
+it('keeps coach turns separate from teach turns and sorted by time', () => {
+  const turn = (patch: Partial<AcademyTutorTurn>): AcademyTutorTurn => ({id: 't', project_id: 'project', lesson_id: 'fractions', request_id: 'r',
+    input_fingerprint: 'a'.repeat(64), prompt: 'p', allow_execution: false, require_execution: false, response: 'ok', model: 'm', language: 'en',
+    status: 'completed', actions: [], created_at: 1, ...patch})
+  const rows = [turn({id: 'late', created_at: 5}), turn({id: 'teach', mode: 'teach', created_at: 2}),
+    turn({id: 'other-lesson', lesson_id: 'decimals', created_at: 3}), turn({id: 'other-project', project_id: 'other', created_at: 4}), turn({id: 'early', created_at: 1})]
+  expect(academyStudioCoachTurns(rows, 'project', 'fractions').map(item => item.id)).toEqual(['early', 'late'])
+})
+
+it('renders the immersive studio with journey, single focus phase and coach strip in both languages', async () => {
+  await setLocale('en')
+  const html = renderToStaticMarkup(studio())
+  expect(html).toContain('data-academy-studio')
+  expect(html).toContain('role="dialog"')
+  expect(html).toContain('Focus learning studio')
+  expect(html).toContain('data-studio-journey')
+  expect(html).toContain('Place value')
+  expect(html).toContain('aria-current="step"')
+  expect(html).toContain('data-studio-phase="struggle"')
+  expect(html).toContain('Try first')
+  expect(html).toContain('data-studio-coach')
+  expect(html).toContain('data-coach-level="0"')
+  expect(html).toContain('data-coach-level="2"')
+  expect(html).toContain('Coach involvement')
+  expect(html).toContain('The coach is nearby')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(studio())
+  expect(chinese).toContain('专注学习舞台')
+  expect(chinese).toContain('学习旅程')
+  expect(chinese).toContain('教练参与度')
+  expect(chinese).toContain('自己先试')
+})
+
+it('shows the finish checklist from existing evidence and celebrates completion with the next lesson', async () => {
+  await setLocale('en')
+  const checklist = renderToStaticMarkup(studio({checkAnswers: new Map([['c1', 'a']]), note: 'I learned halves.', studyReady: true}))
+  expect(checklist).toContain('data-studio-phase="finish"')
+  expect(checklist).toContain('Quick check passed')
+  expect(checklist).toContain('Reflection written')
+  expect(checklist).toContain('Complete this lesson activity')
+  const done = renderToStaticMarkup(studio({studyCompleted: true, studyReady: true, checkAnswers: new Map([['c1', 'a']]), note: 'I learned halves.'}))
+  expect(done).toContain('Great work')
+  expect(done).toContain('Next lesson: Decimals')
+  expect(done).toContain('Back to panel to review')
+})

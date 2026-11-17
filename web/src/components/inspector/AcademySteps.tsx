@@ -92,7 +92,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
 }
 
 /** 步骤播放器容器：一次一步、即时反馈、进度指示；未知回执只回查。 */
-export function AcademySteps({projectId, lesson, active, disabled}: {projectId: string; lesson: AcademyLesson; active: boolean; disabled: boolean}) {
+export function AcademySteps({projectId, lesson, active, disabled, onCompleted}: {projectId: string; lesson: AcademyLesson; active: boolean; disabled: boolean; onCompleted?: () => void}) {
   useLocale()
   const steps = lesson.steps
   const pendingKey = 'academy.steps.pending.' + projectId
@@ -126,6 +126,8 @@ export function AcademySteps({projectId, lesson, active, disabled}: {projectId: 
     })()
     return () => controller.abort()
   }, [active, steps, projectId, lesson.id, revision])
+
+  useEffect(() => {if (view?.completed) onCompleted?.()}, [view?.completed, onCompleted])
 
   if (!steps?.length) return null
   const responses = view?.responses ?? []

@@ -31732,7 +31732,8 @@
               "explain",
               "numeric",
               "choice",
-              "ordering"
+              "ordering",
+              "matching"
             ]
           },
           "prompt": {
@@ -31811,7 +31812,8 @@
               "explain",
               "numeric",
               "choice",
-              "ordering"
+              "ordering",
+              "matching"
             ]
           },
           "prompt": {
@@ -31823,20 +31825,7 @@
           "options": {
             "type": "array",
             "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "label": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "id",
-                "label"
-              ]
+              "$ref": "#/components/schemas/AcademyStepItem"
             }
           },
           "items": {
@@ -32509,6 +32498,22 @@
           "option_id"
         ]
       },
+      "AcademyReviewOption": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ]
+      },
       "AcademyReviewCheck": {
         "type": "object",
         "additionalProperties": false,
@@ -32522,20 +32527,7 @@
           "options": {
             "type": "array",
             "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "label": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "id",
-                "label"
-              ]
+              "$ref": "#/components/schemas/AcademyReviewOption"
             }
           }
         },
