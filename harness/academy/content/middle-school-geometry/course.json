@@ -1,0 +1,363 @@
+{
+  "schema": 1,
+  "id": "middle-school-geometry",
+  "version": "1.0.0",
+  "source_revision": "fixture-geometry-1",
+  "title_key": "title",
+  "description_key": "description",
+  "assumptions_key": "assumptions",
+  "references": [],
+  "band": "middle",
+  "lessons": [
+    {
+      "id": "perimeter-area",
+      "order": 1,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "perimeter-area.title",
+      "goal_key": "perimeter-area.goal",
+      "reading_key": "perimeter-area.reading",
+      "references": [],
+      "prerequisites": [],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "perimeter-area.worked.prompt",
+          "feedback_key": "perimeter-area.worked.fb",
+          "hint_keys": [
+            "perimeter-area.worked.hint"
+          ],
+          "content_key": "perimeter-area.worked.content"
+        },
+        {
+          "id": "area",
+          "kind": "numeric",
+          "prompt_key": "perimeter-area.area.prompt",
+          "feedback_key": "perimeter-area.area.fb",
+          "hint_keys": [
+            "perimeter-area.area.hint"
+          ],
+          "answer": 24,
+          "tolerance": 0
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "perimeter-area.independent.prompt",
+          "feedback_key": "perimeter-area.independent.fb",
+          "hint_keys": [
+            "perimeter-area.independent.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "perimeter-area.independent.a.label",
+              "feedback_key": "perimeter-area.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "perimeter-area.independent.b.label",
+              "feedback_key": "perimeter-area.independent.b.fb"
+            }
+          ]
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "perimeter-area.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "perimeter-area.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "perimeter-area.c1.a.label",
+              "feedback_key": "perimeter-area.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "perimeter-area.c1.b.label",
+              "feedback_key": "perimeter-area.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "triangle-angles",
+      "order": 2,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "triangle-angles.title",
+      "goal_key": "triangle-angles.goal",
+      "reading_key": "triangle-angles.reading",
+      "references": [],
+      "prerequisites": [
+        "perimeter-area"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "triangle-angles.worked.prompt",
+          "feedback_key": "triangle-angles.worked.fb",
+          "hint_keys": [
+            "triangle-angles.worked.hint"
+          ],
+          "content_key": "triangle-angles.worked.content"
+        },
+        {
+          "id": "missing",
+          "kind": "numeric",
+          "prompt_key": "triangle-angles.missing.prompt",
+          "feedback_key": "triangle-angles.missing.fb",
+          "hint_keys": [
+            "triangle-angles.missing.hint"
+          ],
+          "answer": 70,
+          "tolerance": 0
+        },
+        {
+          "id": "transfer-right",
+          "kind": "numeric",
+          "prompt_key": "triangle-angles.transfer-right.prompt",
+          "feedback_key": "triangle-angles.transfer-right.fb",
+          "hint_keys": [
+            "triangle-angles.transfer-right.hint"
+          ],
+          "answer": 55,
+          "tolerance": 0,
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "triangle-angles.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "triangle-angles.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "triangle-angles.c1.a.label",
+              "feedback_key": "triangle-angles.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "triangle-angles.c1.b.label",
+              "feedback_key": "triangle-angles.c1.b.fb"
+            }
+          ]
+        }
+      ],
+      "struggle": {
+        "challenge_key": "triangle-angles.struggle",
+        "window_minutes": 3
+      }
+    },
+    {
+      "id": "volume",
+      "order": 3,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "volume.title",
+      "goal_key": "volume.goal",
+      "reading_key": "volume.reading",
+      "references": [],
+      "prerequisites": [
+        "triangle-angles"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "volume.worked.prompt",
+          "feedback_key": "volume.worked.fb",
+          "hint_keys": [
+            "volume.worked.hint"
+          ],
+          "content_key": "volume.worked.content"
+        },
+        {
+          "id": "compute",
+          "kind": "numeric",
+          "prompt_key": "volume.compute.prompt",
+          "feedback_key": "volume.compute.fb",
+          "hint_keys": [
+            "volume.compute.hint"
+          ],
+          "answer": 30,
+          "tolerance": 0
+        },
+        {
+          "id": "transfer-water",
+          "kind": "numeric",
+          "prompt_key": "volume.transfer-water.prompt",
+          "feedback_key": "volume.transfer-water.fb",
+          "hint_keys": [
+            "volume.transfer-water.hint"
+          ],
+          "answer": 500,
+          "tolerance": 0,
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "volume.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "volume.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "volume.c1.a.label",
+              "feedback_key": "volume.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "volume.c1.b.label",
+              "feedback_key": "volume.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "symmetry",
+      "order": 4,
+      "mode": "study",
+      "milestone": true,
+      "title_key": "symmetry.title",
+      "goal_key": "symmetry.goal",
+      "reading_key": "symmetry.reading",
+      "references": [],
+      "prerequisites": [
+        "volume"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "symmetry.worked.prompt",
+          "feedback_key": "symmetry.worked.fb",
+          "hint_keys": [
+            "symmetry.worked.hint"
+          ],
+          "content_key": "symmetry.worked.content"
+        },
+        {
+          "id": "reflect",
+          "kind": "choice",
+          "prompt_key": "symmetry.reflect.prompt",
+          "feedback_key": "symmetry.reflect.fb",
+          "hint_keys": [
+            "symmetry.reflect.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "symmetry.reflect.a.label",
+              "feedback_key": "symmetry.reflect.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "symmetry.reflect.b.label",
+              "feedback_key": "symmetry.reflect.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "transfer-letter",
+          "kind": "choice",
+          "prompt_key": "symmetry.transfer-letter.prompt",
+          "feedback_key": "symmetry.transfer-letter.fb",
+          "hint_keys": [
+            "symmetry.transfer-letter.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "symmetry.transfer-letter.a.label",
+              "feedback_key": "symmetry.transfer-letter.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "symmetry.transfer-letter.b.label",
+              "feedback_key": "symmetry.transfer-letter.b.fb"
+            }
+          ],
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "symmetry.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "symmetry.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "symmetry.c1.a.label",
+              "feedback_key": "symmetry.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "symmetry.c1.b.label",
+              "feedback_key": "symmetry.c1.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "c2",
+          "prompt_key": "symmetry.c2.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "symmetry.c2.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "symmetry.c2.a.label",
+              "feedback_key": "symmetry.c2.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "symmetry.c2.b.label",
+              "feedback_key": "symmetry.c2.b.fb"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
