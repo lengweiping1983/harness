@@ -1,8 +1,8 @@
 import {isUnconfirmedWrite, request as httpRequest} from './http'
 import {hasTranslation} from '@/i18n'
-import type { AcademyAssessmentDimension, AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyDesign, AcademyDimensionId, AcademyFile, AcademyLesson, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorTurn, AcademyMastery, AcademyReviewItem, AcademyTeachQuiz, AcademyTeachMisconception, AcademyLesson, AcademyStruggleSession, AcademyStruggleView } from '@/types'
+import type { AcademyAssessmentDimension, AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyDesign, AcademyDimensionId, AcademyFile, AcademyLesson, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorTurn, AcademyMastery, AcademyReviewItem, AcademyTeachQuiz, AcademyTeachMisconception, AcademyLesson, AcademyStruggleSession, AcademyStruggleView, AcademyWorldSession, AcademyWorldView } from '@/types'
 import type {ApiResult, RequestOptions} from './http'
-import type { AcademyCompleteStudy, AcademyCreateDesign, AcademyCreateProject, AcademyExecute, AcademyModelRunRequest, AcademyRestore, AcademySaveCheckpoint, AcademyStartLesson, AcademyWriteFile, AcademySubmit, AcademyTutorRequest, AcademyTutorStop, AcademyModelStop, AcademyReviewRequest, AcademyTeachQuizRequest, AcademyStruggleStart, AcademyStruggleAttempt, AcademyStruggleReveal } from './protocol.generated'
+import type { AcademyCompleteStudy, AcademyCreateDesign, AcademyCreateProject, AcademyExecute, AcademyModelRunRequest, AcademyRestore, AcademySaveCheckpoint, AcademyStartLesson, AcademyWriteFile, AcademySubmit, AcademyTutorRequest, AcademyTutorStop, AcademyModelStop, AcademyReviewRequest, AcademyTeachQuizRequest, AcademyStruggleStart, AcademyStruggleAttempt, AcademyStruggleReveal, AcademyWorldStart, AcademyWorldPredict, AcademyWorldObserve, AcademyWorldComplete } from './protocol.generated'
 
 const prefix = '/api/v1/academy'
 const id = encodeURIComponent
@@ -59,18 +59,23 @@ export const academyApi = {
   struggleStart: (project: string, body: AcademyStruggleStart) => post('/projects/' + id(project) + '/struggle', body),
   struggleAttempt: (project: string, body: AcademyStruggleAttempt) => post('/projects/' + id(project) + '/struggle/attempt', body),
   struggleReveal: (project: string, body: AcademyStruggleReveal) => post('/projects/' + id(project) + '/struggle/reveal', body),
+  world: (project: string, lesson: string, signal?: AbortSignal) => request<AcademyWorldView>(prefix + '/projects/' + id(project) + '/world?lesson_id=' + id(lesson), {signal}),
+  worldStart: (project: string, body: AcademyWorldStart) => post('/projects/' + id(project) + '/world', body),
+  worldPredict: (project: string, body: AcademyWorldPredict) => post('/projects/' + id(project) + '/world/predict', body),
+  worldObserve: (project: string, body: AcademyWorldObserve) => post('/projects/' + id(project) + '/world/observe', body),
+  worldComplete: (project: string, body: AcademyWorldComplete) => post('/projects/' + id(project) + '/world/complete', body),
 }
 
 export function academyReceiptMatches(receipt: AcademyReceipt, requestId: string, projectId?: string, tutorRequestId = requestId, modelRequestId = requestId): boolean {
   if (receipt.request_id !== requestId) return false
-  if (projectId && [receipt.result.project?.id, receipt.result.run?.project_id, receipt.result.checkpoint?.project_id, receipt.result.submission?.project_id, receipt.result.model_run?.project_id, receipt.result.tutor_turn?.project_id, receipt.result.review?.project_id, receipt.result.quiz?.project_id, receipt.result.struggle?.project_id].some(id => id !== undefined && id !== projectId)) return false
+  if (projectId && [receipt.result.project?.id, receipt.result.run?.project_id, receipt.result.checkpoint?.project_id, receipt.result.submission?.project_id, receipt.result.model_run?.project_id, receipt.result.tutor_turn?.project_id, receipt.result.review?.project_id, receipt.result.quiz?.project_id, receipt.result.struggle?.project_id, receipt.result.world?.project_id].some(id => id !== undefined && id !== projectId)) return false
   if (receipt.result.submission && receipt.result.submission.request_id !== requestId) return false
   if (receipt.result.design && receipt.result.design.request_id !== requestId) return false
   if (receipt.result.review && receipt.result.review.request_id !== requestId) return false
   if (receipt.result.quiz && receipt.result.quiz.request_id !== requestId) return false
   if (receipt.result.model_run && receipt.result.model_run.request_id !== modelRequestId) return false
   if (receipt.result.tutor_turn && receipt.result.tutor_turn.request_id !== tutorRequestId) return false
-  if (receipt.status === 'ready' && !receipt.result.project && !receipt.result.checkpoint && !receipt.result.submission && !receipt.result.design && !receipt.result.model_run && !receipt.result.tutor_turn && !receipt.result.review && !receipt.result.quiz && !receipt.result.struggle) return false
+  if (receipt.status === 'ready' && !receipt.result.project && !receipt.result.checkpoint && !receipt.result.submission && !receipt.result.design && !receipt.result.model_run && !receipt.result.tutor_turn && !receipt.result.review && !receipt.result.quiz && !receipt.result.struggle && !receipt.result.world) return false
   if (receipt.status === 'failed' && !receipt.result.error_code) return false
   return true
 }
@@ -250,4 +255,11 @@ export function watchAcademyTeachQuizzes(projectId: string, options: {
     const result = await (options.read ?? academyApi.teachQuizzes)(projectId, signal)
     return result.ok ? {...result, data: result.data.quizzes} : result
   }})
+}
+
+/** 微世界参数控件规格；宿主内核仍是唯一真值与边界来源。 */
+export const academyWorldParams: Record<string, Array<{key: string; min: number; max: number}>> = {
+  'fraction-bar': [{key: 'parts', min: 2, max: 12}, {key: 'shaded', min: 0, max: 12}],
+  'group-array': [{key: 'groups', min: 1, max: 9}, {key: 'per_group', min: 1, max: 9}],
+  'balance-scale': [{key: 'left', min: 0, max: 100}, {key: 'right', min: 0, max: 100}],
 }
