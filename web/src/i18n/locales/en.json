@@ -4728,6 +4728,7 @@
   "ui.academy.report.transfers": "Transfer successes",
   "ui.academy.report.delayed": "Delayed-review correct",
   "ui.academy.report.streak": "Day streak (evidence)",
+  "ui.academy.report.export": "Export evidence (JSON)",
   "ui.academy.studio.session.streak": "{days}-day streak",
   "ui.academy.mastery.title": "Memory & delayed review",
   "ui.academy.mastery.dueBadge": "{count} due for review",

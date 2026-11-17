@@ -4728,6 +4728,7 @@
   "ui.academy.report.transfers": "迁移成功",
   "ui.academy.report.delayed": "延迟重测正确率",
   "ui.academy.report.streak": "连续学习天数（证据）",
+  "ui.academy.report.export": "导出证据（JSON）",
   "ui.academy.studio.session.streak": "连续 {days} 天",
   "ui.academy.mastery.title": "记忆与延迟重测",
   "ui.academy.mastery.dueBadge": "{count} 项待重测",

@@ -71,11 +71,24 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
     [mastery.repairs ?? 0, 'ui.academy.report.repairs'], [mastery.blindspots_open ?? 0, 'ui.academy.report.blindspots'], [mastery.transfers ?? 0, 'ui.academy.report.transfers'],
     [delayed + '%', 'ui.academy.report.delayed'], [mastery.streak_days ?? 0, 'ui.academy.report.streak'],
   ]
-  return <div data-academy-report aria-label={t('ui.academy.report.title')} className="grid gap-2 sm:grid-cols-4">
-    {tiles.map(([value, key]) => <div key={key} className="rounded-xl border border-line p-3">
-      <p className="text-lg font-semibold">{value}</p>
-      <p className="text-xs text-muted">{t(key)}</p>
-    </div>)}
+  /** 导出原始证据聚合为 JSON，供家长教师核对与实测研究；纯客户端下载，不上传。 */
+  const exportEvidence = () => {
+    const blob = new Blob([JSON.stringify(mastery, null, 2)], {type: 'application/json'})
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'harness-academy-evidence.json'
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+  return <div className="space-y-2">
+    <div data-academy-report aria-label={t('ui.academy.report.title')} className="grid gap-2 sm:grid-cols-4">
+      {tiles.map(([value, key]) => <div key={key} className="rounded-xl border border-line p-3">
+        <p className="text-lg font-semibold">{value}</p>
+        <p className="text-xs text-muted">{t(key)}</p>
+      </div>)}
+    </div>
+    <Button size="xs" variant="ghost" data-academy-export onClick={exportEvidence}>{t('ui.academy.report.export')}</Button>
   </div>
 }
 

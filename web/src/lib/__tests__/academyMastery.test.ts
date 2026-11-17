@@ -92,6 +92,7 @@ it('renders the learning report tiles from mastery evidence bilingually', async 
   expect(html).toContain('Transfer successes')
   expect(html).toContain('50%')
   expect(html).toContain('Day streak (evidence)')
+  expect(html).toContain('Export evidence (JSON)')
   await setLocale('zh-CN')
   const chinese = renderToStaticMarkup(createElement(AcademyReport, {mastery}))
   expect(chinese).toContain('已修复盲点')

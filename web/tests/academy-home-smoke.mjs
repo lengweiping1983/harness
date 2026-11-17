@@ -101,6 +101,10 @@ try {
   await studio.getByText(en['ui.academy.report.durable'], {exact: true}).waitFor()
   await studio.getByText(en['ui.academy.report.delayed'], {exact: true}).waitFor()
   await studio.getByText(en['ui.academy.report.streak'], {exact: true}).waitFor()
+  const downloadPromise = page.waitForEvent('download')
+  await studio.locator('[data-academy-export]').click()
+  const download = await downloadPromise
+  assert.equal(download.suggestedFilename(), 'harness-academy-evidence.json')
   assert.deepEqual(errors, [])
   console.log('Academy home: grade-band cards and filter, same-instance en/zh/en, course start into default focus studio and exit verified')
 } catch (error) {failure = error}
