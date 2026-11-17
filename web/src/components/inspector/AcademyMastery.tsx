@@ -1,7 +1,7 @@
 import {useEffect, useId, useRef, useState} from 'react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyEngagement, AcademyMastery as AcademyMasteryView, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, NoticeText} from '@/types'
-import {academyApi, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
+import {academyApi, academyBadges, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
 import {noticeText} from '@/lib/noticeText'
 import {Badge, Button, Section, Spinner} from '@/components/ui/primitives'
 
@@ -90,6 +90,9 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
         <p className="text-xs text-muted">{t(key)}</p>
       </div>)}
     </div>
+    {academyBadges(mastery).length ? <div className="flex flex-wrap gap-1" data-academy-badges>
+      {academyBadges(mastery).map(badge => <span key={badge} className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok">{t('ui.academy.badge.' + badge)}</span>)}
+    </div> : null}
     <Button size="xs" variant="ghost" data-academy-export onClick={exportEvidence}>{t('ui.academy.report.export')}</Button>
   </div>
 }

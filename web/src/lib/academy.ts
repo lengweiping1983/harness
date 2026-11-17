@@ -227,6 +227,18 @@ export function academyReviewAnswers(item: Pick<AcademyReviewItem, 'checks'>, se
 }
 
 /** 记忆仪表盘计数；没有证据的技能保持未开始，不投影为已掌握。 */
+export type AcademyBadge = 'repairer' | 'transferer' | 'consistent' | 'master'
+
+/** 证据徽章：只由真实学习证据触发（修复/迁移/连续/牢固），非登录或点击等虚荣指标。 */
+export function academyBadges(mastery: Pick<AcademyMastery, 'repairs' | 'transfers' | 'streak_days' | 'skills'>): AcademyBadge[] {
+  const badges: AcademyBadge[] = []
+  if ((mastery.repairs ?? 0) > 0) badges.push('repairer')
+  if ((mastery.transfers ?? 0) > 0) badges.push('transferer')
+  if ((mastery.streak_days ?? 0) >= 3) badges.push('consistent')
+  if (mastery.skills.filter(skill => skill.state === 'durable').length >= 3) badges.push('master')
+  return badges
+}
+
 export function academyMasteryCounts(mastery: Pick<AcademyMastery, 'skills'>): {durable: number; learning: number; fresh: number} {
   return {durable: mastery.skills.filter(skill => skill.state === 'durable').length,
     learning: mastery.skills.filter(skill => skill.state === 'learning').length,
