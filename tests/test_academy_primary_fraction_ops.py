@@ -42,9 +42,9 @@ class PrimaryFractionOperationsTests(unittest.TestCase):
             pid = project['id']
             receipt = service.start_lesson(pid, 'start', 'same-denominator', project['revision'], project['fingerprint'])
             self.assertEqual(receipt['status'], 'ready')
-            self.assertTrue(service.steps.answer(pid, 'a1', 'same-denominator', 'worked', 'Same-size parts only change count.')['result']['correct'])
-            self.assertTrue(service.steps.answer(pid, 'a2', 'same-denominator', 'add', 5)['result']['correct'])
+            self.assertTrue(service.steps.answer(pid, 'a1', 'same-denominator', 'worked', 'Same-size parts only change count.')['result']['step']['correct'])
+            self.assertTrue(service.steps.answer(pid, 'a2', 'same-denominator', 'add', 5)['result']['step']['correct'])
             last = service.steps.answer(pid, 'a3', 'same-denominator', 'independent', 'a')
-            self.assertTrue(last['result']['completed'])
+            self.assertTrue(last['result']['step']['completed'])
             skill = next(row for row in service.mastery.view(pid)['skills'] if row['lesson_id'] == 'same-denominator')
             self.assertEqual(skill['evidence_count'], 1)

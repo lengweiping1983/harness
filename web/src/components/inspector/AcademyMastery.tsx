@@ -1,7 +1,7 @@
 import {useEffect, useId, useRef, useState} from 'react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyEngagement, AcademyMastery as AcademyMasteryView, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, NoticeText} from '@/types'
-import {academyApi, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
+import {academyApi, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
 import {noticeText} from '@/lib/noticeText'
 import {Badge, Button, Section, Spinner} from '@/components/ui/primitives'
 
@@ -60,6 +60,24 @@ export function AcademyReviewCard({item, busy, onSubmit}: {item: AcademyReviewIt
 }
 
 /** 记忆仪表盘与延迟重测入口；隐藏或收起时停止读取，未知回执只按原请求号回查。 */
+/** 学习报告：把持久证据聚合成可读统计（掌握/盲点修复/迁移/延迟重测），供学习者与家长教师查看。 */
+export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
+  useLocale()
+  const counts = academyMasteryCounts(mastery)
+  const delayed = mastery.reviews.attempts ? Math.round((mastery.reviews.delayed_correct / mastery.reviews.attempts) * 100) : 0
+  const tiles: Array<[string | number, string]> = [
+    [counts.durable, 'ui.academy.report.durable'], [counts.learning, 'ui.academy.report.learning'], [counts.fresh, 'ui.academy.report.fresh'],
+    [mastery.repairs ?? 0, 'ui.academy.report.repairs'], [mastery.blindspots_open ?? 0, 'ui.academy.report.blindspots'], [mastery.transfers ?? 0, 'ui.academy.report.transfers'],
+    [delayed + '%', 'ui.academy.report.delayed'],
+  ]
+  return <div data-academy-report aria-label={t('ui.academy.report.title')} className="grid gap-2 sm:grid-cols-4">
+    {tiles.map(([value, key]) => <div key={key} className="rounded-xl border border-line p-3">
+      <p className="text-lg font-semibold">{value}</p>
+      <p className="text-xs text-muted">{t(key)}</p>
+    </div>)}
+  </div>
+}
+
 /** 独立重测会话：到期队列逐题作答、幂等回执、未知只回查；面板与专注舞台共用同一行为。 */
 export function AcademyReviewSession({projectId, active, disabled = false, onCompleted}: {projectId: string; active: boolean; disabled?: boolean; onCompleted?: () => void}) {
   useLocale()
@@ -189,6 +207,7 @@ export function AcademyMastery({projectId, active}: {projectId: string; active: 
         <AcademyEngagementStats engagement={view.engagement} />
         <AcademySkillList skills={view.skills} />
       </> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
+      {view ? <AcademyReport mastery={view} /> : null}
       <AcademyReviewSession projectId={projectId} active={active && open} onCompleted={() => setRevision(value => value + 1)} />
     </div>
   </details>

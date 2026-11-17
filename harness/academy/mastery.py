@@ -197,8 +197,22 @@ class AcademyMastery:
         now = time.time()
         skills = [_skill_view(lesson, states.get(lesson['id']), now) for lesson in lessons]
         totals = {key: sum(skill['reviews'][key] for skill in skills) for key in ('attempts', 'correct', 'delayed_correct')}
+        # 学习报告聚合：修复的盲点、未修复盲点与迁移成功，全部来自持久作答记录。
+        transfer_ids = {step['id'] for lesson in lessons for step in lesson.get('steps', []) if step.get('transfer')}
+        repairs = transfers = blindspots_open = 0
+        for value in self.service.store.list('step-progress', max_bytes=MAX_EVIDENCE_BYTES):
+            if value.get('project_id') != project_id:
+                continue
+            for row in value.get('responses', []):
+                if row.get('repaired'):
+                    repairs += 1
+                if row.get('blindspot') and not row.get('repaired'):
+                    blindspots_open += 1
+                if row.get('correct') and row.get('step_id') in transfer_ids:
+                    transfers += 1
         return {'skills': skills, 'due_count': sum(1 for skill in skills if skill['state'] != 'new' and skill['retrievability'] < TARGET_RETENTION),
-                'reviews': totals, 'engagement': self._engagement(project_id)}
+                'reviews': totals, 'engagement': self._engagement(project_id),
+                'repairs': repairs, 'transfers': transfers, 'blindspots_open': blindspots_open}
 
 
     def profile(self, project_id: str, lesson_id: str) -> dict:

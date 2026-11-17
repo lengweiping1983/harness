@@ -42,10 +42,10 @@ class MiddleSchoolAlgebraTests(unittest.TestCase):
             pid = project['id']
             receipt = service.start_lesson(pid, 'start', 'like-terms', project['revision'], project['fingerprint'])
             self.assertEqual(receipt['status'], 'ready')
-            self.assertTrue(service.steps.answer(pid, 'a1', 'like-terms', 'worked', 'Same variable part means same kind.')['result']['correct'])
+            self.assertTrue(service.steps.answer(pid, 'a1', 'like-terms', 'worked', 'Same variable part means same kind.')['result']['step']['correct'])
             matched = service.steps.answer(pid, 'a2', 'like-terms', 'match', {'l1': 'r1', 'l2': 'r2', 'l3': 'r3'})
-            self.assertTrue(matched['result']['correct'])
+            self.assertTrue(matched['result']['step']['correct'])
             last = service.steps.answer(pid, 'a3', 'like-terms', 'independent', 6)
-            self.assertTrue(last['result']['completed'])
+            self.assertTrue(last['result']['step']['completed'])
             skill = next(row for row in service.mastery.view(pid)['skills'] if row['lesson_id'] == 'like-terms')
             self.assertEqual(skill['evidence_count'], 1)

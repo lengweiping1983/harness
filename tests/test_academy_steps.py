@@ -90,17 +90,17 @@ class StepSessionTests(unittest.TestCase):
             self.assertNotIn('answer_id', step)
         self.assertFalse(view['completed'])
         worked = self.answer('worked', 'Equal parts are needed so each part is the same size.')
-        self.assertTrue(worked['result']['correct'])
-        self.assertIsNotNone(worked['result']['feedback'])
+        self.assertTrue(worked['result']['step']['correct'])
+        self.assertIsNotNone(worked['result']['step']['feedback'])
         wrong = self.answer('denominator', 5)
-        self.assertFalse(wrong['result']['correct'])
-        self.assertIsNotNone(wrong['result']['feedback'])
+        self.assertFalse(wrong['result']['step']['correct'])
+        self.assertIsNotNone(wrong['result']['step']['feedback'])
         retry = self.answer('denominator', 4, request='ans-denominator-2')
-        self.assertTrue(retry['result']['correct'])
-        self.assertEqual(retry['result']['response']['attempts'], 2)
+        self.assertTrue(retry['result']['step']['correct'])
+        self.assertEqual(retry['result']['step']['response']['attempts'], 2)
         self.answer('which-half', 'b')
         last = self.answer('third-sequence', ['cut', 'take', 'write'])
-        self.assertTrue(last['result']['completed'])
+        self.assertTrue(last['result']['step']['completed'])
         self.assertTrue(self.service.steps.view(self.pid, LESSON)['completed'])
         skill = next(row for row in self.service.mastery.view(self.pid)['skills'] if row['lesson_id'] == LESSON)
         self.assertEqual(skill['evidence_count'], 1)
@@ -117,23 +117,23 @@ class StepSessionTests(unittest.TestCase):
         self.answer('denominator', 4)
         self.answer('which-half', 'b')
         last = self.answer('third-sequence', ['cut', 'take', 'write'])
-        self.assertTrue(last['result']['completed'])
+        self.assertTrue(last['result']['step']['completed'])
     def test_numeric_answer_returns_number_line_mark(self):
         self.open_lesson()
-        result = self.answer('denominator', 7)['result']
+        result = self.answer('denominator', 7)['result']['step']
         self.assertEqual(result['number_line'], {'min': 0, 'max': 12, 'value': 7})
-        choice = self.answer('which-half', 'b')['result']
-        self.assertIsNone(choice['number_line'])
+        choice = self.answer('which-half', 'b')['result']['step']
+        self.assertNotIn('number_line', choice)
     def test_scaffold_is_contingent_on_wrong_answer_and_hidden_in_public(self):
         self.open_lesson()
         view = self.service.steps.view(self.pid, LESSON)
         self.assertTrue(all('scaffold' not in step for step in view['steps']))
         wrong = self.answer('denominator', 5)
-        self.assertFalse(wrong['result']['correct'])
-        self.assertIsNotNone(wrong['result']['scaffold'])
+        self.assertFalse(wrong['result']['step']['correct'])
+        self.assertIsNotNone(wrong['result']['step']['scaffold'])
         right = self.answer('denominator', 4, request='ans-denominator-ok')
-        self.assertTrue(right['result']['correct'])
-        self.assertIsNone(right['result']['scaffold'])
+        self.assertTrue(right['result']['step']['correct'])
+        self.assertNotIn('scaffold', right['result']['step'])
     def test_unknown_step_and_lesson_without_steps(self):
         self.open_lesson()
         missing = self.answer('nope', 'x')
@@ -146,11 +146,11 @@ class StepSessionTests(unittest.TestCase):
     def test_blindspot_repair_loop_flags_and_calibration(self):
         """高确信错误记盲点；之后答对记修复并给 repaired 校准；投影保留历史标记。"""
         self.open_lesson()
-        wrong = self.service.steps.answer(self.pid, 'bs-wrong', LESSON, 'denominator', 5, confidence='sure')['result']
+        wrong = self.service.steps.answer(self.pid, 'bs-wrong', LESSON, 'denominator', 5, confidence='sure')['result']['step']
         self.assertEqual(wrong['calibration'], 'blindspot')
         self.assertTrue(wrong['response']['blindspot'])
         self.assertNotIn('repaired', wrong['response'])
-        fixed = self.service.steps.answer(self.pid, 'bs-fix', LESSON, 'denominator', 4, confidence='sure')['result']
+        fixed = self.service.steps.answer(self.pid, 'bs-fix', LESSON, 'denominator', 4, confidence='sure')['result']['step']
         self.assertTrue(fixed['correct'])
         self.assertEqual(fixed['calibration'], 'repaired')
         self.assertTrue(fixed['response']['blindspot'])
@@ -158,6 +158,19 @@ class StepSessionTests(unittest.TestCase):
         projected = {row['step_id']: row for row in self.service.steps.view(self.pid, LESSON)['responses']}
         self.assertTrue(projected['denominator']['blindspot'])
         self.assertTrue(projected['denominator']['repaired'])
+    def test_report_aggregates_repairs_transfers_blindspots(self):
+        """学习报告聚合来自持久作答：修复数、迁移成功数与待修复盲点数。"""
+        self.open_lesson('add-meaning')
+        self.service.steps.answer(self.pid, 'rp-wrong', 'add-meaning', 'transfer-pages', 'b', confidence='sure')
+        view = self.service.mastery.view(self.pid)
+        self.assertEqual(view['repairs'], 0)
+        self.assertEqual(view['transfers'], 0)
+        self.assertEqual(view['blindspots_open'], 1)
+        self.service.steps.answer(self.pid, 'rp-fix', 'add-meaning', 'transfer-pages', 'a', confidence='sure')
+        view = self.service.mastery.view(self.pid)
+        self.assertEqual(view['repairs'], 1)
+        self.assertEqual(view['transfers'], 1)
+        self.assertEqual(view['blindspots_open'], 0)
     def test_transfer_challenge_public_flag_and_memory_weight(self):
         """迁移挑战公开标记不泄答案；新情境答对给予更高初始稳定性。"""
         self.open_lesson('add-meaning')
@@ -169,26 +182,26 @@ class StepSessionTests(unittest.TestCase):
         self.service.steps.answer(self.pid, 'tr-match', 'add-meaning', 'match-stories', {'l1': 'r1', 'l2': 'r2', 'l3': 'r3'})
         self.service.steps.answer(self.pid, 'tr-which', 'add-meaning', 'which-add', 'a')
         last = self.service.steps.answer(self.pid, 'tr-transfer', 'add-meaning', 'transfer-pages', 'a')
-        self.assertTrue(last['result']['completed'])
+        self.assertTrue(last['result']['step']['completed'])
         skill = next(row for row in self.service.mastery.view(self.pid)['skills'] if row['lesson_id'] == 'add-meaning')
         self.assertEqual(skill['stability_days'], 3.5)
         self.assertEqual(skill['evidence_count'], 1)
     def test_confidence_calibration_and_projection(self):
         """置信度只产生校准反馈与记录，不改变宿主评分真值；重放保持幂等。"""
         self.open_lesson()
-        blind = self.service.steps.answer(self.pid, 'ans-blind', LESSON, 'denominator', 5, confidence='sure')['result']
+        blind = self.service.steps.answer(self.pid, 'ans-blind', LESSON, 'denominator', 5, confidence='sure')['result']['step']
         self.assertFalse(blind['correct'])
         self.assertEqual(blind['calibration'], 'blindspot')
         self.assertEqual(blind['response']['confidence'], 'sure')
-        lucky = self.service.steps.answer(self.pid, 'ans-lucky', LESSON, 'which-half', 'b', confidence='guess')['result']
+        lucky = self.service.steps.answer(self.pid, 'ans-lucky', LESSON, 'which-half', 'b', confidence='guess')['result']['step']
         self.assertTrue(lucky['correct'])
         self.assertEqual(lucky['calibration'], 'lucky')
-        calibrated = self.service.steps.answer(self.pid, 'ans-cal', LESSON, 'which-half', 'b', confidence='sure')['result']
+        calibrated = self.service.steps.answer(self.pid, 'ans-cal', LESSON, 'which-half', 'b', confidence='sure')['result']['step']
         self.assertEqual(calibrated['calibration'], 'calibrated')
-        expected = self.service.steps.answer(self.pid, 'ans-exp', LESSON, 'third-sequence', ['take', 'cut', 'write'], confidence='unsure')['result']
+        expected = self.service.steps.answer(self.pid, 'ans-exp', LESSON, 'third-sequence', ['take', 'cut', 'write'], confidence='unsure')['result']['step']
         self.assertFalse(expected['correct'])
         self.assertEqual(expected['calibration'], 'expected')
-        plain = self.service.steps.answer(self.pid, 'ans-plain', LESSON, 'worked', 'Equal parts share one name.')['result']
+        plain = self.service.steps.answer(self.pid, 'ans-plain', LESSON, 'worked', 'Equal parts share one name.')['result']['step']
         self.assertNotIn('calibration', plain)
         self.assertNotIn('confidence', plain['response'])
         view = self.service.steps.view(self.pid, LESSON)
@@ -199,12 +212,12 @@ class StepSessionTests(unittest.TestCase):
         self.assertNotIn('confidence', projected['worked'])
         replay = self.service.steps.answer(self.pid, 'ans-blind', LESSON, 'denominator', 5, confidence='sure')
         self.assertEqual(replay['status'], 'ready')
-        self.assertEqual(replay['result']['calibration'], 'blindspot')
+        self.assertEqual(replay['result']['step']['calibration'], 'blindspot')
     def test_receipt_idempotency_and_invalid_response(self):
         self.open_lesson()
         first = self.answer('denominator', 4)
         replay = self.answer('denominator', 4)
-        self.assertEqual(first['result']['response']['attempts'], replay['result']['response']['attempts'])
+        self.assertEqual(first['result']['step']['response']['attempts'], replay['result']['step']['response']['attempts'])
         bad = self.service.steps.answer(self.pid, 'ans-bad', LESSON, 'denominator', 'four')
         self.assertEqual(bad['result']['error_code'], 'step-invalid')
 
@@ -233,12 +246,12 @@ class MiddleSchoolStepTests(unittest.TestCase):
         self.assertNotIn('answer', match)
         self.service.steps.answer(self.pid, 'a1', 'expressions', 'worked', 'Multiply first because 2x means 2 times x.')
         wrong = self.service.steps.answer(self.pid, 'a2', 'expressions', 'match-values', {'e1': 'v9', 'e2': 'v11', 'e3': 'v10'})
-        self.assertFalse(wrong['result']['correct'])
+        self.assertFalse(wrong['result']['step']['correct'])
         right = self.service.steps.answer(self.pid, 'a3', 'expressions', 'match-values', {'e1': 'v11', 'e2': 'v9', 'e3': 'v10'})
-        self.assertTrue(right['result']['correct'])
+        self.assertTrue(right['result']['step']['correct'])
         self.service.steps.answer(self.pid, 'a4', 'expressions', 'evaluate', 13)
         last = self.service.steps.answer(self.pid, 'a5', 'expressions', 'independent', 'b')
-        self.assertTrue(last['result']['completed'])
+        self.assertTrue(last['result']['step']['completed'])
         skill = next(row for row in self.service.mastery.view(self.pid)['skills'] if row['lesson_id'] == 'expressions')
         self.assertEqual(skill['evidence_count'], 1)
         self.assertEqual(skill['stability_days'], 2.5)

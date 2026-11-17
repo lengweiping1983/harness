@@ -157,6 +157,12 @@ Python 课的阶段迁移任务包括整理问候、处理空列表、拒绝无�
 
 团队课程另含小学科学“沉与浮”（`primary-science-foundations`，4 课，学段 primary）：预测沉浮→密度微世界→钢铁轮船平均密度→给工程师讲清楚，含挣扎窗口、迁移挑战（潜艇注水、冰浮饮料）与教 AI 学生可用性。课程包合同（步骤/微世界/挣扎/迁移/学段）不变，证明内容可扩展到数学之外的学科。
 
+## 学习报告
+
+掌握视图聚合持久证据为学习报告：已牢固／巩固中／未开始技能数、已修复盲点、待修复盲点、迁移成功数与延迟重测正确率。报告在专注舞台结课页与面板掌握区呈现，供学习者与家长教师查看；全部计数来自作答与重测记录，不来自模型估计。
+
+回执契约核对：步骤作答回执的步骤结果嵌套在 `result.step`（公开步骤在其 `step` 字段），空值可选字段省略而非 null；步骤进度视图投影携带必填 `attempts`/`at`。这些形状由客户端严格校验强制，端到端浏览器验收覆盖。
+
 ## 记忆引擎与延迟独立重测
 
 Academy 从持久证据推导每课的技能记忆状态，并调度延迟独立重测。记忆曲线采用 FSRS 风格的幂律遗忘曲线，更新规则是其简化变体，常量集中声明在 `harness/academy/mastery.py`，不声称与任何特定 FSRS 版本等价。
@@ -363,6 +369,6 @@ tests/test_academy_models.py 使用隔离课程副本验证模型实验的单次
 
 tests/test_academy_mastery.py 核对记忆数学边界、证据投影、重测评分、幂等与冲突、阶段交错、答案不泄露、损坏数据与认知参与度评级。tests/test_academy_teach.py 核对误解冻结、无执行边界、学生测验评分、重试与重启投影、语言与对话记录冻结。tests/test_academy_struggle.py 核对窗口恒温器、尝试冻结、揭示边界与带练防救场守卫的注入和解除。tests/test_academy_worlds.py 核对内核真值与边界、挑战判分、预测—操作—观察—解释状态机与观察上限。tests/test_academy_steps.py 核对四类步骤宿主评分、公开剥离答案、逐步进度、完成证据与幂等。tests/test_academy_tutor_mastery.py 核对掌握度画像冻结注入、先修 surfaced、历史隔离与损坏画像拒绝。tests/test_academy_primary_math.py 与 tests/test_academy_middle_math.py 核对两条学校课程的双语合同及无沙箱全链路。前端 academyMastery.test.ts、academyTeach.test.ts、academyStruggle.test.ts、academyWorld.test.ts 以真实组件静态渲染核对回执绑定、阶段门控、状态可视化、答案不泄露与语言切换身份不变。上述夹具与静态渲染不证明在线模型的教学质量或实际学习效果倍数。
 
-academyStudio.test.ts 以纯函数与真实组件静态渲染核对舞台环节编排（问题先行、到期重测首位、可跳过标记）、旅程状态、教练三档提示词的双语消费与问题拼接、teach 回合分离、已有证据初始进度与结课庆祝。academySteps.test.ts 另核对置信度三档门控提交与校准反馈的双语消费；academyStudio.test.ts 核对主动介入横幅仅在挣扎揭示后出现、可忽略且双语消费；academyMastery.test.ts 核对共用重测会话壳在未激活时不读取。tests/test_academy_steps.py 核对置信度只产生校准反馈与记录、不改变评分真值、进度投影与重放幂等。tests/test_academy_steps.py 另核对盲点→修复闭环的标记、repaired 校准与进度投影；academySteps.test.ts 核对盲点徽标与 repaired 校准的双语消费；tests/test_academy_steps.py 另核对迁移挑战公开标记不泄答案、新情境答对给予 3.5 天初始稳定性；academyStudio.test.ts 核对会话计划条（计划 chip、预计用时、环节进度）与迁移徽标的双语消费；academy-studio-smoke.mjs 在真实浏览器核对迁移徽标与会话计划条的同实例英中英。academy-home-smoke.mjs 核对学习主页学段徽标与筛选、同实例英中英、选课进入默认专注舞台并可退出回面板。tests/test_academy_primary_fraction_ops.py 核对分数运算课程合同、双语往返、分数条微世界、挣扎与迁移及首课证据；tests/test_academy_middle_algebra.py 核对代数课程合同、双语往返、匹配/排序步骤、挣扎与迁移及首课证据；academyStudio.test.ts 核对推荐下一课徽标与会话 chip 的双语消费；tests/test_academy_middle_physics.py 核对物理课程合同、双语往返、天平微世界、挣扎与迁移及首课步骤证据；tests/test_academy_primary_science.py 核对科学课程合同、双语往返、沉浮微世界与迁移挑战及首课步骤证据；tests/test_academy_worlds.py 另核对沉浮内核真值、越界拒绝与挑战选项；academyWorld.test.ts 核对沉浮状态渲染的双语与浸入位置。web/tests/academy-studio-smoke.mjs 在真实浏览器核对单焦点环节轨道、答对后自动前进、教练自主性档位与输入法组合守卫、旅程跳转与退出、同实例英中英及主题／尺寸矩阵。
+academyStudio.test.ts 以纯函数与真实组件静态渲染核对舞台环节编排（问题先行、到期重测首位、可跳过标记）、旅程状态、教练三档提示词的双语消费与问题拼接、teach 回合分离、已有证据初始进度与结课庆祝。academySteps.test.ts 另核对置信度三档门控提交与校准反馈的双语消费；academyStudio.test.ts 核对主动介入横幅仅在挣扎揭示后出现、可忽略且双语消费；academyMastery.test.ts 核对共用重测会话壳在未激活时不读取。tests/test_academy_steps.py 核对置信度只产生校准反馈与记录、不改变评分真值、进度投影与重放幂等。tests/test_academy_steps.py 另核对盲点→修复闭环的标记、repaired 校准与进度投影；academySteps.test.ts 核对盲点徽标与 repaired 校准的双语消费；tests/test_academy_steps.py 另核对迁移挑战公开标记不泄答案、新情境答对给予 3.5 天初始稳定性；academyStudio.test.ts 核对会话计划条（计划 chip、预计用时、环节进度）与迁移徽标的双语消费；academy-studio-smoke.mjs 在真实浏览器核对迁移徽标与会话计划条的同实例英中英。academy-home-smoke.mjs 核对学习主页学段徽标与筛选、同实例英中英、选课进入默认专注舞台并可退出回面板，并端到端完成首课（置信度→步骤→自测→反思→结课）核对学习报告由真实证据聚合。tests/test_academy_primary_fraction_ops.py 核对分数运算课程合同、双语往返、分数条微世界、挣扎与迁移及首课证据；tests/test_academy_middle_algebra.py 核对代数课程合同、双语往返、匹配/排序步骤、挣扎与迁移及首课证据；academyStudio.test.ts 核对推荐下一课徽标与会话 chip 的双语消费；tests/test_academy_middle_physics.py 核对物理课程合同、双语往返、天平微世界、挣扎与迁移及首课步骤证据；tests/test_academy_primary_science.py 核对科学课程合同、双语往返、沉浮微世界与迁移挑战及首课步骤证据；tests/test_academy_worlds.py 另核对沉浮内核真值、越界拒绝与挑战选项；academyWorld.test.ts 核对沉浮状态渲染的双语与浸入位置。web/tests/academy-studio-smoke.mjs 在真实浏览器核对单焦点环节轨道、答对后自动前进、教练自主性档位与输入法组合守卫、旅程跳转与退出、同实例英中英及主题／尺寸矩阵。
 
 交付入口见 [开发与测试](development.md)。系统沙箱缺失时执行回归会明确失败或标记对应 Python 用例跳过，不能报告为跨平台验收通过。

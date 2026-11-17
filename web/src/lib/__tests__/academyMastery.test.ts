@@ -2,7 +2,7 @@ import {createElement} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
 import {afterEach, expect, it} from 'vitest'
 import {setLocale} from '@/i18n'
-import {AcademyEngagementStats, AcademyMastery, AcademyReviewCard, AcademyReviewSession, AcademySkillList} from '@/components/inspector/AcademyMastery'
+import {AcademyEngagementStats, AcademyMastery, AcademyReport, AcademyReviewCard, AcademyReviewSession, AcademySkillList} from '@/components/inspector/AcademyMastery'
 import {academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete} from '../academy'
 import type {AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState} from '@/types'
 
@@ -72,6 +72,20 @@ it('renders skill states and keeps unstarted skills unlabelled as mastery', asyn
   expect(empty).toContain('Complete a lesson activity or pass a code check')
 })
 
+it('renders the learning report tiles from mastery evidence bilingually', async () => {
+  await setLocale('en')
+  const mastery = {skills: [], due_count: 0, reviews: {attempts: 4, correct: 3, delayed_correct: 2},
+    engagement: {constructive: 1, active: 1, total: 2, constructive_ratio: 0.5}, repairs: 2, transfers: 3, blindspots_open: 1}
+  const html = renderToStaticMarkup(createElement(AcademyReport, {mastery}))
+  expect(html).toContain('data-academy-report')
+  expect(html).toContain('Blindspots repaired')
+  expect(html).toContain('Transfer successes')
+  expect(html).toContain('50%')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(createElement(AcademyReport, {mastery}))
+  expect(chinese).toContain('已修复盲点')
+  expect(chinese).toContain('延迟重测正确率')
+})
 it('renders the shared review session shell without fetching when inactive', async () => {
   await setLocale('en')
   const html = renderToStaticMarkup(createElement(AcademyReviewSession, {projectId: 'project', active: false}))

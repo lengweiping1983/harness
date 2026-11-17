@@ -42,9 +42,9 @@ class MiddleSchoolPhysicsTests(unittest.TestCase):
             pid = project['id']
             receipt = service.start_lesson(pid, 'start', 'net-force', project['revision'], project['fingerprint'])
             self.assertEqual(receipt['status'], 'ready')
-            self.assertTrue(service.steps.answer(pid, 'a1', 'net-force', 'worked', 'Zero net force means motion does not change.')['result']['correct'])
-            self.assertTrue(service.steps.answer(pid, 'a2', 'net-force', 'compute', 7)['result']['correct'])
+            self.assertTrue(service.steps.answer(pid, 'a1', 'net-force', 'worked', 'Zero net force means motion does not change.')['result']['step']['correct'])
+            self.assertTrue(service.steps.answer(pid, 'a2', 'net-force', 'compute', 7)['result']['step']['correct'])
             last = service.steps.answer(pid, 'a3', 'net-force', 'independent', 'b')
-            self.assertTrue(last['result']['completed'])
+            self.assertTrue(last['result']['step']['completed'])
             skill = next(row for row in service.mastery.view(pid)['skills'] if row['lesson_id'] == 'net-force')
             self.assertEqual(skill['evidence_count'], 1)

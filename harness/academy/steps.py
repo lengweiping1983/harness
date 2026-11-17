@@ -98,7 +98,8 @@ class AcademySteps:
         done = {item['step_id']: item for item in (progress['responses'] if progress else [])}
         return {'steps': [public_step(step) for step in steps],
                 'responses': [dict({'step_id': step['id'], 'correct': done[step['id']]['correct'],
-                                    'response': done[step['id']]['response']},
+                                    'response': done[step['id']]['response'],
+                                    'attempts': done[step['id']]['attempts'], 'at': done[step['id']]['at']},
                                    **({'confidence': done[step['id']]['confidence']} if 'confidence' in done[step['id']] else {}),
                                    **({'blindspot': True} if done[step['id']].get('blindspot') else {}),
                                    **({'repaired': True} if done[step['id']].get('repaired') else {}))
@@ -158,11 +159,18 @@ class AcademySteps:
                     calibration = 'calibrated' if confidence == 'sure' else 'lucky'
                 else:
                     calibration = 'blindspot' if confidence == 'sure' else 'expected'
-            result = {'correct': correct, 'feedback': feedback, 'scaffold': scaffold, 'number_line': number_line, 'completed': complete,
-                      'step': public_step(step), 'response': entry}
+            # 空值省略而非 null：客户端严格校验不接受未声明 null 的可选字段。
+            result = {'correct': correct, 'completed': complete, 'step': public_step(step), 'response': entry}
+            if feedback is not None:
+                result['feedback'] = feedback
+            if scaffold is not None:
+                result['scaffold'] = scaffold
+            if number_line is not None:
+                result['number_line'] = number_line
             if calibration is not None:
                 result['calibration'] = calibration
-            return result
+            # 回执契约：步骤结果嵌套在 result.step，公开步骤在其 step 字段。
+            return {'step': result}
         frozen = {'lesson_id': lesson_id, 'step_id': step_id, 'response': response}
         if confidence is not None:
             frozen['confidence'] = confidence

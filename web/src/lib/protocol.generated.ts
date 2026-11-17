@@ -2214,6 +2214,9 @@ export interface AcademyMastery {
   due_count: number
   reviews: AcademySkillReviews
   engagement: AcademyEngagement
+  repairs?: number
+  transfers?: number
+  blindspots_open?: number
 }
 export interface AcademyReviewRequest {
   request_id: string

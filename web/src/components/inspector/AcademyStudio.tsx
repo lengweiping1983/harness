@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {Check, Send, Sparkles, X} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
-import type {AcademyCourse, AcademyLesson, AcademyProject, AcademyTutorTurn} from '@/types'
+import type {AcademyCourse, AcademyLesson, AcademyMastery as AcademyMasteryView, AcademyProject, AcademyTutorTurn} from '@/types'
 import {academyApi, academyResumeLesson} from '@/lib/academy'
 import {academyStudioChecksDone, academyStudioCoachPrompt, academyStudioCoachTurns, academyStudioJourney, academyStudioNextPhase, academyStudioPhases, type AcademyStudioCoachLevel, type AcademyStudioPhaseId} from '@/lib/academyStudio'
 import {cn} from '@/lib/utils'
@@ -12,7 +12,7 @@ import {AcademyWorld} from './AcademyWorld'
 import {AcademySteps} from './AcademySteps'
 import {AcademyTeach} from './AcademyTeach'
 import {AcademyKnowledgeChecks} from './AcademyKnowledgeChecks'
-import {AcademyReviewSession} from './AcademyMastery'
+import {AcademyReport, AcademyReviewSession} from './AcademyMastery'
 
 const phaseLabelKey: Record<AcademyStudioPhaseId, string> = {
   review: 'ui.academy.studio.phase.review', struggle: 'ui.academy.studio.phase.struggle', world: 'ui.academy.studio.phase.world', steps: 'ui.academy.studio.phase.steps',
@@ -34,6 +34,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   useLocale()
   const [dueCount, setDueCount] = useState(0)
   const [skills, setSkills] = useState<Readonly<Record<string, string>>>({})
+  const [masteryView, setMasteryView] = useState<AcademyMasteryView | null>(null)
   const manual = useRef(false)
   const phases = useMemo(() => academyStudioPhases(lesson, dueCount > 0), [lesson, dueCount])
   const checks = lesson.knowledge_checks ?? []
@@ -91,7 +92,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     void (async () => {
       const mastery = await academyApi.mastery(project.id, controller.signal)
       if (controller.signal.aborted) return
-      if (mastery.ok) {setDueCount(mastery.data.mastery.due_count); setSkills(Object.fromEntries(mastery.data.mastery.skills.map(skill => [skill.lesson_id, skill.state])))}
+      if (mastery.ok) {setMasteryView(mastery.data.mastery); setDueCount(mastery.data.mastery.due_count); setSkills(Object.fromEntries(mastery.data.mastery.skills.map(skill => [skill.lesson_id, skill.state])))}
     })()
     return () => controller.abort()
   }, [active, project.id])
@@ -144,6 +145,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     if (studyCompleted) return <div role="status" className="space-y-3">
       <p className="flex items-center gap-2 text-base font-medium text-ok"><Check className="h-5 w-5" aria-hidden />{t('ui.academy.studio.finish.done')}</p>
       <p className="text-sm text-muted">{t('ui.academy.studio.session.summary', {done: done.size, total: phases.length})}</p>
+      {masteryView ? <AcademyReport mastery={masteryView} /> : null}
       <div className="flex flex-wrap gap-2">
         {nextLesson ? <Button size="sm" variant="primary" onClick={() => onOpenLesson(nextLesson.id)}>{t('ui.academy.studio.finish.next', {title: nextLesson.title})}</Button>
           : <p className="text-sm text-muted">{t('ui.academy.studio.finish.courseDone')}</p>}
