@@ -1,0 +1,255 @@
+{
+  "schema": 1,
+  "id": "primary-math-foundations",
+  "version": "1.0.0",
+  "source_revision": "team-2026-11",
+  "title_key": "title",
+  "description_key": "description",
+  "assumptions_key": "assumptions",
+  "references": [],
+  "lessons": [
+    {
+      "id": "place-value",
+      "order": 1,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "place-value.title",
+      "goal_key": "place-value.goal",
+      "reading_key": "place-value.reading",
+      "exercise_key": "place-value.exercise",
+      "rubric_key": "place-value.rubric",
+      "stage_key": "stage.1.title",
+      "stage_goal_key": "stage.1.goal",
+      "duration_minutes": 15,
+      "references": [],
+      "prerequisites": [],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "place-value.q1.q",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "place-value.q1.a",
+              "feedback_key": "place-value.q1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "place-value.q1.b",
+              "feedback_key": "place-value.q1.b.fb"
+            },
+            {
+              "id": "c",
+              "label_key": "place-value.q1.c",
+              "feedback_key": "place-value.q1.c.fb"
+            }
+          ],
+          "answer_id": "b",
+          "hint_keys": [
+            "place-value.q1.hint.1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "add-meaning",
+      "order": 2,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "add-meaning.title",
+      "goal_key": "add-meaning.goal",
+      "reading_key": "add-meaning.reading",
+      "exercise_key": "add-meaning.exercise",
+      "rubric_key": "add-meaning.rubric",
+      "stage_key": "stage.1.title",
+      "stage_goal_key": "stage.1.goal",
+      "duration_minutes": 15,
+      "references": [],
+      "prerequisites": [
+        "place-value"
+      ],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "add-meaning.q1.q",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "add-meaning.q1.a",
+              "feedback_key": "add-meaning.q1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "add-meaning.q1.b",
+              "feedback_key": "add-meaning.q1.b.fb"
+            }
+          ],
+          "answer_id": "a",
+          "hint_keys": [
+            "add-meaning.q1.hint.1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "subtract-check",
+      "order": 3,
+      "mode": "study",
+      "milestone": true,
+      "title_key": "subtract-check.title",
+      "goal_key": "subtract-check.goal",
+      "reading_key": "subtract-check.reading",
+      "exercise_key": "subtract-check.exercise",
+      "rubric_key": "subtract-check.rubric",
+      "stage_key": "stage.1.title",
+      "stage_goal_key": "stage.1.goal",
+      "duration_minutes": 20,
+      "references": [],
+      "prerequisites": [
+        "add-meaning"
+      ],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "subtract-check.q1.q",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "subtract-check.q1.a",
+              "feedback_key": "subtract-check.q1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "subtract-check.q1.b",
+              "feedback_key": "subtract-check.q1.b.fb"
+            }
+          ],
+          "answer_id": "b",
+          "hint_keys": [
+            "subtract-check.q1.hint.1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multiply-meaning",
+      "order": 4,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "multiply-meaning.title",
+      "goal_key": "multiply-meaning.goal",
+      "reading_key": "multiply-meaning.reading",
+      "exercise_key": "multiply-meaning.exercise",
+      "rubric_key": "multiply-meaning.rubric",
+      "stage_key": "stage.2.title",
+      "stage_goal_key": "stage.2.goal",
+      "duration_minutes": 20,
+      "references": [],
+      "prerequisites": [
+        "subtract-check"
+      ],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "multiply-meaning.q1.q",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "multiply-meaning.q1.a",
+              "feedback_key": "multiply-meaning.q1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "multiply-meaning.q1.b",
+              "feedback_key": "multiply-meaning.q1.b.fb"
+            }
+          ],
+          "answer_id": "a",
+          "hint_keys": [
+            "multiply-meaning.q1.hint.1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fraction-intuition",
+      "order": 5,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "fraction-intuition.title",
+      "goal_key": "fraction-intuition.goal",
+      "reading_key": "fraction-intuition.reading",
+      "exercise_key": "fraction-intuition.exercise",
+      "rubric_key": "fraction-intuition.rubric",
+      "stage_key": "stage.2.title",
+      "stage_goal_key": "stage.2.goal",
+      "duration_minutes": 20,
+      "references": [],
+      "prerequisites": [
+        "multiply-meaning"
+      ],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "fraction-intuition.q1.q",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "fraction-intuition.q1.a",
+              "feedback_key": "fraction-intuition.q1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "fraction-intuition.q1.b",
+              "feedback_key": "fraction-intuition.q1.b.fb"
+            }
+          ],
+          "answer_id": "b",
+          "hint_keys": [
+            "fraction-intuition.q1.hint.1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "word-problems",
+      "order": 6,
+      "mode": "study",
+      "milestone": true,
+      "title_key": "word-problems.title",
+      "goal_key": "word-problems.goal",
+      "reading_key": "word-problems.reading",
+      "exercise_key": "word-problems.exercise",
+      "rubric_key": "word-problems.rubric",
+      "stage_key": "stage.2.title",
+      "stage_goal_key": "stage.2.goal",
+      "duration_minutes": 25,
+      "references": [],
+      "prerequisites": [
+        "fraction-intuition"
+      ],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "word-problems.q1.q",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "word-problems.q1.a",
+              "feedback_key": "word-problems.q1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "word-problems.q1.b",
+              "feedback_key": "word-problems.q1.b.fb"
+            }
+          ],
+          "answer_id": "a",
+          "hint_keys": [
+            "word-problems.q1.hint.1"
+          ]
+        }
+      ]
+    }
+  ]
+}
