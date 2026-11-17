@@ -42,6 +42,8 @@ it('orders phases problem-first and marks teach and practice-backed reading opti
 it('builds journey states and advances to the next unfinished phase only', () => {
   const journey = academyStudioJourney(course.lessons, project.progress, 'fractions')
   expect(journey.map(node => node.state)).toEqual(['completed', 'active', 'open'])
+  const mastered = academyStudioJourney(course.lessons, project.progress, 'fractions', {fractions: 'durable', 'place-value': 'learning', decimals: 'new'})
+  expect(mastered.map(node => node.mastery)).toEqual(['learning', 'durable', undefined])
   const phases = academyStudioPhases(lesson())
   expect(academyStudioNextPhase(phases, new Set(['struggle']), 'struggle')).toBe('world')
   expect(academyStudioNextPhase(phases, new Set(['world', 'steps', 'reading', 'teach', 'checks', 'note']), 'note')).toBe('finish')

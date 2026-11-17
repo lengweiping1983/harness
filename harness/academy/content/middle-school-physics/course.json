@@ -1,0 +1,375 @@
+{
+  "schema": 1,
+  "id": "middle-school-physics",
+  "version": "1.0.0",
+  "source_revision": "fixture-physics-1",
+  "title_key": "title",
+  "description_key": "description",
+  "assumptions_key": "assumptions",
+  "references": [],
+  "band": "middle",
+  "lessons": [
+    {
+      "id": "net-force",
+      "order": 1,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "net-force.title",
+      "goal_key": "net-force.goal",
+      "reading_key": "net-force.reading",
+      "references": [],
+      "prerequisites": [],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "net-force.worked.prompt",
+          "feedback_key": "net-force.worked.fb",
+          "hint_keys": [
+            "net-force.worked.hint"
+          ],
+          "content_key": "net-force.worked.content"
+        },
+        {
+          "id": "compute",
+          "kind": "numeric",
+          "prompt_key": "net-force.compute.prompt",
+          "feedback_key": "net-force.compute.fb",
+          "hint_keys": [
+            "net-force.compute.hint"
+          ],
+          "answer": 7,
+          "tolerance": 0
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "net-force.independent.prompt",
+          "feedback_key": "net-force.independent.fb",
+          "hint_keys": [
+            "net-force.independent.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "net-force.independent.a.label",
+              "feedback_key": "net-force.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "net-force.independent.b.label",
+              "feedback_key": "net-force.independent.b.fb"
+            }
+          ]
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "net-force.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "net-force.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "net-force.c1.a.label",
+              "feedback_key": "net-force.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "net-force.c1.b.label",
+              "feedback_key": "net-force.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "balance-lab",
+      "order": 2,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "balance-lab.title",
+      "goal_key": "balance-lab.goal",
+      "reading_key": "balance-lab.reading",
+      "references": [],
+      "prerequisites": [
+        "net-force"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "balance-lab.worked.prompt",
+          "feedback_key": "balance-lab.worked.fb",
+          "hint_keys": [
+            "balance-lab.worked.hint"
+          ],
+          "content_key": "balance-lab.worked.content"
+        },
+        {
+          "id": "balance",
+          "kind": "numeric",
+          "prompt_key": "balance-lab.balance.prompt",
+          "feedback_key": "balance-lab.balance.fb",
+          "hint_keys": [
+            "balance-lab.balance.hint"
+          ],
+          "answer": 9,
+          "tolerance": 0
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "balance-lab.independent.prompt",
+          "feedback_key": "balance-lab.independent.fb",
+          "hint_keys": [
+            "balance-lab.independent.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "balance-lab.independent.a.label",
+              "feedback_key": "balance-lab.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "balance-lab.independent.b.label",
+              "feedback_key": "balance-lab.independent.b.fb"
+            }
+          ]
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "balance-lab.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "balance-lab.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "balance-lab.c1.a.label",
+              "feedback_key": "balance-lab.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "balance-lab.c1.b.label",
+              "feedback_key": "balance-lab.c1.b.fb"
+            }
+          ]
+        }
+      ],
+      "world": {
+        "kind": "balance-scale"
+      }
+    },
+    {
+      "id": "tug-of-war",
+      "order": 3,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "tug-of-war.title",
+      "goal_key": "tug-of-war.goal",
+      "reading_key": "tug-of-war.reading",
+      "references": [],
+      "prerequisites": [
+        "balance-lab"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "tug-of-war.worked.prompt",
+          "feedback_key": "tug-of-war.worked.fb",
+          "hint_keys": [
+            "tug-of-war.worked.hint"
+          ],
+          "content_key": "tug-of-war.worked.content"
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "tug-of-war.independent.prompt",
+          "feedback_key": "tug-of-war.independent.fb",
+          "hint_keys": [
+            "tug-of-war.independent.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "tug-of-war.independent.a.label",
+              "feedback_key": "tug-of-war.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "tug-of-war.independent.b.label",
+              "feedback_key": "tug-of-war.independent.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "transfer-bridge",
+          "kind": "numeric",
+          "prompt_key": "tug-of-war.transfer-bridge.prompt",
+          "feedback_key": "tug-of-war.transfer-bridge.fb",
+          "hint_keys": [
+            "tug-of-war.transfer-bridge.hint"
+          ],
+          "answer": 450,
+          "tolerance": 0,
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "tug-of-war.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "tug-of-war.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "tug-of-war.c1.a.label",
+              "feedback_key": "tug-of-war.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "tug-of-war.c1.b.label",
+              "feedback_key": "tug-of-war.c1.b.fb"
+            }
+          ]
+        }
+      ],
+      "struggle": {
+        "challenge_key": "tug-of-war.struggle",
+        "window_minutes": 3
+      }
+    },
+    {
+      "id": "explain-to-engineer",
+      "order": 4,
+      "mode": "study",
+      "milestone": true,
+      "title_key": "explain-to-engineer.title",
+      "goal_key": "explain-to-engineer.goal",
+      "reading_key": "explain-to-engineer.reading",
+      "references": [],
+      "prerequisites": [
+        "tug-of-war"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "explain-to-engineer.worked.prompt",
+          "feedback_key": "explain-to-engineer.worked.fb",
+          "hint_keys": [
+            "explain-to-engineer.worked.hint"
+          ],
+          "content_key": "explain-to-engineer.worked.content"
+        },
+        {
+          "id": "teach-check",
+          "kind": "explain",
+          "prompt_key": "explain-to-engineer.teach-check.prompt",
+          "feedback_key": "explain-to-engineer.teach-check.fb",
+          "hint_keys": [
+            "explain-to-engineer.teach-check.hint"
+          ],
+          "content_key": "explain-to-engineer.teach-check.content"
+        },
+        {
+          "id": "transfer-elevator",
+          "kind": "choice",
+          "prompt_key": "explain-to-engineer.transfer-elevator.prompt",
+          "feedback_key": "explain-to-engineer.transfer-elevator.fb",
+          "hint_keys": [
+            "explain-to-engineer.transfer-elevator.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "explain-to-engineer.transfer-elevator.a.label",
+              "feedback_key": "explain-to-engineer.transfer-elevator.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "explain-to-engineer.transfer-elevator.b.label",
+              "feedback_key": "explain-to-engineer.transfer-elevator.b.fb"
+            }
+          ],
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "explain-to-engineer.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "explain-to-engineer.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "explain-to-engineer.c1.a.label",
+              "feedback_key": "explain-to-engineer.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "explain-to-engineer.c1.b.label",
+              "feedback_key": "explain-to-engineer.c1.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "c2",
+          "prompt_key": "explain-to-engineer.c2.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "explain-to-engineer.c2.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "explain-to-engineer.c2.a.label",
+              "feedback_key": "explain-to-engineer.c2.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "explain-to-engineer.c2.b.label",
+              "feedback_key": "explain-to-engineer.c2.b.fb"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -33,6 +33,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
 }) {
   useLocale()
   const [dueCount, setDueCount] = useState(0)
+  const [skills, setSkills] = useState<Readonly<Record<string, string>>>({})
   const manual = useRef(false)
   const phases = useMemo(() => academyStudioPhases(lesson, dueCount > 0), [lesson, dueCount])
   const checks = lesson.knowledge_checks ?? []
@@ -55,7 +56,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   const doneRef = useRef(done); doneRef.current = done
   const closeRef = useRef(onClose); closeRef.current = onClose
   const dialog = useRef<HTMLDivElement | null>(null)
-  const journey = academyStudioJourney(course.lessons, project.progress, lesson.id)
+  const journey = academyStudioJourney(course.lessons, project.progress, lesson.id, skills)
   const coachTurns = academyStudioCoachTurns(tutorTurns, project.id, lesson.id)
   const latestCoach = coachTurns.at(-1)
   const coachRunning = coachTurns.some(turn => turn.status === 'running')
@@ -88,7 +89,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     void (async () => {
       const mastery = await academyApi.mastery(project.id, controller.signal)
       if (controller.signal.aborted) return
-      if (mastery.ok) setDueCount(mastery.data.mastery.due_count)
+      if (mastery.ok) {setDueCount(mastery.data.mastery.due_count); setSkills(Object.fromEntries(mastery.data.mastery.skills.map(skill => [skill.lesson_id, skill.state])))}
     })()
     return () => controller.abort()
   }, [active, project.id])
@@ -166,6 +167,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
             className={cn('flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm', node.state === 'active' ? 'border-brand bg-brand/10 font-medium' : node.state === 'completed' ? 'border-ok/40 text-ok' : 'border-line text-muted')}>
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current text-xs">{node.state === 'completed' ? <Check className="h-3 w-3" aria-hidden /> : node.order}</span>
             <span className="max-w-40 truncate">{node.title}</span>
+            {node.mastery ? <span role="img" aria-label={t('ui.academy.studio.journey.mastery.' + node.mastery)} className={'h-2 w-2 shrink-0 rounded-full ' + (node.mastery === 'durable' ? 'bg-ok' : 'bg-warn')} /> : null}
           </button>
         </li>)}
       </ol>
