@@ -111,6 +111,19 @@ const coachTurn = (patch: Partial<AcademyTutorTurn> = {}): AcademyTutorTurn => (
   input_fingerprint: 'a'.repeat(64), prompt: 'base instruction\nWhy equal parts?', allow_execution: false, require_execution: false, response: 'Because halves share one name.',
   model: 'm', language: 'en', status: 'completed', actions: [], created_at: 1, ...patch})
 
+it('shows the advance organizer (stage goal + prerequisites) in the reading phase', async () => {
+  await setLocale('en')
+  const readingLesson = lesson({steps: undefined, struggle: undefined, world: undefined, prerequisites: ['place-value'], stage_goal: 'Build the density idea.'})
+  const html = renderToStaticMarkup(studio({lesson: readingLesson}))
+  expect(html).toContain('data-studio-phase="reading"')
+  expect(html).toContain('This stage')
+  expect(html).toContain('Build the density idea.')
+  expect(html).toContain('Lesson 1 · Place value')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(studio({lesson: readingLesson}))
+  expect(chinese).toContain('本阶段')
+})
+
 it('marks the host-recommended next lesson on the journey and session plan', async () => {
   await setLocale('en')
   const advanced = {...project, progress: [...project.progress, {lesson_id: 'fractions', state: 'completed' as const, checkpoint_id: '', evidence_ids: [], attempt_count: 1}]}

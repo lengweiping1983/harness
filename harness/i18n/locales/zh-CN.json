@@ -8076,6 +8076,7 @@
   "ui.academy.studio.optional": "可跳过",
   "ui.academy.studio.skip": "跳过这一环节",
   "ui.academy.studio.readDone": "我读完了",
+  "ui.academy.studio.reading.stage": "本阶段",
   "ui.academy.studio.noteHint": "用自己的话写一句：这节课学会了什么，哪里还模糊？",
   "ui.academy.studio.nudge.struggle": "刚才的挣扎很有价值。要不要一个提示，把你的尝试和概念连起来？",
   "ui.academy.studio.nudge.blindspot": "你很确定却答错——这是最值得修复的缺口。要一个对准它的提示吗？",

@@ -131,6 +131,11 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     if (phase === 'reading') {
       if (lesson.struggle && !struggleRevealed) return <p className="text-sm leading-reading text-muted">{t('ui.academy.struggle.gated')}</p>
       return <div className="space-y-3">
+        {lesson.stage_goal ? <p className="text-xs text-muted">{t('ui.academy.studio.reading.stage')}: {lesson.stage_goal}</p> : null}
+        {lesson.prerequisites.length ? <div className="flex flex-wrap items-center gap-1">
+          <span className="text-xs text-muted">{t('ui.academy.prerequisiteHint')}</span>
+          {lesson.prerequisites.map(id => {const pre = course.lessons.find(item => item.id === id); return pre ? <Button key={id} size="xs" variant="ghost" onClick={() => onOpenLesson(id)}>{t('ui.academy.lessonTitle', {order: pre.order, title: pre.title})}</Button> : null})}
+        </div> : null}
         <div className="min-w-0 text-base leading-reading"><Markdown workspaceLinks={false}>{lesson.reading}</Markdown></div>
         {!done.has('reading') ? <Button size="sm" variant="subtle" onClick={() => markDone('reading')}>{t('ui.academy.studio.readDone')}</Button> : null}
       </div>
