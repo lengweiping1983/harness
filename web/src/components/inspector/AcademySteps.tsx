@@ -9,8 +9,8 @@ import {Button} from '@/components/ui/primitives'
 type Feedback = {correct: boolean; text: string}
 
 /** 单步卡片：按类型渲染输入，提交后即时反馈；答对显示下一步。 */
-export function AcademyStepCard({step, busy, feedback, onSubmit, onNext}: {
-  step: AcademyStepPublic; busy: boolean; feedback: Feedback | null; onSubmit: (response: string | number | string[]) => void; onNext: () => void
+export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}: {
+  step: AcademyStepPublic; busy: boolean; feedback: Feedback | null; cheer?: string; onSubmit: (response: string | number | string[]) => void; onNext: () => void
 }) {
   useLocale()
   const name = useId()
@@ -41,8 +41,11 @@ export function AcademyStepCard({step, busy, feedback, onSubmit, onNext}: {
   return <div data-academy-step={step.id} data-step-kind={step.kind} className="space-y-3 rounded-xl border border-brand/40 p-3">
     {step.kind === 'explain' && step.content ? <div className="rounded-lg bg-canvas p-3 text-base leading-reading">{step.content}</div> : null}
     <p className="whitespace-pre-wrap text-base leading-reading">{step.prompt}</p>
-    {feedback ? <p role="status" className={'flex items-center gap-1 text-sm font-medium ' + (feedback.correct ? 'text-ok' : 'text-warn')}>
-      {feedback.correct ? <Check className="h-4 w-4" /> : null}{feedback.text}</p> : null}
+    {feedback ? <div role="status" className="space-y-1">
+      {feedback.correct && cheer ? <p className="text-sm font-medium text-ok">{cheer}</p> : null}
+      <p className={'flex items-center gap-1 text-sm font-medium ' + (feedback.correct ? 'text-ok' : 'text-warn')}>
+        {feedback.correct ? <Check className="h-4 w-4" /> : null}{feedback.text}</p>
+    </div> : null}
     {feedback?.correct ? <Button size="sm" onClick={onNext}>{t('ui.academy.steps.next')}</Button> : <form className="space-y-2"
       onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}
       onKeyDown={event => {if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault()}}
@@ -104,6 +107,8 @@ export function AcademySteps({projectId, lesson, active, disabled}: {projectId: 
   const currentIndex = steps.findIndex(step => !done.has(step.id))
   const completed = view?.completed || currentIndex === -1
   const current = currentIndex >= 0 ? steps[currentIndex] : null
+  const correctCount = done.size
+  const cheer = t('ui.academy.steps.cheer.' + (correctCount % 3))
 
   const clearPending = () => {
     try {sessionStorage.removeItem(pendingKey)} catch {setPending(null)}
@@ -149,6 +154,7 @@ export function AcademySteps({projectId, lesson, active, disabled}: {projectId: 
       <p className="text-xs text-muted">{completed ? t('ui.academy.steps.completed') : t('ui.academy.steps.progress', {current: Math.min(currentIndex + 1, total), total})}</p>
     </div>
     <div className="flex gap-1" aria-hidden>{steps.map((step, index) => <span key={step.id} className={'h-1.5 flex-1 rounded-full ' + (done.has(step.id) ? 'bg-ok' : index === currentIndex ? 'bg-brand' : 'bg-line')} />)}</div>
+    {correctCount >= 2 && !completed ? <p className="text-xs font-medium text-ok">{t('ui.academy.steps.streak', {count: correctCount})}</p> : null}
     {error ? <p role="alert" className="text-sm text-danger">{noticeText(error)}</p> : null}
     {pending ? <div role="status" className="space-y-2 rounded-xl border border-warn/40 p-3 text-sm">
       <p>{t('ui.academy.steps.pending')}</p>
@@ -156,6 +162,6 @@ export function AcademySteps({projectId, lesson, active, disabled}: {projectId: 
       <Button size="xs" disabled={busy} onClick={() => void recheck()}>{t('ui.academy.recheckReceipt')}</Button>
     </div> : null}
     {completed ? <p role="status" className="rounded-lg bg-canvas p-3 text-sm font-medium text-ok">{t('ui.academy.steps.completed')}</p>
-      : current ? <AcademyStepCard key={current.id + ':' + revision} step={current} busy={busy || disabled || pending !== null} feedback={feedback} onSubmit={response => void submit(response)} onNext={next} /> : null}
+      : current ? <AcademyStepCard key={current.id + ':' + revision} step={current} busy={busy || disabled || pending !== null} feedback={feedback} cheer={cheer} onSubmit={response => void submit(response)} onNext={next} /> : null}
   </div>
 }

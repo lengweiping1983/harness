@@ -66,3 +66,12 @@ it('switches language without changing step identity', async () => {
     expect(html).toContain('Why must parts be equal?')
   }
 })
+
+it('adds rotating encouragement on correct steps', async () => {
+  await setLocale('en')
+  const html = renderToStaticMarkup(card({feedback: {correct: true, text: 'Right: the denominator counts equal parts.'}, cheer: 'Nice thinking!'}))
+  expect(html).toContain('Nice thinking!')
+  expect(html).toContain('Right: the denominator counts equal parts.')
+  const noCheer = renderToStaticMarkup(card({feedback: {correct: false, text: 'Not yet.'}, cheer: 'Nice thinking!'}))
+  expect(noCheer).not.toContain('Nice thinking!')
+})
