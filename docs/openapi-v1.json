@@ -31449,6 +31449,80 @@
           "review_notes"
         ]
       },
+      "AcademyTutorMasteryPrerequisite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lesson_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "new",
+              "learning",
+              "durable"
+            ]
+          },
+          "retrievability": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "lesson_id",
+          "state",
+          "retrievability"
+        ]
+      },
+      "AcademyTutorMasteryFailure": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lesson_id": {
+            "type": "string"
+          },
+          "at": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "lesson_id",
+          "at"
+        ]
+      },
+      "AcademyTutorMastery": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skill": {
+            "$ref": "#/components/schemas/AcademySkillState"
+          },
+          "prerequisites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyTutorMasteryPrerequisite"
+            }
+          },
+          "review_due": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "recent_failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyTutorMasteryFailure"
+            }
+          }
+        },
+        "required": [
+          "skill",
+          "prerequisites",
+          "review_due",
+          "recent_failures"
+        ]
+      },
       "AcademyWorldTask": {
         "type": "object",
         "additionalProperties": false,

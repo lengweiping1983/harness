@@ -157,6 +157,33 @@ class AcademyMastery:
         return {'skills': skills, 'due_count': sum(1 for skill in skills if skill['state'] != 'new' and skill['retrievability'] < TARGET_RETENTION),
                 'reviews': totals}
 
+
+    def profile(self, project_id: str, lesson_id: str) -> dict:
+        """带练冻结的掌握度画像：当前技能、先修状态、到期重测与近期独立失败。"""
+        record, lessons = self._lessons(project_id)
+        states = fold(self.service.store, project_id)
+        now = time.time()
+        lesson = next(item for item in lessons if item['id'] == lesson_id)
+        skill = _skill_view(lesson, states.get(lesson_id), now)
+        prerequisites = []
+        for prereq_id in lesson.get('prerequisites', []):
+            prereq = next((item for item in lessons if item['id'] == prereq_id), None)
+            if prereq is None:
+                continue
+            view = _skill_view(prereq, states.get(prereq_id), now)
+            prerequisites.append({'lesson_id': prereq_id, 'state': view['state'], 'retrievability': view['retrievability']})
+        review_due = []
+        for item in lessons:
+            state = states.get(item['id'])
+            if state and state['evidence_count'] > 0:
+                elapsed = max(0.0, (now - state['last_at']) / DAY)
+                if retrievability(elapsed, state['stability']) < TARGET_RETENTION:
+                    review_due.append(item['id'])
+        recent_failures = [{'lesson_id': value['lesson_id'], 'at': value['created_at']}
+                           for value in self.service.store.list('review', max_bytes=MAX_EVIDENCE_BYTES)
+                           if value.get('project_id') == project_id and value.get('correct') is False][:3]
+        return {'skill': skill, 'prerequisites': prerequisites, 'review_due': review_due[:5], 'recent_failures': recent_failures}
+
     def queue(self, project_id: str) -> list[dict]:
         """到期技能按阶段交错排列；公开题目不含答案、反馈与提示。"""
         record, lessons = self._lessons(project_id)

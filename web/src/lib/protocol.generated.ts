@@ -1950,6 +1950,21 @@ export interface AcademyDesign {
   error_code?: string
   review_notes: Array<string>
 }
+export interface AcademyTutorMasteryPrerequisite {
+  lesson_id: string
+  state: 'new' | 'learning' | 'durable'
+  retrievability: number
+}
+export interface AcademyTutorMasteryFailure {
+  lesson_id: string
+  at: number
+}
+export interface AcademyTutorMastery {
+  skill: AcademySkillState
+  prerequisites: Array<AcademyTutorMasteryPrerequisite>
+  review_due: Array<string>
+  recent_failures: Array<AcademyTutorMasteryFailure>
+}
 export interface AcademyWorldTask {
   kind: 'fraction-bar' | 'group-array' | 'balance-scale'
 }

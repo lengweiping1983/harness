@@ -249,6 +249,8 @@ class AcademyTutor:
                                                'selected': {key: option[key] for key in ('id', 'label', 'feedback')}}
             if mode == 'teach':
                 snapshot['misconception'] = misconception
+            else:
+                snapshot['mastery'] = self.service.mastery.profile(project_id, lesson_id)
             if model_run_id is not None and lesson['mode'] != 'model':
                 raise AcademyError('lesson-not-runnable')
             if lesson['mode'] == 'model':
@@ -481,7 +483,7 @@ class AcademyTutor:
         except (UnicodeError, RecursionError) as exc:
             raise AcademyError('store-invalid') from exc
         if (not isinstance(snapshot, dict) or not {'lesson', 'files', 'history', 'runs'} <= set(snapshot)
-                or set(snapshot) - {'lesson', 'files', 'history', 'runs', 'model_run', 'knowledge_check', 'comparison_model_run', 'misconception'}
+                or set(snapshot) - {'lesson', 'files', 'history', 'runs', 'model_run', 'knowledge_check', 'comparison_model_run', 'misconception', 'mastery'}
                 or snapshot_size > 96 * 1024
                 or not isinstance(snapshot['files'], dict) or any(not isinstance(path, str) or not isinstance(content, str) for path, content in snapshot['files'].items())
                 or fingerprint(snapshot['files']) != value['input_fingerprint']
@@ -495,6 +497,9 @@ class AcademyTutor:
                     or validate(selection, SCHEMAS['AcademyTutorCheckSelection']) or check['id'] != selection['check_id']
                     or not isinstance(check['selected'], dict) or set(check['selected']) != {'id', 'label', 'feedback'}
                     or any(not isinstance(text, str) for text in check['selected'].values()) or check['selected']['id'] != selection['option_id']):
+                raise AcademyError('store-invalid')
+        if 'mastery' in snapshot:
+            if value.get('mode', 'tutor') != 'tutor' or validate(snapshot['mastery'], SCHEMAS['AcademyTutorMastery']):
                 raise AcademyError('store-invalid')
         if 'misconception' in snapshot:
             if value.get('mode') != 'teach' or validate(snapshot['misconception'], SCHEMAS['AcademyTeachMisconception']):
