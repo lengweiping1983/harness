@@ -72,6 +72,16 @@ it('renders skill states and keeps unstarted skills unlabelled as mastery', asyn
   expect(empty).toContain('Complete a lesson activity or pass a code check')
 })
 
+it('shows the next review date on skills with evidence', async () => {
+  await setLocale('en')
+  const html = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({due_at: 1794943740})]}))
+  expect(html).toContain('Next review:')
+  const none = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({due_at: null})]}))
+  expect(none).not.toContain('Next review:')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({due_at: 1794943740})]}))
+  expect(chinese).toContain('下次重测：')
+})
 it('renders the learning report tiles from mastery evidence bilingually', async () => {
   await setLocale('en')
   const mastery = {skills: [], due_count: 0, reviews: {attempts: 4, correct: 3, delayed_correct: 2},

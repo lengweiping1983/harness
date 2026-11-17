@@ -17,7 +17,7 @@ export function AcademyEngagementStats({engagement}: {engagement: AcademyEngagem
 
 /** 技能记忆列表；没有证据的技能保持未开始，不投影为已掌握。 */
 export function AcademySkillList({skills}: {skills: readonly AcademySkillState[]}) {
-  useLocale()
+  const locale = useLocale()
   if (!skills.some(skill => skill.evidence_count > 0)) return <p className="text-sm leading-reading text-muted">{t('ui.academy.mastery.noEvidence')}</p>
   return <ul className="space-y-2">{skills.map(skill => <li key={skill.lesson_id} data-skill-id={skill.lesson_id} className="rounded-lg border border-line p-3 text-sm">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -25,6 +25,7 @@ export function AcademySkillList({skills}: {skills: readonly AcademySkillState[]
       <Badge tone={skill.state === 'durable' ? 'ok' : skill.state === 'learning' ? 'warn' : 'neutral'}>{t('ui.academy.mastery.state.' + skill.state)}</Badge>
     </div>
     {skill.evidence_count > 0 ? <p className="mt-1 text-xs text-muted">{t('ui.academy.mastery.retrievability', {percent: Math.round(skill.retrievability * 100)})} · {t('ui.academy.mastery.stability', {days: skill.stability_days})}</p> : null}
+    {skill.evidence_count > 0 && skill.due_at != null ? <p className="mt-1 text-xs text-warn">{t('ui.academy.mastery.nextDue', {date: new Date(skill.due_at * 1000).toLocaleDateString(locale === 'zh-CN' ? 'zh-CN' : 'en')})}</p> : null}
   </li>)}</ul>
 }
 
@@ -170,6 +171,7 @@ export function AcademyReviewSession({projectId, active, disabled = false, onCom
       <p className="text-xs text-muted">{t('ui.academy.mastery.stability', {days: result.skill.stability_days})}</p>
     </div> : null}
     {queue.length ? <Section title={t('ui.academy.mastery.reviewHeading')}>
+      {queue.length > 1 ? <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.interleavedHint')}</p> : null}
       <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.reviewHint')}</p>
       <AcademyReviewCard key={queue[0].lesson_id + ':' + revision} item={queue[0]} busy={busy || disabled || pending !== null} onSubmit={answers => void submit(answers)} />
     </Section> : loaded ? <p className="text-sm leading-reading text-muted">{t('ui.academy.mastery.queueEmpty')}</p> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
