@@ -4667,6 +4667,8 @@
   "ui.academy.steps.calibration.lucky": "答对但不确定——值得再巩固一遍。",
   "ui.academy.steps.calibration.blindspot": "很确定却答错——这正是现在要修复的缺口。",
   "ui.academy.steps.calibration.expected": "不确定且答错——正常学习区，用好支架。",
+  "ui.academy.steps.calibration.repaired": "盲点已修复：曾高确信答错、现在答对——这才是真学习。",
+  "ui.academy.steps.blindspotChip": "曾高确信答错：现在修复它",
   "ui.academy.steps.title": "引导练习",
   "ui.academy.steps.progress": "第 {current} / {total} 步",
   "ui.academy.steps.explainPrompt": "你的解释",

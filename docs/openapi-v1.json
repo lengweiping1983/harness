@@ -31904,6 +31904,12 @@
               "unsure",
               "sure"
             ]
+          },
+          "blindspot": {
+            "type": "boolean"
+          },
+          "repaired": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -31996,7 +32002,8 @@
               "calibrated",
               "lucky",
               "blindspot",
-              "expected"
+              "expected",
+              "repaired"
             ]
           },
           "step": {

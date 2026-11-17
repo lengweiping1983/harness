@@ -8163,6 +8163,8 @@
   "ui.academy.steps.calibration.lucky": "Correct but unsure - worth one more solidifying pass.",
   "ui.academy.steps.calibration.blindspot": "Sure but wrong - this is exactly the gap to repair now.",
   "ui.academy.steps.calibration.expected": "Unsure and wrong - a normal learning zone; use the scaffold.",
+  "ui.academy.steps.calibration.repaired": "Blindspot repaired: you were sure, wrong, and now correct - that is real learning.",
+  "ui.academy.steps.blindspotChip": "Earlier sure-but-wrong: repair it now",
   "ui.academy.steps.title": "Guided practice",
   "ui.academy.steps.progress": "Step {current} of {total}",
   "ui.academy.steps.explainPrompt": "Your explanation",

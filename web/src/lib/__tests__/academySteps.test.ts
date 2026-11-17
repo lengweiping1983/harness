@@ -90,6 +90,17 @@ it('renders matching pairs without revealing the answer key', async () => {
   expect(html).toContain('disabled=""')
 })
 
+it('shows the blindspot chip and repaired calibration bilingually', async () => {
+  await setLocale('en')
+  const chip = renderToStaticMarkup(card({blindspot: true}))
+  expect(chip).toContain('Earlier sure-but-wrong: repair it now')
+  const repaired = renderToStaticMarkup(card({feedback: {correct: true, text: 'Correct!', calibration: 'repaired'}}))
+  expect(repaired).toContain('Blindspot repaired')
+  expect(repaired).not.toContain('Earlier sure-but-wrong')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(card({blindspot: true}))
+  expect(chinese).toContain('曾高确信答错：现在修复它')
+})
 it('labels transfer challenges without revealing the answer key', async () => {
   await setLocale('en')
   const html = renderToStaticMarkup(card({step: step({kind: 'choice', prompt: 'New situation?', content: undefined, transfer: true, options: [{id: 'a', label: '6 + 4', feedback: 'Combines.'}, {id: 'b', label: '6 - 4', feedback: 'Removes.'}]})}))

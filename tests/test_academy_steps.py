@@ -143,6 +143,21 @@ class StepSessionTests(unittest.TestCase):
         unavailable = self.service.steps.answer(other['id'], 'ans-hf', 'agent-loop', 'q1', 'x')
         self.assertEqual(unavailable['result']['error_code'], 'steps-unavailable')
 
+    def test_blindspot_repair_loop_flags_and_calibration(self):
+        """高确信错误记盲点；之后答对记修复并给 repaired 校准；投影保留历史标记。"""
+        self.open_lesson()
+        wrong = self.service.steps.answer(self.pid, 'bs-wrong', LESSON, 'denominator', 5, confidence='sure')['result']
+        self.assertEqual(wrong['calibration'], 'blindspot')
+        self.assertTrue(wrong['response']['blindspot'])
+        self.assertNotIn('repaired', wrong['response'])
+        fixed = self.service.steps.answer(self.pid, 'bs-fix', LESSON, 'denominator', 4, confidence='sure')['result']
+        self.assertTrue(fixed['correct'])
+        self.assertEqual(fixed['calibration'], 'repaired')
+        self.assertTrue(fixed['response']['blindspot'])
+        self.assertTrue(fixed['response']['repaired'])
+        projected = {row['step_id']: row for row in self.service.steps.view(self.pid, LESSON)['responses']}
+        self.assertTrue(projected['denominator']['blindspot'])
+        self.assertTrue(projected['denominator']['repaired'])
     def test_transfer_challenge_public_flag_and_memory_weight(self):
         """迁移挑战公开标记不泄答案；新情境答对给予更高初始稳定性。"""
         self.open_lesson('add-meaning')
@@ -165,7 +180,7 @@ class StepSessionTests(unittest.TestCase):
         self.assertFalse(blind['correct'])
         self.assertEqual(blind['calibration'], 'blindspot')
         self.assertEqual(blind['response']['confidence'], 'sure')
-        lucky = self.service.steps.answer(self.pid, 'ans-lucky', LESSON, 'denominator', 4, confidence='guess')['result']
+        lucky = self.service.steps.answer(self.pid, 'ans-lucky', LESSON, 'which-half', 'b', confidence='guess')['result']
         self.assertTrue(lucky['correct'])
         self.assertEqual(lucky['calibration'], 'lucky')
         calibrated = self.service.steps.answer(self.pid, 'ans-cal', LESSON, 'which-half', 'b', confidence='sure')['result']
@@ -178,7 +193,9 @@ class StepSessionTests(unittest.TestCase):
         self.assertNotIn('confidence', plain['response'])
         view = self.service.steps.view(self.pid, LESSON)
         projected = {row['step_id']: row for row in view['responses']}
-        self.assertEqual(projected['denominator']['confidence'], 'guess')
+        self.assertEqual(projected['denominator']['confidence'], 'sure')
+        self.assertTrue(projected['denominator']['blindspot'])
+        self.assertEqual(projected['which-half']['confidence'], 'sure')
         self.assertNotIn('confidence', projected['worked'])
         replay = self.service.steps.answer(self.pid, 'ans-blind', LESSON, 'denominator', 5, confidence='sure')
         self.assertEqual(replay['status'], 'ready')

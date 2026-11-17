@@ -99,7 +99,9 @@ class AcademySteps:
         return {'steps': [public_step(step) for step in steps],
                 'responses': [dict({'step_id': step['id'], 'correct': done[step['id']]['correct'],
                                     'response': done[step['id']]['response']},
-                                   **({'confidence': done[step['id']]['confidence']} if 'confidence' in done[step['id']] else {}))
+                                   **({'confidence': done[step['id']]['confidence']} if 'confidence' in done[step['id']] else {}),
+                                   **({'blindspot': True} if done[step['id']].get('blindspot') else {}),
+                                   **({'repaired': True} if done[step['id']].get('repaired') else {}))
                               for step in steps if step['id'] in done],
                 'completed': bool(progress and progress['status'] == 'completed')}
 
@@ -121,6 +123,13 @@ class AcademySteps:
                      'attempts': (previous['attempts'] + 1) if previous else 1, 'at': time.time()}
             if confidence is not None:
                 entry['confidence'] = confidence
+            # 盲点闭环：高确信错误记为盲点；之后答对记为修复，保留历史供界面与校准使用。
+            if previous and previous.get('blindspot'):
+                entry['blindspot'] = True
+            if not correct and confidence == 'sure':
+                entry['blindspot'] = True
+            if correct and previous and previous.get('blindspot'):
+                entry['repaired'] = True
             if previous:
                 progress['responses'][progress['responses'].index(previous)] = entry
             else:
@@ -142,7 +151,9 @@ class AcademySteps:
                 number_line = {'min': step['number_line']['min'], 'max': step['number_line']['max'], 'value': normalized}
             # 元认知校准：高确信错误是最该修复的缺口；低确信答对说明仍靠猜测，需要巩固。
             calibration = None
-            if confidence is not None:
+            if correct and previous and previous.get('blindspot'):
+                calibration = 'repaired'
+            elif confidence is not None:
                 if correct:
                     calibration = 'calibrated' if confidence == 'sure' else 'lucky'
                 else:

@@ -2025,6 +2025,8 @@ export interface AcademyStepResponse {
   attempts: number
   at: number
   confidence?: 'guess' | 'unsure' | 'sure'
+  blindspot?: boolean
+  repaired?: boolean
 }
 export interface AcademyStepsView {
   steps: Array<AcademyStepPublic>
@@ -2044,7 +2046,7 @@ export interface AcademyStepResult {
   scaffold?: string
   number_line?: AcademyNumberLineMark
   completed: boolean
-  calibration?: 'calibrated' | 'lucky' | 'blindspot' | 'expected'
+  calibration?: 'calibrated' | 'lucky' | 'blindspot' | 'expected' | 'repaired'
   step: AcademyStepPublic
   response: AcademyStepResponse
 }

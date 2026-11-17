@@ -26,8 +26,8 @@ export function AcademyNumberLine({min, max, value}: {min: number; max: number; 
 }
 
 /** 单步卡片：按类型渲染输入，提交后即时反馈；答对显示下一步。 */
-export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}: {
-  step: AcademyStepPublic; busy: boolean; feedback: Feedback | null; cheer?: string; onSubmit: (response: string | number | string[] | Record<string, string>, confidence: AcademyConfidence) => void; onNext: () => void
+export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmit, onNext}: {
+  step: AcademyStepPublic; busy: boolean; feedback: Feedback | null; cheer?: string; blindspot?: boolean; onSubmit: (response: string | number | string[] | Record<string, string>, confidence: AcademyConfidence) => void; onNext: () => void
 }) {
   useLocale()
   const name = useId()
@@ -62,6 +62,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
   return <div data-academy-step={step.id} data-step-kind={step.kind} className="space-y-3 rounded-xl border border-brand/40 p-3">
     {step.kind === 'explain' && step.content ? <div className="rounded-lg bg-canvas p-3 text-base leading-reading">{step.content}</div> : null}
     {step.transfer ? <p className="inline-flex rounded-full border border-brand/40 bg-brand/5 px-2 py-0.5 text-xs font-medium text-brand" title={t('ui.academy.steps.transferHint')}>{t('ui.academy.steps.transferLabel')}</p> : null}
+    {blindspot && feedback?.correct !== true ? <p className="inline-flex rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-xs font-medium text-warn">{t('ui.academy.steps.blindspotChip')}</p> : null}
     <p className="whitespace-pre-wrap text-base leading-reading">{step.prompt}</p>
     {feedback ? <div role="status" className="space-y-1">
       {feedback.correct && cheer ? <p className="text-sm font-medium text-ok">{cheer}</p> : null}
@@ -146,6 +147,7 @@ export function AcademySteps({projectId, lesson, active, disabled, onCompleted, 
   const done = new Set(responses.filter(response => response.correct).map(response => response.step_id))
   const total = steps.length
   const current = academyNextStep(steps, responses)
+  const currentResponse = current ? responses.find(item => item.step_id === current.id) : undefined
   const currentIndex = current ? steps.findIndex(step => step.id === current.id) : -1
   const completed = view?.completed || current === null
   const correctCount = done.size
@@ -204,6 +206,6 @@ export function AcademySteps({projectId, lesson, active, disabled, onCompleted, 
       <Button size="xs" disabled={busy} onClick={() => void recheck()}>{t('ui.academy.recheckReceipt')}</Button>
     </div> : null}
     {completed ? <p role="status" className="rounded-lg bg-canvas p-3 text-sm font-medium text-ok">{t('ui.academy.steps.completed')}</p>
-      : current ? <AcademyStepCard key={current.id + ':' + revision} step={current} busy={busy || disabled || pending !== null} feedback={feedback} cheer={cheer} onSubmit={(response, confidence) => void submit(response, confidence)} onNext={next} /> : null}
+      : current ? <AcademyStepCard key={current.id + ':' + revision} step={current} busy={busy || disabled || pending !== null} feedback={feedback} cheer={cheer} blindspot={currentResponse?.blindspot} onSubmit={(response, confidence) => void submit(response, confidence)} onNext={next} /> : null}
   </div>
 }

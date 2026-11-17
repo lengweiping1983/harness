@@ -18,7 +18,7 @@ def array(item):
 TEXT = {'type': 'string'}
 # 作答前的元认知置信度；宿主据此给出校准反馈，不改变评分真值。
 CONFIDENCE = {'type': 'string', 'enum': ['guess', 'unsure', 'sure']}
-CALIBRATION = {'type': 'string', 'enum': ['calibrated', 'lucky', 'blindspot', 'expected']}
+CALIBRATION = {'type': 'string', 'enum': ['calibrated', 'lucky', 'blindspot', 'expected', 'repaired']}
 HASH = {'type': 'string', 'pattern': '^[a-f0-9]{64}$'}
 REQUEST = {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'}
 VERSION = {'type': 'integer', 'minimum': 0}
@@ -114,7 +114,8 @@ SCHEMAS = {
         'prompt': TEXT, 'content': TEXT, 'options': array(ref('AcademyStepItem')),
         'items': array(ref('AcademyStepItem')), 'tolerance': NUMBER,
         'left': array(ref('AcademyStepItem')), 'right': array(ref('AcademyStepItem')), 'on_wrong': TEXT, 'transfer': BOOL}, ['id', 'kind', 'prompt']),
-    'AcademyStepResponse': obj({'step_id': TEXT, 'correct': BOOL, 'response': {}, 'attempts': VERSION, 'at': NUMBER, 'confidence': CONFIDENCE},
+    'AcademyStepResponse': obj({'step_id': TEXT, 'correct': BOOL, 'response': {}, 'attempts': VERSION, 'at': NUMBER, 'confidence': CONFIDENCE,
+                                'blindspot': BOOL, 'repaired': BOOL},
                                ['step_id', 'correct', 'response', 'attempts', 'at']),
     'AcademyStepsView': obj({'steps': array(ref('AcademyStepPublic')), 'responses': array(ref('AcademyStepResponse')), 'completed': BOOL}),
     'AcademyStepAnswer': obj({'request_id': REQUEST, 'lesson_id': TEXT, 'step_id': TEXT,
