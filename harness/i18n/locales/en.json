@@ -7838,6 +7838,7 @@
   "ui.academy.home.band.all": "All",
   "ui.academy.home.band.primary": "Primary",
   "ui.academy.home.band.middle": "Middle",
+  "ui.academy.home.dueBadge": "{count} due reviews",
   "ui.academy.manage": "Courses and projects",
   "ui.academy.today": "Today's lesson",
   "ui.academy.previousLesson": "Previous lesson",

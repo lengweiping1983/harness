@@ -4345,6 +4345,7 @@
   "ui.academy.home.band.all": "全部",
   "ui.academy.home.band.primary": "小学",
   "ui.academy.home.band.middle": "初中",
+  "ui.academy.home.dueBadge": "{count} 项待重测",
   "ui.academy.manage": "课程与项目",
   "ui.academy.today": "今天这一课",
   "ui.academy.previousLesson": "上一课",

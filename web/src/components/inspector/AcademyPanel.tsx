@@ -19,6 +19,7 @@ import {AcademyStruggle} from './AcademyStruggle'
 import {AcademyWorld} from './AcademyWorld'
 import {AcademySteps} from './AcademySteps'
 import {AcademyStudio} from './AcademyStudio'
+import {AcademyHomeCard} from './AcademyHome'
 import {AcademyTopicStudio} from './AcademyTopicStudio'
 import {AcademyModelLab} from './AcademyModelLab'
 import {AcademyTutor} from './AcademyTutor'
@@ -110,6 +111,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
   const [storageError, setStorageError] = useState(savedView.invalid === 'true')
   const [studioOpen, setStudioOpen] = useState(() => {try {return localStorage.getItem(studioKey) === 'open'} catch {return false}})
   const [homeBand, setHomeBand] = useState<'all' | 'primary' | 'middle'>('all')
+  const [dueByProject, setDueByProject] = useState<Readonly<Record<string, number>>>({})
   const studioPreference = useRef<'open' | 'closed' | null>((() => {try {const value = localStorage.getItem(studioKey); return value === 'open' ? 'open' : value === 'closed' ? 'closed' : null} catch {return null}})())
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -173,6 +175,20 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
 
   const hasProject = !!projectId
   useEffect(() => {setManageOpen(false); setCatalogOpen(hasProject)}, [hasProject])
+  /** 主页跨课程聚合到期重测数：统一每日重测视野，不必逐课打开才发现待重测。 */
+  useEffect(() => {
+    if (!active || project) return
+    const controller = new AbortController()
+    void (async () => {
+      const entries = await Promise.all(projects.map(async row => {
+        const result = await academyApi.mastery(row.id, controller.signal)
+        return [row.id, result.ok ? result.data.mastery.due_count : 0] as const
+      }))
+      if (!controller.signal.aborted) setDueByProject(Object.fromEntries(entries))
+    })()
+    return () => controller.abort()
+  }, [active, project, projects])
+
   /** 闯关式课次默认进入专注舞台；用户显式退出后尊重其持久偏好。 */
   useEffect(() => {
     if (studioPreference.current !== null || !active) return
@@ -636,13 +652,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
             className={'rounded-full border px-2.5 py-1 text-xs ' + (homeBand === band ? 'border-brand bg-brand/10 font-medium text-brand' : 'border-line text-muted')}>{t('ui.academy.home.band.' + band)}</button>)}
         </div>
       </div>
-      <ul className="grid gap-3 sm:grid-cols-2">{courses.filter(item => item.origin === 'provided' && (homeBand === 'all' || item.band === homeBand)).map(item => {const saved = academyCourseProject(item, projects, projectId); return <li key={item.id} data-course-id={item.id} className="flex flex-col gap-2 rounded-2xl border border-line p-4">
-        <div className="flex items-start justify-between gap-2"><h3 className="text-base font-semibold">{item.title}</h3>{item.band ? <Badge tone="brand">{t('ui.academy.home.band.' + item.band)}</Badge> : null}</div>
-        {saved ? <p className="break-words text-xs text-muted">{t('ui.academy.resumeProjectName', {name: saved.name})}</p> : null}
-        <p className="text-sm leading-reading text-muted">{item.description}</p>
-        <div className="mt-auto flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-muted">{t('ui.academy.lessonCount', {count: item.lesson_count})}</span>
-          <Button size="sm" variant="primary" disabled={locked || loading || dirty} aria-label={t(saved ? 'ui.academy.resumeCourse' : 'ui.academy.startCourse', {title: item.title})} icon={<BookOpen className="h-3.5 w-3.5" />} onClick={() => saved ? resumeProject(saved) : startCourse(item.id)}>{t(saved ? 'ui.academy.resumeCourseAction' : 'ui.academy.startDesignedCourse')}</Button></div>
-      </li>})}</ul>
+      <ul className="grid gap-3 sm:grid-cols-2">{courses.filter(item => item.origin === 'provided' && (homeBand === 'all' || item.band === homeBand)).map(item => {const saved = academyCourseProject(item, projects, projectId); return <AcademyHomeCard key={item.id} item={item} saved={saved} dueCount={saved ? dueByProject[saved.id] ?? 0 : 0} disabled={locked || loading || dirty} onStart={() => startCourse(item.id)} onResume={() => {if (saved) resumeProject(saved)}} />})}</ul>
     </section> : null}
     <details data-academy-section="manage" open={manageOpen} onToggle={event => setManageOpen(event.currentTarget.open)} className="rounded-xl border border-line p-3">
       <summary className="cursor-pointer rounded-lg text-sm text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.manage')}</summary>
