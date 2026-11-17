@@ -2,7 +2,7 @@ import {createElement} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
 import {afterEach, expect, it} from 'vitest'
 import {setLocale} from '@/i18n'
-import {AcademyStepCard, AcademySteps} from '@/components/inspector/AcademySteps'
+import {AcademyNumberLine, AcademyStepCard, AcademySteps} from '@/components/inspector/AcademySteps'
 import {academyReceiptMatches} from '../academy'
 import type {AcademyLesson, AcademyReceipt, AcademyStepPublic} from '@/types'
 
@@ -96,4 +96,14 @@ it('shows a contingent scaffold only after a wrong answer', async () => {
   expect(wrong).toContain('scaffold')
   const correct = renderToStaticMarkup(card({feedback: {correct: true, text: 'Right!', scaffold: 'Count all the equal parts first.'}}))
   expect(correct).not.toContain('Count all the equal parts first.')
+})
+
+it('renders a number line mark for numeric feedback without revealing the answer', async () => {
+  await setLocale('en')
+  const line = renderToStaticMarkup(createElement(AcademyNumberLine, {min: 0, max: 12, value: 7}))
+  expect(line).toContain('data-academy-number-line')
+  expect(line).toContain('58.3333')
+  const html = renderToStaticMarkup(card({step: step({kind: 'numeric', prompt: 'Denominator?', content: undefined, tolerance: 0}), feedback: {correct: false, text: 'Not yet.', numberLine: {min: 0, max: 12, value: 7}}}))
+  expect(html).toContain('data-academy-number-line')
+  expect(html).not.toContain('answer_id')
 })

@@ -8068,6 +8068,7 @@
   "ui.academy.steps.cheer.2": "You’ve got it!",
   "ui.academy.steps.streak": "{count} steps correct in a row — keep the momentum!",
   "ui.academy.steps.scaffoldLabel": "Here is a scaffold to help you think it through:",
+  "ui.academy.steps.numberLineLabel": "Your answer {value} on the number line",
   "ui.academy.steps.title": "Guided practice",
   "ui.academy.steps.progress": "Step {current} of {total}",
   "ui.academy.steps.explainPrompt": "Your explanation",

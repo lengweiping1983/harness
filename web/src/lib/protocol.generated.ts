@@ -1975,6 +1975,15 @@ export interface AcademyStepItem {
   id: string
   label: string
 }
+export interface AcademyNumberLine {
+  min: number
+  max: number
+}
+export interface AcademyNumberLineMark {
+  min: number
+  max: number
+  value: number
+}
 export interface AcademyStep {
   id: string
   kind: 'explain' | 'numeric' | 'choice' | 'ordering'
@@ -1983,6 +1992,7 @@ export interface AcademyStep {
   hints?: Array<string>
   content?: string
   scaffold?: string
+  number_line?: AcademyNumberLine
   answer?: unknown
   tolerance?: number
   answer_id?: string
@@ -2024,6 +2034,7 @@ export interface AcademyStepResult {
   correct: boolean
   feedback?: string
   scaffold?: string
+  number_line?: AcademyNumberLineMark
   completed: boolean
   step: AcademyStepPublic
   response: AcademyStepResponse

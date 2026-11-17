@@ -31683,6 +31683,42 @@
           "label"
         ]
       },
+      "AcademyNumberLine": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "min",
+          "max"
+        ]
+      },
+      "AcademyNumberLineMark": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          },
+          "value": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "min",
+          "max",
+          "value"
+        ]
+      },
       "AcademyStep": {
         "type": "object",
         "additionalProperties": false,
@@ -31716,6 +31752,9 @@
           },
           "scaffold": {
             "type": "string"
+          },
+          "number_line": {
+            "$ref": "#/components/schemas/AcademyNumberLine"
           },
           "answer": {},
           "tolerance": {
@@ -31913,6 +31952,9 @@
           },
           "scaffold": {
             "type": "string"
+          },
+          "number_line": {
+            "$ref": "#/components/schemas/AcademyNumberLineMark"
           },
           "completed": {
             "type": "boolean"

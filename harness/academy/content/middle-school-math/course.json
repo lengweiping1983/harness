@@ -148,7 +148,11 @@
           "hint_keys": [
             "expressions.s3.hint"
           ],
-          "scaffold_key": "expressions.evaluate.scaffold"
+          "scaffold_key": "expressions.evaluate.scaffold",
+          "number_line": {
+            "min": 0,
+            "max": 20
+          }
         },
         {
           "id": "independent",

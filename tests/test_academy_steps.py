@@ -108,6 +108,12 @@ class StepSessionTests(unittest.TestCase):
         again = self.answer('worked', 'another explanation', request='ans-after')
         self.assertEqual(again['result']['error_code'], 'steps-completed')
 
+    def test_numeric_answer_returns_number_line_mark(self):
+        self.open_lesson()
+        result = self.answer('denominator', 7)['result']
+        self.assertEqual(result['number_line'], {'min': 0, 'max': 12, 'value': 7})
+        choice = self.answer('which-half', 'b')['result']
+        self.assertIsNone(choice['number_line'])
     def test_scaffold_is_contingent_on_wrong_answer_and_hidden_in_public(self):
         self.open_lesson()
         view = self.service.steps.view(self.pid, LESSON)

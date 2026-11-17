@@ -57,6 +57,7 @@ class AcademyCatalog:
                 'steps': {'type': 'array', 'maxItems': 16, 'items': obj({
                     'id': TEXT, 'kind': {'type': 'string', 'enum': list(STEP_KINDS)}, 'prompt_key': TEXT, 'feedback_key': TEXT,
                     'hint_keys': {'type': 'array', 'items': TEXT, 'maxItems': 3}, 'content_key': TEXT, 'scaffold_key': TEXT,
+                    'number_line': obj({'min': {'type': 'number'}, 'max': {'type': 'number'}}),
                     'answer': {'type': ['number', 'string', 'array', 'object']}, 'tolerance': {'type': 'number'}, 'answer_id': TEXT,
                     'options': {'type': 'array', 'items': knowledge_option, 'minItems': 2, 'maxItems': 6},
                     'items': {'type': 'array', 'items': obj({'id': TEXT, 'label_key': TEXT}), 'minItems': 2, 'maxItems': 8},
@@ -241,6 +242,8 @@ class AcademyCatalog:
                         localized['hints'] = [resources[key] for key in step['hint_keys']]
                     if 'scaffold_key' in step:
                         localized['scaffold'] = resources[step['scaffold_key']]
+                    if 'number_line' in step:
+                        localized['number_line'] = step['number_line']
                     if step['kind'] == 'explain':
                         localized['content'] = resources[step['content_key']]
                     elif step['kind'] == 'numeric':

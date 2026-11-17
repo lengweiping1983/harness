@@ -6,7 +6,21 @@ import {academyApi, academyReceiptMatches, isAcademyUnconfirmedWrite} from '@/li
 import {noticeText} from '@/lib/noticeText'
 import {Button} from '@/components/ui/primitives'
 
-type Feedback = {correct: boolean; text: string; scaffold?: string}
+type Feedback = {correct: boolean; text: string; scaffold?: string; numberLine?: {min: number; max: number; value: number}}
+
+/** 数轴可视化：把数值答案落到数轴上（表象支持），不揭示正确答案。 */
+export function AcademyNumberLine({min, max, value}: {min: number; max: number; value: number}) {
+  useLocale()
+  const span = max - min || 1
+  const pct = Math.max(0, Math.min(100, ((value - min) / span) * 100))
+  return <div data-academy-number-line className="space-y-1 rounded-lg bg-canvas p-3">
+    <div className="relative h-6" role="img" aria-label={t('ui.academy.steps.numberLineLabel', {value})}>
+      <div className="absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 bg-line" />
+      <div className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand" style={{left: pct + '%'}} />
+    </div>
+    <div className="flex justify-between text-xs text-muted"><span>{min}</span><span className="font-medium text-brand">{value}</span><span>{max}</span></div>
+  </div>
+}
 
 /** 单步卡片：按类型渲染输入，提交后即时反馈；答对显示下一步。 */
 export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}: {
@@ -50,6 +64,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
         {feedback.correct ? <Check className="h-4 w-4" /> : null}{feedback.text}</p>
     </div> : null}
     {feedback && !feedback.correct && feedback.scaffold ? <div className="rounded-lg border border-warn/40 bg-canvas p-3 text-sm leading-reading"><p className="text-xs font-medium text-warn">{t('ui.academy.steps.scaffoldLabel')}</p><p className="mt-1 whitespace-pre-wrap">{feedback.scaffold}</p></div> : null}
+    {feedback?.numberLine ? <AcademyNumberLine min={feedback.numberLine.min} max={feedback.numberLine.max} value={feedback.numberLine.value} /> : null}
     {feedback?.correct ? <Button size="sm" onClick={onNext}>{t('ui.academy.steps.next')}</Button> : <form className="space-y-2"
       onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}
       onKeyDown={event => {if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault()}}
@@ -135,7 +150,7 @@ export function AcademySteps({projectId, lesson, active, disabled}: {projectId: 
     }
     clearPending()
     const result = receipt.result.step
-    setFeedback({correct: result.correct, text: result.feedback ?? t(result.correct ? 'ui.academy.steps.correct' : 'ui.academy.steps.tryAgain'), scaffold: result.scaffold ?? undefined})
+    setFeedback({correct: result.correct, text: result.feedback ?? t(result.correct ? 'ui.academy.steps.correct' : 'ui.academy.steps.tryAgain'), scaffold: result.scaffold ?? undefined, numberLine: result.number_line ?? undefined})
     if (result.completed) setRevision(value => value + 1)
   }
   const submit = async (response: string | number | string[] | Record<string, string>) => {

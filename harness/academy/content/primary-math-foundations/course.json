@@ -245,7 +245,11 @@
           "hint_keys": [
             "fraction-intuition.s2.hint"
           ],
-          "scaffold_key": "fraction-intuition.denominator.scaffold"
+          "scaffold_key": "fraction-intuition.denominator.scaffold",
+          "number_line": {
+            "min": 0,
+            "max": 12
+          }
         },
         {
           "id": "which-half",

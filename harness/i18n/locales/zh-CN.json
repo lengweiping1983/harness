@@ -8068,6 +8068,7 @@
   "ui.academy.steps.cheer.2": "你掌握了！",
   "ui.academy.steps.streak": "已连续答对 {count} 步——保持这个势头！",
   "ui.academy.steps.scaffoldLabel": "给你一个支架，帮你理清思路：",
+  "ui.academy.steps.numberLineLabel": "你的答案 {value} 在数轴上的位置",
   "ui.academy.steps.title": "引导练习",
   "ui.academy.steps.progress": "第 {current} / {total} 步",
   "ui.academy.steps.explainPrompt": "你的解释",

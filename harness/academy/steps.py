@@ -126,7 +126,10 @@ class AcademySteps:
             self.store.put('step-progress', progress)
             feedback = step['feedback'] if correct else (step['hints'][0] if step.get('hints') else None)
             scaffold = None if correct else step.get('scaffold')
-            return {'correct': correct, 'feedback': feedback, 'scaffold': scaffold, 'completed': complete,
+            number_line = None
+            if step['kind'] == 'numeric' and step.get('number_line') and type(normalized) in (int, float):
+                number_line = {'min': step['number_line']['min'], 'max': step['number_line']['max'], 'value': normalized}
+            return {'correct': correct, 'feedback': feedback, 'scaffold': scaffold, 'number_line': number_line, 'completed': complete,
                     'step': public_step(step), 'response': entry}
         return self.service._change(request_id, 'step-answer', project_id,
                                     {'lesson_id': lesson_id, 'step_id': step_id, 'response': response}, write)
