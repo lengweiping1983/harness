@@ -1,0 +1,373 @@
+{
+  "schema": 1,
+  "id": "primary-measurement",
+  "version": "1.0.0",
+  "source_revision": "fixture-measurement-1",
+  "title_key": "title",
+  "description_key": "description",
+  "assumptions_key": "assumptions",
+  "references": [],
+  "band": "primary",
+  "lessons": [
+    {
+      "id": "length-units",
+      "order": 1,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "length-units.title",
+      "goal_key": "length-units.goal",
+      "reading_key": "length-units.reading",
+      "references": [],
+      "prerequisites": [],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "length-units.worked.prompt",
+          "feedback_key": "length-units.worked.fb",
+          "hint_keys": [
+            "length-units.worked.hint"
+          ],
+          "content_key": "length-units.worked.content"
+        },
+        {
+          "id": "convert",
+          "kind": "numeric",
+          "prompt_key": "length-units.convert.prompt",
+          "feedback_key": "length-units.convert.fb",
+          "hint_keys": [
+            "length-units.convert.hint"
+          ],
+          "answer": 500,
+          "tolerance": 0
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "length-units.independent.prompt",
+          "feedback_key": "length-units.independent.fb",
+          "hint_keys": [
+            "length-units.independent.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "length-units.independent.a.label",
+              "feedback_key": "length-units.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "length-units.independent.b.label",
+              "feedback_key": "length-units.independent.b.fb"
+            }
+          ]
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "length-units.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "length-units.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "length-units.c1.a.label",
+              "feedback_key": "length-units.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "length-units.c1.b.label",
+              "feedback_key": "length-units.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mass-units",
+      "order": 2,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "mass-units.title",
+      "goal_key": "mass-units.goal",
+      "reading_key": "mass-units.reading",
+      "references": [],
+      "prerequisites": [
+        "length-units"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "mass-units.worked.prompt",
+          "feedback_key": "mass-units.worked.fb",
+          "hint_keys": [
+            "mass-units.worked.hint"
+          ],
+          "content_key": "mass-units.worked.content"
+        },
+        {
+          "id": "convert",
+          "kind": "numeric",
+          "prompt_key": "mass-units.convert.prompt",
+          "feedback_key": "mass-units.convert.fb",
+          "hint_keys": [
+            "mass-units.convert.hint"
+          ],
+          "answer": 3000,
+          "tolerance": 0
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "mass-units.independent.prompt",
+          "feedback_key": "mass-units.independent.fb",
+          "hint_keys": [
+            "mass-units.independent.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "mass-units.independent.a.label",
+              "feedback_key": "mass-units.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "mass-units.independent.b.label",
+              "feedback_key": "mass-units.independent.b.fb"
+            }
+          ]
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "mass-units.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "mass-units.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "mass-units.c1.a.label",
+              "feedback_key": "mass-units.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "mass-units.c1.b.label",
+              "feedback_key": "mass-units.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "time-units",
+      "order": 3,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "time-units.title",
+      "goal_key": "time-units.goal",
+      "reading_key": "time-units.reading",
+      "references": [],
+      "prerequisites": [
+        "mass-units"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "time-units.worked.prompt",
+          "feedback_key": "time-units.worked.fb",
+          "hint_keys": [
+            "time-units.worked.hint"
+          ],
+          "content_key": "time-units.worked.content"
+        },
+        {
+          "id": "convert",
+          "kind": "numeric",
+          "prompt_key": "time-units.convert.prompt",
+          "feedback_key": "time-units.convert.fb",
+          "hint_keys": [
+            "time-units.convert.hint"
+          ],
+          "answer": 120,
+          "tolerance": 0
+        },
+        {
+          "id": "transfer-elapsed",
+          "kind": "numeric",
+          "prompt_key": "time-units.transfer-elapsed.prompt",
+          "feedback_key": "time-units.transfer-elapsed.fb",
+          "hint_keys": [
+            "time-units.transfer-elapsed.hint"
+          ],
+          "answer": 30,
+          "tolerance": 0,
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "time-units.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "time-units.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "time-units.c1.a.label",
+              "feedback_key": "time-units.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "time-units.c1.b.label",
+              "feedback_key": "time-units.c1.b.fb"
+            }
+          ]
+        }
+      ],
+      "struggle": {
+        "challenge_key": "time-units.struggle",
+        "window_minutes": 3
+      }
+    },
+    {
+      "id": "choose-units",
+      "order": 4,
+      "mode": "study",
+      "milestone": true,
+      "title_key": "choose-units.title",
+      "goal_key": "choose-units.goal",
+      "reading_key": "choose-units.reading",
+      "references": [],
+      "prerequisites": [
+        "time-units"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "choose-units.worked.prompt",
+          "feedback_key": "choose-units.worked.fb",
+          "hint_keys": [
+            "choose-units.worked.hint"
+          ],
+          "content_key": "choose-units.worked.content"
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "choose-units.independent.prompt",
+          "feedback_key": "choose-units.independent.fb",
+          "hint_keys": [
+            "choose-units.independent.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "choose-units.independent.a.label",
+              "feedback_key": "choose-units.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "choose-units.independent.b.label",
+              "feedback_key": "choose-units.independent.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "transfer-estimate",
+          "kind": "choice",
+          "prompt_key": "choose-units.transfer-estimate.prompt",
+          "feedback_key": "choose-units.transfer-estimate.fb",
+          "hint_keys": [
+            "choose-units.transfer-estimate.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "choose-units.transfer-estimate.a.label",
+              "feedback_key": "choose-units.transfer-estimate.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "choose-units.transfer-estimate.b.label",
+              "feedback_key": "choose-units.transfer-estimate.b.fb"
+            }
+          ],
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "choose-units.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "choose-units.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "choose-units.c1.a.label",
+              "feedback_key": "choose-units.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "choose-units.c1.b.label",
+              "feedback_key": "choose-units.c1.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "c2",
+          "prompt_key": "choose-units.c2.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "choose-units.c2.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "choose-units.c2.a.label",
+              "feedback_key": "choose-units.c2.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "choose-units.c2.b.label",
+              "feedback_key": "choose-units.c2.b.fb"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
