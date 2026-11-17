@@ -2020,6 +2020,7 @@ export interface AcademyStepResponse {
   response: unknown
   attempts: number
   at: number
+  confidence?: 'guess' | 'unsure' | 'sure'
 }
 export interface AcademyStepsView {
   steps: Array<AcademyStepPublic>
@@ -2031,6 +2032,7 @@ export interface AcademyStepAnswer {
   lesson_id: string
   step_id: string
   response: unknown
+  confidence?: 'guess' | 'unsure' | 'sure'
 }
 export interface AcademyStepResult {
   correct: boolean
@@ -2038,6 +2040,7 @@ export interface AcademyStepResult {
   scaffold?: string
   number_line?: AcademyNumberLineMark
   completed: boolean
+  calibration?: 'calibrated' | 'lucky' | 'blindspot' | 'expected'
   step: AcademyStepPublic
   response: AcademyStepResponse
 }

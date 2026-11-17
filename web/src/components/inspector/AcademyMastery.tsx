@@ -60,17 +60,18 @@ export function AcademyReviewCard({item, busy, onSubmit}: {item: AcademyReviewIt
 }
 
 /** 记忆仪表盘与延迟重测入口；隐藏或收起时停止读取，未知回执只按原请求号回查。 */
-export function AcademyMastery({projectId, active}: {projectId: string; active: boolean}) {
+/** 独立重测会话：到期队列逐题作答、幂等回执、未知只回查；面板与专注舞台共用同一行为。 */
+export function AcademyReviewSession({projectId, active, disabled = false, onCompleted}: {projectId: string; active: boolean; disabled?: boolean; onCompleted?: () => void}) {
   useLocale()
-  const [open, setOpen] = useState(false)
-  const [view, setView] = useState<AcademyMasteryView | null>(null)
   const [queue, setQueue] = useState<AcademyReviewItem[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [revision, setRevision] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<NoticeText | ''>('')
   const [result, setResult] = useState<{review: AcademyReview; skill: AcademySkillState} | null>(null)
   const [pending, setPending] = useState<PendingReview | null>(null)
   const pendingKey = 'academy.mastery.pending.' + projectId
+  const completedRef = useRef(onCompleted); completedRef.current = onCompleted
 
   useEffect(() => {
     try {
@@ -90,18 +91,15 @@ export function AcademyMastery({projectId, active}: {projectId: string; active: 
     if (!active) return
     const controller = new AbortController()
     void (async () => {
-      const mastery = await academyApi.mastery(projectId, controller.signal)
-      if (controller.signal.aborted) return
-      if (mastery.ok) setView(mastery.data.mastery)
-      else setError(mastery.copy ?? mastery.message)
-      if (!open) return
       const reviews = await academyApi.reviews(projectId, controller.signal)
       if (controller.signal.aborted) return
-      if (reviews.ok) setQueue(reviews.data.reviews)
+      if (reviews.ok) {setQueue(reviews.data.reviews); setLoaded(true)}
       else setError(reviews.copy ?? reviews.message)
     })()
     return () => controller.abort()
-  }, [active, open, projectId, revision])
+  }, [active, projectId, revision])
+
+  useEffect(() => {if (loaded && queue.length === 0) completedRef.current?.()}, [loaded, queue.length])
 
   const clearPending = () => {
     try {sessionStorage.removeItem(pendingKey)} catch {setPending(null)}
@@ -122,7 +120,7 @@ export function AcademyMastery({projectId, active}: {projectId: string; active: 
   }
   const submit = async (answers: Array<{check_id: string; option_id: string}>) => {
     const item = queue[0]
-    if (busy || pending || !item) return
+    if (disabled || busy || pending || !item) return
     const identity: PendingReview = {requestId: crypto.randomUUID(), lessonId: item.lesson_id}
     try {sessionStorage.setItem(pendingKey, JSON.stringify({...identity, projectId}))} catch {setError({key: 'ui.academy.error.store-invalid'})}
     setPending(identity); setBusy(true); setError('')
@@ -141,6 +139,43 @@ export function AcademyMastery({projectId, active}: {projectId: string; active: 
     setBusy(false)
   }
 
+  return <div data-academy-review-session className="space-y-3">
+    {error ? <p role="alert" className="text-sm text-danger">{noticeText(error)}</p> : null}
+    {pending ? <div role="status" className="space-y-2 rounded-xl border border-warn/40 p-3 text-sm">
+      <p>{t('ui.academy.mastery.pending')}</p>
+      <p className="break-all font-mono text-xs">{t('ui.academy.receiptId', {id: pending.requestId})}</p>
+      <Button size="xs" disabled={busy} onClick={() => void recheck()}>{t('ui.academy.recheckReceipt')}</Button>
+    </div> : null}
+    {result ? <div role="status" className="space-y-1 rounded-lg bg-canvas p-3 text-sm">
+      <p className={result.review.correct ? 'font-medium text-ok' : 'font-medium text-warn'}>{t(result.review.correct ? 'ui.academy.mastery.resultCorrect' : 'ui.academy.mastery.resultWrong')}</p>
+      <ul className="space-y-1 text-xs text-muted">{result.review.results.map((item, index) => <li key={item.check_id}>{t('ui.academy.mastery.checkEntry', {number: index + 1, status: t(item.correct ? 'ui.academy.mastery.checkCorrect' : 'ui.academy.mastery.checkWrong')})}</li>)}</ul>
+      <p className="text-xs text-muted">{t('ui.academy.mastery.stability', {days: result.skill.stability_days})}</p>
+    </div> : null}
+    {queue.length ? <Section title={t('ui.academy.mastery.reviewHeading')}>
+      <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.reviewHint')}</p>
+      <AcademyReviewCard key={queue[0].lesson_id + ':' + revision} item={queue[0]} busy={busy || disabled || pending !== null} onSubmit={answers => void submit(answers)} />
+    </Section> : loaded ? <p className="text-sm leading-reading text-muted">{t('ui.academy.mastery.queueEmpty')}</p> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
+  </div>
+}
+export function AcademyMastery({projectId, active}: {projectId: string; active: boolean}) {
+  useLocale()
+  const [open, setOpen] = useState(false)
+  const [view, setView] = useState<AcademyMasteryView | null>(null)
+  const [revision, setRevision] = useState(0)
+  const [error, setError] = useState<NoticeText | ''>('')
+
+  useEffect(() => {
+    if (!active) return
+    const controller = new AbortController()
+    void (async () => {
+      const mastery = await academyApi.mastery(projectId, controller.signal)
+      if (controller.signal.aborted) return
+      if (mastery.ok) setView(mastery.data.mastery)
+      else setError(mastery.copy ?? mastery.message)
+    })()
+    return () => controller.abort()
+  }, [active, projectId, revision])
+
   return <details data-academy-section="mastery" open={open} onToggle={event => setOpen(event.currentTarget.open)} className="rounded-xl border border-line p-3">
     <summary className="cursor-pointer rounded-lg text-sm text-muted focus-visible:outline focus-visible:outline-brand">
       {t('ui.academy.mastery.title')}
@@ -149,25 +184,12 @@ export function AcademyMastery({projectId, active}: {projectId: string; active: 
     <div className="mt-3 space-y-4">
       <p className="text-xs leading-reading text-muted">{t('ui.academy.mastery.intro')}</p>
       {error ? <p role="alert" className="text-sm text-danger">{noticeText(error)}</p> : null}
-      {pending ? <div role="status" className="space-y-2 rounded-xl border border-warn/40 p-3 text-sm">
-        <p>{t('ui.academy.mastery.pending')}</p>
-        <p className="break-all font-mono text-xs">{t('ui.academy.receiptId', {id: pending.requestId})}</p>
-        <Button size="xs" disabled={busy} onClick={() => void recheck()}>{t('ui.academy.recheckReceipt')}</Button>
-      </div> : null}
       {view ? <>
         <p className="text-xs text-muted">{t('ui.academy.mastery.statAttempts', {count: view.reviews.attempts})} · {t('ui.academy.mastery.statCorrect', {count: view.reviews.correct})} · {t('ui.academy.mastery.statDelayed', {count: view.reviews.delayed_correct})}</p>
         <AcademyEngagementStats engagement={view.engagement} />
         <AcademySkillList skills={view.skills} />
       </> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
-      {result ? <div role="status" className="space-y-1 rounded-lg bg-canvas p-3 text-sm">
-        <p className={result.review.correct ? 'font-medium text-ok' : 'font-medium text-warn'}>{t(result.review.correct ? 'ui.academy.mastery.resultCorrect' : 'ui.academy.mastery.resultWrong')}</p>
-        <ul className="space-y-1 text-xs text-muted">{result.review.results.map((item, index) => <li key={item.check_id}>{t('ui.academy.mastery.checkEntry', {number: index + 1, status: t(item.correct ? 'ui.academy.mastery.checkCorrect' : 'ui.academy.mastery.checkWrong')})}</li>)}</ul>
-        <p className="text-xs text-muted">{t('ui.academy.mastery.stability', {days: result.skill.stability_days})}</p>
-      </div> : null}
-      {open ? queue.length ? <Section title={t('ui.academy.mastery.reviewHeading')}>
-        <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.reviewHint')}</p>
-        <AcademyReviewCard key={queue[0].lesson_id + ':' + revision} item={queue[0]} busy={busy || pending !== null} onSubmit={answers => void submit(answers)} />
-      </Section> : view ? <p className="text-sm leading-reading text-muted">{t('ui.academy.mastery.queueEmpty')}</p> : null : null}
+      <AcademyReviewSession projectId={projectId} active={active && open} onCompleted={() => setRevision(value => value + 1)} />
     </div>
   </details>
 }

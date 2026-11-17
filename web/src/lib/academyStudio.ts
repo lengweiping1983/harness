@@ -1,12 +1,13 @@
 import {t} from '@/i18n'
 import type {AcademyLesson, AcademyProject, AcademyTutorTurn} from '@/types'
 
-export type AcademyStudioPhaseId = 'struggle' | 'world' | 'steps' | 'reading' | 'teach' | 'checks' | 'note' | 'finish'
+export type AcademyStudioPhaseId = 'review' | 'struggle' | 'world' | 'steps' | 'reading' | 'teach' | 'checks' | 'note' | 'finish'
 export interface AcademyStudioPhase {id: AcademyStudioPhaseId; optional: boolean}
 
 /** 专注舞台环节编排：问题先行 → 动手世界 → 步步闯关 → 概念阅读 → 教 AI 学生（可跳过）→ 快速测试 → 一句话反思 → 结课。 */
-export function academyStudioPhases(lesson: Pick<AcademyLesson, 'struggle' | 'world' | 'steps' | 'knowledge_checks' | 'reading'>): AcademyStudioPhase[] {
+export function academyStudioPhases(lesson: Pick<AcademyLesson, 'struggle' | 'world' | 'steps' | 'knowledge_checks' | 'reading'>, dueReviews = false): AcademyStudioPhase[] {
   const phases: AcademyStudioPhase[] = []
+  if (dueReviews) phases.push({id: 'review', optional: true})
   const practice = Boolean(lesson.struggle || lesson.world || lesson.steps?.length)
   if (lesson.struggle) phases.push({id: 'struggle', optional: false})
   if (lesson.world) phases.push({id: 'world', optional: false})

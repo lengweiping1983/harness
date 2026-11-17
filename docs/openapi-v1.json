@@ -31876,6 +31876,14 @@
           },
           "at": {
             "type": "number"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "guess",
+              "unsure",
+              "sure"
+            ]
           }
         },
         "required": [
@@ -31926,7 +31934,15 @@
           "step_id": {
             "type": "string"
           },
-          "response": {}
+          "response": {},
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "guess",
+              "unsure",
+              "sure"
+            ]
+          }
         },
         "required": [
           "request_id",
@@ -31953,6 +31969,15 @@
           },
           "completed": {
             "type": "boolean"
+          },
+          "calibration": {
+            "type": "string",
+            "enum": [
+              "calibrated",
+              "lucky",
+              "blindspot",
+              "expected"
+            ]
           },
           "step": {
             "$ref": "#/components/schemas/AcademyStepPublic"

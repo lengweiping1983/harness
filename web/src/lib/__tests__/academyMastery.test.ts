@@ -2,7 +2,7 @@ import {createElement} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
 import {afterEach, expect, it} from 'vitest'
 import {setLocale} from '@/i18n'
-import {AcademyEngagementStats, AcademyMastery, AcademyReviewCard, AcademySkillList} from '@/components/inspector/AcademyMastery'
+import {AcademyEngagementStats, AcademyMastery, AcademyReviewCard, AcademyReviewSession, AcademySkillList} from '@/components/inspector/AcademyMastery'
 import {academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete} from '../academy'
 import type {AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState} from '@/types'
 
@@ -70,6 +70,13 @@ it('renders skill states and keeps unstarted skills unlabelled as mastery', asyn
   expect(html).toContain('Stability 2.5 days')
   const empty = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({state: 'new', evidence_count: 0})]}))
   expect(empty).toContain('Complete a lesson activity or pass a code check')
+})
+
+it('renders the shared review session shell without fetching when inactive', async () => {
+  await setLocale('en')
+  const html = renderToStaticMarkup(createElement(AcademyReviewSession, {projectId: 'project', active: false}))
+  expect(html).toContain('data-academy-review-session')
+  expect(html).not.toContain('role="status"')
 })
 
 it('renders review questions without answers, feedback or hints and disables incomplete submission', async () => {

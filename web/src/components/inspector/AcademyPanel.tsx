@@ -109,6 +109,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
   const [pending, setPending] = useState<Pending | null>(null)
   const [storageError, setStorageError] = useState(savedView.invalid === 'true')
   const [studioOpen, setStudioOpen] = useState(() => {try {return localStorage.getItem(studioKey) === 'open'} catch {return false}})
+  const studioPreference = useRef<'open' | 'closed' | null>((() => {try {const value = localStorage.getItem(studioKey); return value === 'open' ? 'open' : value === 'closed' ? 'closed' : null} catch {return null}})())
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [feedbackView, setFeedbackView] = useState({scope: '', open: false})
@@ -171,6 +172,11 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
 
   const hasProject = !!projectId
   useEffect(() => {setManageOpen(!hasProject); setCatalogOpen(hasProject)}, [hasProject])
+  /** 闯关式课次默认进入专注舞台；用户显式退出后尊重其持久偏好。 */
+  useEffect(() => {
+    if (studioPreference.current !== null || !active) return
+    if (project && current && lesson && hasActivePractice) toggleStudio(true)
+  }, [active, project, current, lesson, hasActivePractice])
   useEffect(() => {
     if (active && !busy && !pending && refreshAfterWrite.current) {
       refreshAfterWrite.current = false

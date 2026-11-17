@@ -6,7 +6,10 @@ import {academyApi, academyNextStep, academyReceiptMatches, isAcademyUnconfirmed
 import {noticeText} from '@/lib/noticeText'
 import {Button} from '@/components/ui/primitives'
 
-type Feedback = {correct: boolean; text: string; scaffold?: string; numberLine?: {min: number; max: number; value: number}}
+type Feedback = {correct: boolean; text: string; scaffold?: string; numberLine?: {min: number; max: number; value: number}; calibration?: string}
+
+/** 作答前的元认知置信度档位。 */
+export type AcademyConfidence = 'guess' | 'unsure' | 'sure'
 
 /** 数轴可视化：把数值答案落到数轴上（表象支持），不揭示正确答案。 */
 export function AcademyNumberLine({min, max, value}: {min: number; max: number; value: number}) {
@@ -24,7 +27,7 @@ export function AcademyNumberLine({min, max, value}: {min: number; max: number; 
 
 /** 单步卡片：按类型渲染输入，提交后即时反馈；答对显示下一步。 */
 export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}: {
-  step: AcademyStepPublic; busy: boolean; feedback: Feedback | null; cheer?: string; onSubmit: (response: string | number | string[] | Record<string, string>) => void; onNext: () => void
+  step: AcademyStepPublic; busy: boolean; feedback: Feedback | null; cheer?: string; onSubmit: (response: string | number | string[] | Record<string, string>, confidence: AcademyConfidence) => void; onNext: () => void
 }) {
   useLocale()
   const name = useId()
@@ -33,6 +36,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
   const [choice, setChoice] = useState('')
   const [order, setOrder] = useState<string[]>(() => (step.items ?? []).map(item => item.id))
   const [pairs, setPairs] = useState<Record<string, string>>({})
+  const [confidence, setConfidence] = useState<AcademyConfidence | null>(null)
   const locked = busy || feedback?.correct === true
   const move = (index: number, delta: number) => {
     const target = index + delta
@@ -42,19 +46,19 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
     setOrder(next)
   }
   const submit = () => {
-    if (composing.current || locked) return
+    if (composing.current || locked || !confidence) return
     if (step.kind === 'explain' || step.kind === 'numeric') {
       if (!text.trim()) return
-      onSubmit(step.kind === 'numeric' ? Number(text) : text.trim())
+      onSubmit(step.kind === 'numeric' ? Number(text) : text.trim(), confidence)
     } else if (step.kind === 'choice') {
-      if (choice) onSubmit(choice)
+      if (choice) onSubmit(choice, confidence)
     } else if (step.kind === 'ordering') {
-      onSubmit(order)
+      onSubmit(order, confidence)
     } else if (step.kind === 'matching') {
-      onSubmit(pairs)
+      onSubmit(pairs, confidence)
     }
   }
-  const ready = step.kind === 'ordering' ? order.length > 0 : step.kind === 'choice' ? Boolean(choice) : step.kind === 'matching' ? (step.left ?? []).every(item => Boolean(pairs[item.id])) : Boolean(text.trim())
+  const ready = confidence !== null && (step.kind === 'ordering' ? order.length > 0 : step.kind === 'choice' ? Boolean(choice) : step.kind === 'matching' ? (step.left ?? []).every(item => Boolean(pairs[item.id])) : Boolean(text.trim()))
   return <div data-academy-step={step.id} data-step-kind={step.kind} className="space-y-3 rounded-xl border border-brand/40 p-3">
     {step.kind === 'explain' && step.content ? <div className="rounded-lg bg-canvas p-3 text-base leading-reading">{step.content}</div> : null}
     <p className="whitespace-pre-wrap text-base leading-reading">{step.prompt}</p>
@@ -62,6 +66,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
       {feedback.correct && cheer ? <p className="text-sm font-medium text-ok">{cheer}</p> : null}
       <p className={'flex items-center gap-1 text-sm font-medium ' + (feedback.correct ? 'text-ok' : 'text-warn')}>
         {feedback.correct ? <Check className="h-4 w-4" /> : null}{feedback.text}</p>
+      {feedback.calibration ? <p className={'text-sm font-medium ' + (feedback.calibration === 'calibrated' ? 'text-ok' : feedback.calibration === 'blindspot' ? 'text-warn' : 'text-muted')}>{t('ui.academy.steps.calibration.' + feedback.calibration)}</p> : null}
     </div> : null}
     {feedback && !feedback.correct && feedback.scaffold ? <div className="rounded-lg border border-warn/40 bg-canvas p-3 text-sm leading-reading"><p className="text-xs font-medium text-warn">{t('ui.academy.steps.scaffoldLabel')}</p><p className="mt-1 whitespace-pre-wrap">{feedback.scaffold}</p></div> : null}
     {feedback?.numberLine ? <AcademyNumberLine min={feedback.numberLine.min} max={feedback.numberLine.max} value={feedback.numberLine.value} /> : null}
@@ -69,6 +74,12 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
       onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}
       onKeyDown={event => {if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault()}}
       onSubmit={event => {event.preventDefault(); submit()}}>
+      <div role="group" aria-label={t('ui.academy.steps.confidence.label')} className="flex flex-wrap items-center gap-1">
+        <span className="mr-1 text-xs text-muted">{t('ui.academy.steps.confidence.label')}</span>
+        {(['guess', 'unsure', 'sure'] as const).map(level => <button key={level} type="button" data-confidence={level} aria-pressed={confidence === level} disabled={locked}
+          onClick={() => setConfidence(level)}
+          className={'rounded-full border px-2.5 py-1 text-xs ' + (confidence === level ? 'border-brand bg-brand/10 font-medium text-brand' : 'border-line text-muted')}>{t('ui.academy.steps.confidence.' + level)}</button>)}
+      </div>
       {step.kind === 'explain' ? <textarea className="ui-field min-h-20 w-full" value={text} disabled={locked} placeholder={t('ui.academy.steps.explainPlaceholder')} aria-label={t('ui.academy.steps.explainPrompt')} onChange={event => setText(event.target.value)} /> : null}
       {step.kind === 'numeric' ? <input type="number" className="ui-field w-32" value={text} disabled={locked} placeholder={t('ui.academy.steps.numericPlaceholder')} onChange={event => setText(event.target.value)} /> : null}
       {step.kind === 'choice' ? <fieldset className="space-y-2" disabled={locked}>{(step.options ?? []).map(option => <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-lg border border-line p-3 text-sm focus-within:border-brand">
@@ -153,15 +164,15 @@ export function AcademySteps({projectId, lesson, active, disabled, onCompleted}:
     }
     clearPending()
     const result = receipt.result.step
-    setFeedback({correct: result.correct, text: result.feedback ?? t(result.correct ? 'ui.academy.steps.correct' : 'ui.academy.steps.tryAgain'), scaffold: result.scaffold ?? undefined, numberLine: result.number_line ?? undefined})
+    setFeedback({correct: result.correct, text: result.feedback ?? t(result.correct ? 'ui.academy.steps.correct' : 'ui.academy.steps.tryAgain'), scaffold: result.scaffold ?? undefined, numberLine: result.number_line ?? undefined, calibration: result.calibration ?? undefined})
     if (result.completed) setRevision(value => value + 1)
   }
-  const submit = async (response: string | number | string[] | Record<string, string>) => {
+  const submit = async (response: string | number | string[] | Record<string, string>, confidence: AcademyConfidence) => {
     if (disabled || busy || pending || !current) return
     const requestId = crypto.randomUUID()
     try {sessionStorage.setItem(pendingKey, JSON.stringify({requestId, projectId}))} catch {setError({key: 'ui.academy.error.store-invalid'})}
     setPending({requestId}); setBusy(true); setError(''); setFeedback(null)
-    const outcome = await academyApi.stepAnswer(projectId, {request_id: requestId, lesson_id: lesson.id, step_id: current.id, response})
+    const outcome = await academyApi.stepAnswer(projectId, {request_id: requestId, lesson_id: lesson.id, step_id: current.id, response, confidence})
     if (outcome.ok) applyReceipt(outcome.data, requestId)
     else if (isAcademyUnconfirmedWrite(outcome)) setError(outcome.copy ?? outcome.message)
     else {clearPending(); setError(outcome.copy ?? outcome.message)}
@@ -191,6 +202,6 @@ export function AcademySteps({projectId, lesson, active, disabled, onCompleted}:
       <Button size="xs" disabled={busy} onClick={() => void recheck()}>{t('ui.academy.recheckReceipt')}</Button>
     </div> : null}
     {completed ? <p role="status" className="rounded-lg bg-canvas p-3 text-sm font-medium text-ok">{t('ui.academy.steps.completed')}</p>
-      : current ? <AcademyStepCard key={current.id + ':' + revision} step={current} busy={busy || disabled || pending !== null} feedback={feedback} cheer={cheer} onSubmit={response => void submit(response)} onNext={next} /> : null}
+      : current ? <AcademyStepCard key={current.id + ':' + revision} step={current} busy={busy || disabled || pending !== null} feedback={feedback} cheer={cheer} onSubmit={(response, confidence) => void submit(response, confidence)} onNext={next} /> : null}
   </div>
 }

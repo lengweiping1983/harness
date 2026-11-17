@@ -2,6 +2,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {Check, Send, Sparkles, X} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyCourse, AcademyLesson, AcademyProject, AcademyTutorTurn} from '@/types'
+import {academyApi} from '@/lib/academy'
 import {academyStudioChecksDone, academyStudioCoachPrompt, academyStudioCoachTurns, academyStudioJourney, academyStudioNextPhase, academyStudioPhases, type AcademyStudioCoachLevel, type AcademyStudioPhaseId} from '@/lib/academyStudio'
 import {cn} from '@/lib/utils'
 import {Markdown} from '@/components/markdown/Markdown'
@@ -11,9 +12,10 @@ import {AcademyWorld} from './AcademyWorld'
 import {AcademySteps} from './AcademySteps'
 import {AcademyTeach} from './AcademyTeach'
 import {AcademyKnowledgeChecks} from './AcademyKnowledgeChecks'
+import {AcademyReviewSession} from './AcademyMastery'
 
 const phaseLabelKey: Record<AcademyStudioPhaseId, string> = {
-  struggle: 'ui.academy.studio.phase.struggle', world: 'ui.academy.studio.phase.world', steps: 'ui.academy.studio.phase.steps',
+  review: 'ui.academy.studio.phase.review', struggle: 'ui.academy.studio.phase.struggle', world: 'ui.academy.studio.phase.world', steps: 'ui.academy.studio.phase.steps',
   reading: 'ui.academy.studio.phase.reading', teach: 'ui.academy.studio.phase.teach', checks: 'ui.academy.quickCheck',
   note: 'ui.academy.studio.phase.note', finish: 'ui.academy.studio.phase.finish',
 }
@@ -30,7 +32,9 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   onNote: (value: string) => void; onComplete: () => void; onRefresh: () => void
 }) {
   useLocale()
-  const phases = useMemo(() => academyStudioPhases(lesson), [lesson])
+  const [dueCount, setDueCount] = useState(0)
+  const manual = useRef(false)
+  const phases = useMemo(() => academyStudioPhases(lesson, dueCount > 0), [lesson, dueCount])
   const checks = lesson.knowledge_checks ?? []
   const checksDone = academyStudioChecksDone(checks, checkAnswers)
   /** 初始进度来自已有证据：struggle 揭示、快速测试、反思与结课状态，打开舞台即回到离开的位置。 */
@@ -65,7 +69,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     doneRef.current = next; setDone(next)
     if (phaseRef.current === id) {
       const target = academyStudioNextPhase(phases, next, id)
-      if (target) setPhase(target)
+      if (target) {manual.current = true; setPhase(target)}
     }
   }, [phases])
 
@@ -73,6 +77,19 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   useEffect(() => {if (checksDone) markDone('checks')}, [checksDone, markDone])
   useEffect(() => {if (note.trim()) markDone('note')}, [note, markDone])
   useEffect(() => {if (studyCompleted) markDone('finish')}, [studyCompleted, markDone])
+
+  /** 到期独立重测优先于新内容：掌握学习先补旧缺口再前进。 */
+  useEffect(() => {
+    if (!active) return
+    const controller = new AbortController()
+    void (async () => {
+      const mastery = await academyApi.mastery(project.id, controller.signal)
+      if (controller.signal.aborted) return
+      if (mastery.ok) setDueCount(mastery.data.mastery.due_count)
+    })()
+    return () => controller.abort()
+  }, [active, project.id])
+  useEffect(() => {if (dueCount > 0 && !manual.current && !doneRef.current.has('review')) setPhase('review')}, [dueCount])
 
   useEffect(() => {
     dialog.current?.focus()
@@ -88,6 +105,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   }
 
   const renderPhase = () => {
+    if (phase === 'review') return <AcademyReviewSession projectId={project.id} active={active} disabled={disabled} onCompleted={() => markDone('review')} />
     if (phase === 'struggle') return <AcademyStruggle projectId={project.id} lesson={lesson} active={active} disabled={disabled} onPhase={onStrugglePhase} />
     if (phase === 'world') return <AcademyWorld projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('world')} />
     if (phase === 'steps') return <AcademySteps projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('steps')} />
@@ -133,7 +151,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
         <h2 className="truncate text-base font-semibold">{course.title}</h2>
         <span className="shrink-0 text-xs text-muted">{t('ui.academy.progress', {done: completedCount, total: course.lessons.length})}</span>
       </div>
-      <Button size="xs" variant="ghost" icon={<X className="h-3.5 w-3.5" />} onClick={onClose}>{t('ui.academy.studio.exit')}</Button>
+      <Button size="xs" variant="ghost" data-academy-studio-exit icon={<X className="h-3.5 w-3.5" />} onClick={onClose}>{t('ui.academy.studio.exit')}</Button>
     </header>
     <nav data-studio-journey aria-label={t('ui.academy.studio.journeyLabel')} className="shrink-0 overflow-x-auto border-b border-line px-4 py-2">
       <ol className="flex min-w-max items-center gap-1">
@@ -156,9 +174,10 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
         </div>
         <ol className="flex flex-wrap gap-1" aria-label={t('ui.academy.studio.phaseLabel')}>
           {phases.map(item => <li key={item.id}>
-            <button type="button" aria-current={item.id === phase ? 'step' : undefined} onClick={() => setPhase(item.id)}
+            <button type="button" aria-current={item.id === phase ? 'step' : undefined} onClick={() => {manual.current = true; setPhase(item.id)}}
               className={cn('flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs', item.id === phase ? 'border-brand bg-brand/10 font-medium text-brand' : done.has(item.id) ? 'border-ok/40 text-ok' : 'border-line text-muted')}>
               {done.has(item.id) ? <Check className="h-3 w-3" aria-hidden /> : null}{t(phaseLabelKey[item.id])}
+              {item.id === 'review' && dueCount > 0 ? <span className="rounded-full bg-warn/15 px-1.5 text-warn">{dueCount}</span> : null}
               {item.optional ? <span className="text-muted">· {t('ui.academy.studio.optional')}</span> : null}
             </button>
           </li>)}

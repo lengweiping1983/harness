@@ -143,6 +143,31 @@ class StepSessionTests(unittest.TestCase):
         unavailable = self.service.steps.answer(other['id'], 'ans-hf', 'agent-loop', 'q1', 'x')
         self.assertEqual(unavailable['result']['error_code'], 'steps-unavailable')
 
+    def test_confidence_calibration_and_projection(self):
+        """置信度只产生校准反馈与记录，不改变宿主评分真值；重放保持幂等。"""
+        self.open_lesson()
+        blind = self.service.steps.answer(self.pid, 'ans-blind', LESSON, 'denominator', 5, confidence='sure')['result']
+        self.assertFalse(blind['correct'])
+        self.assertEqual(blind['calibration'], 'blindspot')
+        self.assertEqual(blind['response']['confidence'], 'sure')
+        lucky = self.service.steps.answer(self.pid, 'ans-lucky', LESSON, 'denominator', 4, confidence='guess')['result']
+        self.assertTrue(lucky['correct'])
+        self.assertEqual(lucky['calibration'], 'lucky')
+        calibrated = self.service.steps.answer(self.pid, 'ans-cal', LESSON, 'which-half', 'b', confidence='sure')['result']
+        self.assertEqual(calibrated['calibration'], 'calibrated')
+        expected = self.service.steps.answer(self.pid, 'ans-exp', LESSON, 'third-sequence', ['take', 'cut', 'write'], confidence='unsure')['result']
+        self.assertFalse(expected['correct'])
+        self.assertEqual(expected['calibration'], 'expected')
+        plain = self.service.steps.answer(self.pid, 'ans-plain', LESSON, 'worked', 'Equal parts share one name.')['result']
+        self.assertNotIn('calibration', plain)
+        self.assertNotIn('confidence', plain['response'])
+        view = self.service.steps.view(self.pid, LESSON)
+        projected = {row['step_id']: row for row in view['responses']}
+        self.assertEqual(projected['denominator']['confidence'], 'guess')
+        self.assertNotIn('confidence', projected['worked'])
+        replay = self.service.steps.answer(self.pid, 'ans-blind', LESSON, 'denominator', 5, confidence='sure')
+        self.assertEqual(replay['status'], 'ready')
+        self.assertEqual(replay['result']['calibration'], 'blindspot')
     def test_receipt_idempotency_and_invalid_response(self):
         self.open_lesson()
         first = self.answer('denominator', 4)

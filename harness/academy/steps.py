@@ -95,11 +95,13 @@ class AcademySteps:
         progress = self._progress(project_id, lesson_id)
         done = {item['step_id']: item for item in (progress['responses'] if progress else [])}
         return {'steps': [public_step(step) for step in steps],
-                'responses': [{'step_id': step['id'], 'correct': done[step['id']]['correct'],
-                               'response': done[step['id']]['response']} for step in steps if step['id'] in done],
+                'responses': [dict({'step_id': step['id'], 'correct': done[step['id']]['correct'],
+                                    'response': done[step['id']]['response']},
+                                   **({'confidence': done[step['id']]['confidence']} if 'confidence' in done[step['id']] else {}))
+                              for step in steps if step['id'] in done],
                 'completed': bool(progress and progress['status'] == 'completed')}
 
-    def answer(self, project_id, request_id, lesson_id, step_id, response):
+    def answer(self, project_id, request_id, lesson_id, step_id, response, confidence=None):
         def write():
             record, lesson, steps = self._lesson(project_id, lesson_id)
             step = next((item for item in steps if item['id'] == step_id), None)
@@ -115,6 +117,8 @@ class AcademySteps:
             previous = next((item for item in progress['responses'] if item['step_id'] == step_id), None)
             entry = {'step_id': step_id, 'correct': correct, 'response': normalized,
                      'attempts': (previous['attempts'] + 1) if previous else 1, 'at': time.time()}
+            if confidence is not None:
+                entry['confidence'] = confidence
             if previous:
                 progress['responses'][progress['responses'].index(previous)] = entry
             else:
@@ -132,7 +136,19 @@ class AcademySteps:
             number_line = None
             if step['kind'] == 'numeric' and step.get('number_line') and type(normalized) in (int, float):
                 number_line = {'min': step['number_line']['min'], 'max': step['number_line']['max'], 'value': normalized}
-            return {'correct': correct, 'feedback': feedback, 'scaffold': scaffold, 'number_line': number_line, 'completed': complete,
-                    'step': public_step(step), 'response': entry}
-        return self.service._change(request_id, 'step-answer', project_id,
-                                    {'lesson_id': lesson_id, 'step_id': step_id, 'response': response}, write)
+            # 元认知校准：高确信错误是最该修复的缺口；低确信答对说明仍靠猜测，需要巩固。
+            calibration = None
+            if confidence is not None:
+                if correct:
+                    calibration = 'calibrated' if confidence == 'sure' else 'lucky'
+                else:
+                    calibration = 'blindspot' if confidence == 'sure' else 'expected'
+            result = {'correct': correct, 'feedback': feedback, 'scaffold': scaffold, 'number_line': number_line, 'completed': complete,
+                      'step': public_step(step), 'response': entry}
+            if calibration is not None:
+                result['calibration'] = calibration
+            return result
+        frozen = {'lesson_id': lesson_id, 'step_id': step_id, 'response': response}
+        if confidence is not None:
+            frozen['confidence'] = confidence
+        return self.service._change(request_id, 'step-answer', project_id, frozen, write)

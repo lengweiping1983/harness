@@ -71,6 +71,11 @@ await browserScenario(async({server,browser}) => {
     // 单焦点环节轨道：步步闯关渲染步骤卡；快速测试答对后自动进入反思，反思后自动进入结课。
     await page.getByRole('button',{name:strings['ui.academy.studio.phase.steps'],exact:true}).click()
     await page.locator('[data-studio-phase="steps"] [data-academy-step="s1"]').waitFor()
+    await page.locator('[data-studio-phase="steps"] input[type="number"]').fill('2')
+    const stepSubmit = page.locator('[data-studio-phase="steps"] button[type="submit"]')
+    assert.equal(await stepSubmit.isDisabled(), true, 'Confidence rating gates step submit')
+    await page.locator('[data-studio-phase="steps"] [data-confidence="sure"]').click()
+    assert.equal(await stepSubmit.isDisabled(), false, 'Chosen confidence enables submit')
     await page.getByRole('button',{name:strings['ui.academy.quickCheck'],exact:true}).click()
     await page.getByRole('radio',{name:'One of two equal parts',exact:true}).check()
     await page.getByRole('button',{name:strings['ui.academy.checkUnderstanding'],exact:true}).click()

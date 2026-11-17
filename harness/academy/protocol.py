@@ -16,6 +16,9 @@ def array(item):
 
 
 TEXT = {'type': 'string'}
+# 作答前的元认知置信度；宿主据此给出校准反馈，不改变评分真值。
+CONFIDENCE = {'type': 'string', 'enum': ['guess', 'unsure', 'sure']}
+CALIBRATION = {'type': 'string', 'enum': ['calibrated', 'lucky', 'blindspot', 'expected']}
 HASH = {'type': 'string', 'pattern': '^[a-f0-9]{64}$'}
 REQUEST = {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'}
 VERSION = {'type': 'integer', 'minimum': 0}
@@ -108,12 +111,13 @@ SCHEMAS = {
         'prompt': TEXT, 'content': TEXT, 'options': array(ref('AcademyStepItem')),
         'items': array(ref('AcademyStepItem')), 'tolerance': NUMBER,
         'left': array(ref('AcademyStepItem')), 'right': array(ref('AcademyStepItem')), 'on_wrong': TEXT}, ['id', 'kind', 'prompt']),
-    'AcademyStepResponse': obj({'step_id': TEXT, 'correct': BOOL, 'response': {}, 'attempts': VERSION, 'at': NUMBER}),
+    'AcademyStepResponse': obj({'step_id': TEXT, 'correct': BOOL, 'response': {}, 'attempts': VERSION, 'at': NUMBER, 'confidence': CONFIDENCE},
+                               ['step_id', 'correct', 'response', 'attempts', 'at']),
     'AcademyStepsView': obj({'steps': array(ref('AcademyStepPublic')), 'responses': array(ref('AcademyStepResponse')), 'completed': BOOL}),
     'AcademyStepAnswer': obj({'request_id': REQUEST, 'lesson_id': TEXT, 'step_id': TEXT,
-        'response': {}}),
+        'response': {}, 'confidence': CONFIDENCE}, ['request_id', 'lesson_id', 'step_id', 'response']),
     'AcademyStepResult': obj({'correct': BOOL, 'feedback': TEXT, 'scaffold': TEXT, 'number_line': ref('AcademyNumberLineMark'), 'completed': BOOL,
-        'step': ref('AcademyStepPublic'), 'response': ref('AcademyStepResponse')}, ['correct', 'completed', 'step', 'response']),
+        'calibration': CALIBRATION, 'step': ref('AcademyStepPublic'), 'response': ref('AcademyStepResponse')}, ['correct', 'completed', 'step', 'response']),
     'AcademyWorldTask': obj({'kind': {'type': 'string', 'enum': ['fraction-bar', 'group-array', 'balance-scale']}}),
     'AcademyWorldOption': obj({'id': TEXT, 'label': TEXT}),
     'AcademyWorldChallenge': obj({'prompt': TEXT, 'options': array(ref('AcademyWorldOption')), 'target': {'type': 'object'}}),
