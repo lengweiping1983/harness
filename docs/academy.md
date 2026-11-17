@@ -173,6 +173,31 @@ Python 课的阶段迁移任务包括整理问候、处理空列表、拒绝无�
 
 “效率提升几倍”不能由夹具或静态渲染证明，需真实学习者测量。现有证据账本已提供可核验指标：延迟重测正确率（间隔 ≥ 稳定期）、迁移挑战成功率、盲点修复率、连续学习天数与单位课次用时。建议实测协议：同课程随机分组（完整舞台机制 vs 仅阅读+自测对照），前测对齐先修，后测用未练过的迁移题与延迟重测（≥7 天），比较延迟保持率与迁移成功率并报告效应量与置信区间；时间效率用“达到同一延迟保持阈值所需学习分钟数”之比。任何倍数结论须附样本量、分组与原始证据导出，不得以机制存在代替效果证据。
 
+## 机制与学习科学对照
+
+下表把已落地机制映射到其学习科学来源，便于核对“与世界顶尖教学方式的差距”是否已被机制覆盖；效果倍数仍须按上文实测协议以真实学习者数据证明，机制存在不等于效果证据。
+
+| 机制 | 学习科学来源 | 实现位置 | 状态 |
+| --- | --- | --- | --- |
+| 掌握学习＋延迟独立重测 | Bloom mastery learning；FSRS 间隔重复 | mastery.py／重测队列 | 已落地，待实测 |
+| 调度透明＋交错重测 | Bjork desirable difficulties；Rohrer interleaving | 技能 due_at／队列 round-robin＋理由 | 已落地，待实测 |
+| 检索练习（重测而非重读） | Roediger & Karpicke testing effect | 独立重测回执 | 已落地，待实测 |
+| 生产性失败／挣扎窗口 | Kapur productive failure | struggle.py 恒温器＋防救场 | 已落地，待实测 |
+| 预测—操作—观察—解释微世界 | Bret Victor explorable explanations；POE | worlds.py 四内核 | 已落地，待实测 |
+| 例题→补全→独立 fading／CRA | Sweller worked-example effect；Bruner CRA | steps.py 序列＋contingent scaffold | 已落地，待实测 |
+| 自适应支架路由 | Vygotsky ZPD；contingent tutoring | on_wrong 路由 | 已落地，待实测 |
+| 置信度校准＋校准分析 | Kornell metacognitive calibration | confidence×correct 六格 | 已落地，待实测 |
+| 盲点修复＋错误自诊断 | Chi self-explanation；error analysis | blindspot/repaired/diagnosis | 已落地，待实测 |
+| 对照参考自我解释 | Chi contrastive self-explanation | reference_key 答对后对照 | 已落地，待实测 |
+| 迁移挑战加权 | Thorndike transfer；Bjork varied practice | transfer 标记＋稳定性加权 | 已落地，待实测 |
+| 教 AI 学生 | Papert constructionism；protégé effect | teach 模式＋独立测验 | 已落地，待实测 |
+| 自我调节（计划/计时/休息/反思） | Zimmerman self-regulated learning | 会话计划条／计时／反思 | 已落地，待实测 |
+| 证据 streak | 行为动机（证据而非登录） | mastery streak_days | 已落地，待实测 |
+| 先行组织者 | Ausubel advance organizer | 阅读环节阶段目标＋先修入口 | 已落地，待实测 |
+| 自主性教练＋主动介入 | Agentic UX autonomy slider；Khanmigo 苏格拉底护栏 | 教练三档＋证据触发 nudge | 已落地，待实测 |
+| 学习报告＋证据导出 | Open learner model；数据可携带 | AcademyReport＋JSON 导出 | 已落地，待实测 |
+| 单一学习 surface／学段选课／证据推荐 | Cognitive load theory（Rams/Norman 单焦点） | 舞台／主页 band／resume 推荐 | 已落地，待实测 |
+| 跨课程重测聚合 | Anki/Alpha 跨 deck 统一复习 | 主页 due 徽章 | 已落地，待实测 |
 ## 记忆引擎与延迟独立重测
 
 Academy 从持久证据推导每课的技能记忆状态，并调度延迟独立重测。记忆曲线采用 FSRS 风格的幂律遗忘曲线，更新规则是其简化变体，常量集中声明在 `harness/academy/mastery.py`，不声称与任何特定 FSRS 版本等价。
