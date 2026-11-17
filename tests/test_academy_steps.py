@@ -1,0 +1,122 @@
+"""步骤式引擎：逐步宿主评分、即时反馈、例题→独立序列与记忆证据。"""
+from __future__ import annotations
+
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from harness.academy import steps
+from harness.academy.errors import AcademyError
+from harness.academy.service import AcademyService
+
+COURSE = 'primary-math-foundations'
+LESSON = 'fraction-intuition'
+
+
+class StepGradeTests(unittest.TestCase):
+    def test_explain_requires_nonempty_text(self):
+        step = {'kind': 'explain'}
+        self.assertTrue(steps.grade(step, 'Because equal parts share one name.')[0])
+        for bad in ('', '   ', 'x' * 2001, 5):
+            with self.assertRaises(AcademyError) as caught:
+                steps.grade(step, bad)
+            self.assertEqual(caught.exception.code, 'step-invalid')
+
+    def test_numeric_tolerance_and_type(self):
+        step = {'kind': 'numeric', 'answer': 4, 'tolerance': 0.5}
+        self.assertTrue(steps.grade(step, 4.2)[0])
+        self.assertFalse(steps.grade(step, 5)[0])
+        with self.assertRaises(AcademyError):
+            steps.grade(step, '4')
+
+    def test_choice_and_ordering(self):
+        choice = {'kind': 'choice', 'answer_id': 'b', 'options': [{'id': 'a'}, {'id': 'b'}]}
+        self.assertTrue(steps.grade(choice, 'b')[0])
+        self.assertFalse(steps.grade(choice, 'a')[0])
+        with self.assertRaises(AcademyError):
+            steps.grade(choice, 'c')
+        ordering = {'kind': 'ordering', 'items': [{'id': 'x'}, {'id': 'y'}, {'id': 'z'}], 'answer': ['x', 'y', 'z']}
+        self.assertTrue(steps.grade(ordering, ['x', 'y', 'z'])[0])
+        self.assertFalse(steps.grade(ordering, ['y', 'x', 'z'])[0])
+        with self.assertRaises(AcademyError):
+            steps.grade(ordering, ['x', 'y'])
+
+    def test_public_step_hides_answers_and_reverses_ordering(self):
+        ordering = {'id': 's', 'kind': 'ordering', 'prompt': 'p', 'items': [{'id': 'x', 'label': 'X'}, {'id': 'y', 'label': 'Y'}], 'answer': ['x', 'y']}
+        public = steps.public_step(ordering)
+        self.assertNotIn('answer', public)
+        self.assertEqual([item['id'] for item in public['items']], ['y', 'x'])
+        numeric = steps.public_step({'id': 'n', 'kind': 'numeric', 'prompt': 'p', 'answer': 4, 'tolerance': 0})
+        self.assertNotIn('answer', numeric)
+        self.assertEqual(numeric['tolerance'], 0)
+
+
+class StepSessionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.service = AcademyService(self.root / 'home')
+        self.project = self.service.create_project('create', COURSE)['result']['project']
+        self.pid = self.project['id']
+        self.now = time.time()
+        patcher = patch('time.time', side_effect=lambda: self.now)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.temp.cleanup)
+
+    def open_lesson(self, lesson_id=LESSON):
+        project = self.service.project(self.pid)
+        receipt = self.service.start_lesson(self.pid, 'start-' + lesson_id, lesson_id, project['revision'], project['fingerprint'])
+        self.assertEqual(receipt['status'], 'ready')
+
+    def answer(self, step_id, response, request=None):
+        return self.service.steps.answer(self.pid, request or ('ans-' + step_id), LESSON, step_id, response)
+
+    def test_full_step_sequence_grades_each_step_and_awards_evidence(self):
+        self.open_lesson()
+        view = self.service.steps.view(self.pid, LESSON)
+        self.assertEqual([step['id'] for step in view['steps']], ['worked', 'denominator', 'which-half', 'third-sequence'])
+        for step in view['steps']:
+            self.assertNotIn('answer', step)
+            self.assertNotIn('answer_id', step)
+        self.assertFalse(view['completed'])
+        worked = self.answer('worked', 'Equal parts are needed so each part is the same size.')
+        self.assertTrue(worked['result']['correct'])
+        self.assertIsNotNone(worked['result']['feedback'])
+        wrong = self.answer('denominator', 5)
+        self.assertFalse(wrong['result']['correct'])
+        self.assertIsNotNone(wrong['result']['feedback'])
+        retry = self.answer('denominator', 4, request='ans-denominator-2')
+        self.assertTrue(retry['result']['correct'])
+        self.assertEqual(retry['result']['response']['attempts'], 2)
+        self.answer('which-half', 'b')
+        last = self.answer('third-sequence', ['cut', 'take', 'write'])
+        self.assertTrue(last['result']['completed'])
+        self.assertTrue(self.service.steps.view(self.pid, LESSON)['completed'])
+        skill = next(row for row in self.service.mastery.view(self.pid)['skills'] if row['lesson_id'] == LESSON)
+        self.assertEqual(skill['evidence_count'], 1)
+        self.assertEqual(skill['stability_days'], 2.5)
+        again = self.answer('worked', 'another explanation', request='ans-after')
+        self.assertEqual(again['result']['error_code'], 'steps-completed')
+
+    def test_unknown_step_and_lesson_without_steps(self):
+        self.open_lesson()
+        missing = self.answer('nope', 'x')
+        self.assertEqual(missing['result']['error_code'], 'step-not-found')
+        self.open_lesson('place-value')
+        unavailable = self.service.steps.answer(self.pid, 'ans-pv', 'place-value', 'q1', 'x')
+        self.assertEqual(unavailable['result']['error_code'], 'steps-unavailable')
+
+    def test_receipt_idempotency_and_invalid_response(self):
+        self.open_lesson()
+        first = self.answer('denominator', 4)
+        replay = self.answer('denominator', 4)
+        self.assertEqual(first['result']['response']['attempts'], replay['result']['response']['attempts'])
+        bad = self.service.steps.answer(self.pid, 'ans-bad', LESSON, 'denominator', 'four')
+        self.assertEqual(bad['result']['error_code'], 'step-invalid')
+
+
+if __name__ == '__main__':
+    unittest.main()

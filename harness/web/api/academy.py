@@ -121,6 +121,8 @@ def build_router(ctx):
     endpoint('POST', prefix + '/projects/{project_id}/submissions', submit)
     endpoint('GET', prefix + '/projects/{project_id}/submissions', lambda service, body, params, request: {'submissions': service.submissions(**params)})
     endpoint('GET', prefix + '/projects/{project_id}/submissions/{submission_id}', lambda service, body, params, request: {'submission': service.submission(**params)})
+    endpoint('GET', prefix + '/projects/{project_id}/steps', lambda service, body, params, request: service.steps.view(**params, lesson_id=request.get('lesson_id')), query=('lesson_id',))
+    endpoint('POST', prefix + '/projects/{project_id}/steps/answer', lambda service, body, params, request: service.steps.answer(**params, **body))
     endpoint('GET', prefix + '/projects/{project_id}/world', lambda service, body, params, request: service.worlds.view(**params, lesson_id=request.get('lesson_id')), query=('lesson_id',))
     endpoint('POST', prefix + '/projects/{project_id}/world', lambda service, body, params, request: service.worlds.start(**params, **body))
     endpoint('POST', prefix + '/projects/{project_id}/world/predict', lambda service, body, params, request: service.worlds.predict(**params, **body))

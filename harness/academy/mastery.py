@@ -16,7 +16,7 @@ from .errors import AcademyError
 
 DAY = 86400.0
 TARGET_RETENTION = 0.9
-INITIAL_STABILITY = {'check': 3.0, 'study': 2.0, 'teach': 2.5, 'world': 2.0}
+INITIAL_STABILITY = {'check': 3.0, 'study': 2.0, 'teach': 2.5, 'world': 2.0, 'steps': 2.5}
 INITIAL_DIFFICULTY = 5.0
 STABILITY_CAP = 730.0
 STABILITY_FLOOR = 0.5
@@ -85,6 +85,12 @@ def _events(store, project_id: str) -> list[dict]:
                 and run['result'].get('status') == 'passed' and run.get('input_changed') is False
                 and isinstance(run.get('created_at'), (int, float)) and isinstance(run.get('lesson_id'), str)):
             events.append({'at': run['created_at'], 'id': run['id'], 'lesson_id': run['lesson_id'], 'kind': 'check', 'correct': True})
+    for value in store.list('step-progress', max_bytes=MAX_EVIDENCE_BYTES):
+        if value.get('project_id') != project_id:
+            continue
+        if (value.get('status') == 'completed' and isinstance(value.get('completed_at'), (int, float))
+                and isinstance(value.get('lesson_id'), str)):
+            events.append({'at': value['completed_at'], 'id': value['id'], 'lesson_id': value['lesson_id'], 'kind': 'steps', 'correct': True})
     for value in store.list('world', max_bytes=MAX_EVIDENCE_BYTES):
         if value.get('project_id') != project_id:
             continue

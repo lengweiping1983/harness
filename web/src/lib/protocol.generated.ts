@@ -1745,6 +1745,7 @@ export interface AcademyLesson {
   knowledge_checks?: Array<AcademyKnowledgeCheck>
   struggle?: AcademyStruggleTask
   world?: AcademyWorldTask
+  steps?: Array<AcademyStep>
 }
 export interface AcademyCourseSummary {
   id: string
@@ -1965,6 +1966,62 @@ export interface AcademyTutorMastery {
   review_due: Array<string>
   recent_failures: Array<AcademyTutorMasteryFailure>
 }
+export interface AcademyStepOption {
+  id: string
+  label: string
+  feedback: string
+}
+export interface AcademyStepItem {
+  id: string
+  label: string
+}
+export interface AcademyStep {
+  id: string
+  kind: 'explain' | 'numeric' | 'choice' | 'ordering'
+  prompt: string
+  feedback: string
+  hints?: Array<string>
+  content?: string
+  answer?: unknown
+  tolerance?: number
+  answer_id?: string
+  options?: Array<AcademyStepOption>
+  items?: Array<AcademyStepItem>
+}
+export interface AcademyStepPublic {
+  id: string
+  kind: 'explain' | 'numeric' | 'choice' | 'ordering'
+  prompt: string
+  content?: string
+  options?: Array<Record<string, unknown>>
+  items?: Array<AcademyStepItem>
+  tolerance?: number
+}
+export interface AcademyStepResponse {
+  step_id: string
+  correct: boolean
+  response: unknown
+  attempts: number
+  at: number
+}
+export interface AcademyStepsView {
+  steps: Array<AcademyStepPublic>
+  responses: Array<AcademyStepResponse>
+  completed: boolean
+}
+export interface AcademyStepAnswer {
+  request_id: string
+  lesson_id: string
+  step_id: string
+  response: unknown
+}
+export interface AcademyStepResult {
+  correct: boolean
+  feedback?: string
+  completed: boolean
+  step: AcademyStepPublic
+  response: AcademyStepResponse
+}
 export interface AcademyWorldTask {
   kind: 'fraction-bar' | 'group-array' | 'balance-scale'
 }
@@ -2162,6 +2219,7 @@ export interface AcademyOperationResult {
   quiz?: AcademyTeachQuiz
   struggle?: AcademyStruggleSession
   world?: AcademyWorldSession
+  step?: AcademyStepResult
   backup_checkpoint_id?: string
   error_code?: string
 }

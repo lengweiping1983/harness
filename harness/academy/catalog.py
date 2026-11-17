@@ -12,6 +12,7 @@ from .protocol import obj, array, TEXT, BOOL, VERSION, MODE, SCHEMAS
 
 from .errors import AcademyError
 from .worlds import KINDS as WORLD_KINDS
+from .steps import STEP_KINDS
 from .files import file_path, fingerprint, read_files
 
 IDENTITY = r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}'
@@ -53,6 +54,13 @@ class AcademyCatalog:
                 'knowledge_checks': {'type': 'array', 'items': knowledge_check, 'minItems': 1, 'maxItems': 8},
                 'struggle': obj({'challenge_key': TEXT, 'window_minutes': {'type': 'integer', 'minimum': 1, 'maximum': 30}}),
                 'world': obj({'kind': {'type': 'string', 'enum': list(WORLD_KINDS)}}),
+                'steps': {'type': 'array', 'maxItems': 16, 'items': obj({
+                    'id': TEXT, 'kind': {'type': 'string', 'enum': list(STEP_KINDS)}, 'prompt_key': TEXT, 'feedback_key': TEXT,
+                    'hint_keys': {'type': 'array', 'items': TEXT, 'maxItems': 3}, 'content_key': TEXT,
+                    'answer': {'type': ['number', 'string', 'array']}, 'tolerance': {'type': 'number'}, 'answer_id': TEXT,
+                    'options': {'type': 'array', 'items': knowledge_option, 'minItems': 2, 'maxItems': 6},
+                    'items': {'type': 'array', 'items': obj({'id': TEXT, 'label_key': TEXT}), 'minItems': 2, 'maxItems': 8}},
+                    ['id', 'kind', 'prompt_key', 'feedback_key'])},
                 'trace_labels': {'type': 'object', 'additionalProperties': TEXT}},
                 ['id', 'order', 'milestone', 'title_key', 'goal_key', 'reading_key', 'references', 'prerequisites'])
             manifest = obj({'schema': {'type': 'integer', 'const': 1}, 'id': TEXT, 'version': TEXT,
@@ -91,6 +99,33 @@ class AcademyCatalog:
                     raise ValueError
                 if any(prerequisite not in ids - {lesson['id']} for prerequisite in lesson['prerequisites']):
                     raise ValueError
+                steps = lesson.get('steps', [])
+                if len({step['id'] for step in steps}) != len(steps):
+                    raise ValueError
+                for step in steps:
+                    if not re.fullmatch(IDENTITY, step['id']):
+                        raise ValueError
+                    kind = step['kind']
+                    if kind == 'explain':
+                        if 'content_key' not in step or any(key in step for key in ('answer', 'answer_id', 'options', 'items', 'tolerance')):
+                            raise ValueError
+                    elif kind == 'numeric':
+                        if type(step.get('answer')) not in (int, float) or type(step.get('tolerance')) not in (int, float) or step['tolerance'] < 0:
+                            raise ValueError
+                        if any(key in step for key in ('answer_id', 'options', 'items', 'content_key')):
+                            raise ValueError
+                    elif kind == 'choice':
+                        option_ids = [option['id'] for option in step.get('options', [])]
+                        if (len(set(option_ids)) != len(option_ids) or step.get('answer_id') not in option_ids
+                                or any(key in step for key in ('answer', 'items', 'content_key', 'tolerance'))):
+                            raise ValueError
+                    elif kind == 'ordering':
+                        item_ids = [item['id'] for item in step.get('items', [])]
+                        answer = step.get('answer')
+                        if (len(set(item_ids)) != len(item_ids) or not isinstance(answer, list)
+                                or sorted(answer) != sorted(item_ids)
+                                or any(key in step for key in ('answer_id', 'options', 'content_key', 'tolerance'))):
+                            raise ValueError
                 checks = lesson.get('knowledge_checks', [])
                 if len({check['id'] for check in checks}) != len(checks):
                     raise ValueError
@@ -115,6 +150,13 @@ class AcademyCatalog:
                               for key in [check['prompt_key'], *check['hint_keys'],
                                           *(option[field] for option in check['options'] for field in ('label_key', 'feedback_key'))]]
             keys.extend(knowledge_keys)
+            for lesson in course['lessons']:
+                for step in lesson.get('steps', []):
+                    keys.extend([step['prompt_key'], step['feedback_key'], *step.get('hint_keys', [])])
+                    if 'content_key' in step:
+                        keys.append(step['content_key'])
+                    keys.extend(option[field] for option in step.get('options', []) for field in ('label_key', 'feedback_key'))
+                    keys.extend(item['label_key'] for item in step.get('items', []))
             if any(key not in resources[0] for key in keys):
                 raise ValueError
             if any(not resource[key].strip() for resource in resources for key in knowledge_keys):
@@ -174,6 +216,27 @@ class AcademyCatalog:
                                       'window_minutes': source['struggle']['window_minutes']}
             if 'world' in source:
                 lesson['world'] = {'kind': source['world']['kind']}
+            if 'steps' in source:
+                localized_steps = []
+                for step in source['steps']:
+                    localized = {'id': step['id'], 'kind': step['kind'], 'prompt': resources[step['prompt_key']],
+                                 'feedback': resources[step['feedback_key']]}
+                    if step.get('hint_keys'):
+                        localized['hints'] = [resources[key] for key in step['hint_keys']]
+                    if step['kind'] == 'explain':
+                        localized['content'] = resources[step['content_key']]
+                    elif step['kind'] == 'numeric':
+                        localized['answer'] = step['answer']
+                        localized['tolerance'] = step['tolerance']
+                    elif step['kind'] == 'choice':
+                        localized['answer_id'] = step['answer_id']
+                        localized['options'] = [{'id': option['id'], 'label': resources[option['label_key']],
+                                                 'feedback': resources[option['feedback_key']]} for option in step['options']]
+                    elif step['kind'] == 'ordering':
+                        localized['items'] = [{'id': item['id'], 'label': resources[item['label_key']]} for item in step['items']]
+                        localized['answer'] = step['answer']
+                    localized_steps.append(localized)
+                lesson['steps'] = localized_steps
         return course
 
     def courses(self):

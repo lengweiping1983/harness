@@ -223,7 +223,77 @@
       },
       "world": {
         "kind": "fraction-bar"
-      }
+      },
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "fraction-intuition.s1.prompt",
+          "feedback_key": "fraction-intuition.s1.fb",
+          "content_key": "fraction-intuition.s1.content",
+          "hint_keys": [
+            "fraction-intuition.s1.hint"
+          ]
+        },
+        {
+          "id": "denominator",
+          "kind": "numeric",
+          "prompt_key": "fraction-intuition.s2.prompt",
+          "feedback_key": "fraction-intuition.s2.fb",
+          "answer": 4,
+          "tolerance": 0,
+          "hint_keys": [
+            "fraction-intuition.s2.hint"
+          ]
+        },
+        {
+          "id": "which-half",
+          "kind": "choice",
+          "prompt_key": "fraction-intuition.s3.prompt",
+          "feedback_key": "fraction-intuition.s3.fb",
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "fraction-intuition.s3.a",
+              "feedback_key": "fraction-intuition.s3.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "fraction-intuition.s3.b",
+              "feedback_key": "fraction-intuition.s3.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "third-sequence",
+          "kind": "ordering",
+          "prompt_key": "fraction-intuition.s4.prompt",
+          "feedback_key": "fraction-intuition.s4.fb",
+          "items": [
+            {
+              "id": "cut",
+              "label_key": "fraction-intuition.s4.cut"
+            },
+            {
+              "id": "take",
+              "label_key": "fraction-intuition.s4.take"
+            },
+            {
+              "id": "write",
+              "label_key": "fraction-intuition.s4.write"
+            }
+          ],
+          "answer": [
+            "cut",
+            "take",
+            "write"
+          ],
+          "hint_keys": [
+            "fraction-intuition.s4.hint"
+          ]
+        }
+      ]
     },
     {
       "id": "word-problems",

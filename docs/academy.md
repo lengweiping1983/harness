@@ -163,6 +163,13 @@ Academy 从持久证据推导每课的技能记忆状态，并调度延迟独立
 
 记忆引擎只依赖课程包的 `knowledge_checks`，与课型无关；团队课程与个人课程按课程合同声明自测题即可参与延迟重测，学习模式内容（含未来的小学、初中主题课程）不需要执行环境。是否提升长期保持仍需实际学习者测量；当前实现提供证据与度量接口，不构成学习效果认证。
 
+## 步骤式引导练习
+
+声明了 `steps` 的课程提供逐步引导练习，把反馈粒度从“只判最终答案”提升到“每个微步骤即时评分与反馈”（step-based）。步骤按有序序列编排，支持四种宿主评分类型：`explain`（例题步骤，展示worked example并要求学习者用自己的话解释，记录非空解释）、`numeric`（数值作答，按 answer 与 tolerance 判分）、`choice`（单选，逐选项反馈）、`ordering`（排序，按正确顺序判分，公开项以反序呈现避免显示即答案）。课程设计遵循例题→补全→独立（fading）与具身→表象→抽象（CRA）序列；小学数学“分数直觉”课已改造为四步序列。
+
+`GET /api/v1/academy/projects/{project_id}/steps?lesson_id=...` 返回公开步骤（剥离答案）与已答进度；`POST .../steps/answer` 提交单步作答，宿主按课程冻结真值评分，返回对错、针对性反馈（答错给首条提示）、是否完成全部步骤。全部步骤作答且评分步骤全对后记为一条独立步骤证据参与记忆调度（初始稳定性 2.5）。作答格式无效明确拒绝不记录；已完成课拒绝再答；写入沿用幂等回执。步骤真值来自课程数据，不来自模型，不执行代码。
+
+步骤式练习与既有自测、微世界、挣扎并存：步骤是引导练习层，自测是独立核对层。是否提升迁移仍需实际学习者测量；当前实现提供逐步反馈与证据边界。
 ## 模型实验
 
 模型课提供可编辑的课程提示，点击“运行提示”使用已配置模型发送一次请求，可能产生提供方费用。每次只发送接受时冻结的本课系统指令与用户提示，不携带主对话、文件、其他实验历史或工具权限，也不执行回答中的代码。“本课系统指令”可展开核对。一次请求最多等待 60 秒，输出预算为 4000 token，完整文本最多 64 KiB；空回答、超限回答或工具调用不作为可用结果。
@@ -279,7 +286,7 @@ Academy 从持久证据推导每课的技能记忆状态，并调度延迟独立
       "hint_keys": ["loop.hint.direction", "loop.hint.step"]
     }]
 
-每课可选 `struggle` 声明挣扎优先任务：`challenge_key` 引用双语资源中的挑战正文，`window_minutes` 为 1–30 的最小挣扎窗口。每课可选 `world` 声明交互微世界：`kind` 取宿主内核 `fraction-bar`、`group-array` 或 `balance-scale`；真值与参数边界由宿主内核计算，课程不能声明任意执行代码。两个字段的行为见“挣扎优先”和“交互微世界”。
+每课可选 `struggle` 声明挣扎优先任务：`challenge_key` 引用双语资源中的挑战正文，`window_minutes` 为 1–30 的最小挣扎窗口。每课可选 `world` 声明交互微世界：`kind` 取宿主内核 `fraction-bar`、`group-array` 或 `balance-scale`；真值与参数边界由宿主内核计算，课程不能声明任意执行代码。两个字段的行为见“挣扎优先”和“交互微世界”。每课可选 `steps` 声明 1–16 个有序引导步骤，类型与资源键规则见“步骤式引导练习”。
 
 起始目录只包含学生可以修改的文件；固定检查文件位于该目录之外，通过项目的 Python 环境执行。当前运行器支持 Python 文件及参数数组，不提供 Shell、任意解释器或在线依赖安装。检查脚本应包含正确结果、拒绝输入和停止条件等业务断言。课程可以使用多个源码文件或不同 Python 入口，不需要改框架。新语言或新的系统执行能力属于运行器扩展，不能仅靠课程正文开启。
 
@@ -321,6 +328,6 @@ tests/test_academy_models.py 使用隔离课程副本验证模型实验的单次
 
 `web/tests/academy-save-smoke.mjs` 使用两个真实页面和挂起的已接受保存回包，核对 `AcademyPanel` 的 `sourceInput` 提交绑定、较新草稿原字节保留、旧版本拒绝、保存及新建文件的错配回执与刷新后只读恢复。丢弃草稿和回查后等待实际的新源码读取及编辑器就绪，再提交下一次修改；`academy-save-fixture.mjs` 仅拦截 POST 保存，透传同一路径的 GET 文件清单，再核对 HTTP 状态、ready 回执及 source；错误信封与拦截异常交回场景等待方，保留原响应并完成路由清理，不让回调异常结束工作进程。对应 Node 回归覆盖 GET 与 POST 分流、失败回执、缺少 source 及收尾失败；浏览器场景在保存前插入同路径 GET，并用真实参数校验错误信封核对进程继续与文件原件保留。web/tests/academy-smoke.mjs 使用真实临时后端及受控模型传输验证学习、自测与进度分离、过期运行、提交、雷达反馈、观察隔离、保存回查、恢复及中英文/主题/尺寸矩阵；web/tests/academy-learning-smoke.mjs 通过实际路线和自测组件覆盖同实例英中英、键盘、输入法、提示、主题尺寸和项目／课次隔离。web/tests/academy-topic-smoke.mjs 验证主题生成、隐藏后回查、课程分组、阅读课完成、丢失回执及生成课程的 Python 执行；web/tests/academy-topic-lifecycle-smoke.mjs 覆盖实际制课组件的同实例英中英、草稿保留、输入法、隐藏取消观察及写入归属。`web/tests/academy-model-flow-smoke.mjs` 核对模型课任务与提示先行、有效模型结果后展开反思、显式完成、提示草稿及同实例语言主题尺寸矩阵。web/tests/academy-curriculum-smoke.mjs 走团队课程卡片、迁移练习修改、阅读完成、参考代码和跨课程项目隔离，并核对语言、主题及尺寸矩阵。继续学习还核对当前证据、未保存草稿、输入法和重复点击准入、自动检查点、刷新后只读回查及目标课号匹配；同一实例通过实际语言设置往返切换，检查继续入口、完成提示、原代码及笔记保留。全部活动完成分支使用受控目录投影，当前课保留真实检查证据，并核对不改写后端进度。受控挂起项目读取后选课，验证旧读取取消与加载恢复。证据门槛的版本、项目、课号和指纹矩阵由 `web/src/lib/__tests__/academy.test.ts` 覆盖。受控传输不代表在线模型的语义评分或课程事实质量验收。
 
-tests/test_academy_mastery.py 核对记忆数学边界、证据投影、重测评分、幂等与冲突、阶段交错、答案不泄露、损坏数据与认知参与度评级。tests/test_academy_teach.py 核对误解冻结、无执行边界、学生测验评分、重试与重启投影、语言与对话记录冻结。tests/test_academy_struggle.py 核对窗口恒温器、尝试冻结、揭示边界与带练防救场守卫的注入和解除。tests/test_academy_worlds.py 核对内核真值与边界、挑战判分、预测—操作—观察—解释状态机与观察上限。tests/test_academy_tutor_mastery.py 核对掌握度画像冻结注入、先修 surfaced、历史隔离与损坏画像拒绝。tests/test_academy_primary_math.py 与 tests/test_academy_middle_math.py 核对两条学校课程的双语合同及无沙箱全链路。前端 academyMastery.test.ts、academyTeach.test.ts、academyStruggle.test.ts、academyWorld.test.ts 以真实组件静态渲染核对回执绑定、阶段门控、状态可视化、答案不泄露与语言切换身份不变。上述夹具与静态渲染不证明在线模型的教学质量或实际学习效果倍数。
+tests/test_academy_mastery.py 核对记忆数学边界、证据投影、重测评分、幂等与冲突、阶段交错、答案不泄露、损坏数据与认知参与度评级。tests/test_academy_teach.py 核对误解冻结、无执行边界、学生测验评分、重试与重启投影、语言与对话记录冻结。tests/test_academy_struggle.py 核对窗口恒温器、尝试冻结、揭示边界与带练防救场守卫的注入和解除。tests/test_academy_worlds.py 核对内核真值与边界、挑战判分、预测—操作—观察—解释状态机与观察上限。tests/test_academy_steps.py 核对四类步骤宿主评分、公开剥离答案、逐步进度、完成证据与幂等。tests/test_academy_tutor_mastery.py 核对掌握度画像冻结注入、先修 surfaced、历史隔离与损坏画像拒绝。tests/test_academy_primary_math.py 与 tests/test_academy_middle_math.py 核对两条学校课程的双语合同及无沙箱全链路。前端 academyMastery.test.ts、academyTeach.test.ts、academyStruggle.test.ts、academyWorld.test.ts 以真实组件静态渲染核对回执绑定、阶段门控、状态可视化、答案不泄露与语言切换身份不变。上述夹具与静态渲染不证明在线模型的教学质量或实际学习效果倍数。
 
 交付入口见 [开发与测试](development.md)。系统沙箱缺失时执行回归会明确失败或标记对应 Python 用例跳过，不能报告为跨平台验收通过。

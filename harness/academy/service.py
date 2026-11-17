@@ -25,6 +25,7 @@ from .mastery import AcademyMastery
 from .runtime import AcademyRuntime
 from .protocol import SCHEMAS
 from .store import AcademyStore
+from .steps import AcademySteps
 from .struggle import AcademyStruggle
 from .tutor import AcademyTutor
 from .worlds import AcademyWorlds
@@ -45,6 +46,7 @@ class AcademyService:
         self.tutor = AcademyTutor(self)
         self.mastery = AcademyMastery(self)
         self.struggle = AcademyStruggle(self)
+        self.steps = AcademySteps(self)
         self.worlds = AcademyWorlds(self)
 
     def courses(self):

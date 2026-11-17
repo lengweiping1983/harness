@@ -20817,6 +20817,124 @@
         ]
       }
     },
+    "/api/v1/academy/projects/{project_id}/steps": {
+      "get": {
+        "operationId": "get_api_v1_academy_projects_project_id_steps",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyStepsView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/academy/projects/{project_id}/steps/answer": {
+      "post": {
+        "operationId": "post_api_v1_academy_projects_project_id_steps_answer",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademyStepAnswer"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/academy/projects/{project_id}/world": {
       "get": {
         "operationId": "get_api_v1_academy_projects_project_id_world",
@@ -30491,6 +30609,12 @@
           },
           "world": {
             "$ref": "#/components/schemas/AcademyWorldTask"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStep"
+            }
           }
         },
         "required": [
@@ -31523,6 +31647,260 @@
           "recent_failures"
         ]
       },
+      "AcademyStepOption": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "feedback": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "feedback"
+        ]
+      },
+      "AcademyStepItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ]
+      },
+      "AcademyStep": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "explain",
+              "numeric",
+              "choice",
+              "ordering"
+            ]
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "feedback": {
+            "type": "string"
+          },
+          "hints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "content": {
+            "type": "string"
+          },
+          "answer": {},
+          "tolerance": {
+            "type": "number"
+          },
+          "answer_id": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStepOption"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStepItem"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "prompt",
+          "feedback"
+        ]
+      },
+      "AcademyStepPublic": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "explain",
+              "numeric",
+              "choice",
+              "ordering"
+            ]
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label"
+              ]
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStepItem"
+            }
+          },
+          "tolerance": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "prompt"
+        ]
+      },
+      "AcademyStepResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "step_id": {
+            "type": "string"
+          },
+          "correct": {
+            "type": "boolean"
+          },
+          "response": {},
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "at": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "step_id",
+          "correct",
+          "response",
+          "attempts",
+          "at"
+        ]
+      },
+      "AcademyStepsView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStepPublic"
+            }
+          },
+          "responses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStepResponse"
+            }
+          },
+          "completed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "steps",
+          "responses",
+          "completed"
+        ]
+      },
+      "AcademyStepAnswer": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "lesson_id": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "response": {}
+        },
+        "required": [
+          "request_id",
+          "lesson_id",
+          "step_id",
+          "response"
+        ]
+      },
+      "AcademyStepResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "correct": {
+            "type": "boolean"
+          },
+          "feedback": {
+            "type": "string"
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "step": {
+            "$ref": "#/components/schemas/AcademyStepPublic"
+          },
+          "response": {
+            "$ref": "#/components/schemas/AcademyStepResponse"
+          }
+        },
+        "required": [
+          "correct",
+          "completed",
+          "step",
+          "response"
+        ]
+      },
       "AcademyWorldTask": {
         "type": "object",
         "additionalProperties": false,
@@ -32411,6 +32789,9 @@
           },
           "world": {
             "$ref": "#/components/schemas/AcademyWorldSession"
+          },
+          "step": {
+            "$ref": "#/components/schemas/AcademyStepResult"
           },
           "backup_checkpoint_id": {
             "type": "string"
