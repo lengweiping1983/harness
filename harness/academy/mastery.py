@@ -191,6 +191,26 @@ class AcademyMastery:
         return {'constructive': constructive, 'active': active, 'total': total,
                 'constructive_ratio': round(constructive / total, 4) if total else 0.0}
 
+    def _streak_days(self, project_id: str, now: float) -> int:
+        """连续学习天数只认真实证据日期：从今天（或昨天）向前数连续有证据的天。"""
+        days = {time.strftime('%Y-%m-%d', time.localtime(event['at'])) for event in _events(self.service.store, project_id)}
+        # 任何作答记录（含未结课）都算当日学习证据，streak 不因课未完成而断。
+        for value in self.service.store.list('step-progress', max_bytes=MAX_EVIDENCE_BYTES):
+            if value.get('project_id') != project_id:
+                continue
+            for row in value.get('responses', []):
+                if isinstance(row.get('at'), (int, float)):
+                    days.add(time.strftime('%Y-%m-%d', time.localtime(row['at'])))
+        cursor = time.localtime(now)
+        today = time.strftime('%Y-%m-%d', cursor)
+        if today not in days:
+            cursor = time.localtime(now - DAY)
+        streak = 0
+        while time.strftime('%Y-%m-%d', cursor) in days:
+            streak += 1
+            cursor = time.localtime(time.mktime(cursor) - DAY)
+        return streak
+
     def view(self, project_id: str) -> dict:
         record, lessons = self._lessons(project_id)
         states = fold(self.service.store, project_id)
@@ -212,7 +232,8 @@ class AcademyMastery:
                     transfers += 1
         return {'skills': skills, 'due_count': sum(1 for skill in skills if skill['state'] != 'new' and skill['retrievability'] < TARGET_RETENTION),
                 'reviews': totals, 'engagement': self._engagement(project_id),
-                'repairs': repairs, 'transfers': transfers, 'blindspots_open': blindspots_open}
+                'repairs': repairs, 'transfers': transfers, 'blindspots_open': blindspots_open,
+                'streak_days': self._streak_days(project_id, now)}
 
 
     def profile(self, project_id: str, lesson_id: str) -> dict:

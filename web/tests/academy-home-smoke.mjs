@@ -96,6 +96,7 @@ try {
   await studio.locator('[data-academy-report]').waitFor()
   await studio.getByText(en['ui.academy.report.durable'], {exact: true}).waitFor()
   await studio.getByText(en['ui.academy.report.delayed'], {exact: true}).waitFor()
+  await studio.getByText(en['ui.academy.report.streak'], {exact: true}).waitFor()
   assert.deepEqual(errors, [])
   console.log('Academy home: grade-band cards and filter, same-instance en/zh/en, course start into default focus studio and exit verified')
 } catch (error) {failure = error}

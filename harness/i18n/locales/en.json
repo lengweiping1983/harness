@@ -8220,6 +8220,8 @@
   "ui.academy.report.blindspots": "Open blindspots",
   "ui.academy.report.transfers": "Transfer successes",
   "ui.academy.report.delayed": "Delayed-review correct",
+  "ui.academy.report.streak": "Day streak (evidence)",
+  "ui.academy.studio.session.streak": "{days}-day streak",
   "ui.academy.mastery.title": "Memory & delayed review",
   "ui.academy.mastery.dueBadge": "{count} due for review",
   "ui.academy.mastery.intro": "Skills fade on a forgetting curve; due reviews come back interleaved across stages. Only independent answers count.",

@@ -2217,6 +2217,7 @@ export interface AcademyMastery {
   repairs?: number
   transfers?: number
   blindspots_open?: number
+  streak_days?: number
 }
 export interface AcademyReviewRequest {
   request_id: string

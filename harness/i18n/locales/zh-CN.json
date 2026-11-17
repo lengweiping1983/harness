@@ -8220,6 +8220,8 @@
   "ui.academy.report.blindspots": "待修复盲点",
   "ui.academy.report.transfers": "迁移成功",
   "ui.academy.report.delayed": "延迟重测正确率",
+  "ui.academy.report.streak": "连续学习天数（证据）",
+  "ui.academy.studio.session.streak": "连续 {days} 天",
   "ui.academy.mastery.title": "记忆与延迟重测",
   "ui.academy.mastery.dueBadge": "{count} 项待重测",
   "ui.academy.mastery.intro": "技能按遗忘曲线淡忘；到期重测按阶段交错回来，只有独立作答才算数。",

@@ -197,6 +197,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
       {recommended && recommended.id !== lesson.id ? <span className="rounded-full border border-brand/40 bg-brand/10 px-2 py-0.5 text-brand">{t('ui.academy.studio.session.plan.recommended', {title: recommended.title})}</span> : null}
       <span className="ml-auto">{t('ui.academy.studio.session.estimate', {minutes: lesson.duration_minutes ?? 15})}</span>
       <span data-studio-elapsed>{t('ui.academy.studio.session.elapsed', {minutes: Math.floor(elapsed / 60)})}</span>
+      {masteryView && (masteryView.streak_days ?? 0) > 0 ? <span className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-ok">{t('ui.academy.studio.session.streak', {days: masteryView.streak_days})}</span> : null}
       {elapsed >= (lesson.duration_minutes ?? 15) * 60 ? <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-warn">{t('ui.academy.studio.session.rest')}</span> : null}
       <span aria-label={t('ui.academy.studio.session.progress', {done: done.size, total: phases.length})}>{t('ui.academy.studio.session.progress', {done: done.size, total: phases.length})}</span>
     </div>

@@ -68,7 +68,7 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
   const tiles: Array<[string | number, string]> = [
     [counts.durable, 'ui.academy.report.durable'], [counts.learning, 'ui.academy.report.learning'], [counts.fresh, 'ui.academy.report.fresh'],
     [mastery.repairs ?? 0, 'ui.academy.report.repairs'], [mastery.blindspots_open ?? 0, 'ui.academy.report.blindspots'], [mastery.transfers ?? 0, 'ui.academy.report.transfers'],
-    [delayed + '%', 'ui.academy.report.delayed'],
+    [delayed + '%', 'ui.academy.report.delayed'], [mastery.streak_days ?? 0, 'ui.academy.report.streak'],
   ]
   return <div data-academy-report aria-label={t('ui.academy.report.title')} className="grid gap-2 sm:grid-cols-4">
     {tiles.map(([value, key]) => <div key={key} className="rounded-xl border border-line p-3">

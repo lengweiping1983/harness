@@ -167,7 +167,7 @@ SCHEMAS = {
         'evidence_count': VERSION, 'reviews': ref('AcademySkillReviews')}),
     'AcademyEngagement': obj({'constructive': VERSION, 'active': VERSION, 'total': VERSION, 'constructive_ratio': NUMBER}),
     'AcademyMastery': obj({'skills': array(ref('AcademySkillState')), 'due_count': VERSION, 'reviews': ref('AcademySkillReviews'), 'engagement': ref('AcademyEngagement'),
-                         'repairs': VERSION, 'transfers': VERSION, 'blindspots_open': VERSION},
+                         'repairs': VERSION, 'transfers': VERSION, 'blindspots_open': VERSION, 'streak_days': VERSION},
                         ['skills', 'due_count', 'reviews', 'engagement']),
     'AcademyReviewRequest': obj({'request_id': REQUEST, 'lesson_id': TEXT,
         'answers': {'type': 'array', 'items': ref('AcademyStudyAnswer'), 'maxItems': 8}}),

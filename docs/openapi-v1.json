@@ -32775,6 +32775,10 @@
           "blindspots_open": {
             "type": "integer",
             "minimum": 0
+          },
+          "streak_days": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [
