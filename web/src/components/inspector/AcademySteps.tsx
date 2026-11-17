@@ -5,6 +5,7 @@ import type {AcademyLesson, AcademyReceipt, AcademyStepPublic, AcademyStepsView,
 import {academyApi, academyNextStep, academyReceiptMatches, isAcademyUnconfirmedWrite} from '@/lib/academy'
 import {noticeText} from '@/lib/noticeText'
 import {Button} from '@/components/ui/primitives'
+import {AcademyVoiceButton} from './AcademyVoice'
 
 type Feedback = {correct: boolean; text: string; scaffold?: string; numberLine?: {min: number; max: number; value: number}; calibration?: string}
 
@@ -92,7 +93,10 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
         <span className="text-xs font-medium text-warn">{t('ui.academy.steps.diagnosisPrompt')}</span>
         <textarea className="ui-field min-h-16 w-full" value={diagnosis} disabled={locked} placeholder={t('ui.academy.steps.diagnosisHint')} aria-label={t('ui.academy.steps.diagnosisPrompt')} onChange={event => setDiagnosis(event.target.value)} />
       </label> : null}
-      {step.kind === 'explain' ? <textarea className="ui-field min-h-20 w-full" value={text} disabled={locked} placeholder={t('ui.academy.steps.explainPlaceholder')} aria-label={t('ui.academy.steps.explainPrompt')} onChange={event => setText(event.target.value)} /> : null}
+      {step.kind === 'explain' ? <div className="flex items-start gap-2">
+        <textarea className="ui-field min-h-20 w-full" value={text} disabled={locked} placeholder={t('ui.academy.steps.explainPlaceholder')} aria-label={t('ui.academy.steps.explainPrompt')} onChange={event => setText(event.target.value)} />
+        <AcademyVoiceButton active={!locked} disabled={locked} onText={value => setText(previous => previous ? previous + ' ' + value : value)} />
+      </div> : null}
       {step.kind === 'numeric' ? <input type="number" className="ui-field w-32" value={text} disabled={locked} placeholder={t('ui.academy.steps.numericPlaceholder')} onChange={event => setText(event.target.value)} /> : null}
       {step.kind === 'choice' ? <fieldset className="space-y-2" disabled={locked}>{(step.options ?? []).map(option => <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-lg border border-line p-3 text-sm focus-within:border-brand">
         <input type="radio" name={name} value={option.id} checked={choice === option.id} className="mt-1 accent-brand" onChange={() => setChoice(option.id)} />

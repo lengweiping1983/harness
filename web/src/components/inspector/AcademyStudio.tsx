@@ -13,6 +13,7 @@ import {AcademySteps} from './AcademySteps'
 import {AcademyTeach} from './AcademyTeach'
 import {AcademyKnowledgeChecks} from './AcademyKnowledgeChecks'
 import {AcademyReport, AcademyReviewSession} from './AcademyMastery'
+import {AcademyVoiceButton} from './AcademyVoice'
 
 const phaseLabelKey: Record<AcademyStudioPhaseId, string> = {
   review: 'ui.academy.studio.phase.review', struggle: 'ui.academy.studio.phase.struggle', world: 'ui.academy.studio.phase.world', steps: 'ui.academy.studio.phase.steps',
@@ -262,6 +263,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
           <textarea rows={1} className="ui-field max-h-24 min-h-10 flex-1 resize-y leading-reading" value={coachDraft} placeholder={t('ui.academy.studio.coach.placeholder')} aria-label={t('ui.academy.studio.coach.placeholder')}
             onChange={event => setCoachDraft(event.target.value)}
             onKeyDown={event => {if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {event.preventDefault(); sendCoach()}}} />
+          <AcademyVoiceButton active={active && !disabled} disabled={disabled || coachRunning} onText={value => setCoachDraft(previous => previous ? previous + ' ' + value : value)} />
           <Button type="submit" size="sm" disabled={disabled || coachRunning} icon={<Send className="h-3.5 w-3.5" />}>{t('ui.academy.studio.coach.send')}</Button>
         </form>
       </div>
