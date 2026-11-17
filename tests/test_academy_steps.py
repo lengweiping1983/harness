@@ -158,6 +158,17 @@ class StepSessionTests(unittest.TestCase):
         projected = {row['step_id']: row for row in self.service.steps.view(self.pid, LESSON)['responses']}
         self.assertTrue(projected['denominator']['blindspot'])
         self.assertTrue(projected['denominator']['repaired'])
+    def test_diagnosis_recorded_and_projected(self):
+        """错误自诊断随作答记录持久化并投影；重试修复后仍保留诊断原文。"""
+        self.open_lesson()
+        wrong = self.service.steps.answer(self.pid, 'dg-wrong', LESSON, 'denominator', 5, confidence='sure',
+                                          diagnosis='I counted parts instead of equal groups.')['result']['step']
+        self.assertEqual(wrong['response']['diagnosis'], 'I counted parts instead of equal groups.')
+        fixed = self.service.steps.answer(self.pid, 'dg-fix', LESSON, 'denominator', 4, confidence='sure')['result']['step']
+        self.assertEqual(fixed['calibration'], 'repaired')
+        self.assertEqual(fixed['response']['diagnosis'], 'I counted parts instead of equal groups.')
+        projected = {row['step_id']: row for row in self.service.steps.view(self.pid, LESSON)['responses']}
+        self.assertEqual(projected['denominator']['diagnosis'], 'I counted parts instead of equal groups.')
     def test_report_aggregates_repairs_transfers_blindspots(self):
         """学习报告聚合来自持久作答：修复数、迁移成功数与待修复盲点数。"""
         self.open_lesson('add-meaning')

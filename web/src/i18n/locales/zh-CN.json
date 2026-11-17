@@ -4677,6 +4677,8 @@
   "ui.academy.steps.calibration.expected": "不确定且答错——正常学习区，用好支架。",
   "ui.academy.steps.calibration.repaired": "盲点已修复：曾高确信答错、现在答对——这才是真学习。",
   "ui.academy.steps.blindspotChip": "曾高确信答错：现在修复它",
+  "ui.academy.steps.diagnosisPrompt": "重试前：你觉得刚才为什么错？",
+  "ui.academy.steps.diagnosisHint": "用自己的话说出错误所在——诊断它才是修复它。",
   "ui.academy.steps.title": "引导练习",
   "ui.academy.steps.progress": "第 {current} / {total} 步",
   "ui.academy.steps.explainPrompt": "你的解释",

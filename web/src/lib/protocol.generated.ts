@@ -2027,6 +2027,7 @@ export interface AcademyStepResponse {
   confidence?: 'guess' | 'unsure' | 'sure'
   blindspot?: boolean
   repaired?: boolean
+  diagnosis?: string
 }
 export interface AcademyStepsView {
   steps: Array<AcademyStepPublic>
@@ -2039,6 +2040,7 @@ export interface AcademyStepAnswer {
   step_id: string
   response: unknown
   confidence?: 'guess' | 'unsure' | 'sure'
+  diagnosis?: string
 }
 export interface AcademyStepResult {
   correct: boolean

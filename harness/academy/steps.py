@@ -102,11 +102,12 @@ class AcademySteps:
                                     'attempts': done[step['id']]['attempts'], 'at': done[step['id']]['at']},
                                    **({'confidence': done[step['id']]['confidence']} if 'confidence' in done[step['id']] else {}),
                                    **({'blindspot': True} if done[step['id']].get('blindspot') else {}),
-                                   **({'repaired': True} if done[step['id']].get('repaired') else {}))
+                                   **({'repaired': True} if done[step['id']].get('repaired') else {}),
+                                   **({'diagnosis': done[step['id']]['diagnosis']} if done[step['id']].get('diagnosis') else {}))
                               for step in steps if step['id'] in done],
                 'completed': bool(progress and progress['status'] == 'completed')}
 
-    def answer(self, project_id, request_id, lesson_id, step_id, response, confidence=None):
+    def answer(self, project_id, request_id, lesson_id, step_id, response, confidence=None, diagnosis=None):
         def write():
             record, lesson, steps = self._lesson(project_id, lesson_id)
             step = next((item for item in steps if item['id'] == step_id), None)
@@ -124,6 +125,10 @@ class AcademySteps:
                      'attempts': (previous['attempts'] + 1) if previous else 1, 'at': time.time()}
             if confidence is not None:
                 entry['confidence'] = confidence
+            if diagnosis is not None and diagnosis.strip():
+                entry['diagnosis'] = diagnosis.strip()
+            elif previous and previous.get('diagnosis'):
+                entry['diagnosis'] = previous['diagnosis']
             # 盲点闭环：高确信错误记为盲点；之后答对记为修复，保留历史供界面与校准使用。
             if previous and previous.get('blindspot'):
                 entry['blindspot'] = True
@@ -174,4 +179,6 @@ class AcademySteps:
         frozen = {'lesson_id': lesson_id, 'step_id': step_id, 'response': response}
         if confidence is not None:
             frozen['confidence'] = confidence
+        if diagnosis is not None and diagnosis.strip():
+            frozen['diagnosis'] = diagnosis.strip()
         return self.service._change(request_id, 'step-answer', project_id, frozen, write)

@@ -27,7 +27,7 @@ export function AcademyNumberLine({min, max, value}: {min: number; max: number; 
 
 /** 单步卡片：按类型渲染输入，提交后即时反馈；答对显示下一步。 */
 export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmit, onNext}: {
-  step: AcademyStepPublic; busy: boolean; feedback: Feedback | null; cheer?: string; blindspot?: boolean; onSubmit: (response: string | number | string[] | Record<string, string>, confidence: AcademyConfidence) => void; onNext: () => void
+  step: AcademyStepPublic; busy: boolean; feedback: Feedback | null; cheer?: string; blindspot?: boolean; onSubmit: (response: string | number | string[] | Record<string, string>, confidence: AcademyConfidence, diagnosis: string) => void; onNext: () => void
 }) {
   useLocale()
   const name = useId()
@@ -37,6 +37,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
   const [order, setOrder] = useState<string[]>(() => (step.items ?? []).map(item => item.id))
   const [pairs, setPairs] = useState<Record<string, string>>({})
   const [confidence, setConfidence] = useState<AcademyConfidence | null>(null)
+  const [diagnosis, setDiagnosis] = useState('')
   const locked = busy || feedback?.correct === true
   const move = (index: number, delta: number) => {
     const target = index + delta
@@ -49,13 +50,13 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
     if (composing.current || locked || !confidence) return
     if (step.kind === 'explain' || step.kind === 'numeric') {
       if (!text.trim()) return
-      onSubmit(step.kind === 'numeric' ? Number(text) : text.trim(), confidence)
+      onSubmit(step.kind === 'numeric' ? Number(text) : text.trim(), confidence, diagnosis)
     } else if (step.kind === 'choice') {
-      if (choice) onSubmit(choice, confidence)
+      if (choice) onSubmit(choice, confidence, diagnosis)
     } else if (step.kind === 'ordering') {
-      onSubmit(order, confidence)
+      onSubmit(order, confidence, diagnosis)
     } else if (step.kind === 'matching') {
-      onSubmit(pairs, confidence)
+      onSubmit(pairs, confidence, diagnosis)
     }
   }
   const ready = confidence !== null && (step.kind === 'ordering' ? order.length > 0 : step.kind === 'choice' ? Boolean(choice) : step.kind === 'matching' ? (step.left ?? []).every(item => Boolean(pairs[item.id])) : Boolean(text.trim()))
@@ -82,6 +83,10 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
           onClick={() => setConfidence(level)}
           className={'rounded-full border px-2.5 py-1 text-xs ' + (confidence === level ? 'border-brand bg-brand/10 font-medium text-brand' : 'border-line text-muted')}>{t('ui.academy.steps.confidence.' + level)}</button>)}
       </div>
+      {feedback && !feedback.correct ? <label className="block space-y-1 text-sm">
+        <span className="text-xs font-medium text-warn">{t('ui.academy.steps.diagnosisPrompt')}</span>
+        <textarea className="ui-field min-h-16 w-full" value={diagnosis} disabled={locked} placeholder={t('ui.academy.steps.diagnosisHint')} aria-label={t('ui.academy.steps.diagnosisPrompt')} onChange={event => setDiagnosis(event.target.value)} />
+      </label> : null}
       {step.kind === 'explain' ? <textarea className="ui-field min-h-20 w-full" value={text} disabled={locked} placeholder={t('ui.academy.steps.explainPlaceholder')} aria-label={t('ui.academy.steps.explainPrompt')} onChange={event => setText(event.target.value)} /> : null}
       {step.kind === 'numeric' ? <input type="number" className="ui-field w-32" value={text} disabled={locked} placeholder={t('ui.academy.steps.numericPlaceholder')} onChange={event => setText(event.target.value)} /> : null}
       {step.kind === 'choice' ? <fieldset className="space-y-2" disabled={locked}>{(step.options ?? []).map(option => <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-lg border border-line p-3 text-sm focus-within:border-brand">
@@ -171,12 +176,12 @@ export function AcademySteps({projectId, lesson, active, disabled, onCompleted, 
     if (result.calibration) onCalibration?.(result.calibration)
     if (result.completed) setRevision(value => value + 1)
   }
-  const submit = async (response: string | number | string[] | Record<string, string>, confidence: AcademyConfidence) => {
+  const submit = async (response: string | number | string[] | Record<string, string>, confidence: AcademyConfidence, diagnosis: string) => {
     if (disabled || busy || pending || !current) return
     const requestId = crypto.randomUUID()
     try {sessionStorage.setItem(pendingKey, JSON.stringify({requestId, projectId}))} catch {setError({key: 'ui.academy.error.store-invalid'})}
     setPending({requestId}); setBusy(true); setError(''); setFeedback(null)
-    const outcome = await academyApi.stepAnswer(projectId, {request_id: requestId, lesson_id: lesson.id, step_id: current.id, response, confidence})
+    const outcome = await academyApi.stepAnswer(projectId, {request_id: requestId, lesson_id: lesson.id, step_id: current.id, response, confidence, diagnosis})
     if (outcome.ok) applyReceipt(outcome.data, requestId)
     else if (isAcademyUnconfirmedWrite(outcome)) setError(outcome.copy ?? outcome.message)
     else {clearPending(); setError(outcome.copy ?? outcome.message)}
@@ -206,6 +211,6 @@ export function AcademySteps({projectId, lesson, active, disabled, onCompleted, 
       <Button size="xs" disabled={busy} onClick={() => void recheck()}>{t('ui.academy.recheckReceipt')}</Button>
     </div> : null}
     {completed ? <p role="status" className="rounded-lg bg-canvas p-3 text-sm font-medium text-ok">{t('ui.academy.steps.completed')}</p>
-      : current ? <AcademyStepCard key={current.id + ':' + revision} step={current} busy={busy || disabled || pending !== null} feedback={feedback} cheer={cheer} blindspot={currentResponse?.blindspot} onSubmit={(response, confidence) => void submit(response, confidence)} onNext={next} /> : null}
+      : current ? <AcademyStepCard key={current.id + ':' + revision} step={current} busy={busy || disabled || pending !== null} feedback={feedback} cheer={cheer} blindspot={currentResponse?.blindspot} onSubmit={(response, confidence, diagnosis) => void submit(response, confidence, diagnosis)} onNext={next} /> : null}
   </div>
 }

@@ -31910,6 +31910,9 @@
           },
           "repaired": {
             "type": "boolean"
+          },
+          "diagnosis": {
+            "type": "string"
           }
         },
         "required": [
@@ -31968,6 +31971,9 @@
               "unsure",
               "sure"
             ]
+          },
+          "diagnosis": {
+            "type": "string"
           }
         },
         "required": [

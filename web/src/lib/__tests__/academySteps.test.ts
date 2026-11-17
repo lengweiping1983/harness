@@ -90,6 +90,16 @@ it('renders matching pairs without revealing the answer key', async () => {
   expect(html).toContain('disabled=""')
 })
 
+it('asks for a self-diagnosis after a wrong answer before retrying', async () => {
+  await setLocale('en')
+  const wrong = renderToStaticMarkup(card({feedback: {correct: false, text: 'Not yet.'}}))
+  expect(wrong).toContain('Before retrying: why do you think it was wrong?')
+  const right = renderToStaticMarkup(card({feedback: {correct: true, text: 'Correct!'}}))
+  expect(right).not.toContain('Before retrying')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(card({feedback: {correct: false, text: '再试试'}}))
+  expect(chinese).toContain('重试前：你觉得刚才为什么错？')
+})
 it('shows the blindspot chip and repaired calibration bilingually', async () => {
   await setLocale('en')
   const chip = renderToStaticMarkup(card({blindspot: true}))
