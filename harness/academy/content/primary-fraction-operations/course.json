@@ -1,0 +1,376 @@
+{
+  "schema": 1,
+  "id": "primary-fraction-operations",
+  "version": "1.0.0",
+  "source_revision": "fixture-fraction-ops-1",
+  "title_key": "title",
+  "description_key": "description",
+  "assumptions_key": "assumptions",
+  "references": [],
+  "band": "primary",
+  "lessons": [
+    {
+      "id": "same-denominator",
+      "order": 1,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "same-denominator.title",
+      "goal_key": "same-denominator.goal",
+      "reading_key": "same-denominator.reading",
+      "references": [],
+      "prerequisites": [],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "same-denominator.worked.prompt",
+          "feedback_key": "same-denominator.worked.fb",
+          "hint_keys": [
+            "same-denominator.worked.hint"
+          ],
+          "content_key": "same-denominator.worked.content"
+        },
+        {
+          "id": "add",
+          "kind": "numeric",
+          "prompt_key": "same-denominator.add.prompt",
+          "feedback_key": "same-denominator.add.fb",
+          "hint_keys": [
+            "same-denominator.add.hint"
+          ],
+          "answer": 5,
+          "tolerance": 0
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "same-denominator.independent.prompt",
+          "feedback_key": "same-denominator.independent.fb",
+          "hint_keys": [
+            "same-denominator.independent.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "same-denominator.independent.a.label",
+              "feedback_key": "same-denominator.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "same-denominator.independent.b.label",
+              "feedback_key": "same-denominator.independent.b.fb"
+            }
+          ]
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "same-denominator.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "same-denominator.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "same-denominator.c1.a.label",
+              "feedback_key": "same-denominator.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "same-denominator.c1.b.label",
+              "feedback_key": "same-denominator.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "common-denominator",
+      "order": 2,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "common-denominator.title",
+      "goal_key": "common-denominator.goal",
+      "reading_key": "common-denominator.reading",
+      "references": [],
+      "prerequisites": [
+        "same-denominator"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "common-denominator.worked.prompt",
+          "feedback_key": "common-denominator.worked.fb",
+          "hint_keys": [
+            "common-denominator.worked.hint"
+          ],
+          "content_key": "common-denominator.worked.content"
+        },
+        {
+          "id": "rename",
+          "kind": "numeric",
+          "prompt_key": "common-denominator.rename.prompt",
+          "feedback_key": "common-denominator.rename.fb",
+          "hint_keys": [
+            "common-denominator.rename.hint"
+          ],
+          "answer": 3,
+          "tolerance": 0
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "common-denominator.independent.prompt",
+          "feedback_key": "common-denominator.independent.fb",
+          "hint_keys": [
+            "common-denominator.independent.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "common-denominator.independent.a.label",
+              "feedback_key": "common-denominator.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "common-denominator.independent.b.label",
+              "feedback_key": "common-denominator.independent.b.fb"
+            }
+          ]
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "common-denominator.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "common-denominator.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "common-denominator.c1.a.label",
+              "feedback_key": "common-denominator.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "common-denominator.c1.b.label",
+              "feedback_key": "common-denominator.c1.b.fb"
+            }
+          ]
+        }
+      ],
+      "world": {
+        "kind": "fraction-bar"
+      }
+    },
+    {
+      "id": "compare-fractions",
+      "order": 3,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "compare-fractions.title",
+      "goal_key": "compare-fractions.goal",
+      "reading_key": "compare-fractions.reading",
+      "references": [],
+      "prerequisites": [
+        "common-denominator"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "compare-fractions.worked.prompt",
+          "feedback_key": "compare-fractions.worked.fb",
+          "hint_keys": [
+            "compare-fractions.worked.hint"
+          ],
+          "content_key": "compare-fractions.worked.content"
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "compare-fractions.independent.prompt",
+          "feedback_key": "compare-fractions.independent.fb",
+          "hint_keys": [
+            "compare-fractions.independent.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "compare-fractions.independent.a.label",
+              "feedback_key": "compare-fractions.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "compare-fractions.independent.b.label",
+              "feedback_key": "compare-fractions.independent.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "transfer-recipe",
+          "kind": "choice",
+          "prompt_key": "compare-fractions.transfer-recipe.prompt",
+          "feedback_key": "compare-fractions.transfer-recipe.fb",
+          "hint_keys": [
+            "compare-fractions.transfer-recipe.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "compare-fractions.transfer-recipe.a.label",
+              "feedback_key": "compare-fractions.transfer-recipe.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "compare-fractions.transfer-recipe.b.label",
+              "feedback_key": "compare-fractions.transfer-recipe.b.fb"
+            }
+          ],
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "compare-fractions.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "compare-fractions.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "compare-fractions.c1.a.label",
+              "feedback_key": "compare-fractions.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "compare-fractions.c1.b.label",
+              "feedback_key": "compare-fractions.c1.b.fb"
+            }
+          ]
+        }
+      ],
+      "struggle": {
+        "challenge_key": "compare-fractions.struggle",
+        "window_minutes": 3
+      }
+    },
+    {
+      "id": "fraction-decimal",
+      "order": 4,
+      "mode": "study",
+      "milestone": true,
+      "title_key": "fraction-decimal.title",
+      "goal_key": "fraction-decimal.goal",
+      "reading_key": "fraction-decimal.reading",
+      "references": [],
+      "prerequisites": [
+        "compare-fractions"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "fraction-decimal.worked.prompt",
+          "feedback_key": "fraction-decimal.worked.fb",
+          "hint_keys": [
+            "fraction-decimal.worked.hint"
+          ],
+          "content_key": "fraction-decimal.worked.content"
+        },
+        {
+          "id": "convert",
+          "kind": "numeric",
+          "prompt_key": "fraction-decimal.convert.prompt",
+          "feedback_key": "fraction-decimal.convert.fb",
+          "hint_keys": [
+            "fraction-decimal.convert.hint"
+          ],
+          "answer": 0.75,
+          "tolerance": 0.001
+        },
+        {
+          "id": "transfer-half-of",
+          "kind": "numeric",
+          "prompt_key": "fraction-decimal.transfer-half-of.prompt",
+          "feedback_key": "fraction-decimal.transfer-half-of.fb",
+          "hint_keys": [
+            "fraction-decimal.transfer-half-of.hint"
+          ],
+          "answer": 5,
+          "tolerance": 0,
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "fraction-decimal.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "fraction-decimal.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "fraction-decimal.c1.a.label",
+              "feedback_key": "fraction-decimal.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "fraction-decimal.c1.b.label",
+              "feedback_key": "fraction-decimal.c1.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "c2",
+          "prompt_key": "fraction-decimal.c2.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "fraction-decimal.c2.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "fraction-decimal.c2.a.label",
+              "feedback_key": "fraction-decimal.c2.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "fraction-decimal.c2.b.label",
+              "feedback_key": "fraction-decimal.c2.b.fb"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
