@@ -65,6 +65,9 @@ try {
   assert.equal(await panel.locator('[data-academy-studio]').count(), 0)
   assert.equal(await panel.locator('[data-academy-home]').count(), 0)
   await panel.getByRole('heading', {name: /Lesson 1 ·/}).first().waitFor()
+  // 面板去重：闯关课的实践组件只归舞台所有，面板仅摘要＋主 CTA。
+  assert.equal(await panel.locator('[data-academy-section="steps"]').count(), 0)
+  await panel.getByRole('button', {name: 'Learn in the focus studio', exact: true}).waitFor()
   // 端到端：回到舞台完成首课（置信度→步骤→自测→反思→结课），核对学习报告由真实证据聚合。
   const en = JSON.parse(await readFile(new URL('../src/i18n/locales/en.json', import.meta.url), 'utf-8'))
   await panel.getByRole('button', {name: en['ui.academy.studio.enter'], exact: true}).click()

@@ -4549,6 +4549,7 @@
   "ui.academy.teach.quizRetry": "重试测验",
   "ui.academy.teach.pending": "结果未确认；只按原请求号回查。",
   "ui.academy.studio.enter": "专注舞台",
+  "ui.academy.studio.enterLong": "在专注舞台中学习",
   "ui.academy.studio.exit": "退出舞台",
   "ui.academy.studio.dialogLabel": "专注学习舞台",
   "ui.academy.studio.journeyLabel": "学习旅程",

@@ -4549,6 +4549,7 @@
   "ui.academy.teach.quizRetry": "Retry quiz",
   "ui.academy.teach.pending": "The result is unconfirmed; only the original request is rechecked.",
   "ui.academy.studio.enter": "Focus studio",
+  "ui.academy.studio.enterLong": "Learn in the focus studio",
   "ui.academy.studio.exit": "Exit studio",
   "ui.academy.studio.dialogLabel": "Focus learning studio",
   "ui.academy.studio.journeyLabel": "Learning journey",
