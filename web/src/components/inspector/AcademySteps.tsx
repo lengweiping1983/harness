@@ -71,6 +71,11 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
         {feedback.correct ? <Check className="h-4 w-4" /> : null}{feedback.text}</p>
       {feedback.calibration ? <p className={'text-sm font-medium ' + (feedback.calibration === 'calibrated' ? 'text-ok' : feedback.calibration === 'blindspot' ? 'text-warn' : 'text-muted')}>{t('ui.academy.steps.calibration.' + feedback.calibration)}</p> : null}
     </div> : null}
+    {feedback?.correct && step.reference ? <details className="rounded-lg border border-line p-3 text-sm">
+      <summary className="cursor-pointer rounded-lg text-xs font-medium text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.steps.compareReference')}</summary>
+      <p className="mt-2 whitespace-pre-wrap leading-reading">{step.reference}</p>
+      <p className="mt-1 text-xs text-muted">{t('ui.academy.steps.compareHint')}</p>
+    </details> : null}
     {feedback && !feedback.correct && feedback.scaffold ? <div className="rounded-lg border border-warn/40 bg-canvas p-3 text-sm leading-reading"><p className="text-xs font-medium text-warn">{t('ui.academy.steps.scaffoldLabel')}</p><p className="mt-1 whitespace-pre-wrap">{feedback.scaffold}</p></div> : null}
     {feedback?.numberLine ? <AcademyNumberLine min={feedback.numberLine.min} max={feedback.numberLine.max} value={feedback.numberLine.value} /> : null}
     {feedback?.correct ? <Button size="sm" onClick={onNext}>{t('ui.academy.steps.next')}</Button> : <form className="space-y-2"

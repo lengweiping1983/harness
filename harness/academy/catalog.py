@@ -56,7 +56,7 @@ class AcademyCatalog:
                 'world': obj({'kind': {'type': 'string', 'enum': list(WORLD_KINDS)}}),
                 'steps': {'type': 'array', 'maxItems': 16, 'items': obj({
                     'id': TEXT, 'kind': {'type': 'string', 'enum': list(STEP_KINDS)}, 'prompt_key': TEXT, 'feedback_key': TEXT,
-                    'hint_keys': {'type': 'array', 'items': TEXT, 'maxItems': 3}, 'content_key': TEXT, 'scaffold_key': TEXT,
+                    'hint_keys': {'type': 'array', 'items': TEXT, 'maxItems': 3}, 'content_key': TEXT, 'reference_key': TEXT, 'scaffold_key': TEXT,
                     'number_line': obj({'min': {'type': 'number'}, 'max': {'type': 'number'}}), 'on_wrong': TEXT, 'transfer': BOOL,
                     'answer': {'type': ['number', 'string', 'array', 'object']}, 'tolerance': {'type': 'number'}, 'answer_id': TEXT,
                     'options': {'type': 'array', 'items': knowledge_option, 'minItems': 2, 'maxItems': 6},
@@ -175,6 +175,8 @@ class AcademyCatalog:
                         keys.append(step['scaffold_key'])
                     if 'content_key' in step:
                         keys.append(step['content_key'])
+                    if 'reference_key' in step:
+                        keys.append(step['reference_key'])
                     keys.extend(option[field] for option in step.get('options', []) for field in ('label_key', 'feedback_key'))
                     keys.extend(item['label_key'] for item in step.get('items', []))
                     keys.extend(item['label_key'] for item in step.get('left', []))
@@ -257,6 +259,8 @@ class AcademyCatalog:
                         localized['transfer'] = True
                     if step['kind'] == 'explain':
                         localized['content'] = resources[step['content_key']]
+                        if 'reference_key' in step:
+                            localized['reference'] = resources[step['reference_key']]
                     elif step['kind'] == 'numeric':
                         localized['answer'] = step['answer']
                         localized['tolerance'] = step['tolerance']

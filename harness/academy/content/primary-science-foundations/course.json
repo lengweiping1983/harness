@@ -32,7 +32,8 @@
           "hint_keys": [
             "sink-or-float.worked.hint"
           ],
-          "content_key": "sink-or-float.worked.content"
+          "content_key": "sink-or-float.worked.content",
+          "reference_key": "sink-or-float.worked.reference"
         },
         {
           "id": "predict",

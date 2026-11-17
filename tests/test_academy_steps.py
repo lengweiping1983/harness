@@ -189,6 +189,8 @@ class StepSessionTests(unittest.TestCase):
         """迁移挑战公开标记不泄答案；新情境答对给予更高初始稳定性。"""
         self.open_lesson('add-meaning')
         view = self.service.steps.view(self.pid, 'add-meaning')
+        worked = next(step for step in view['steps'] if step['id'] == 'worked')
+        self.assertIn('reference', worked)
         transfer = next(step for step in view['steps'] if step['id'] == 'transfer-pages')
         self.assertTrue(transfer['transfer'])
         self.assertNotIn('answer_id', transfer)

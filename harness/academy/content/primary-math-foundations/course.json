@@ -59,7 +59,8 @@
           "hint_keys": [
             "place-value.worked.hint"
           ],
-          "content_key": "place-value.worked.content"
+          "content_key": "place-value.worked.content",
+          "reference_key": "place-value.worked.reference"
         },
         {
           "id": "tens-value",
@@ -146,7 +147,8 @@
           "hint_keys": [
             "add-meaning.worked.hint"
           ],
-          "content_key": "add-meaning.worked.content"
+          "content_key": "add-meaning.worked.content",
+          "reference_key": "add-meaning.worked.reference"
         },
         {
           "id": "match-stories",
@@ -583,7 +585,8 @@
           "content_key": "fraction-intuition.s1.content",
           "hint_keys": [
             "fraction-intuition.s1.hint"
-          ]
+          ],
+          "reference_key": "fraction-intuition.worked.reference"
         },
         {
           "id": "denominator",

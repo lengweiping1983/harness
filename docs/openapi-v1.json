@@ -31765,6 +31765,9 @@
           "content": {
             "type": "string"
           },
+          "reference": {
+            "type": "string"
+          },
           "scaffold": {
             "type": "string"
           },
@@ -31837,6 +31840,9 @@
             "type": "string"
           },
           "content": {
+            "type": "string"
+          },
+          "reference": {
             "type": "string"
           },
           "options": {

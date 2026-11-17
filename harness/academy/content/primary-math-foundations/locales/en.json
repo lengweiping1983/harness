@@ -219,5 +219,8 @@
   "add-meaning.transfer.hint": "Ask: are the two days combining or comparing?",
   "multiply-meaning.transfer.prompt": "New situation: each box holds 6 apples and there are 4 boxes. How many apples in all?",
   "multiply-meaning.transfer.fb": "4 equal groups of 6 is 4 × 6 = 24.",
-  "multiply-meaning.transfer.hint": "Count equal groups first, then the size of each group."
+  "multiply-meaning.transfer.hint": "Count equal groups first, then the size of each group.",
+  "place-value.worked.reference": "Each digit’s value comes from its place: in 502 the 5 is hundreds (500), in 52 the 5 is tens (50). Same digit, different job.",
+  "fraction-intuition.worked.reference": "Equal parts share one fraction name: the denominator counts equal parts, the numerator counts taken parts. Unequal pieces cannot be named by one fraction.",
+  "add-meaning.worked.reference": "Addition joins two amounts into one total: 24 + 18 combines the apples, so the total is 42; the story changes but joining stays addition."
 }

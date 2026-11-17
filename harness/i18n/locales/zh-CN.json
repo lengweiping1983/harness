@@ -8175,6 +8175,8 @@
   "ui.academy.steps.blindspotChip": "曾高确信答错：现在修复它",
   "ui.academy.steps.diagnosisPrompt": "重试前：你觉得刚才为什么错？",
   "ui.academy.steps.diagnosisHint": "用自己的话说出错误所在——诊断它才是修复它。",
+  "ui.academy.steps.compareReference": "对照参考解释",
+  "ui.academy.steps.compareHint": "你的解释与它有何不同？注意到差距才是深化理解。",
   "ui.academy.steps.title": "引导练习",
   "ui.academy.steps.progress": "第 {current} / {total} 步",
   "ui.academy.steps.explainPrompt": "你的解释",

@@ -109,5 +109,6 @@
   "explain-to-engineer.c2.a.label": "Object density / liquid density",
   "explain-to-engineer.c2.a.fb": "Capped at 1 when it sinks.",
   "explain-to-engineer.c2.b.label": "Liquid density / object density",
-  "explain-to-engineer.c2.b.fb": "That ratio is inverted."
+  "explain-to-engineer.c2.b.fb": "That ratio is inverted.",
+  "sink-or-float.worked.reference": "Compare object density with liquid density: less dense floats, more dense sinks, equal suspends. Size or weight alone does not decide."
 }

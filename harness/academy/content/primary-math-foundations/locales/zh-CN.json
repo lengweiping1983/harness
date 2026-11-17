@@ -219,5 +219,8 @@
   "add-meaning.transfer.hint": "问自己：两天是合起来还是比较？",
   "multiply-meaning.transfer.prompt": "新情境：每箱装 6 个苹果，共 4 箱。一共多少个苹果？",
   "multiply-meaning.transfer.fb": "4 个 6 的相同组就是 4 × 6 = 24。",
-  "multiply-meaning.transfer.hint": "先数相同的组，再看每组几个。"
+  "multiply-meaning.transfer.hint": "先数相同的组，再看每组几个。",
+  "place-value.worked.reference": "每个数字的值来自它的数位：502 里 5 在百位（500），52 里 5 在十位（50）。同一数字，不同职责。",
+  "fraction-intuition.worked.reference": "相等的份共用一个分数名：分母数相等的份，分子数取的份。不相等的块不能用一个分数命名。",
+  "add-meaning.worked.reference": "加法把两个数量合成一个总数：24 + 18 合并苹果，总数 42；故事变了但“合并”仍是加法。"
 }

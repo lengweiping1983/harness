@@ -34,6 +34,8 @@ def public_step(step):
         public['on_wrong'] = step['on_wrong']
     if step.get('transfer'):
         public['transfer'] = True
+    if step.get('reference'):
+        public['reference'] = step['reference']
     return public
 
 

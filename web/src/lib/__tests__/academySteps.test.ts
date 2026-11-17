@@ -90,6 +90,18 @@ it('renders matching pairs without revealing the answer key', async () => {
   expect(html).toContain('disabled=""')
 })
 
+it('offers a reference explanation to compare after a correct self-explanation', async () => {
+  await setLocale('en')
+  const html = renderToStaticMarkup(card({step: step({reference: 'Reference: place decides value.'}), feedback: {correct: true, text: 'Correct!'}}))
+  expect(html).toContain('Compare with a reference explanation')
+  expect(html).toContain('Reference: place decides value.')
+  const wrong = renderToStaticMarkup(card({step: step({reference: 'Reference.'}), feedback: {correct: false, text: 'Not yet.'}}))
+  expect(wrong).not.toContain('Compare with a reference explanation')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(card({step: step({reference: '参考。'}), feedback: {correct: true, text: '对！'}}))
+  expect(chinese).toContain('对照参考解释')
+})
+
 it('asks for a self-diagnosis after a wrong answer before retrying', async () => {
   await setLocale('en')
   const wrong = renderToStaticMarkup(card({feedback: {correct: false, text: 'Not yet.'}}))

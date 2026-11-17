@@ -8175,6 +8175,8 @@
   "ui.academy.steps.blindspotChip": "Earlier sure-but-wrong: repair it now",
   "ui.academy.steps.diagnosisPrompt": "Before retrying: why do you think it was wrong?",
   "ui.academy.steps.diagnosisHint": "Name the mistake in your own words — diagnosing it is what repairs it.",
+  "ui.academy.steps.compareReference": "Compare with a reference explanation",
+  "ui.academy.steps.compareHint": "How does yours differ? Noticing the gap is what deepens understanding.",
   "ui.academy.steps.title": "Guided practice",
   "ui.academy.steps.progress": "Step {current} of {total}",
   "ui.academy.steps.explainPrompt": "Your explanation",

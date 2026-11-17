@@ -1993,6 +1993,7 @@ export interface AcademyStep {
   feedback: string
   hints?: Array<string>
   content?: string
+  reference?: string
   scaffold?: string
   number_line?: AcademyNumberLine
   on_wrong?: string
@@ -2010,6 +2011,7 @@ export interface AcademyStepPublic {
   kind: 'explain' | 'numeric' | 'choice' | 'ordering' | 'matching'
   prompt: string
   content?: string
+  reference?: string
   options?: Array<AcademyStepItem>
   items?: Array<AcademyStepItem>
   tolerance?: number

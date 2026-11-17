@@ -109,5 +109,6 @@
   "explain-to-engineer.c2.a.label": "物体密度 / 液体密度",
   "explain-to-engineer.c2.a.fb": "下沉时上限 1。",
   "explain-to-engineer.c2.b.label": "液体密度 / 物体密度",
-  "explain-to-engineer.c2.b.fb": "那个比例反了。"
+  "explain-to-engineer.c2.b.fb": "那个比例反了。",
+  "sink-or-float.worked.reference": "比较物体密度与液体密度：更疏漂浮、更密下沉、相等悬浮。只看大小或重量不能决定。"
 }
