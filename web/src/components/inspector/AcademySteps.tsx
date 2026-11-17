@@ -2,7 +2,7 @@ import {useEffect, useId, useRef, useState} from 'react'
 import {ArrowDown, ArrowUp, Check, Send} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyLesson, AcademyReceipt, AcademyStepPublic, AcademyStepsView, NoticeText} from '@/types'
-import {academyApi, academyReceiptMatches, isAcademyUnconfirmedWrite} from '@/lib/academy'
+import {academyApi, academyNextStep, academyReceiptMatches, isAcademyUnconfirmedWrite} from '@/lib/academy'
 import {noticeText} from '@/lib/noticeText'
 import {Button} from '@/components/ui/primitives'
 
@@ -128,11 +128,12 @@ export function AcademySteps({projectId, lesson, active, disabled}: {projectId: 
   }, [active, steps, projectId, lesson.id, revision])
 
   if (!steps?.length) return null
-  const done = new Set((view?.responses ?? []).filter(response => response.correct).map(response => response.step_id))
+  const responses = view?.responses ?? []
+  const done = new Set(responses.filter(response => response.correct).map(response => response.step_id))
   const total = steps.length
-  const currentIndex = steps.findIndex(step => !done.has(step.id))
-  const completed = view?.completed || currentIndex === -1
-  const current = currentIndex >= 0 ? steps[currentIndex] : null
+  const current = academyNextStep(steps, responses)
+  const currentIndex = current ? steps.findIndex(step => step.id === current.id) : -1
+  const completed = view?.completed || current === null
   const correctCount = done.size
   const cheer = t('ui.academy.steps.cheer.' + (correctCount % 3))
 

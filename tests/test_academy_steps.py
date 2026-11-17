@@ -84,7 +84,7 @@ class StepSessionTests(unittest.TestCase):
     def test_full_step_sequence_grades_each_step_and_awards_evidence(self):
         self.open_lesson()
         view = self.service.steps.view(self.pid, LESSON)
-        self.assertEqual([step['id'] for step in view['steps']], ['worked', 'denominator', 'which-half', 'third-sequence'])
+        self.assertEqual([step['id'] for step in view['steps']], ['worked', 'denominator', 'denominator-support', 'which-half', 'third-sequence'])
         for step in view['steps']:
             self.assertNotIn('answer', step)
             self.assertNotIn('answer_id', step)
@@ -108,6 +108,16 @@ class StepSessionTests(unittest.TestCase):
         again = self.answer('worked', 'another explanation', request='ans-after')
         self.assertEqual(again['result']['error_code'], 'steps-completed')
 
+    def test_support_step_is_optional_and_routing_is_public(self):
+        self.open_lesson()
+        view = self.service.steps.view(self.pid, LESSON)
+        denom = next(step for step in view['steps'] if step['id'] == 'denominator')
+        self.assertEqual(denom['on_wrong'], 'denominator-support')
+        self.answer('worked', 'Equal parts share one fraction name.')
+        self.answer('denominator', 4)
+        self.answer('which-half', 'b')
+        last = self.answer('third-sequence', ['cut', 'take', 'write'])
+        self.assertTrue(last['result']['completed'])
     def test_numeric_answer_returns_number_line_mark(self):
         self.open_lesson()
         result = self.answer('denominator', 7)['result']

@@ -57,7 +57,7 @@ class AcademyCatalog:
                 'steps': {'type': 'array', 'maxItems': 16, 'items': obj({
                     'id': TEXT, 'kind': {'type': 'string', 'enum': list(STEP_KINDS)}, 'prompt_key': TEXT, 'feedback_key': TEXT,
                     'hint_keys': {'type': 'array', 'items': TEXT, 'maxItems': 3}, 'content_key': TEXT, 'scaffold_key': TEXT,
-                    'number_line': obj({'min': {'type': 'number'}, 'max': {'type': 'number'}}),
+                    'number_line': obj({'min': {'type': 'number'}, 'max': {'type': 'number'}}), 'on_wrong': TEXT,
                     'answer': {'type': ['number', 'string', 'array', 'object']}, 'tolerance': {'type': 'number'}, 'answer_id': TEXT,
                     'options': {'type': 'array', 'items': knowledge_option, 'minItems': 2, 'maxItems': 6},
                     'items': {'type': 'array', 'items': obj({'id': TEXT, 'label_key': TEXT}), 'minItems': 2, 'maxItems': 8},
@@ -139,6 +139,10 @@ class AcademyCatalog:
                                 or any(value not in right_ids for value in answer.values())
                                 or any(key in step for key in ('answer_id', 'options', 'items', 'content_key', 'tolerance'))):
                             raise ValueError
+                step_ids = {step['id'] for step in steps}
+                for step in steps:
+                    if 'on_wrong' in step and (step['on_wrong'] not in step_ids or step['on_wrong'] == step['id']):
+                        raise ValueError
                 checks = lesson.get('knowledge_checks', [])
                 if len({check['id'] for check in checks}) != len(checks):
                     raise ValueError
@@ -244,6 +248,8 @@ class AcademyCatalog:
                         localized['scaffold'] = resources[step['scaffold_key']]
                     if 'number_line' in step:
                         localized['number_line'] = step['number_line']
+                    if 'on_wrong' in step:
+                        localized['on_wrong'] = step['on_wrong']
                     if step['kind'] == 'explain':
                         localized['content'] = resources[step['content_key']]
                     elif step['kind'] == 'numeric':

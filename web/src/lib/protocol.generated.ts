@@ -1993,6 +1993,7 @@ export interface AcademyStep {
   content?: string
   scaffold?: string
   number_line?: AcademyNumberLine
+  on_wrong?: string
   answer?: unknown
   tolerance?: number
   answer_id?: string
@@ -2011,6 +2012,7 @@ export interface AcademyStepPublic {
   tolerance?: number
   left?: Array<AcademyStepItem>
   right?: Array<AcademyStepItem>
+  on_wrong?: string
 }
 export interface AcademyStepResponse {
   step_id: string

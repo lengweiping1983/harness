@@ -191,5 +191,9 @@
   "word-problems.order-solve.hint": "Understand before computing.",
   "word-problems.order-solve.r": "Read and choose the operation",
   "word-problems.order-solve.c": "Write the sentence and compute",
-  "word-problems.order-solve.k": "Check the answer in the story"
+  "word-problems.order-solve.k": "Check the answer in the story",
+  "fraction-intuition.denominator-support.prompt": "Look at the whole circle. Into how many equal parts is it cut?",
+  "fraction-intuition.denominator-support.fb": "Right: the whole is cut into 4 equal parts — that number is the denominator.",
+  "fraction-intuition.denominator-support.hint": "Count every equal part of the whole circle.",
+  "fraction-intuition.denominator-support.scaffold": "The denominator counts ALL the equal parts of the whole. Count them: 1, 2, 3, 4."
 }

@@ -533,7 +533,20 @@
           "number_line": {
             "min": 0,
             "max": 12
-          }
+          },
+          "on_wrong": "denominator-support"
+        },
+        {
+          "id": "denominator-support",
+          "kind": "numeric",
+          "prompt_key": "fraction-intuition.denominator-support.prompt",
+          "feedback_key": "fraction-intuition.denominator-support.fb",
+          "answer": 4,
+          "tolerance": 0,
+          "hint_keys": [
+            "fraction-intuition.denominator-support.hint"
+          ],
+          "scaffold_key": "fraction-intuition.denominator-support.scaffold"
         },
         {
           "id": "which-half",

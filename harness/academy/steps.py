@@ -30,6 +30,8 @@ def public_step(step):
     elif step['kind'] == 'matching':
         public['left'] = [{'id': item['id'], 'label': item['label']} for item in step['left']]
         public['right'] = [{'id': item['id'], 'label': item['label']} for item in reversed(step['right'])]
+    if step.get('on_wrong'):
+        public['on_wrong'] = step['on_wrong']
     return public
 
 
@@ -118,8 +120,9 @@ class AcademySteps:
             else:
                 progress['responses'].append(entry)
             answered = {item['step_id']: item for item in progress['responses']}
-            complete = all(step['id'] in answered and (answered[step['id']]['correct'] or step['kind'] == 'explain')
-                           for step in steps) and all(step['id'] in answered for step in steps)
+            support_ids = {step['on_wrong'] for step in steps if step.get('on_wrong')}
+            main = [step for step in steps if step['id'] not in support_ids]
+            complete = all(step['id'] in answered and answered[step['id']]['correct'] for step in main)
             if complete:
                 progress.update(status='completed', completed_at=time.time())
             self.service._mark_started()

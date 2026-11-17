@@ -1,6 +1,6 @@
 import {isUnconfirmedWrite, request as httpRequest} from './http'
 import {hasTranslation} from '@/i18n'
-import type { AcademyAssessmentDimension, AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyDesign, AcademyDimensionId, AcademyFile, AcademyLesson, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorTurn, AcademyMastery, AcademyReviewItem, AcademyTeachQuiz, AcademyTeachMisconception, AcademyLesson, AcademyStruggleSession, AcademyStruggleView, AcademyWorldSession, AcademyWorldView, AcademyStepsView } from '@/types'
+import type { AcademyAssessmentDimension, AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyDesign, AcademyDimensionId, AcademyFile, AcademyLesson, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorTurn, AcademyMastery, AcademyReviewItem, AcademyTeachQuiz, AcademyTeachMisconception, AcademyLesson, AcademyStruggleSession, AcademyStruggleView, AcademyWorldSession, AcademyWorldView, AcademyStepsView, AcademyStepPublic } from '@/types'
 import type {ApiResult, RequestOptions} from './http'
 import type { AcademyCompleteStudy, AcademyCreateDesign, AcademyCreateProject, AcademyExecute, AcademyModelRunRequest, AcademyRestore, AcademySaveCheckpoint, AcademyStartLesson, AcademyWriteFile, AcademySubmit, AcademyTutorRequest, AcademyTutorStop, AcademyModelStop, AcademyReviewRequest, AcademyTeachQuizRequest, AcademyStruggleStart, AcademyStruggleAttempt, AcademyStruggleReveal, AcademyWorldStart, AcademyWorldPredict, AcademyWorldObserve, AcademyWorldComplete, AcademyStepAnswer } from './protocol.generated'
 
@@ -264,4 +264,20 @@ export const academyWorldParams: Record<string, Array<{key: string; min: number;
   'fraction-bar': [{key: 'parts', min: 2, max: 12}, {key: 'shaded', min: 0, max: 12}],
   'group-array': [{key: 'groups', min: 1, max: 9}, {key: 'per_group', min: 1, max: 9}],
   'balance-scale': [{key: 'left', min: 0, max: 100}, {key: 'right', min: 0, max: 100}],
+}
+
+/** 自适应步骤路由：答错主步骤时路由到 on_wrong 支架步骤，支架掌握后回到主步骤；支架步骤不计入完成。 */
+export function academyNextStep(steps: readonly AcademyStepPublic[], responses: ReadonlyArray<{step_id: string; correct: boolean}>): AcademyStepPublic | null {
+  const supportIds = new Set(steps.map(step => step.on_wrong).filter((id): id is string => Boolean(id)))
+  const correct = new Set(responses.filter(response => response.correct).map(response => response.step_id))
+  const wrong = new Set(responses.filter(response => !response.correct).map(response => response.step_id))
+  for (const step of steps) {
+    if (supportIds.has(step.id) || correct.has(step.id)) continue
+    if (step.on_wrong && wrong.has(step.id) && !correct.has(step.on_wrong)) {
+      const support = steps.find(item => item.id === step.on_wrong)
+      if (support) return support
+    }
+    return step
+  }
+  return null
 }

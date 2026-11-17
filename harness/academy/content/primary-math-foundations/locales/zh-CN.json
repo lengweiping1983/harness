@@ -191,5 +191,9 @@
   "word-problems.order-solve.hint": "先理解再计算。",
   "word-problems.order-solve.r": "读题判断运算",
   "word-problems.order-solve.c": "列式计算",
-  "word-problems.order-solve.k": "代回情境检验"
+  "word-problems.order-solve.k": "代回情境检验",
+  "fraction-intuition.denominator-support.prompt": "看整个圆。它被平均切成了几份？",
+  "fraction-intuition.denominator-support.fb": "对：整个圆被平均切成 4 份——这个数就是分母。",
+  "fraction-intuition.denominator-support.hint": "数整个圆的每一份。",
+  "fraction-intuition.denominator-support.scaffold": "分母数的是整个圆的所有相等份。数一数：1、2、3、4。"
 }

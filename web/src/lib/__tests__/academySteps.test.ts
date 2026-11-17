@@ -3,7 +3,7 @@ import {renderToStaticMarkup} from 'react-dom/server'
 import {afterEach, expect, it} from 'vitest'
 import {setLocale} from '@/i18n'
 import {AcademyNumberLine, AcademyStepCard, AcademySteps} from '@/components/inspector/AcademySteps'
-import {academyReceiptMatches} from '../academy'
+import {academyNextStep, academyReceiptMatches} from '../academy'
 import type {AcademyLesson, AcademyReceipt, AcademyStepPublic} from '@/types'
 
 afterEach(async () => {await setLocale('zh-CN')})
@@ -106,4 +106,18 @@ it('renders a number line mark for numeric feedback without revealing the answer
   const html = renderToStaticMarkup(card({step: step({kind: 'numeric', prompt: 'Denominator?', content: undefined, tolerance: 0}), feedback: {correct: false, text: 'Not yet.', numberLine: {min: 0, max: 12, value: 7}}}))
   expect(html).toContain('data-academy-number-line')
   expect(html).not.toContain('answer_id')
+})
+
+it('routes adaptively to a support step on wrong and back after mastery', () => {
+  const steps = [
+    step({id: 'worked', kind: 'explain'}),
+    step({id: 'denominator', kind: 'numeric', prompt: 'Denominator?', content: undefined, tolerance: 0, on_wrong: 'support'}),
+    step({id: 'support', kind: 'numeric', prompt: 'Count parts', content: undefined, tolerance: 0}),
+    step({id: 'which-half', kind: 'choice', prompt: 'Which?', content: undefined, options: [{id: 'b', label: 'Equal'}]}),
+  ]
+  expect(academyNextStep(steps, [])?.id).toBe('worked')
+  expect(academyNextStep(steps, [{step_id: 'worked', correct: true}])?.id).toBe('denominator')
+  expect(academyNextStep(steps, [{step_id: 'worked', correct: true}, {step_id: 'denominator', correct: false}])?.id).toBe('support')
+  expect(academyNextStep(steps, [{step_id: 'worked', correct: true}, {step_id: 'denominator', correct: false}, {step_id: 'support', correct: true}])?.id).toBe('denominator')
+  expect(academyNextStep(steps, [{step_id: 'worked', correct: true}, {step_id: 'denominator', correct: true}, {step_id: 'which-half', correct: true}])).toBeNull()
 })

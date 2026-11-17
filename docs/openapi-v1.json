@@ -31756,6 +31756,9 @@
           "number_line": {
             "$ref": "#/components/schemas/AcademyNumberLine"
           },
+          "on_wrong": {
+            "type": "string"
+          },
           "answer": {},
           "tolerance": {
             "type": "number"
@@ -31856,6 +31859,9 @@
             "items": {
               "$ref": "#/components/schemas/AcademyStepItem"
             }
+          },
+          "on_wrong": {
+            "type": "string"
           }
         },
         "required": [
