@@ -51,6 +51,8 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   const [coachLevel, setCoachLevel] = useState<AcademyStudioCoachLevel>(0)
   const [nudge, setNudge] = useState<'struggle' | 'blindspot' | null>(() => struggleRevealed ? 'struggle' : null)
   const [coachDraft, setCoachDraft] = useState('')
+  const [elapsed, setElapsed] = useState(0)
+  const [visible, setVisible] = useState(() => typeof document === 'undefined' || !document.hidden)
   const composing = useRef(false)
   const phaseRef = useRef(phase); phaseRef.current = phase
   const doneRef = useRef(done); doneRef.current = done
@@ -58,7 +60,6 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   const dialog = useRef<HTMLDivElement | null>(null)
   const journey = academyStudioJourney(course.lessons, project.progress, lesson.id, skills)
   const coachTurns = academyStudioCoachTurns(tutorTurns, project.id, lesson.id)
-  const latestCoach = coachTurns.at(-1)
   const coachRunning = coachTurns.some(turn => turn.status === 'running')
   const lessonIndex = course.lessons.findIndex(item => item.id === lesson.id)
   const nextLesson = lessonIndex >= 0 ? course.lessons[lessonIndex + 1] : undefined
@@ -94,6 +95,18 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     return () => controller.abort()
   }, [active, project.id])
   useEffect(() => {if (dueCount > 0 && !manual.current && !doneRef.current.has('review')) setPhase('review')}, [dueCount])
+
+  /** 专注计时：隐藏标签页暂停计时与轮询，回到前台继续；到预计用时给出休息提示。 */
+  useEffect(() => {
+    const onVisibility = () => setVisible(!document.hidden)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
+  useEffect(() => {
+    if (!active || !visible) return
+    const timer = setInterval(() => setElapsed(value => value + 1), 1000)
+    return () => clearInterval(timer)
+  }, [active, visible])
 
   useEffect(() => {
     dialog.current?.focus()
@@ -178,6 +191,8 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
       <span className="rounded-full border border-line px-2 py-0.5">{t('ui.academy.studio.session.plan.new', {title: lesson.title})}</span>
       <span className="rounded-full border border-line px-2 py-0.5">{t('ui.academy.studio.session.plan.reflect')}</span>
       <span className="ml-auto">{t('ui.academy.studio.session.estimate', {minutes: lesson.duration_minutes ?? 15})}</span>
+      <span data-studio-elapsed>{t('ui.academy.studio.session.elapsed', {minutes: Math.floor(elapsed / 60)})}</span>
+      {elapsed >= (lesson.duration_minutes ?? 15) * 60 ? <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-warn">{t('ui.academy.studio.session.rest')}</span> : null}
       <span aria-label={t('ui.academy.studio.session.progress', {done: done.size, total: phases.length})}>{t('ui.academy.studio.session.progress', {done: done.size, total: phases.length})}</span>
     </div>
     <main className="flex-1 overflow-y-auto">
@@ -217,11 +232,15 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
           <Button size="xs" variant="subtle" disabled={disabled || coachRunning} onClick={() => {setCoachLevel(1); onAskCoach(academyStudioCoachPrompt(1, t('ui.academy.studio.nudge.prompt.' + nudge), lesson.title)); setNudge(null)}}>{t('ui.academy.studio.nudge.action')}</Button>
           <Button size="xs" variant="ghost" aria-label={t('ui.academy.studio.nudge.dismiss')} onClick={() => setNudge(null)}>{t('ui.academy.studio.nudge.dismiss')}</Button>
         </div> : null}
-        {latestCoach ? <div role="status" className="max-h-40 overflow-y-auto rounded-lg bg-canvas p-3 text-sm">
-          {latestCoach.status === 'running' ? <p className="flex gap-2 text-muted"><Spinner />{t('ui.academy.loading')}</p>
-            : latestCoach.status === 'completed' ? <div className="min-w-0 leading-reading"><Markdown workspaceLinks={false}>{latestCoach.response}</Markdown></div>
-            : <p className="text-warn">{t('ui.academy.studio.coach.failed')}</p>}
-        </div> : <p className="text-xs text-muted">{t('ui.academy.studio.coach.empty')}</p>}
+        {coachTurns.length ? <ol data-studio-coach-thread className="max-h-48 space-y-2 overflow-y-auto rounded-lg bg-canvas p-3 text-sm">
+          {coachTurns.slice(-3).map(turn => <li key={turn.id} className="space-y-1">
+            <p className="text-xs font-medium text-muted">{t('ui.academy.studio.coach.you')}</p>
+            <p className="whitespace-pre-wrap leading-reading">{turn.prompt.includes('\n') ? turn.prompt.slice(turn.prompt.indexOf('\n') + 1) : t('ui.academy.studio.coach.generalAsk')}</p>
+            {turn.status === 'running' ? <p role="status" className="flex gap-2 text-muted"><Spinner />{t('ui.academy.loading')}</p>
+              : turn.status === 'completed' ? <div className="min-w-0 leading-reading"><Markdown workspaceLinks={false}>{turn.response}</Markdown></div>
+              : <p className="text-warn">{t('ui.academy.studio.coach.failed')}</p>}
+          </li>)}
+        </ol> : <p className="text-xs text-muted">{t('ui.academy.studio.coach.empty')}</p>}
         <form className="flex items-end gap-2"
           onKeyDown={event => {if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault()}}
           onSubmit={event => {event.preventDefault(); sendCoach()}}>

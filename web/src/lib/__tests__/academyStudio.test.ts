@@ -103,6 +103,25 @@ it('renders the immersive studio with journey, single focus phase and coach stri
   expect(chinese).toContain('自己先试')
 })
 
+const coachTurn = (patch: Partial<AcademyTutorTurn> = {}): AcademyTutorTurn => ({id: 'turn', project_id: 'project', lesson_id: 'fractions', request_id: 'r',
+  input_fingerprint: 'a'.repeat(64), prompt: 'base instruction\nWhy equal parts?', allow_execution: false, require_execution: false, response: 'Because halves share one name.',
+  model: 'm', language: 'en', status: 'completed', actions: [], created_at: 1, ...patch})
+
+it('shows a focus timer and a multi-turn coach thread that excludes teach turns', async () => {
+  await setLocale('en')
+  const html = renderToStaticMarkup(studio({tutorTurns: [coachTurn(), coachTurn({id: 'teach', mode: 'teach', created_at: 2}), coachTurn({id: 'late', created_at: 3, prompt: 'no newline prompt'})]}))
+  expect(html).toContain('data-studio-elapsed')
+  expect(html).toContain('0 min focused')
+  expect(html).toContain('data-studio-coach-thread')
+  expect(html).toContain('Why equal parts?')
+  expect(html).toContain('Help me with this phase')
+  expect(html).toContain('Because halves share one name.')
+  expect(html).not.toContain('base instruction')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(studio({tutorTurns: [coachTurn({prompt: 'plain ask'})]}))
+  expect(chinese).toContain('已专注 0 分钟')
+  expect(chinese).toContain('帮我理解当前环节')
+})
 it('shows a session plan with estimate and phase monitoring in both languages', async () => {
   await setLocale('en')
   const html = renderToStaticMarkup(studio())
