@@ -275,7 +275,20 @@
           "number_line": {
             "min": 0,
             "max": 60
-          }
+          },
+          "on_wrong": "compute-support"
+        },
+        {
+          "id": "compute-support",
+          "kind": "numeric",
+          "prompt_key": "subtract-check.compute-support.prompt",
+          "feedback_key": "subtract-check.compute-support.fb",
+          "answer": 24,
+          "tolerance": 0,
+          "hint_keys": [
+            "subtract-check.compute-support.hint"
+          ],
+          "scaffold_key": "subtract-check.compute-support.scaffold"
         },
         {
           "id": "match-checks",
@@ -411,7 +424,20 @@
           "number_line": {
             "min": 0,
             "max": 40
-          }
+          },
+          "on_wrong": "groups-support"
+        },
+        {
+          "id": "groups-support",
+          "kind": "numeric",
+          "prompt_key": "multiply-meaning.groups-support.prompt",
+          "feedback_key": "multiply-meaning.groups-support.fb",
+          "answer": 20,
+          "tolerance": 0,
+          "hint_keys": [
+            "multiply-meaning.groups-support.hint"
+          ],
+          "scaffold_key": "multiply-meaning.groups-support.scaffold"
         },
         {
           "id": "order-groups",
@@ -661,7 +687,20 @@
           "number_line": {
             "min": 0,
             "max": 12
-          }
+          },
+          "on_wrong": "tables-support"
+        },
+        {
+          "id": "tables-support",
+          "kind": "numeric",
+          "prompt_key": "word-problems.tables-support.prompt",
+          "feedback_key": "word-problems.tables-support.fb",
+          "answer": 6,
+          "tolerance": 0,
+          "hint_keys": [
+            "word-problems.tables-support.hint"
+          ],
+          "scaffold_key": "word-problems.tables-support.scaffold"
         },
         {
           "id": "which-op",

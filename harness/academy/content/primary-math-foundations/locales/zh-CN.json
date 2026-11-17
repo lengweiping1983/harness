@@ -195,5 +195,17 @@
   "fraction-intuition.denominator-support.prompt": "看整个圆。它被平均切成了几份？",
   "fraction-intuition.denominator-support.fb": "对：整个圆被平均切成 4 份——这个数就是分母。",
   "fraction-intuition.denominator-support.hint": "数整个圆的每一份。",
-  "fraction-intuition.denominator-support.scaffold": "分母数的是整个圆的所有相等份。数一数：1、2、3、4。"
+  "fraction-intuition.denominator-support.scaffold": "分母数的是整个圆的所有相等份。数一数：1、2、3、4。",
+  "multiply-meaning.groups-support.prompt": "加起来：4 + 4 + 4 + 4 + 4 = ？",
+  "multiply-meaning.groups-support.fb": "对：5 个 4 相加得 20，也就是 5 × 4。",
+  "multiply-meaning.groups-support.hint": "一个一个地加 4。",
+  "multiply-meaning.groups-support.scaffold": "5 个 4 就是 4 + 4 + 4 + 4 + 4。逐步加：4、8、12、16、20。",
+  "word-problems.tables-support.prompt": "把 30 按每份 5 分。30 ÷ 5 = ？",
+  "word-problems.tables-support.fb": "对：30 ÷ 5 = 6 组。",
+  "word-problems.tables-support.hint": "30 里面有几个 5？",
+  "word-problems.tables-support.scaffold": "5 个 5 个地数：5、10、15、20、25、30——共 6 组。",
+  "subtract-check.compute-support.prompt": "62 − 30 = 32。再算 32 − 8 = ？",
+  "subtract-check.compute-support.fb": "对：32 − 8 = 24，所以 62 − 38 = 24。",
+  "subtract-check.compute-support.hint": "从 32 里减 8。",
+  "subtract-check.compute-support.scaffold": "把 38 拆成 30 + 8。先 62 − 30 = 32，再 32 − 8。"
 }

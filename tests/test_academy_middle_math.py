@@ -50,6 +50,7 @@ class MiddleSchoolMathTests(unittest.TestCase):
                     self.assertTrue(all(option['feedback'].strip() for option in check_zh['options']))
         self.assertEqual(positions, {0, 1})
         self.assertGreaterEqual(sum(1 for lesson in english['lessons'] if lesson.get('steps')), 6)
+        self.assertGreaterEqual(sum(1 for lesson in english['lessons'] if any(step.get('on_wrong') for step in lesson.get('steps', []))), 2)
         balance = next(lesson for lesson in english['lessons'] if lesson['id'] == 'equation-balance')
         self.assertEqual(balance['world'], {'kind': 'balance-scale'})
         struggle = next(lesson for lesson in english['lessons'] if lesson['id'] == 'solve-two-step')

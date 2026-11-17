@@ -205,5 +205,13 @@
   "word-to-equation.match-stories.w3": "2 倍减 5 得 13",
   "word-to-equation.match-stories.q1": "2x + 5 = 13",
   "word-to-equation.match-stories.q2": "2(x + 5) = 13",
-  "word-to-equation.match-stories.q3": "2x − 5 = 13"
+  "word-to-equation.match-stories.q3": "2x − 5 = 13",
+  "equation-balance.solve-support.prompt": "x + 5 = 12 即 x = 12 − 5。12 − 5 = ？",
+  "equation-balance.solve-support.fb": "对：12 − 5 = 7，所以 x = 7。",
+  "equation-balance.solve-support.hint": "12 减 5。",
+  "equation-balance.solve-support.scaffold": "两边减 5 后剩 x = 12 − 5。算 12 − 5。",
+  "solve-two-step.solve-support.prompt": "减 5 后：2x = 8。x = 8 ÷ 2 = ？",
+  "solve-two-step.solve-support.fb": "对：8 ÷ 2 = 4，所以 x = 4。",
+  "solve-two-step.solve-support.hint": "8 除以 2。",
+  "solve-two-step.solve-support.scaffold": "先减 5（13 − 5 = 8），再除以 2（8 ÷ 2）。"
 }

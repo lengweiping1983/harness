@@ -205,5 +205,13 @@
   "word-to-equation.match-stories.w3": "Double, minus 5, gives 13",
   "word-to-equation.match-stories.q1": "2x + 5 = 13",
   "word-to-equation.match-stories.q2": "2(x + 5) = 13",
-  "word-to-equation.match-stories.q3": "2x − 5 = 13"
+  "word-to-equation.match-stories.q3": "2x − 5 = 13",
+  "equation-balance.solve-support.prompt": "x + 5 = 12 means x = 12 − 5. What is 12 − 5?",
+  "equation-balance.solve-support.fb": "Right: 12 − 5 = 7, so x = 7.",
+  "equation-balance.solve-support.hint": "Subtract 5 from 12.",
+  "equation-balance.solve-support.scaffold": "Subtracting 5 from both sides leaves x = 12 − 5. Compute 12 − 5.",
+  "solve-two-step.solve-support.prompt": "After subtracting 5: 2x = 8. What is x = 8 ÷ 2?",
+  "solve-two-step.solve-support.fb": "Right: 8 ÷ 2 = 4, so x = 4.",
+  "solve-two-step.solve-support.hint": "Divide 8 by 2.",
+  "solve-two-step.solve-support.scaffold": "First subtract 5 (13 − 5 = 8), then divide by 2 (8 ÷ 2)."
 }

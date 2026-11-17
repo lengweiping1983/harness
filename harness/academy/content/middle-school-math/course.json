@@ -350,7 +350,20 @@
           "number_line": {
             "min": 0,
             "max": 15
-          }
+          },
+          "on_wrong": "solve-support"
+        },
+        {
+          "id": "solve-support",
+          "kind": "numeric",
+          "prompt_key": "equation-balance.solve-support.prompt",
+          "feedback_key": "equation-balance.solve-support.fb",
+          "answer": 7,
+          "tolerance": 0,
+          "hint_keys": [
+            "equation-balance.solve-support.hint"
+          ],
+          "scaffold_key": "equation-balance.solve-support.scaffold"
         },
         {
           "id": "match-solutions",
@@ -579,7 +592,20 @@
           "number_line": {
             "min": 0,
             "max": 10
-          }
+          },
+          "on_wrong": "solve-support"
+        },
+        {
+          "id": "solve-support",
+          "kind": "numeric",
+          "prompt_key": "solve-two-step.solve-support.prompt",
+          "feedback_key": "solve-two-step.solve-support.fb",
+          "answer": 4,
+          "tolerance": 0,
+          "hint_keys": [
+            "solve-two-step.solve-support.hint"
+          ],
+          "scaffold_key": "solve-two-step.solve-support.scaffold"
         },
         {
           "id": "order-solve",

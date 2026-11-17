@@ -195,5 +195,17 @@
   "fraction-intuition.denominator-support.prompt": "Look at the whole circle. Into how many equal parts is it cut?",
   "fraction-intuition.denominator-support.fb": "Right: the whole is cut into 4 equal parts — that number is the denominator.",
   "fraction-intuition.denominator-support.hint": "Count every equal part of the whole circle.",
-  "fraction-intuition.denominator-support.scaffold": "The denominator counts ALL the equal parts of the whole. Count them: 1, 2, 3, 4."
+  "fraction-intuition.denominator-support.scaffold": "The denominator counts ALL the equal parts of the whole. Count them: 1, 2, 3, 4.",
+  "multiply-meaning.groups-support.prompt": "Add them up: 4 + 4 + 4 + 4 + 4 = ?",
+  "multiply-meaning.groups-support.fb": "Right: five 4s added give 20, which is 5 × 4.",
+  "multiply-meaning.groups-support.hint": "Add the 4s one at a time.",
+  "multiply-meaning.groups-support.scaffold": "5 groups of 4 is 4 + 4 + 4 + 4 + 4. Add step by step: 4, 8, 12, 16, 20.",
+  "word-problems.tables-support.prompt": "Share 30 into groups of 5. What is 30 ÷ 5?",
+  "word-problems.tables-support.fb": "Right: 30 ÷ 5 = 6 groups.",
+  "word-problems.tables-support.hint": "How many 5s fit into 30?",
+  "word-problems.tables-support.scaffold": "Count by 5s: 5, 10, 15, 20, 25, 30 — that is 6 groups.",
+  "subtract-check.compute-support.prompt": "62 − 30 = 32. Then 32 − 8 = ?",
+  "subtract-check.compute-support.fb": "Right: 32 − 8 = 24, so 62 − 38 = 24.",
+  "subtract-check.compute-support.hint": "Subtract 8 from 32.",
+  "subtract-check.compute-support.scaffold": "Break 38 into 30 + 8. First 62 − 30 = 32, then 32 − 8."
 }
