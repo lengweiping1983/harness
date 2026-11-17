@@ -1,0 +1,430 @@
+{
+  "schema": 1,
+  "id": "primary-chinese-reading",
+  "version": "1.0.0",
+  "source_revision": "fixture-chinese-1",
+  "title_key": "title",
+  "description_key": "description",
+  "assumptions_key": "assumptions",
+  "references": [],
+  "band": "primary",
+  "lessons": [
+    {
+      "id": "word-meaning",
+      "order": 1,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "word-meaning.title",
+      "goal_key": "word-meaning.goal",
+      "reading_key": "word-meaning.reading",
+      "references": [],
+      "prerequisites": [],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "word-meaning.worked.prompt",
+          "feedback_key": "word-meaning.worked.fb",
+          "hint_keys": [
+            "word-meaning.worked.hint"
+          ],
+          "content_key": "word-meaning.worked.content"
+        },
+        {
+          "id": "clue",
+          "kind": "choice",
+          "prompt_key": "word-meaning.clue.prompt",
+          "feedback_key": "word-meaning.clue.fb",
+          "hint_keys": [
+            "word-meaning.clue.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "word-meaning.clue.a.label",
+              "feedback_key": "word-meaning.clue.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "word-meaning.clue.b.label",
+              "feedback_key": "word-meaning.clue.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "word-meaning.independent.prompt",
+          "feedback_key": "word-meaning.independent.fb",
+          "hint_keys": [
+            "word-meaning.independent.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "word-meaning.independent.a.label",
+              "feedback_key": "word-meaning.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "word-meaning.independent.b.label",
+              "feedback_key": "word-meaning.independent.b.fb"
+            }
+          ]
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "word-meaning.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "word-meaning.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "word-meaning.c1.a.label",
+              "feedback_key": "word-meaning.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "word-meaning.c1.b.label",
+              "feedback_key": "word-meaning.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sentence-order",
+      "order": 2,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "sentence-order.title",
+      "goal_key": "sentence-order.goal",
+      "reading_key": "sentence-order.reading",
+      "references": [],
+      "prerequisites": [
+        "word-meaning"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "sentence-order.worked.prompt",
+          "feedback_key": "sentence-order.worked.fb",
+          "hint_keys": [
+            "sentence-order.worked.hint"
+          ],
+          "content_key": "sentence-order.worked.content"
+        },
+        {
+          "id": "order",
+          "kind": "ordering",
+          "prompt_key": "sentence-order.order.prompt",
+          "feedback_key": "sentence-order.order.fb",
+          "hint_keys": [
+            "sentence-order.order.hint"
+          ],
+          "items": [
+            {
+              "id": "f",
+              "label_key": "sentence-order.order.f.label"
+            },
+            {
+              "id": "s",
+              "label_key": "sentence-order.order.s.label"
+            },
+            {
+              "id": "p",
+              "label_key": "sentence-order.order.p.label"
+            }
+          ],
+          "answer": [
+            "s",
+            "p",
+            "f"
+          ]
+        },
+        {
+          "id": "transfer-order",
+          "kind": "ordering",
+          "prompt_key": "sentence-order.transfer-order.prompt",
+          "feedback_key": "sentence-order.transfer-order.fb",
+          "hint_keys": [
+            "sentence-order.transfer-order.hint"
+          ],
+          "items": [
+            {
+              "id": "e",
+              "label_key": "sentence-order.transfer-order.e.label"
+            },
+            {
+              "id": "c",
+              "label_key": "sentence-order.transfer-order.c.label"
+            },
+            {
+              "id": "b",
+              "label_key": "sentence-order.transfer-order.b.label"
+            }
+          ],
+          "answer": [
+            "b",
+            "c",
+            "e"
+          ],
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "sentence-order.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "sentence-order.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "sentence-order.c1.a.label",
+              "feedback_key": "sentence-order.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "sentence-order.c1.b.label",
+              "feedback_key": "sentence-order.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "paragraph-main",
+      "order": 3,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "paragraph-main.title",
+      "goal_key": "paragraph-main.goal",
+      "reading_key": "paragraph-main.reading",
+      "references": [],
+      "prerequisites": [
+        "sentence-order"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "paragraph-main.worked.prompt",
+          "feedback_key": "paragraph-main.worked.fb",
+          "hint_keys": [
+            "paragraph-main.worked.hint"
+          ],
+          "content_key": "paragraph-main.worked.content"
+        },
+        {
+          "id": "main",
+          "kind": "choice",
+          "prompt_key": "paragraph-main.main.prompt",
+          "feedback_key": "paragraph-main.main.fb",
+          "hint_keys": [
+            "paragraph-main.main.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "paragraph-main.main.a.label",
+              "feedback_key": "paragraph-main.main.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "paragraph-main.main.b.label",
+              "feedback_key": "paragraph-main.main.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "transfer-main",
+          "kind": "choice",
+          "prompt_key": "paragraph-main.transfer-main.prompt",
+          "feedback_key": "paragraph-main.transfer-main.fb",
+          "hint_keys": [
+            "paragraph-main.transfer-main.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "paragraph-main.transfer-main.a.label",
+              "feedback_key": "paragraph-main.transfer-main.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "paragraph-main.transfer-main.b.label",
+              "feedback_key": "paragraph-main.transfer-main.b.fb"
+            }
+          ],
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "paragraph-main.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "paragraph-main.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "paragraph-main.c1.a.label",
+              "feedback_key": "paragraph-main.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "paragraph-main.c1.b.label",
+              "feedback_key": "paragraph-main.c1.b.fb"
+            }
+          ]
+        }
+      ],
+      "struggle": {
+        "challenge_key": "paragraph-main.struggle",
+        "window_minutes": 3
+      }
+    },
+    {
+      "id": "infer-intent",
+      "order": 4,
+      "mode": "study",
+      "milestone": true,
+      "title_key": "infer-intent.title",
+      "goal_key": "infer-intent.goal",
+      "reading_key": "infer-intent.reading",
+      "references": [],
+      "prerequisites": [
+        "paragraph-main"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "infer-intent.worked.prompt",
+          "feedback_key": "infer-intent.worked.fb",
+          "hint_keys": [
+            "infer-intent.worked.hint"
+          ],
+          "content_key": "infer-intent.worked.content"
+        },
+        {
+          "id": "intent",
+          "kind": "choice",
+          "prompt_key": "infer-intent.intent.prompt",
+          "feedback_key": "infer-intent.intent.fb",
+          "hint_keys": [
+            "infer-intent.intent.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "infer-intent.intent.a.label",
+              "feedback_key": "infer-intent.intent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "infer-intent.intent.b.label",
+              "feedback_key": "infer-intent.intent.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "transfer-intent",
+          "kind": "choice",
+          "prompt_key": "infer-intent.transfer-intent.prompt",
+          "feedback_key": "infer-intent.transfer-intent.fb",
+          "hint_keys": [
+            "infer-intent.transfer-intent.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "infer-intent.transfer-intent.a.label",
+              "feedback_key": "infer-intent.transfer-intent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "infer-intent.transfer-intent.b.label",
+              "feedback_key": "infer-intent.transfer-intent.b.fb"
+            }
+          ],
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "infer-intent.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "infer-intent.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "infer-intent.c1.a.label",
+              "feedback_key": "infer-intent.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "infer-intent.c1.b.label",
+              "feedback_key": "infer-intent.c1.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "c2",
+          "prompt_key": "infer-intent.c2.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "infer-intent.c2.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "infer-intent.c2.a.label",
+              "feedback_key": "infer-intent.c2.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "infer-intent.c2.b.label",
+              "feedback_key": "infer-intent.c2.b.fb"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
