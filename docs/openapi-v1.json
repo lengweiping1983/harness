@@ -32750,6 +32750,44 @@
           "constructive_ratio"
         ]
       },
+      "AcademyCalibration": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sure_correct": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sure_wrong": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unsure_correct": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unsure_wrong": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "guess_correct": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "guess_wrong": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "sure_correct",
+          "sure_wrong",
+          "unsure_correct",
+          "unsure_wrong",
+          "guess_correct",
+          "guess_wrong"
+        ]
+      },
       "AcademyMastery": {
         "type": "object",
         "additionalProperties": false,
@@ -32785,6 +32823,9 @@
           "streak_days": {
             "type": "integer",
             "minimum": 0
+          },
+          "calibration": {
+            "$ref": "#/components/schemas/AcademyCalibration"
           }
         },
         "required": [

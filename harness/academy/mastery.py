@@ -220,6 +220,7 @@ class AcademyMastery:
         # 学习报告聚合：修复的盲点、未修复盲点与迁移成功，全部来自持久作答记录。
         transfer_ids = {step['id'] for lesson in lessons for step in lesson.get('steps', []) if step.get('transfer')}
         repairs = transfers = blindspots_open = 0
+        calibration = {'sure_correct': 0, 'sure_wrong': 0, 'unsure_correct': 0, 'unsure_wrong': 0, 'guess_correct': 0, 'guess_wrong': 0}
         for value in self.service.store.list('step-progress', max_bytes=MAX_EVIDENCE_BYTES):
             if value.get('project_id') != project_id:
                 continue
@@ -230,10 +231,13 @@ class AcademyMastery:
                     blindspots_open += 1
                 if row.get('correct') and row.get('step_id') in transfer_ids:
                     transfers += 1
+                confidence = row.get('confidence')
+                if confidence in ('sure', 'unsure', 'guess'):
+                    calibration[confidence + ('_correct' if row.get('correct') else '_wrong')] += 1
         return {'skills': skills, 'due_count': sum(1 for skill in skills if skill['state'] != 'new' and skill['retrievability'] < TARGET_RETENTION),
                 'reviews': totals, 'engagement': self._engagement(project_id),
                 'repairs': repairs, 'transfers': transfers, 'blindspots_open': blindspots_open,
-                'streak_days': self._streak_days(project_id, now)}
+                'streak_days': self._streak_days(project_id, now), 'calibration': calibration}
 
 
     def profile(self, project_id: str, lesson_id: str) -> dict:

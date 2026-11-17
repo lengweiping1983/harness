@@ -183,6 +183,8 @@ class StepSessionTests(unittest.TestCase):
         self.assertEqual(view['transfers'], 1)
         self.assertEqual(view['blindspots_open'], 0)
         self.assertEqual(view['streak_days'], 1)
+        self.assertEqual(view['calibration']['sure_correct'], 1)
+        self.assertEqual(view['calibration']['sure_wrong'], 0)
     def test_transfer_challenge_public_flag_and_memory_weight(self):
         """迁移挑战公开标记不泄答案；新情境答对给予更高初始稳定性。"""
         self.open_lesson('add-meaning')

@@ -85,7 +85,8 @@ it('shows the next review date on skills with evidence', async () => {
 it('renders the learning report tiles from mastery evidence bilingually', async () => {
   await setLocale('en')
   const mastery = {skills: [], due_count: 0, reviews: {attempts: 4, correct: 3, delayed_correct: 2},
-    engagement: {constructive: 1, active: 1, total: 2, constructive_ratio: 0.5}, repairs: 2, transfers: 3, blindspots_open: 1, streak_days: 3}
+    engagement: {constructive: 1, active: 1, total: 2, constructive_ratio: 0.5}, repairs: 2, transfers: 3, blindspots_open: 1, streak_days: 3,
+    calibration: {sure_correct: 4, sure_wrong: 1, unsure_correct: 2, unsure_wrong: 1, guess_correct: 3, guess_wrong: 0}}
   const html = renderToStaticMarkup(createElement(AcademyReport, {mastery}))
   expect(html).toContain('data-academy-report')
   expect(html).toContain('Blindspots repaired')
@@ -93,6 +94,8 @@ it('renders the learning report tiles from mastery evidence bilingually', async 
   expect(html).toContain('50%')
   expect(html).toContain('Day streak (evidence)')
   expect(html).toContain('Export evidence (JSON)')
+  expect(html).toContain('Sure &amp; wrong (blindspots)')
+  expect(html).toContain('Guess &amp; correct')
   await setLocale('zh-CN')
   const chinese = renderToStaticMarkup(createElement(AcademyReport, {mastery}))
   expect(chinese).toContain('已修复盲点')

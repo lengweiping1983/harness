@@ -70,6 +70,8 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
     [counts.durable, 'ui.academy.report.durable'], [counts.learning, 'ui.academy.report.learning'], [counts.fresh, 'ui.academy.report.fresh'],
     [mastery.repairs ?? 0, 'ui.academy.report.repairs'], [mastery.blindspots_open ?? 0, 'ui.academy.report.blindspots'], [mastery.transfers ?? 0, 'ui.academy.report.transfers'],
     [delayed + '%', 'ui.academy.report.delayed'], [mastery.streak_days ?? 0, 'ui.academy.report.streak'],
+    [mastery.calibration?.sure_correct ?? 0, 'ui.academy.report.sureCorrect'], [mastery.calibration?.sure_wrong ?? 0, 'ui.academy.report.sureWrong'],
+    [mastery.calibration?.guess_correct ?? 0, 'ui.academy.report.guessCorrect'],
   ]
   /** 导出原始证据聚合为 JSON，供家长教师核对与实测研究；纯客户端下载，不上传。 */
   const exportEvidence = () => {

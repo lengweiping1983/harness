@@ -2211,6 +2211,14 @@ export interface AcademyEngagement {
   total: number
   constructive_ratio: number
 }
+export interface AcademyCalibration {
+  sure_correct: number
+  sure_wrong: number
+  unsure_correct: number
+  unsure_wrong: number
+  guess_correct: number
+  guess_wrong: number
+}
 export interface AcademyMastery {
   skills: Array<AcademySkillState>
   due_count: number
@@ -2220,6 +2228,7 @@ export interface AcademyMastery {
   transfers?: number
   blindspots_open?: number
   streak_days?: number
+  calibration?: AcademyCalibration
 }
 export interface AcademyReviewRequest {
   request_id: string
