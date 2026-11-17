@@ -20817,6 +20817,314 @@
         ]
       }
     },
+    "/api/v1/academy/projects/{project_id}/world": {
+      "get": {
+        "operationId": "get_api_v1_academy_projects_project_id_world",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyWorldView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_v1_academy_projects_project_id_world",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademyWorldStart"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/academy/projects/{project_id}/world/predict": {
+      "post": {
+        "operationId": "post_api_v1_academy_projects_project_id_world_predict",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademyWorldPredict"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/academy/projects/{project_id}/world/observe": {
+      "post": {
+        "operationId": "post_api_v1_academy_projects_project_id_world_observe",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademyWorldObserve"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/academy/projects/{project_id}/world/complete": {
+      "post": {
+        "operationId": "post_api_v1_academy_projects_project_id_world_complete",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademyWorldComplete"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/academy/projects/{project_id}/struggle": {
       "get": {
         "operationId": "get_api_v1_academy_projects_project_id_struggle",
@@ -30180,6 +30488,9 @@
           },
           "struggle": {
             "$ref": "#/components/schemas/AcademyStruggleTask"
+          },
+          "world": {
+            "$ref": "#/components/schemas/AcademyWorldTask"
           }
         },
         "required": [
@@ -31138,6 +31449,255 @@
           "review_notes"
         ]
       },
+      "AcademyWorldTask": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "fraction-bar",
+              "group-array",
+              "balance-scale"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "AcademyWorldOption": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ]
+      },
+      "AcademyWorldChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyWorldOption"
+            }
+          },
+          "target": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "prompt",
+          "options",
+          "target"
+        ]
+      },
+      "AcademyWorldPrediction": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "option_id": {
+            "type": "string"
+          },
+          "correct": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "option_id",
+          "correct"
+        ]
+      },
+      "AcademyWorldObservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "params": {
+            "type": "object"
+          },
+          "state": {
+            "type": "object"
+          },
+          "at": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "params",
+          "state",
+          "at"
+        ]
+      },
+      "AcademyWorldSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "lesson_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "fraction-bar",
+              "group-array",
+              "balance-scale"
+            ]
+          },
+          "params": {
+            "type": "object"
+          },
+          "challenge": {
+            "$ref": "#/components/schemas/AcademyWorldChallenge"
+          },
+          "prediction": {
+            "$ref": "#/components/schemas/AcademyWorldPrediction"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "predicting",
+              "observing",
+              "completed"
+            ]
+          },
+          "observations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyWorldObservation"
+            }
+          },
+          "note": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "completed_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "lesson_id",
+          "request_id",
+          "kind",
+          "params",
+          "challenge",
+          "status",
+          "observations",
+          "note",
+          "created_at"
+        ]
+      },
+      "AcademyWorldView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "world": {
+            "$ref": "#/components/schemas/AcademyWorldSession"
+          }
+        },
+        "required": []
+      },
+      "AcademyWorldStart": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "lesson_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "lesson_id"
+        ]
+      },
+      "AcademyWorldPredict": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "option_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "request_id",
+          "option_id"
+        ]
+      },
+      "AcademyWorldObserve": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "params": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "request_id",
+          "params"
+        ]
+      },
+      "AcademyWorldComplete": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "request_id",
+          "note"
+        ]
+      },
       "AcademyStruggleTask": {
         "type": "object",
         "additionalProperties": false,
@@ -31743,6 +32303,9 @@
           },
           "struggle": {
             "$ref": "#/components/schemas/AcademyStruggleSession"
+          },
+          "world": {
+            "$ref": "#/components/schemas/AcademyWorldSession"
           },
           "backup_checkpoint_id": {
             "type": "string"

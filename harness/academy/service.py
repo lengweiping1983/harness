@@ -27,6 +27,7 @@ from .protocol import SCHEMAS
 from .store import AcademyStore
 from .struggle import AcademyStruggle
 from .tutor import AcademyTutor
+from .worlds import AcademyWorlds
 
 
 class AcademyService:
@@ -44,6 +45,7 @@ class AcademyService:
         self.tutor = AcademyTutor(self)
         self.mastery = AcademyMastery(self)
         self.struggle = AcademyStruggle(self)
+        self.worlds = AcademyWorlds(self)
 
     def courses(self):
         return [{key: course[key] for key in ('id', 'version', 'origin', 'title', 'description')} | {'lesson_count': len(course['lessons'])}

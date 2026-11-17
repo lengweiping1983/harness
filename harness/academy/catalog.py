@@ -11,6 +11,7 @@ from harness.tools.schema import validate
 from .protocol import obj, array, TEXT, BOOL, VERSION, MODE, SCHEMAS
 
 from .errors import AcademyError
+from .worlds import KINDS as WORLD_KINDS
 from .files import file_path, fingerprint, read_files
 
 IDENTITY = r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}'
@@ -51,6 +52,7 @@ class AcademyCatalog:
                 'duration_minutes': {'type': 'integer', 'minimum': 1, 'maximum': 180},
                 'knowledge_checks': {'type': 'array', 'items': knowledge_check, 'minItems': 1, 'maxItems': 8},
                 'struggle': obj({'challenge_key': TEXT, 'window_minutes': {'type': 'integer', 'minimum': 1, 'maximum': 30}}),
+                'world': obj({'kind': {'type': 'string', 'enum': list(WORLD_KINDS)}}),
                 'trace_labels': {'type': 'object', 'additionalProperties': TEXT}},
                 ['id', 'order', 'milestone', 'title_key', 'goal_key', 'reading_key', 'references', 'prerequisites'])
             manifest = obj({'schema': {'type': 'integer', 'const': 1}, 'id': TEXT, 'version': TEXT,
@@ -170,6 +172,8 @@ class AcademyCatalog:
             if 'struggle' in source:
                 lesson['struggle'] = {'challenge': resources[source['struggle']['challenge_key']],
                                       'window_minutes': source['struggle']['window_minutes']}
+            if 'world' in source:
+                lesson['world'] = {'kind': source['world']['kind']}
         return course
 
     def courses(self):

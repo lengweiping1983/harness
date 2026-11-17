@@ -173,6 +173,9 @@
       "struggle": {
         "challenge_key": "multiply-meaning.struggle",
         "window_minutes": 5
+      },
+      "world": {
+        "kind": "group-array"
       }
     },
     {
@@ -217,6 +220,9 @@
       "struggle": {
         "challenge_key": "fraction-intuition.struggle",
         "window_minutes": 5
+      },
+      "world": {
+        "kind": "fraction-bar"
       }
     },
     {

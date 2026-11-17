@@ -1744,6 +1744,7 @@ export interface AcademyLesson {
   model_system?: string
   knowledge_checks?: Array<AcademyKnowledgeCheck>
   struggle?: AcademyStruggleTask
+  world?: AcademyWorldTask
 }
 export interface AcademyCourseSummary {
   id: string
@@ -1949,6 +1950,61 @@ export interface AcademyDesign {
   error_code?: string
   review_notes: Array<string>
 }
+export interface AcademyWorldTask {
+  kind: 'fraction-bar' | 'group-array' | 'balance-scale'
+}
+export interface AcademyWorldOption {
+  id: string
+  label: string
+}
+export interface AcademyWorldChallenge {
+  prompt: string
+  options: Array<AcademyWorldOption>
+  target: Record<string, unknown>
+}
+export interface AcademyWorldPrediction {
+  option_id: string
+  correct: boolean
+}
+export interface AcademyWorldObservation {
+  params: Record<string, unknown>
+  state: Record<string, unknown>
+  at: number
+}
+export interface AcademyWorldSession {
+  id: string
+  project_id: string
+  lesson_id: string
+  request_id: string
+  kind: 'fraction-bar' | 'group-array' | 'balance-scale'
+  params: Record<string, unknown>
+  challenge: AcademyWorldChallenge
+  prediction?: AcademyWorldPrediction
+  status: 'predicting' | 'observing' | 'completed'
+  observations: Array<AcademyWorldObservation>
+  note: string
+  created_at: number
+  completed_at?: number | null
+}
+export interface AcademyWorldView {
+  world?: AcademyWorldSession
+}
+export interface AcademyWorldStart {
+  request_id: string
+  lesson_id: string
+}
+export interface AcademyWorldPredict {
+  request_id: string
+  option_id: string
+}
+export interface AcademyWorldObserve {
+  request_id: string
+  params: Record<string, unknown>
+}
+export interface AcademyWorldComplete {
+  request_id: string
+  note: string
+}
 export interface AcademyStruggleTask {
   challenge: string
   window_minutes: number
@@ -2083,6 +2139,7 @@ export interface AcademyOperationResult {
   skill?: AcademySkillState
   quiz?: AcademyTeachQuiz
   struggle?: AcademyStruggleSession
+  world?: AcademyWorldSession
   backup_checkpoint_id?: string
   error_code?: string
 }
