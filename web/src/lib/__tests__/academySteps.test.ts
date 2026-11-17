@@ -88,3 +88,12 @@ it('renders matching pairs without revealing the answer key', async () => {
   expect(html).not.toContain('answer')
   expect(html).toContain('disabled=""')
 })
+
+it('shows a contingent scaffold only after a wrong answer', async () => {
+  await setLocale('en')
+  const wrong = renderToStaticMarkup(card({feedback: {correct: false, text: 'Not yet.', scaffold: 'Count all the equal parts first.'}}))
+  expect(wrong).toContain('Count all the equal parts first.')
+  expect(wrong).toContain('scaffold')
+  const correct = renderToStaticMarkup(card({feedback: {correct: true, text: 'Right!', scaffold: 'Count all the equal parts first.'}}))
+  expect(correct).not.toContain('Count all the equal parts first.')
+})

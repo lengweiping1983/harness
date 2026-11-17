@@ -125,7 +125,8 @@ class AcademySteps:
             self.service._mark_started()
             self.store.put('step-progress', progress)
             feedback = step['feedback'] if correct else (step['hints'][0] if step.get('hints') else None)
-            return {'correct': correct, 'feedback': feedback, 'completed': complete,
+            scaffold = None if correct else step.get('scaffold')
+            return {'correct': correct, 'feedback': feedback, 'scaffold': scaffold, 'completed': complete,
                     'step': public_step(step), 'response': entry}
         return self.service._change(request_id, 'step-answer', project_id,
                                     {'lesson_id': lesson_id, 'step_id': step_id, 'response': response}, write)

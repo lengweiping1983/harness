@@ -94,5 +94,6 @@
   "expressions.s4.a": "6",
   "expressions.s4.a.fb": "这只是 3 × 2；别忘了 +1。",
   "expressions.s4.b": "7",
-  "expressions.s4.b.fb": "对：3 × 2 + 1 = 7。"
+  "expressions.s4.b.fb": "对：3 × 2 + 1 = 7。",
+  "expressions.evaluate.scaffold": "把 x 换成 4 后，式子是 2 × 4 + 5。先算 2 × 4，再加 5——不要先算 4 + 5。"
 }

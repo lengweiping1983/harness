@@ -94,5 +94,6 @@
   "fraction-intuition.s4.cut": "Divide one whole into 3 equal parts.",
   "fraction-intuition.s4.take": "Take 1 of those parts.",
   "fraction-intuition.s4.write": "Write it as 1/3.",
-  "fraction-intuition.s4.hint": "You must divide before you can take a part."
+  "fraction-intuition.s4.hint": "You must divide before you can take a part.",
+  "fraction-intuition.denominator.scaffold": "The denominator is not the shaded parts — it is the total number of equal parts the whole is cut into. Count all the equal parts first, then look at how many are shaded."
 }

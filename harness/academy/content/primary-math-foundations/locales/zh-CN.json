@@ -94,5 +94,6 @@
   "fraction-intuition.s4.cut": "把一个整体平均分成 3 份。",
   "fraction-intuition.s4.take": "取其中 1 份。",
   "fraction-intuition.s4.write": "写成 1/3。",
-  "fraction-intuition.s4.hint": "必须先分，才能取一份。"
+  "fraction-intuition.s4.hint": "必须先分，才能取一份。",
+  "fraction-intuition.denominator.scaffold": "分母不是涂色的份数，而是整个圆被平均切成的总份数。先数一共有几份，再看涂了几份。"
 }

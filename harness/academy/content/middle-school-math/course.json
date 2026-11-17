@@ -147,7 +147,8 @@
           "tolerance": 0,
           "hint_keys": [
             "expressions.s3.hint"
-          ]
+          ],
+          "scaffold_key": "expressions.evaluate.scaffold"
         },
         {
           "id": "independent",

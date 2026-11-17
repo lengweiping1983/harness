@@ -108,6 +108,16 @@ class StepSessionTests(unittest.TestCase):
         again = self.answer('worked', 'another explanation', request='ans-after')
         self.assertEqual(again['result']['error_code'], 'steps-completed')
 
+    def test_scaffold_is_contingent_on_wrong_answer_and_hidden_in_public(self):
+        self.open_lesson()
+        view = self.service.steps.view(self.pid, LESSON)
+        self.assertTrue(all('scaffold' not in step for step in view['steps']))
+        wrong = self.answer('denominator', 5)
+        self.assertFalse(wrong['result']['correct'])
+        self.assertIsNotNone(wrong['result']['scaffold'])
+        right = self.answer('denominator', 4, request='ans-denominator-ok')
+        self.assertTrue(right['result']['correct'])
+        self.assertIsNone(right['result']['scaffold'])
     def test_unknown_step_and_lesson_without_steps(self):
         self.open_lesson()
         missing = self.answer('nope', 'x')

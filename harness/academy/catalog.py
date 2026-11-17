@@ -56,7 +56,7 @@ class AcademyCatalog:
                 'world': obj({'kind': {'type': 'string', 'enum': list(WORLD_KINDS)}}),
                 'steps': {'type': 'array', 'maxItems': 16, 'items': obj({
                     'id': TEXT, 'kind': {'type': 'string', 'enum': list(STEP_KINDS)}, 'prompt_key': TEXT, 'feedback_key': TEXT,
-                    'hint_keys': {'type': 'array', 'items': TEXT, 'maxItems': 3}, 'content_key': TEXT,
+                    'hint_keys': {'type': 'array', 'items': TEXT, 'maxItems': 3}, 'content_key': TEXT, 'scaffold_key': TEXT,
                     'answer': {'type': ['number', 'string', 'array', 'object']}, 'tolerance': {'type': 'number'}, 'answer_id': TEXT,
                     'options': {'type': 'array', 'items': knowledge_option, 'minItems': 2, 'maxItems': 6},
                     'items': {'type': 'array', 'items': obj({'id': TEXT, 'label_key': TEXT}), 'minItems': 2, 'maxItems': 8},
@@ -165,6 +165,8 @@ class AcademyCatalog:
             for lesson in course['lessons']:
                 for step in lesson.get('steps', []):
                     keys.extend([step['prompt_key'], step['feedback_key'], *step.get('hint_keys', [])])
+                    if 'scaffold_key' in step:
+                        keys.append(step['scaffold_key'])
                     if 'content_key' in step:
                         keys.append(step['content_key'])
                     keys.extend(option[field] for option in step.get('options', []) for field in ('label_key', 'feedback_key'))
@@ -237,6 +239,8 @@ class AcademyCatalog:
                                  'feedback': resources[step['feedback_key']]}
                     if step.get('hint_keys'):
                         localized['hints'] = [resources[key] for key in step['hint_keys']]
+                    if 'scaffold_key' in step:
+                        localized['scaffold'] = resources[step['scaffold_key']]
                     if step['kind'] == 'explain':
                         localized['content'] = resources[step['content_key']]
                     elif step['kind'] == 'numeric':

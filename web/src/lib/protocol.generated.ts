@@ -1982,6 +1982,7 @@ export interface AcademyStep {
   feedback: string
   hints?: Array<string>
   content?: string
+  scaffold?: string
   answer?: unknown
   tolerance?: number
   answer_id?: string
@@ -2022,6 +2023,7 @@ export interface AcademyStepAnswer {
 export interface AcademyStepResult {
   correct: boolean
   feedback?: string
+  scaffold?: string
   completed: boolean
   step: AcademyStepPublic
   response: AcademyStepResponse

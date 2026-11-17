@@ -94,5 +94,6 @@
   "expressions.s4.a": "6",
   "expressions.s4.a.fb": "That is 3 × 2 only; do not forget the +1.",
   "expressions.s4.b": "7",
-  "expressions.s4.b.fb": "Yes: 3 × 2 + 1 = 7."
+  "expressions.s4.b.fb": "Yes: 3 × 2 + 1 = 7.",
+  "expressions.evaluate.scaffold": "After replacing x with 4 you have 2 × 4 + 5. Compute 2 × 4 first, then add 5 — do not add 4 + 5 first."
 }

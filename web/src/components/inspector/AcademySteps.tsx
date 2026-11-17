@@ -6,7 +6,7 @@ import {academyApi, academyReceiptMatches, isAcademyUnconfirmedWrite} from '@/li
 import {noticeText} from '@/lib/noticeText'
 import {Button} from '@/components/ui/primitives'
 
-type Feedback = {correct: boolean; text: string}
+type Feedback = {correct: boolean; text: string; scaffold?: string}
 
 /** 单步卡片：按类型渲染输入，提交后即时反馈；答对显示下一步。 */
 export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}: {
@@ -49,6 +49,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
       <p className={'flex items-center gap-1 text-sm font-medium ' + (feedback.correct ? 'text-ok' : 'text-warn')}>
         {feedback.correct ? <Check className="h-4 w-4" /> : null}{feedback.text}</p>
     </div> : null}
+    {feedback && !feedback.correct && feedback.scaffold ? <div className="rounded-lg border border-warn/40 bg-canvas p-3 text-sm leading-reading"><p className="text-xs font-medium text-warn">{t('ui.academy.steps.scaffoldLabel')}</p><p className="mt-1 whitespace-pre-wrap">{feedback.scaffold}</p></div> : null}
     {feedback?.correct ? <Button size="sm" onClick={onNext}>{t('ui.academy.steps.next')}</Button> : <form className="space-y-2"
       onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}
       onKeyDown={event => {if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault()}}
@@ -134,7 +135,7 @@ export function AcademySteps({projectId, lesson, active, disabled}: {projectId: 
     }
     clearPending()
     const result = receipt.result.step
-    setFeedback({correct: result.correct, text: result.feedback ?? t(result.correct ? 'ui.academy.steps.correct' : 'ui.academy.steps.tryAgain')})
+    setFeedback({correct: result.correct, text: result.feedback ?? t(result.correct ? 'ui.academy.steps.correct' : 'ui.academy.steps.tryAgain'), scaffold: result.scaffold ?? undefined})
     if (result.completed) setRevision(value => value + 1)
   }
   const submit = async (response: string | number | string[] | Record<string, string>) => {
