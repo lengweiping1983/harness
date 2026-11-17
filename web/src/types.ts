@@ -914,7 +914,7 @@ export type {
   AcademyCourse, AcademyCourseSummary, AcademyLesson, AcademyProgress, AcademyProject,
   AcademySourceFile, AcademyRun, AcademyTraceEvent, AcademyReceipt, AcademyCheckpoint,
   AcademyRestorePreview, AcademyFile, AcademySubmission, AcademyAssessmentDimension, AcademyAssessment,
-  AcademyKnowledgeCheck, AcademyDesign, AcademyModelRun, AcademyTutorTurn, AcademyTutorProposal,
+  AcademyKnowledgeCheck, AcademyDesign, AcademyModelRun, AcademyTutorTurn, AcademyTutorProposal, AcademyMastery, AcademySkillState, AcademySkillReviews, AcademyReviewItem, AcademyReviewCheck, AcademyReview,
 } from './lib/protocol.generated'
 
 export type AcademyDimensionId = import('./lib/protocol.generated').AcademyAssessmentDimension['id']
