@@ -103,7 +103,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
 }
 
 /** 步骤播放器容器：一次一步、即时反馈、进度指示；未知回执只回查。 */
-export function AcademySteps({projectId, lesson, active, disabled, onCompleted}: {projectId: string; lesson: AcademyLesson; active: boolean; disabled: boolean; onCompleted?: () => void}) {
+export function AcademySteps({projectId, lesson, active, disabled, onCompleted, onCalibration}: {projectId: string; lesson: AcademyLesson; active: boolean; disabled: boolean; onCompleted?: () => void; onCalibration?: (code: string) => void}) {
   useLocale()
   const steps = lesson.steps
   const pendingKey = 'academy.steps.pending.' + projectId
@@ -165,6 +165,7 @@ export function AcademySteps({projectId, lesson, active, disabled, onCompleted}:
     clearPending()
     const result = receipt.result.step
     setFeedback({correct: result.correct, text: result.feedback ?? t(result.correct ? 'ui.academy.steps.correct' : 'ui.academy.steps.tryAgain'), scaffold: result.scaffold ?? undefined, numberLine: result.number_line ?? undefined, calibration: result.calibration ?? undefined})
+    if (result.calibration) onCalibration?.(result.calibration)
     if (result.completed) setRevision(value => value + 1)
   }
   const submit = async (response: string | number | string[] | Record<string, string>, confidence: AcademyConfidence) => {

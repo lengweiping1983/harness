@@ -48,6 +48,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   })
   const [phase, setPhase] = useState<AcademyStudioPhaseId>(() => studyCompleted || studyReady ? 'finish' : phases[0].id)
   const [coachLevel, setCoachLevel] = useState<AcademyStudioCoachLevel>(0)
+  const [nudge, setNudge] = useState<'struggle' | 'blindspot' | null>(() => struggleRevealed ? 'struggle' : null)
   const [coachDraft, setCoachDraft] = useState('')
   const composing = useRef(false)
   const phaseRef = useRef(phase); phaseRef.current = phase
@@ -74,6 +75,8 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   }, [phases])
 
   useEffect(() => {if (struggleRevealed) markDone('struggle')}, [struggleRevealed, markDone])
+  /** 主动介入仅由宿主证据触发：挣扎揭示或高确信错误；不自动调用模型，学习者一键采纳或忽略。 */
+  useEffect(() => {if (struggleRevealed) setNudge('struggle')}, [struggleRevealed])
   useEffect(() => {if (checksDone) markDone('checks')}, [checksDone, markDone])
   useEffect(() => {if (note.trim()) markDone('note')}, [note, markDone])
   useEffect(() => {if (studyCompleted) markDone('finish')}, [studyCompleted, markDone])
@@ -108,7 +111,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     if (phase === 'review') return <AcademyReviewSession projectId={project.id} active={active} disabled={disabled} onCompleted={() => markDone('review')} />
     if (phase === 'struggle') return <AcademyStruggle projectId={project.id} lesson={lesson} active={active} disabled={disabled} onPhase={onStrugglePhase} />
     if (phase === 'world') return <AcademyWorld projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('world')} />
-    if (phase === 'steps') return <AcademySteps projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('steps')} />
+    if (phase === 'steps') return <AcademySteps projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('steps')} onCalibration={code => {if (code === 'blindspot') setNudge('blindspot')}} />
     if (phase === 'reading') {
       if (lesson.struggle && !struggleRevealed) return <p className="text-sm leading-reading text-muted">{t('ui.academy.struggle.gated')}</p>
       return <div className="space-y-3">
@@ -198,6 +201,11 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
           </div>
         </div>
         <p className="text-xs text-muted">{t('ui.academy.studio.coach.levelHint.' + coachLevelNames[coachLevel])}</p>
+        {nudge ? <div role="status" data-studio-nudge={nudge} className="flex flex-wrap items-center gap-2 rounded-lg border border-brand/40 bg-brand/5 p-2 text-sm">
+          <p className="min-w-0 flex-1 leading-reading">{t('ui.academy.studio.nudge.' + nudge)}</p>
+          <Button size="xs" variant="subtle" disabled={disabled || coachRunning} onClick={() => {setCoachLevel(1); onAskCoach(academyStudioCoachPrompt(1, t('ui.academy.studio.nudge.prompt.' + nudge), lesson.title)); setNudge(null)}}>{t('ui.academy.studio.nudge.action')}</Button>
+          <Button size="xs" variant="ghost" aria-label={t('ui.academy.studio.nudge.dismiss')} onClick={() => setNudge(null)}>{t('ui.academy.studio.nudge.dismiss')}</Button>
+        </div> : null}
         {latestCoach ? <div role="status" className="max-h-40 overflow-y-auto rounded-lg bg-canvas p-3 text-sm">
           {latestCoach.status === 'running' ? <p className="flex gap-2 text-muted"><Spinner />{t('ui.academy.loading')}</p>
             : latestCoach.status === 'completed' ? <div className="min-w-0 leading-reading"><Markdown workspaceLinks={false}>{latestCoach.response}</Markdown></div>

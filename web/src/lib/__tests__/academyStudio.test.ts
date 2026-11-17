@@ -101,6 +101,19 @@ it('renders the immersive studio with journey, single focus phase and coach stri
   expect(chinese).toContain('自己先试')
 })
 
+it('offers a dismissible proactive coach nudge after the struggle reveal without calling the model', async () => {
+  await setLocale('en')
+  const html = renderToStaticMarkup(studio({struggleRevealed: true}))
+  expect(html).toContain('data-studio-nudge="struggle"')
+  expect(html).toContain('Your struggle just now was valuable')
+  expect(html).toContain('Get one hint')
+  const plain = renderToStaticMarkup(studio())
+  expect(plain).not.toContain('data-studio-nudge')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(studio({struggleRevealed: true}))
+  expect(chinese).toContain('刚才的挣扎很有价值')
+})
+
 it('shows the finish checklist from existing evidence and celebrates completion with the next lesson', async () => {
   await setLocale('en')
   const checklist = renderToStaticMarkup(studio({checkAnswers: new Map([['c1', 'a']]), note: 'I learned halves.', studyReady: true}))
