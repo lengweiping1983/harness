@@ -90,6 +90,15 @@ it('renders matching pairs without revealing the answer key', async () => {
   expect(html).toContain('disabled=""')
 })
 
+it('labels transfer challenges without revealing the answer key', async () => {
+  await setLocale('en')
+  const html = renderToStaticMarkup(card({step: step({kind: 'choice', prompt: 'New situation?', content: undefined, transfer: true, options: [{id: 'a', label: '6 + 4', feedback: 'Combines.'}, {id: 'b', label: '6 - 4', feedback: 'Removes.'}]})}))
+  expect(html).toContain('Transfer challenge')
+  expect(html).not.toContain('answer_id')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(card({step: step({kind: 'choice', prompt: '新情境？', content: undefined, transfer: true, options: [{id: 'a', label: '6 + 4', feedback: '合起来。'}, {id: 'b', label: '6 - 4', feedback: '去掉。'}]})}))
+  expect(chinese).toContain('迁移挑战')
+})
 it('requires a confidence rating before submitting and renders calibration feedback bilingually', async () => {
   await setLocale('en')
   const html = renderToStaticMarkup(card({step: step({kind: 'numeric', prompt: 'Denominator?', content: undefined, tolerance: 0})}))

@@ -31790,6 +31790,9 @@
             "items": {
               "$ref": "#/components/schemas/AcademyStepItem"
             }
+          },
+          "transfer": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -31851,6 +31854,9 @@
           },
           "on_wrong": {
             "type": "string"
+          },
+          "transfer": {
+            "type": "boolean"
           }
         },
         "required": [

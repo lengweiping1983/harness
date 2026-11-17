@@ -213,5 +213,17 @@
   "solve-two-step.solve-support.prompt": "减 5 后：2x = 8。x = 8 ÷ 2 = ？",
   "solve-two-step.solve-support.fb": "对：8 ÷ 2 = 4，所以 x = 4。",
   "solve-two-step.solve-support.hint": "8 除以 2。",
-  "solve-two-step.solve-support.scaffold": "先减 5（13 − 5 = 8），再除以 2（8 ÷ 2）。"
+  "solve-two-step.solve-support.scaffold": "先减 5（13 − 5 = 8），再除以 2（8 ÷ 2）。",
+  "variables.transfer.prompt": "新情境：一支笔 n 元。买 3 支付 20 元。当 n = 4 时找回多少元？",
+  "variables.transfer.fb": "20 - 3n 代入 n = 4 得 20 - 12 = 8。",
+  "variables.transfer.hint": "先写算式，再代入。",
+  "solve-one-step.transfer.a.label": "x - 7 = 15",
+  "solve-one-step.transfer.a.fb": "下车是从 x 里减去。",
+  "solve-one-step.transfer.b.label": "x + 7 = 15",
+  "solve-one-step.transfer.b.fb": "加法表示上车。",
+  "solve-one-step.transfer.c.label": "7 - x = 15",
+  "solve-one-step.transfer.c.fb": "未知数是原来的人数。",
+  "solve-one-step.transfer.prompt": "新情境：车上有 x 人，下车 7 人后剩 15 人。哪个方程符合？",
+  "solve-one-step.transfer.fb": "原来的人数减去下车的等于剩下的。",
+  "solve-one-step.transfer.hint": "哪个量未知：原来、变化还是结果？"
 }

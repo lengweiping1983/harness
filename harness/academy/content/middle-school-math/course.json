@@ -132,6 +132,18 @@
               "feedback_key": "variables.independent.b.fb"
             }
           ]
+        },
+        {
+          "id": "transfer-change",
+          "kind": "numeric",
+          "prompt_key": "variables.transfer.prompt",
+          "feedback_key": "variables.transfer.fb",
+          "hint_keys": [
+            "variables.transfer.hint"
+          ],
+          "transfer": true,
+          "answer": 8,
+          "tolerance": 0
         }
       ]
     },
@@ -519,6 +531,34 @@
               "id": "b",
               "label_key": "solve-one-step.independent.b",
               "feedback_key": "solve-one-step.independent.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "transfer-bus",
+          "kind": "choice",
+          "prompt_key": "solve-one-step.transfer.prompt",
+          "feedback_key": "solve-one-step.transfer.fb",
+          "hint_keys": [
+            "solve-one-step.transfer.hint"
+          ],
+          "transfer": true,
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "solve-one-step.transfer.a.label",
+              "feedback_key": "solve-one-step.transfer.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "solve-one-step.transfer.b.label",
+              "feedback_key": "solve-one-step.transfer.b.fb"
+            },
+            {
+              "id": "c",
+              "label_key": "solve-one-step.transfer.c.label",
+              "feedback_key": "solve-one-step.transfer.c.fb"
             }
           ]
         }

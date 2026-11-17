@@ -128,6 +128,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     </label>
     if (studyCompleted) return <div role="status" className="space-y-3">
       <p className="flex items-center gap-2 text-base font-medium text-ok"><Check className="h-5 w-5" aria-hidden />{t('ui.academy.studio.finish.done')}</p>
+      <p className="text-sm text-muted">{t('ui.academy.studio.session.summary', {done: done.size, total: phases.length})}</p>
       <div className="flex flex-wrap gap-2">
         {nextLesson ? <Button size="sm" variant="primary" onClick={() => onOpenLesson(nextLesson.id)}>{t('ui.academy.studio.finish.next', {title: nextLesson.title})}</Button>
           : <p className="text-sm text-muted">{t('ui.academy.studio.finish.courseDone')}</p>}
@@ -169,6 +170,14 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
         </li>)}
       </ol>
     </nav>
+    <div data-studio-session className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2 text-xs text-muted">
+      <span className="font-medium">{t('ui.academy.studio.session.label')}</span>
+      {dueCount > 0 ? <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-warn">{t('ui.academy.studio.session.plan.review', {count: dueCount})}</span> : null}
+      <span className="rounded-full border border-line px-2 py-0.5">{t('ui.academy.studio.session.plan.new', {title: lesson.title})}</span>
+      <span className="rounded-full border border-line px-2 py-0.5">{t('ui.academy.studio.session.plan.reflect')}</span>
+      <span className="ml-auto">{t('ui.academy.studio.session.estimate', {minutes: lesson.duration_minutes ?? 15})}</span>
+      <span aria-label={t('ui.academy.studio.session.progress', {done: done.size, total: phases.length})}>{t('ui.academy.studio.session.progress', {done: done.size, total: phases.length})}</span>
+    </div>
     <main className="flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-5">
         <div>

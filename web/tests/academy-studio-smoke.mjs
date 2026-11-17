@@ -19,7 +19,7 @@ function App(){
  const check={id:'c1',prompt:zh?'哪一个是二分之一？':'Which is one half?',answer_id:'a',hints:[zh?'必须平均分。':'Parts must be equal.'],options:[
   {id:'a',label:zh?'两份相等中的一份':'One of two equal parts',feedback:zh?'相等的一份。':'Equal share.'},
   {id:'b',label:zh?'任意两块':'Any two pieces',feedback:zh?'不一定相等。':'Not necessarily equal.'}]}
- const step={id:'s1',kind:'numeric',prompt:zh?'分母是几？':'What is the denominator?',feedback:zh?'想想相等的份数。':'Think equal parts.',tolerance:0}
+ const step={id:'s1',kind:'numeric',prompt:zh?'分母是几？':'What is the denominator?',feedback:zh?'想想相等的份数。':'Think equal parts.',tolerance:0,transfer:true}
  const base={mode:'study',milestone:false,run_command:[],source_manifest:[],references:[],prerequisites:[],trace_labels:{},knowledge_checks:[check]}
  const lessons=[
   {...base,id:'place-value',order:1,title:zh?'数位':'Place value',goal:'fixture',reading:'fixture'},
@@ -71,6 +71,8 @@ await browserScenario(async({server,browser}) => {
     // 单焦点环节轨道：步步闯关渲染步骤卡；快速测试答对后自动进入反思，反思后自动进入结课。
     await page.getByRole('button',{name:strings['ui.academy.studio.phase.steps'],exact:true}).click()
     await page.locator('[data-studio-phase="steps"] [data-academy-step="s1"]').waitFor()
+    await page.getByText('Transfer challenge',{exact:true}).waitFor()
+    await page.getByText(strings['ui.academy.studio.session.label'],{exact:true}).waitFor()
     await page.locator('[data-studio-phase="steps"] input[type="number"]').fill('2')
     const stepSubmit = page.locator('[data-studio-phase="steps"] button[type="submit"]')
     assert.equal(await stepSubmit.isDisabled(), true, 'Confidence rating gates step submit')
@@ -96,6 +98,7 @@ await browserScenario(async({server,browser}) => {
       await page.getByRole('button',{name:localeStrings['ui.academy.studio.exit'],exact:true}).waitFor()
       await page.getByText(localeStrings['ui.academy.studio.finish.done'],{exact:true}).waitFor()
       await page.getByText(localeStrings['ui.academy.studio.coach.title'],{exact:true}).waitFor()
+      await page.getByText(localeStrings['ui.academy.studio.session.label'],{exact:true}).waitFor()
       assert.equal(await page.locator('[data-studio-journey] [aria-current="step"]').count(),1)
       const bounds=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
       assert.ok(bounds.scroll<=bounds.width,[theme,width,language].join('/'))

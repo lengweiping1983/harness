@@ -208,6 +208,34 @@
               "feedback_key": "add-meaning.which-add.b.fb"
             }
           ]
+        },
+        {
+          "id": "transfer-pages",
+          "kind": "choice",
+          "prompt_key": "add-meaning.transfer.prompt",
+          "feedback_key": "add-meaning.transfer.fb",
+          "hint_keys": [
+            "add-meaning.transfer.hint"
+          ],
+          "transfer": true,
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "add-meaning.transfer.a.label",
+              "feedback_key": "add-meaning.transfer.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "add-meaning.transfer.b.label",
+              "feedback_key": "add-meaning.transfer.b.fb"
+            },
+            {
+              "id": "c",
+              "label_key": "add-meaning.transfer.c.label",
+              "feedback_key": "add-meaning.transfer.c.fb"
+            }
+          ]
         }
       ]
     },
@@ -485,6 +513,18 @@
               "feedback_key": "multiply-meaning.independent.b.fb"
             }
           ]
+        },
+        {
+          "id": "transfer-apples",
+          "kind": "numeric",
+          "prompt_key": "multiply-meaning.transfer.prompt",
+          "feedback_key": "multiply-meaning.transfer.fb",
+          "hint_keys": [
+            "multiply-meaning.transfer.hint"
+          ],
+          "transfer": true,
+          "answer": 24,
+          "tolerance": 0
         }
       ]
     },

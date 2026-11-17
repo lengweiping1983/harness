@@ -143,6 +143,21 @@ class StepSessionTests(unittest.TestCase):
         unavailable = self.service.steps.answer(other['id'], 'ans-hf', 'agent-loop', 'q1', 'x')
         self.assertEqual(unavailable['result']['error_code'], 'steps-unavailable')
 
+    def test_transfer_challenge_public_flag_and_memory_weight(self):
+        """迁移挑战公开标记不泄答案；新情境答对给予更高初始稳定性。"""
+        self.open_lesson('add-meaning')
+        view = self.service.steps.view(self.pid, 'add-meaning')
+        transfer = next(step for step in view['steps'] if step['id'] == 'transfer-pages')
+        self.assertTrue(transfer['transfer'])
+        self.assertNotIn('answer_id', transfer)
+        self.service.steps.answer(self.pid, 'tr-worked', 'add-meaning', 'worked', 'Adding combines two amounts into one total.')
+        self.service.steps.answer(self.pid, 'tr-match', 'add-meaning', 'match-stories', {'l1': 'r1', 'l2': 'r2', 'l3': 'r3'})
+        self.service.steps.answer(self.pid, 'tr-which', 'add-meaning', 'which-add', 'a')
+        last = self.service.steps.answer(self.pid, 'tr-transfer', 'add-meaning', 'transfer-pages', 'a')
+        self.assertTrue(last['result']['completed'])
+        skill = next(row for row in self.service.mastery.view(self.pid)['skills'] if row['lesson_id'] == 'add-meaning')
+        self.assertEqual(skill['stability_days'], 3.5)
+        self.assertEqual(skill['evidence_count'], 1)
     def test_confidence_calibration_and_projection(self):
         """置信度只产生校准反馈与记录，不改变宿主评分真值；重放保持幂等。"""
         self.open_lesson()

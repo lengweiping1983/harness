@@ -101,6 +101,22 @@ it('renders the immersive studio with journey, single focus phase and coach stri
   expect(chinese).toContain('自己先试')
 })
 
+it('shows a session plan with estimate and phase monitoring in both languages', async () => {
+  await setLocale('en')
+  const html = renderToStaticMarkup(studio())
+  expect(html).toContain('data-studio-session')
+  expect(html).toContain('Today&#x27;s session')
+  expect(html).toContain('New: Fractions')
+  expect(html).toContain('Reflect &amp; finish')
+  expect(html).toContain('~15 min')
+  expect(html).toContain('0/8 phases')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(studio())
+  expect(chinese).toContain('今日会话')
+  expect(chinese).toContain('新课：Fractions')
+  expect(chinese).toContain('反思与结课')
+})
+
 it('offers a dismissible proactive coach nudge after the struggle reveal without calling the model', async () => {
   await setLocale('en')
   const html = renderToStaticMarkup(studio({struggleRevealed: true}))

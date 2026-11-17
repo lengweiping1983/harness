@@ -207,5 +207,17 @@
   "subtract-check.compute-support.prompt": "62 − 30 = 32. Then 32 − 8 = ?",
   "subtract-check.compute-support.fb": "Right: 32 − 8 = 24, so 62 − 38 = 24.",
   "subtract-check.compute-support.hint": "Subtract 8 from 32.",
-  "subtract-check.compute-support.scaffold": "Break 38 into 30 + 8. First 62 − 30 = 32, then 32 − 8."
+  "subtract-check.compute-support.scaffold": "Break 38 into 30 + 8. First 62 − 30 = 32, then 32 − 8.",
+  "add-meaning.transfer.a.label": "6 + 4",
+  "add-meaning.transfer.a.fb": "Both days combine, so add.",
+  "add-meaning.transfer.b.label": "6 - 4",
+  "add-meaning.transfer.b.fb": "Subtracting would remove pages.",
+  "add-meaning.transfer.c.label": "6 × 4",
+  "add-meaning.transfer.c.fb": "Multiplying needs equal groups.",
+  "add-meaning.transfer.prompt": "New situation: you read 6 pages on Monday and 4 on Tuesday. Which expression matches the total pages?",
+  "add-meaning.transfer.fb": "Combining two amounts is addition, even in a new story.",
+  "add-meaning.transfer.hint": "Ask: are the two days combining or comparing?",
+  "multiply-meaning.transfer.prompt": "New situation: each box holds 6 apples and there are 4 boxes. How many apples in all?",
+  "multiply-meaning.transfer.fb": "4 equal groups of 6 is 4 × 6 = 24.",
+  "multiply-meaning.transfer.hint": "Count equal groups first, then the size of each group."
 }

@@ -2001,6 +2001,7 @@ export interface AcademyStep {
   items?: Array<AcademyStepItem>
   left?: Array<AcademyStepItem>
   right?: Array<AcademyStepItem>
+  transfer?: boolean
 }
 export interface AcademyStepPublic {
   id: string
@@ -2013,6 +2014,7 @@ export interface AcademyStepPublic {
   left?: Array<AcademyStepItem>
   right?: Array<AcademyStepItem>
   on_wrong?: string
+  transfer?: boolean
 }
 export interface AcademyStepResponse {
   step_id: string

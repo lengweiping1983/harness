@@ -213,5 +213,17 @@
   "solve-two-step.solve-support.prompt": "After subtracting 5: 2x = 8. What is x = 8 ÷ 2?",
   "solve-two-step.solve-support.fb": "Right: 8 ÷ 2 = 4, so x = 4.",
   "solve-two-step.solve-support.hint": "Divide 8 by 2.",
-  "solve-two-step.solve-support.scaffold": "First subtract 5 (13 − 5 = 8), then divide by 2 (8 ÷ 2)."
+  "solve-two-step.solve-support.scaffold": "First subtract 5 (13 − 5 = 8), then divide by 2 (8 ÷ 2).",
+  "variables.transfer.prompt": "New situation: a pen costs n yuan. You buy 3 pens and pay 20 yuan. What is the change when n = 4?",
+  "variables.transfer.fb": "20 - 3n with n = 4 gives 20 - 12 = 8.",
+  "variables.transfer.hint": "Write the expression first, then substitute.",
+  "solve-one-step.transfer.a.label": "x - 7 = 15",
+  "solve-one-step.transfer.a.fb": "Passengers leaving subtracts from x.",
+  "solve-one-step.transfer.b.label": "x + 7 = 15",
+  "solve-one-step.transfer.b.fb": "Adding would mean passengers boarded.",
+  "solve-one-step.transfer.c.label": "7 - x = 15",
+  "solve-one-step.transfer.c.fb": "The unknown is the starting amount.",
+  "solve-one-step.transfer.prompt": "New situation: a bus had x passengers. 7 got off and 15 remain. Which equation matches?",
+  "solve-one-step.transfer.fb": "Starting amount minus those leaving equals those remaining.",
+  "solve-one-step.transfer.hint": "Which quantity is unknown: start, change, or result?"
 }

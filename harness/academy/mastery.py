@@ -17,6 +17,8 @@ from .errors import AcademyError
 DAY = 86400.0
 TARGET_RETENTION = 0.9
 INITIAL_STABILITY = {'check': 3.0, 'study': 2.0, 'teach': 2.5, 'world': 2.0, 'steps': 2.5}
+# 迁移挑战（新情境答对）给予更高初始稳定性：迁移成功比同情境练习更耐久。
+TRANSFER_STABILITY = 3.5
 INITIAL_DIFFICULTY = 5.0
 STABILITY_CAP = 730.0
 STABILITY_FLOOR = 0.5
@@ -58,7 +60,7 @@ def _apply(state: dict, event: dict) -> dict:
     if state['evidence_count'] == 0:
         if event['kind'] not in INITIAL_STABILITY:
             raise AcademyError('store-invalid')
-        state['stability'] = INITIAL_STABILITY[event['kind']]
+        state['stability'] = TRANSFER_STABILITY if event['kind'] == 'steps' and event.get('transfer') else INITIAL_STABILITY[event['kind']]
     elif event['correct']:
         recall = retrievability(elapsed, state['stability'])
         state['stability'], state['difficulty'] = succeed(state['stability'], state['difficulty'], recall)
@@ -90,7 +92,8 @@ def _events(store, project_id: str) -> list[dict]:
             continue
         if (value.get('status') == 'completed' and isinstance(value.get('completed_at'), (int, float))
                 and isinstance(value.get('lesson_id'), str)):
-            events.append({'at': value['completed_at'], 'id': value['id'], 'lesson_id': value['lesson_id'], 'kind': 'steps', 'correct': True})
+            events.append(dict({'at': value['completed_at'], 'id': value['id'], 'lesson_id': value['lesson_id'], 'kind': 'steps', 'correct': True},
+                               **({'transfer': True} if value.get('transfer') is True else {})))
     for value in store.list('world', max_bytes=MAX_EVIDENCE_BYTES):
         if value.get('project_id') != project_id:
             continue

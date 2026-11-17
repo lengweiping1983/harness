@@ -207,5 +207,17 @@
   "subtract-check.compute-support.prompt": "62 − 30 = 32。再算 32 − 8 = ？",
   "subtract-check.compute-support.fb": "对：32 − 8 = 24，所以 62 − 38 = 24。",
   "subtract-check.compute-support.hint": "从 32 里减 8。",
-  "subtract-check.compute-support.scaffold": "把 38 拆成 30 + 8。先 62 − 30 = 32，再 32 − 8。"
+  "subtract-check.compute-support.scaffold": "把 38 拆成 30 + 8。先 62 − 30 = 32，再 32 − 8。",
+  "add-meaning.transfer.a.label": "6 + 4",
+  "add-meaning.transfer.a.fb": "两天合起来，用加法。",
+  "add-meaning.transfer.b.label": "6 - 4",
+  "add-meaning.transfer.b.fb": "减法会去掉页数。",
+  "add-meaning.transfer.c.label": "6 × 4",
+  "add-meaning.transfer.c.fb": "乘法需要相同的组。",
+  "add-meaning.transfer.prompt": "新情境：周一读 6 页，周二读 4 页。哪个算式表示两天读的总页数？",
+  "add-meaning.transfer.fb": "把两个数量合起来就是加法，换了故事也一样。",
+  "add-meaning.transfer.hint": "问自己：两天是合起来还是比较？",
+  "multiply-meaning.transfer.prompt": "新情境：每箱装 6 个苹果，共 4 箱。一共多少个苹果？",
+  "multiply-meaning.transfer.fb": "4 个 6 的相同组就是 4 × 6 = 24。",
+  "multiply-meaning.transfer.hint": "先数相同的组，再看每组几个。"
 }

@@ -57,7 +57,7 @@ class AcademyCatalog:
                 'steps': {'type': 'array', 'maxItems': 16, 'items': obj({
                     'id': TEXT, 'kind': {'type': 'string', 'enum': list(STEP_KINDS)}, 'prompt_key': TEXT, 'feedback_key': TEXT,
                     'hint_keys': {'type': 'array', 'items': TEXT, 'maxItems': 3}, 'content_key': TEXT, 'scaffold_key': TEXT,
-                    'number_line': obj({'min': {'type': 'number'}, 'max': {'type': 'number'}}), 'on_wrong': TEXT,
+                    'number_line': obj({'min': {'type': 'number'}, 'max': {'type': 'number'}}), 'on_wrong': TEXT, 'transfer': BOOL,
                     'answer': {'type': ['number', 'string', 'array', 'object']}, 'tolerance': {'type': 'number'}, 'answer_id': TEXT,
                     'options': {'type': 'array', 'items': knowledge_option, 'minItems': 2, 'maxItems': 6},
                     'items': {'type': 'array', 'items': obj({'id': TEXT, 'label_key': TEXT}), 'minItems': 2, 'maxItems': 8},
@@ -250,6 +250,8 @@ class AcademyCatalog:
                         localized['number_line'] = step['number_line']
                     if 'on_wrong' in step:
                         localized['on_wrong'] = step['on_wrong']
+                    if step.get('transfer'):
+                        localized['transfer'] = True
                     if step['kind'] == 'explain':
                         localized['content'] = resources[step['content_key']]
                     elif step['kind'] == 'numeric':

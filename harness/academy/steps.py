@@ -32,6 +32,8 @@ def public_step(step):
         public['right'] = [{'id': item['id'], 'label': item['label']} for item in reversed(step['right'])]
     if step.get('on_wrong'):
         public['on_wrong'] = step['on_wrong']
+    if step.get('transfer'):
+        public['transfer'] = True
     return public
 
 
@@ -128,7 +130,9 @@ class AcademySteps:
             main = [step for step in steps if step['id'] not in support_ids]
             complete = all(step['id'] in answered and answered[step['id']]['correct'] for step in main)
             if complete:
-                progress.update(status='completed', completed_at=time.time())
+                # 迁移挑战答对才标记：新情境的成功才是更耐久的理解证据。
+                progress.update(status='completed', completed_at=time.time(),
+                                transfer=any(step.get('transfer') and answered[step['id']]['correct'] for step in steps))
             self.service._mark_started()
             self.store.put('step-progress', progress)
             feedback = step['feedback'] if correct else (step['hints'][0] if step.get('hints') else None)

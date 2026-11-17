@@ -61,6 +61,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
   const ready = confidence !== null && (step.kind === 'ordering' ? order.length > 0 : step.kind === 'choice' ? Boolean(choice) : step.kind === 'matching' ? (step.left ?? []).every(item => Boolean(pairs[item.id])) : Boolean(text.trim()))
   return <div data-academy-step={step.id} data-step-kind={step.kind} className="space-y-3 rounded-xl border border-brand/40 p-3">
     {step.kind === 'explain' && step.content ? <div className="rounded-lg bg-canvas p-3 text-base leading-reading">{step.content}</div> : null}
+    {step.transfer ? <p className="inline-flex rounded-full border border-brand/40 bg-brand/5 px-2 py-0.5 text-xs font-medium text-brand" title={t('ui.academy.steps.transferHint')}>{t('ui.academy.steps.transferLabel')}</p> : null}
     <p className="whitespace-pre-wrap text-base leading-reading">{step.prompt}</p>
     {feedback ? <div role="status" className="space-y-1">
       {feedback.correct && cheer ? <p className="text-sm font-medium text-ok">{cheer}</p> : null}
