@@ -2,7 +2,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {Check, Send, Sparkles, X} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyCourse, AcademyLesson, AcademyProject, AcademyTutorTurn} from '@/types'
-import {academyApi} from '@/lib/academy'
+import {academyApi, academyResumeLesson} from '@/lib/academy'
 import {academyStudioChecksDone, academyStudioCoachPrompt, academyStudioCoachTurns, academyStudioJourney, academyStudioNextPhase, academyStudioPhases, type AcademyStudioCoachLevel, type AcademyStudioPhaseId} from '@/lib/academyStudio'
 import {cn} from '@/lib/utils'
 import {Markdown} from '@/components/markdown/Markdown'
@@ -58,7 +58,8 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   const doneRef = useRef(done); doneRef.current = done
   const closeRef = useRef(onClose); closeRef.current = onClose
   const dialog = useRef<HTMLDivElement | null>(null)
-  const journey = academyStudioJourney(course.lessons, project.progress, lesson.id, skills)
+  const recommended = academyResumeLesson(course, project)
+  const journey = academyStudioJourney(course.lessons, project.progress, lesson.id, skills, recommended?.id)
   const coachTurns = academyStudioCoachTurns(tutorTurns, project.id, lesson.id)
   const coachRunning = coachTurns.some(turn => turn.status === 'running')
   const lessonIndex = course.lessons.findIndex(item => item.id === lesson.id)
@@ -181,6 +182,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current text-xs">{node.state === 'completed' ? <Check className="h-3 w-3" aria-hidden /> : node.order}</span>
             <span className="max-w-40 truncate">{node.title}</span>
             {node.mastery ? <span role="img" aria-label={t('ui.academy.studio.journey.mastery.' + node.mastery)} className={'h-2 w-2 shrink-0 rounded-full ' + (node.mastery === 'durable' ? 'bg-ok' : 'bg-warn')} /> : null}
+            {node.recommended ? <span className="rounded-full bg-brand/15 px-1.5 text-brand">{t('ui.academy.studio.journey.recommended')}</span> : null}
           </button>
         </li>)}
       </ol>
@@ -190,6 +192,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
       {dueCount > 0 ? <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-warn">{t('ui.academy.studio.session.plan.review', {count: dueCount})}</span> : null}
       <span className="rounded-full border border-line px-2 py-0.5">{t('ui.academy.studio.session.plan.new', {title: lesson.title})}</span>
       <span className="rounded-full border border-line px-2 py-0.5">{t('ui.academy.studio.session.plan.reflect')}</span>
+      {recommended && recommended.id !== lesson.id ? <span className="rounded-full border border-brand/40 bg-brand/10 px-2 py-0.5 text-brand">{t('ui.academy.studio.session.plan.recommended', {title: recommended.title})}</span> : null}
       <span className="ml-auto">{t('ui.academy.studio.session.estimate', {minutes: lesson.duration_minutes ?? 15})}</span>
       <span data-studio-elapsed>{t('ui.academy.studio.session.elapsed', {minutes: Math.floor(elapsed / 60)})}</span>
       {elapsed >= (lesson.duration_minutes ?? 15) * 60 ? <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-warn">{t('ui.academy.studio.session.rest')}</span> : null}

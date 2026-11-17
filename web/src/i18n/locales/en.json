@@ -4554,6 +4554,8 @@
   "ui.academy.studio.journeyLabel": "Learning journey",
   "ui.academy.studio.journey.mastery.durable": "Durable memory",
   "ui.academy.studio.journey.mastery.learning": "Consolidating",
+  "ui.academy.studio.journey.recommended": "Next",
+  "ui.academy.studio.session.plan.recommended": "Recommended: {title}",
   "ui.academy.studio.phaseLabel": "Learning phases",
   "ui.academy.studio.session.label": "Today's session",
   "ui.academy.studio.session.plan.review": "Review {count}",

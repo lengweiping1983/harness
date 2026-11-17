@@ -20,14 +20,15 @@ export function academyStudioPhases(lesson: Pick<AcademyLesson, 'struggle' | 'wo
   return phases
 }
 
-export interface AcademyStudioJourneyNode {id: string; order: number; title: string; state: 'completed' | 'active' | 'open'; mastery?: 'learning' | 'durable'}
+export interface AcademyStudioJourneyNode {id: string; order: number; title: string; state: 'completed' | 'active' | 'open'; mastery?: 'learning' | 'durable'; recommended?: boolean}
 
 /** 学习旅程节点：已完成 / 当前 / 待解锁，供舞台顶部路径可视化。 */
 export function academyStudioJourney(lessons: ReadonlyArray<Pick<AcademyLesson, 'id' | 'order' | 'title'>>, progress: AcademyProject['progress'], lessonId: string,
-                                   skills: Readonly<Record<string, string>> = {}): AcademyStudioJourneyNode[] {
+                                   skills: Readonly<Record<string, string>> = {}, recommendedId?: string): AcademyStudioJourneyNode[] {
   return lessons.map(lesson => {const mastery = skills[lesson.id]; return {id: lesson.id, order: lesson.order, title: lesson.title,
     state: lesson.id === lessonId ? 'active' : progress.some(row => row.lesson_id === lesson.id && row.state === 'completed') ? 'completed' : 'open',
-    ...(mastery === 'learning' || mastery === 'durable' ? {mastery} : {})}})
+    ...(mastery === 'learning' || mastery === 'durable' ? {mastery} : {}),
+    ...(recommendedId === lesson.id && lesson.id !== lessonId ? {recommended: true} : {})}})
 }
 
 /** 完成当前环节后跳到下一个未完成环节；全部完成返回 null。 */

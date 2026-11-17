@@ -8050,6 +8050,8 @@
   "ui.academy.studio.journeyLabel": "学习旅程",
   "ui.academy.studio.journey.mastery.durable": "记忆已牢固",
   "ui.academy.studio.journey.mastery.learning": "巩固中",
+  "ui.academy.studio.journey.recommended": "推荐",
+  "ui.academy.studio.session.plan.recommended": "推荐下一课：{title}",
   "ui.academy.studio.phaseLabel": "学习环节",
   "ui.academy.studio.session.label": "今日会话",
   "ui.academy.studio.session.plan.review": "重测 {count}",

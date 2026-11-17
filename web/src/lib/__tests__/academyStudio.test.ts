@@ -44,6 +44,10 @@ it('builds journey states and advances to the next unfinished phase only', () =>
   expect(journey.map(node => node.state)).toEqual(['completed', 'active', 'open'])
   const mastered = academyStudioJourney(course.lessons, project.progress, 'fractions', {fractions: 'durable', 'place-value': 'learning', decimals: 'new'})
   expect(mastered.map(node => node.mastery)).toEqual(['learning', 'durable', undefined])
+  const planned = academyStudioJourney(course.lessons, project.progress, 'fractions', {}, 'decimals')
+  expect(planned.map(node => node.recommended)).toEqual([undefined, undefined, true])
+  const currentRecommended = academyStudioJourney(course.lessons, project.progress, 'fractions', {}, 'fractions')
+  expect(currentRecommended.every(node => !node.recommended)).toBe(true)
   const phases = academyStudioPhases(lesson())
   expect(academyStudioNextPhase(phases, new Set(['struggle']), 'struggle')).toBe('world')
   expect(academyStudioNextPhase(phases, new Set(['world', 'steps', 'reading', 'teach', 'checks', 'note']), 'note')).toBe('finish')
@@ -107,6 +111,18 @@ const coachTurn = (patch: Partial<AcademyTutorTurn> = {}): AcademyTutorTurn => (
   input_fingerprint: 'a'.repeat(64), prompt: 'base instruction\nWhy equal parts?', allow_execution: false, require_execution: false, response: 'Because halves share one name.',
   model: 'm', language: 'en', status: 'completed', actions: [], created_at: 1, ...patch})
 
+it('marks the host-recommended next lesson on the journey and session plan', async () => {
+  await setLocale('en')
+  const advanced = {...project, progress: [...project.progress, {lesson_id: 'fractions', state: 'completed' as const, checkpoint_id: '', evidence_ids: [], attempt_count: 1}]}
+  const html = renderToStaticMarkup(studio({project: advanced}))
+  expect(html).toContain('Recommended: Decimals')
+  expect(html).toContain('>Next<')
+  const plain = renderToStaticMarkup(studio())
+  expect(plain).not.toContain('Recommended:')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(studio({project: advanced}))
+  expect(chinese).toContain('推荐下一课：Decimals')
+})
 it('shows a focus timer and a multi-turn coach thread that excludes teach turns', async () => {
   await setLocale('en')
   const html = renderToStaticMarkup(studio({tutorTurns: [coachTurn(), coachTurn({id: 'teach', mode: 'teach', created_at: 2}), coachTurn({id: 'late', created_at: 3, prompt: 'no newline prompt'})]}))
