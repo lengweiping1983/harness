@@ -4755,6 +4755,7 @@
   "ui.academy.mastery.overdue": "已逾期 {days} 天",
   "ui.academy.mastery.nextDue": "下次重测：{date}",
   "ui.academy.mastery.interleavedHint": "重测混合不同课次，练习辨别它们——交错练习强化区分。",
+  "ui.academy.mastery.restudy": "重学本课，然后再测",
   "ui.academy.mastery.noEvidence": "完成一课学习活动或通过代码检查后，记忆调度会从这里开始。",
   "ui.academy.mastery.queueEmpty": "现在没有到期重测；记忆淡忘时再回来。",
   "ui.academy.mastery.reviewHeading": "独立重测",

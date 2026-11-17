@@ -104,7 +104,7 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
 }
 
 /** 独立重测会话：到期队列逐题作答、幂等回执、未知只回查；面板与专注舞台共用同一行为。 */
-export function AcademyReviewSession({projectId, active, disabled = false, onCompleted}: {projectId: string; active: boolean; disabled?: boolean; onCompleted?: () => void}) {
+export function AcademyReviewSession({projectId, active, disabled = false, onCompleted, onOpenLesson}: {projectId: string; active: boolean; disabled?: boolean; onCompleted?: () => void; onOpenLesson?: (lessonId: string) => void}) {
   useLocale()
   const [queue, setQueue] = useState<AcademyReviewItem[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -193,6 +193,7 @@ export function AcademyReviewSession({projectId, active, disabled = false, onCom
       <p className={result.review.correct ? 'font-medium text-ok' : 'font-medium text-warn'}>{t(result.review.correct ? 'ui.academy.mastery.resultCorrect' : 'ui.academy.mastery.resultWrong')}</p>
       <ul className="space-y-1 text-xs text-muted">{result.review.results.map((item, index) => <li key={item.check_id}>{t('ui.academy.mastery.checkEntry', {number: index + 1, status: t(item.correct ? 'ui.academy.mastery.checkCorrect' : 'ui.academy.mastery.checkWrong')})}</li>)}</ul>
       <p className="text-xs text-muted">{t('ui.academy.mastery.stability', {days: result.skill.stability_days})}</p>
+      {!result.review.correct && onOpenLesson ? <Button size="xs" variant="subtle" data-academy-restudy onClick={() => onOpenLesson(result.review.lesson_id)}>{t('ui.academy.mastery.restudy')}</Button> : null}
     </div> : null}
     {queue.length ? <Section title={t('ui.academy.mastery.reviewHeading')}>
       {queue.length > 1 ? <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.interleavedHint')}</p> : null}
@@ -201,7 +202,7 @@ export function AcademyReviewSession({projectId, active, disabled = false, onCom
     </Section> : loaded ? <p className="text-sm leading-reading text-muted">{t('ui.academy.mastery.queueEmpty')}</p> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
   </div>
 }
-export function AcademyMastery({projectId, active}: {projectId: string; active: boolean}) {
+export function AcademyMastery({projectId, active, onOpenLesson}: {projectId: string; active: boolean; onOpenLesson?: (lessonId: string) => void}) {
   useLocale()
   const [open, setOpen] = useState(false)
   const [view, setView] = useState<AcademyMasteryView | null>(null)
@@ -234,7 +235,7 @@ export function AcademyMastery({projectId, active}: {projectId: string; active: 
         <AcademySkillList skills={view.skills} />
       </> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
       {view ? <AcademyReport mastery={view} /> : null}
-      <AcademyReviewSession projectId={projectId} active={active && open} onCompleted={() => setRevision(value => value + 1)} />
+      <AcademyReviewSession projectId={projectId} active={active && open} onCompleted={() => setRevision(value => value + 1)} onOpenLesson={onOpenLesson} />
     </div>
   </details>
 }

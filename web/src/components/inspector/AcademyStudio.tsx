@@ -124,7 +124,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   }
 
   const renderPhase = () => {
-    if (phase === 'review') return <AcademyReviewSession projectId={project.id} active={active} disabled={disabled} onCompleted={() => markDone('review')} />
+    if (phase === 'review') return <AcademyReviewSession projectId={project.id} active={active} disabled={disabled} onCompleted={() => markDone('review')} onOpenLesson={onOpenLesson} />
     if (phase === 'struggle') return <AcademyStruggle projectId={project.id} lesson={lesson} active={active} disabled={disabled} onPhase={onStrugglePhase} />
     if (phase === 'world') return <AcademyWorld projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('world')} />
     if (phase === 'steps') return <AcademySteps projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('steps')} onCalibration={code => {if (code === 'blindspot') setNudge('blindspot')}} />
