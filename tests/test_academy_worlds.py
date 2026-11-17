@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import tempfile
+import uuid
 import time
 import unittest
 from pathlib import Path
@@ -68,7 +69,7 @@ class WorldSessionTests(unittest.TestCase):
 
     def open_lesson(self, lesson_id):
         project = self.service.project(self.pid)
-        receipt = self.service.start_lesson(self.pid, 'start-' + lesson_id, lesson_id, project['revision'], project['fingerprint'])
+        receipt = self.service.start_lesson(self.pid, 'start-' + lesson_id + '-' + uuid.uuid4().hex[:8], lesson_id, project['revision'], project['fingerprint'])
         self.assertEqual(receipt['status'], 'ready')
 
     def start(self, lesson_id='fraction-intuition', request='world-1'):
@@ -129,6 +130,22 @@ class WorldSessionTests(unittest.TestCase):
             self.assertEqual(receipt['status'], 'ready')
         over = self.service.worlds.observe(self.pid, 'observe-over', {'parts': 4, 'shaded': 1})
         self.assertEqual(over['result']['error_code'], 'world-limit')
+
+    def test_session_follows_active_lesson_across_switches(self):
+        self.open_lesson('fraction-intuition')
+        self.start()
+        self.service.worlds.predict(self.pid, 'predict-f', 'option-0')
+        self.open_lesson('multiply-meaning')
+        self.start(lesson_id='multiply-meaning', request='world-mm')
+        self.service.worlds.predict(self.pid, 'predict-mm', 'option-0')
+        self.open_lesson('fraction-intuition')
+        observe = self.service.worlds.observe(self.pid, 'observe-f', {'parts': 6, 'shaded': 2})
+        self.assertEqual(observe['status'], 'ready')
+        self.assertEqual(observe['result']['world']['lesson_id'], 'fraction-intuition')
+        complete = self.service.worlds.complete(self.pid, 'complete-f', 'Equal parts make the fraction.')
+        self.assertEqual(complete['result']['world']['lesson_id'], 'fraction-intuition')
+        other = self.service.worlds.view(self.pid, 'multiply-meaning')['world']
+        self.assertEqual(other['status'], 'observing')
 
     def test_world_unavailable_and_done_lessons(self):
         self.open_lesson('place-value')

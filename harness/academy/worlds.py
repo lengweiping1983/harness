@@ -117,12 +117,9 @@ class AcademyWorlds:
     def _session(self, project_id):
         record = self.service._record(project_id)
         with self.store.lock:
-            sessions = self._sessions(project_id)
-        session = sessions[0] if sessions else None
+            session = next((value for value in self._sessions(project_id) if value.get('lesson_id') == record['active_lesson_id']), None)
         if session is None:
             raise AcademyError('world-not-found')
-        if session['lesson_id'] != record['active_lesson_id']:
-            raise AcademyError('lesson-not-active')
         return session
 
     def predict(self, project_id, request_id, option_id):

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+import uuid
 import time
 import unittest
 from pathlib import Path
@@ -51,7 +52,7 @@ class AcademyStruggleTests(unittest.IsolatedAsyncioTestCase):
 
     def open_lesson(self, lesson_id=LESSON):
         project = self.service.project(self.pid)
-        receipt = self.service.start_lesson(self.pid, 'start-' + lesson_id, lesson_id, project['revision'], project['fingerprint'])
+        receipt = self.service.start_lesson(self.pid, 'start-' + lesson_id + '-' + uuid.uuid4().hex[:8], lesson_id, project['revision'], project['fingerprint'])
         self.assertEqual(receipt['status'], 'ready')
         return receipt['result']['project']
 
@@ -138,6 +139,21 @@ class AcademyStruggleTests(unittest.IsolatedAsyncioTestCase):
         await self.service.tutor.evaluate(second['result']['tutor_turn']['id'], adapter2, self.config)
         system2 = ' '.join(item['content'] for item in transport2.requests[0]['messages'] if item.get('role') == 'system')
         self.assertNotIn('productive struggle', system2)
+
+    async def test_session_follows_active_lesson_across_switches(self):
+        self.open_lesson()
+        self.start()
+        self.open_lesson('fraction-intuition')
+        second = self.start('struggle-2', lesson_id='fraction-intuition')
+        self.assertEqual(second['status'], 'ready')
+        self.open_lesson()
+        attempt = self.service.struggle.attempt(self.pid, 'attempt-1', 'my try / 我的尝试')
+        self.assertEqual(attempt['status'], 'ready')
+        self.assertEqual(attempt['result']['struggle']['lesson_id'], LESSON)
+        revealed = self.service.struggle.reveal(self.pid, 'reveal-1')
+        self.assertEqual(revealed['result']['struggle']['lesson_id'], LESSON)
+        other = self.service.struggle.view(self.pid, 'fraction-intuition')['struggle']
+        self.assertEqual(other['status'], 'struggling')
 
     async def test_api_validation_precedes_writes(self):
         class Config:

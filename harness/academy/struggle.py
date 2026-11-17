@@ -27,6 +27,11 @@ class AcademyStruggle:
             sessions = self._sessions(project_id)
         return sessions[0] if sessions else None
 
+    def for_lesson(self, project_id, lesson_id):
+        self.service._record(project_id)
+        with self.store.lock:
+            return next((value for value in self._sessions(project_id) if value.get('lesson_id') == lesson_id), None)
+
     def view(self, project_id, lesson_id):
         self.service._record(project_id)
         with self.store.lock:
@@ -64,11 +69,9 @@ class AcademyStruggle:
             raise AcademyError('invalid-request')
         def write():
             record = self.service._record(project_id)
-            session = self.current(project_id)
+            session = self.for_lesson(project_id, record['active_lesson_id'])
             if session is None:
                 raise AcademyError('struggle-not-found')
-            if session['lesson_id'] != record['active_lesson_id']:
-                raise AcademyError('lesson-not-active')
             if session['status'] == 'revealed':
                 raise AcademyError('struggle-revealed')
             session.update(attempt=text, attempt_at=time.time(), status='attempted')
@@ -80,11 +83,9 @@ class AcademyStruggle:
     def reveal(self, project_id, request_id):
         def end():
             record = self.service._record(project_id)
-            session = self.current(project_id)
+            session = self.for_lesson(project_id, record['active_lesson_id'])
             if session is None:
                 raise AcademyError('struggle-not-found')
-            if session['lesson_id'] != record['active_lesson_id']:
-                raise AcademyError('lesson-not-active')
             if session['status'] == 'revealed':
                 return {'struggle': session}
             elapsed = time.time() - session['started_at']
