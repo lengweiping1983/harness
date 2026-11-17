@@ -13,6 +13,7 @@ from unittest.mock import patch
 from harness.academy.errors import AcademyError
 from harness.academy.service import AcademyService
 from harness.core.language import current_language
+from harness.i18n import tr
 from harness.llm.adapter import OpenRouterAdapter
 from harness.llm.transport import Transport
 from harness.llm.types import LlmCallConfig
@@ -264,6 +265,18 @@ class AcademyTeachTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context['misconception']['option_id'], 'wrong')
         self.assertEqual(second['status'], 'completed')
 
+
+
+class TutorPersonaTests(unittest.TestCase):
+    def test_warm_persona_guidance_is_consumed_bilingually(self):
+        for language, tutor_mark, teach_mark in (('en', 'growth-mindset', 'endearingly'), ('zh-CN', '成长型思维', '好奇而真诚')):
+            token = current_language.set(language)
+            try:
+                self.assertIn(tutor_mark, tr('academy.tutor.instructions'))
+                self.assertIn(teach_mark, tr('academy.teach.instructions'))
+                self.assertIn('mastery', tr('academy.tutor.instructions'))
+            finally:
+                current_language.reset(token)
 
 if __name__ == '__main__':
     unittest.main()
