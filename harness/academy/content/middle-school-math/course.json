@@ -1,0 +1,257 @@
+{
+  "schema": 1,
+  "id": "middle-school-math",
+  "version": "1.0.0",
+  "source_revision": "team-2026-11",
+  "title_key": "title",
+  "description_key": "description",
+  "assumptions_key": "assumptions",
+  "references": [],
+  "lessons": [
+    {
+      "id": "variables",
+      "order": 1,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "variables.title",
+      "goal_key": "variables.goal",
+      "reading_key": "variables.reading",
+      "exercise_key": "variables.exercise",
+      "rubric_key": "variables.rubric",
+      "stage_key": "stage.1.title",
+      "stage_goal_key": "stage.1.goal",
+      "duration_minutes": 20,
+      "references": [],
+      "prerequisites": [],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "variables.q1.q",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "variables.q1.a",
+              "feedback_key": "variables.q1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "variables.q1.b",
+              "feedback_key": "variables.q1.b.fb"
+            }
+          ],
+          "answer_id": "a",
+          "hint_keys": [
+            "variables.q1.hint.1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "expressions",
+      "order": 2,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "expressions.title",
+      "goal_key": "expressions.goal",
+      "reading_key": "expressions.reading",
+      "exercise_key": "expressions.exercise",
+      "rubric_key": "expressions.rubric",
+      "stage_key": "stage.1.title",
+      "stage_goal_key": "stage.1.goal",
+      "duration_minutes": 20,
+      "references": [],
+      "prerequisites": [
+        "variables"
+      ],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "expressions.q1.q",
+          "options": [
+            {
+              "id": "b",
+              "label_key": "expressions.q1.b",
+              "feedback_key": "expressions.q1.b.fb"
+            },
+            {
+              "id": "a",
+              "label_key": "expressions.q1.a",
+              "feedback_key": "expressions.q1.a.fb"
+            }
+          ],
+          "answer_id": "a",
+          "hint_keys": [
+            "expressions.q1.hint.1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "equation-balance",
+      "order": 3,
+      "mode": "study",
+      "milestone": true,
+      "title_key": "equation-balance.title",
+      "goal_key": "equation-balance.goal",
+      "reading_key": "equation-balance.reading",
+      "exercise_key": "equation-balance.exercise",
+      "rubric_key": "equation-balance.rubric",
+      "stage_key": "stage.1.title",
+      "stage_goal_key": "stage.1.goal",
+      "duration_minutes": 25,
+      "references": [],
+      "prerequisites": [
+        "expressions"
+      ],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "equation-balance.q1.q",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "equation-balance.q1.a",
+              "feedback_key": "equation-balance.q1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "equation-balance.q1.b",
+              "feedback_key": "equation-balance.q1.b.fb"
+            }
+          ],
+          "answer_id": "a",
+          "hint_keys": [
+            "equation-balance.q1.hint.1"
+          ]
+        }
+      ],
+      "world": {
+        "kind": "balance-scale"
+      }
+    },
+    {
+      "id": "solve-one-step",
+      "order": 4,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "solve-one-step.title",
+      "goal_key": "solve-one-step.goal",
+      "reading_key": "solve-one-step.reading",
+      "exercise_key": "solve-one-step.exercise",
+      "rubric_key": "solve-one-step.rubric",
+      "stage_key": "stage.2.title",
+      "stage_goal_key": "stage.2.goal",
+      "duration_minutes": 20,
+      "references": [],
+      "prerequisites": [
+        "equation-balance"
+      ],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "solve-one-step.q1.q",
+          "options": [
+            {
+              "id": "b",
+              "label_key": "solve-one-step.q1.b",
+              "feedback_key": "solve-one-step.q1.b.fb"
+            },
+            {
+              "id": "a",
+              "label_key": "solve-one-step.q1.a",
+              "feedback_key": "solve-one-step.q1.a.fb"
+            }
+          ],
+          "answer_id": "a",
+          "hint_keys": [
+            "solve-one-step.q1.hint.1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "solve-two-step",
+      "order": 5,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "solve-two-step.title",
+      "goal_key": "solve-two-step.goal",
+      "reading_key": "solve-two-step.reading",
+      "exercise_key": "solve-two-step.exercise",
+      "rubric_key": "solve-two-step.rubric",
+      "stage_key": "stage.2.title",
+      "stage_goal_key": "stage.2.goal",
+      "duration_minutes": 25,
+      "references": [],
+      "prerequisites": [
+        "solve-one-step"
+      ],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "solve-two-step.q1.q",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "solve-two-step.q1.a",
+              "feedback_key": "solve-two-step.q1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "solve-two-step.q1.b",
+              "feedback_key": "solve-two-step.q1.b.fb"
+            }
+          ],
+          "answer_id": "a",
+          "hint_keys": [
+            "solve-two-step.q1.hint.1"
+          ]
+        }
+      ],
+      "struggle": {
+        "challenge_key": "solve-two-step.struggle",
+        "window_minutes": 6
+      }
+    },
+    {
+      "id": "word-to-equation",
+      "order": 6,
+      "mode": "study",
+      "milestone": true,
+      "title_key": "word-to-equation.title",
+      "goal_key": "word-to-equation.goal",
+      "reading_key": "word-to-equation.reading",
+      "exercise_key": "word-to-equation.exercise",
+      "rubric_key": "word-to-equation.rubric",
+      "stage_key": "stage.2.title",
+      "stage_goal_key": "stage.2.goal",
+      "duration_minutes": 30,
+      "references": [],
+      "prerequisites": [
+        "solve-two-step"
+      ],
+      "knowledge_checks": [
+        {
+          "id": "q1",
+          "prompt_key": "word-to-equation.q1.q",
+          "options": [
+            {
+              "id": "b",
+              "label_key": "word-to-equation.q1.b",
+              "feedback_key": "word-to-equation.q1.b.fb"
+            },
+            {
+              "id": "a",
+              "label_key": "word-to-equation.q1.a",
+              "feedback_key": "word-to-equation.q1.a.fb"
+            }
+          ],
+          "answer_id": "a",
+          "hint_keys": [
+            "word-to-equation.q1.hint.1"
+          ]
+        }
+      ]
+    }
+  ]
+}
