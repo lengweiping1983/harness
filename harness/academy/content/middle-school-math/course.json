@@ -44,6 +44,95 @@
             "variables.q1.hint.1"
           ]
         }
+      ],
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "variables.worked.prompt",
+          "feedback_key": "variables.worked.fb",
+          "hint_keys": [
+            "variables.worked.hint"
+          ],
+          "content_key": "variables.worked.content"
+        },
+        {
+          "id": "evaluate-3a",
+          "kind": "numeric",
+          "prompt_key": "variables.evaluate-3a.prompt",
+          "feedback_key": "variables.evaluate-3a.fb",
+          "hint_keys": [
+            "variables.evaluate-3a.hint"
+          ],
+          "scaffold_key": "variables.evaluate-3a.scaffold",
+          "answer": 15,
+          "tolerance": 0,
+          "number_line": {
+            "min": 0,
+            "max": 30
+          }
+        },
+        {
+          "id": "match-a2",
+          "kind": "matching",
+          "prompt_key": "variables.match-a2.prompt",
+          "feedback_key": "variables.match-a2.fb",
+          "hint_keys": [
+            "variables.match-a2.hint"
+          ],
+          "left": [
+            {
+              "id": "e1",
+              "label_key": "variables.match-a2.e1"
+            },
+            {
+              "id": "e2",
+              "label_key": "variables.match-a2.e2"
+            },
+            {
+              "id": "e3",
+              "label_key": "variables.match-a2.e3"
+            }
+          ],
+          "right": [
+            {
+              "id": "v6",
+              "label_key": "variables.match-a2.v6"
+            },
+            {
+              "id": "v5",
+              "label_key": "variables.match-a2.v5"
+            },
+            {
+              "id": "v4",
+              "label_key": "variables.match-a2.v4"
+            }
+          ],
+          "answer": {
+            "e1": "v6",
+            "e2": "v5",
+            "e3": "v4"
+          }
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "variables.independent.prompt",
+          "feedback_key": "variables.independent.fb",
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "variables.independent.a",
+              "feedback_key": "variables.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "variables.independent.b",
+              "feedback_key": "variables.independent.b.fb"
+            }
+          ]
+        }
       ]
     },
     {
@@ -254,6 +343,81 @@
           "answer_id": "a",
           "hint_keys": [
             "solve-one-step.q1.hint.1"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "solve-one-step.worked.prompt",
+          "feedback_key": "solve-one-step.worked.fb",
+          "hint_keys": [
+            "solve-one-step.worked.hint"
+          ],
+          "content_key": "solve-one-step.worked.content"
+        },
+        {
+          "id": "solve-5x",
+          "kind": "numeric",
+          "prompt_key": "solve-one-step.solve-5x.prompt",
+          "feedback_key": "solve-one-step.solve-5x.fb",
+          "hint_keys": [
+            "solve-one-step.solve-5x.hint"
+          ],
+          "scaffold_key": "solve-one-step.solve-5x.scaffold",
+          "answer": 7,
+          "tolerance": 0,
+          "number_line": {
+            "min": 0,
+            "max": 15
+          }
+        },
+        {
+          "id": "order-solve",
+          "kind": "ordering",
+          "prompt_key": "solve-one-step.order-solve.prompt",
+          "feedback_key": "solve-one-step.order-solve.fb",
+          "hint_keys": [
+            "solve-one-step.order-solve.hint"
+          ],
+          "items": [
+            {
+              "id": "m",
+              "label_key": "solve-one-step.order-solve.m"
+            },
+            {
+              "id": "x",
+              "label_key": "solve-one-step.order-solve.x"
+            },
+            {
+              "id": "c",
+              "label_key": "solve-one-step.order-solve.c"
+            }
+          ],
+          "answer": [
+            "m",
+            "x",
+            "c"
+          ]
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "solve-one-step.independent.prompt",
+          "feedback_key": "solve-one-step.independent.fb",
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "solve-one-step.independent.a",
+              "feedback_key": "solve-one-step.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "solve-one-step.independent.b",
+              "feedback_key": "solve-one-step.independent.b.fb"
+            }
           ]
         }
       ]

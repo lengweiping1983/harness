@@ -128,8 +128,8 @@ class StepSessionTests(unittest.TestCase):
         self.open_lesson()
         missing = self.answer('nope', 'x')
         self.assertEqual(missing['result']['error_code'], 'step-not-found')
-        self.open_lesson('place-value')
-        unavailable = self.service.steps.answer(self.pid, 'ans-pv', 'place-value', 'q1', 'x')
+        self.open_lesson('subtract-check')
+        unavailable = self.service.steps.answer(self.pid, 'ans-pv', 'subtract-check', 'q1', 'x')
         self.assertEqual(unavailable['result']['error_code'], 'steps-unavailable')
 
     def test_receipt_idempotency_and_invalid_response(self):

@@ -49,6 +49,53 @@
             "place-value.q1.hint.1"
           ]
         }
+      ],
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "place-value.worked.prompt",
+          "feedback_key": "place-value.worked.fb",
+          "hint_keys": [
+            "place-value.worked.hint"
+          ],
+          "content_key": "place-value.worked.content"
+        },
+        {
+          "id": "tens-value",
+          "kind": "numeric",
+          "prompt_key": "place-value.tens-value.prompt",
+          "feedback_key": "place-value.tens-value.fb",
+          "hint_keys": [
+            "place-value.tens-value.hint"
+          ],
+          "scaffold_key": "place-value.tens-value.scaffold",
+          "answer": 70,
+          "tolerance": 0,
+          "number_line": {
+            "min": 0,
+            "max": 100
+          }
+        },
+        {
+          "id": "which-500",
+          "kind": "choice",
+          "prompt_key": "place-value.which-500.prompt",
+          "feedback_key": "place-value.which-500.fb",
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "place-value.which-500.a",
+              "feedback_key": "place-value.which-500.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "place-value.which-500.b",
+              "feedback_key": "place-value.which-500.b.fb"
+            }
+          ]
+        }
       ]
     },
     {
@@ -87,6 +134,79 @@
           "answer_id": "a",
           "hint_keys": [
             "add-meaning.q1.hint.1"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "add-meaning.worked.prompt",
+          "feedback_key": "add-meaning.worked.fb",
+          "hint_keys": [
+            "add-meaning.worked.hint"
+          ],
+          "content_key": "add-meaning.worked.content"
+        },
+        {
+          "id": "match-stories",
+          "kind": "matching",
+          "prompt_key": "add-meaning.match-stories.prompt",
+          "feedback_key": "add-meaning.match-stories.fb",
+          "hint_keys": [
+            "add-meaning.match-stories.hint"
+          ],
+          "left": [
+            {
+              "id": "l1",
+              "label_key": "add-meaning.match-stories.l1"
+            },
+            {
+              "id": "l2",
+              "label_key": "add-meaning.match-stories.l2"
+            },
+            {
+              "id": "l3",
+              "label_key": "add-meaning.match-stories.l3"
+            }
+          ],
+          "right": [
+            {
+              "id": "r1",
+              "label_key": "add-meaning.match-stories.r1"
+            },
+            {
+              "id": "r2",
+              "label_key": "add-meaning.match-stories.r2"
+            },
+            {
+              "id": "r3",
+              "label_key": "add-meaning.match-stories.r3"
+            }
+          ],
+          "answer": {
+            "l1": "r1",
+            "l2": "r2",
+            "l3": "r3"
+          }
+        },
+        {
+          "id": "which-add",
+          "kind": "choice",
+          "prompt_key": "add-meaning.which-add.prompt",
+          "feedback_key": "add-meaning.which-add.fb",
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "add-meaning.which-add.a",
+              "feedback_key": "add-meaning.which-add.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "add-meaning.which-add.b",
+              "feedback_key": "add-meaning.which-add.b.fb"
+            }
           ]
         }
       ]
