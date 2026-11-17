@@ -1,0 +1,51 @@
+"""小学科学地球与宇宙课程包：合同、双语消费、循环排序与迁移挑战。"""
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from harness.academy.catalog import AcademyCatalog
+from harness.academy.service import AcademyService
+from harness.core.language import current_language
+
+COURSE = 'primary-science-earth-space'
+
+
+class PrimaryEarthSpaceTests(unittest.TestCase):
+    def setUp(self):
+        self.catalog = AcademyCatalog()
+
+    def test_contract_bilingual_cycles_transfer(self):
+        views = []
+        for language in ('en', 'zh-CN', 'en'):
+            token = current_language.set(language)
+            try:
+                views.append(self.catalog.course(COURSE))
+            finally:
+                current_language.reset(token)
+        english, chinese, repeated = views
+        self.assertEqual(english, repeated)
+        self.assertEqual(english['band'], 'primary')
+        self.assertEqual(len(english['lessons']), 4)
+        self.assertNotEqual(english['title'], chinese['title'])
+        transfer_steps = [step for lesson in english['lessons'] for step in lesson.get('steps', []) if step.get('transfer')]
+        self.assertGreaterEqual(len(transfer_steps), 3)
+        self.assertTrue(any(lesson.get('struggle') for lesson in english['lessons']))
+        order_steps = [step for lesson in english['lessons'] for step in lesson.get('steps', []) if step['kind'] == 'ordering']
+        self.assertGreaterEqual(len(order_steps), 4)
+
+    def test_first_lesson_day_night_award_evidence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            service = AcademyService(Path(temp) / 'home')
+            project = service.create_project('create', COURSE)['result']['project']
+            pid = project['id']
+            receipt = service.start_lesson(pid, 'start', 'day-night', project['revision'], project['fingerprint'])
+            self.assertEqual(receipt['status'], 'ready')
+            self.assertTrue(service.steps.answer(pid, 'a1', 'day-night', 'worked', 'Earth spin turns us toward then away from Sun.')['result']['step']['correct'])
+            self.assertTrue(service.steps.answer(pid, 'a2', 'day-night', 'order', ['n1', 'd', 'n2'])['result']['step']['correct'])
+            last = service.steps.answer(pid, 'a3', 'day-night', 'independent', 'a')
+            self.assertTrue(last['result']['step']['completed'])
+            skill = next(row for row in service.mastery.view(pid)['skills'] if row['lesson_id'] == 'day-night')
+            self.assertEqual(skill['evidence_count'], 1)
+

@@ -1,0 +1,447 @@
+{
+  "schema": 1,
+  "id": "primary-science-earth-space",
+  "version": "1.0.0",
+  "source_revision": "fixture-earth-1",
+  "title_key": "title",
+  "description_key": "description",
+  "assumptions_key": "assumptions",
+  "references": [],
+  "band": "primary",
+  "lessons": [
+    {
+      "id": "day-night",
+      "order": 1,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "day-night.title",
+      "goal_key": "day-night.goal",
+      "reading_key": "day-night.reading",
+      "references": [],
+      "prerequisites": [],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "day-night.worked.prompt",
+          "feedback_key": "day-night.worked.fb",
+          "hint_keys": [
+            "day-night.worked.hint"
+          ],
+          "content_key": "day-night.worked.content"
+        },
+        {
+          "id": "order",
+          "kind": "ordering",
+          "prompt_key": "day-night.order.prompt",
+          "feedback_key": "day-night.order.fb",
+          "hint_keys": [
+            "day-night.order.hint"
+          ],
+          "items": [
+            {
+              "id": "n1",
+              "label_key": "day-night.order.n1.label"
+            },
+            {
+              "id": "d",
+              "label_key": "day-night.order.d.label"
+            },
+            {
+              "id": "n2",
+              "label_key": "day-night.order.n2.label"
+            }
+          ],
+          "answer": [
+            "n1",
+            "d",
+            "n2"
+          ]
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "day-night.independent.prompt",
+          "feedback_key": "day-night.independent.fb",
+          "hint_keys": [
+            "day-night.independent.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "day-night.independent.a.label",
+              "feedback_key": "day-night.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "day-night.independent.b.label",
+              "feedback_key": "day-night.independent.b.fb"
+            }
+          ]
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "day-night.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "day-night.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "day-night.c1.a.label",
+              "feedback_key": "day-night.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "day-night.c1.b.label",
+              "feedback_key": "day-night.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "seasons",
+      "order": 2,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "seasons.title",
+      "goal_key": "seasons.goal",
+      "reading_key": "seasons.reading",
+      "references": [],
+      "prerequisites": [
+        "day-night"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "seasons.worked.prompt",
+          "feedback_key": "seasons.worked.fb",
+          "hint_keys": [
+            "seasons.worked.hint"
+          ],
+          "content_key": "seasons.worked.content"
+        },
+        {
+          "id": "order",
+          "kind": "ordering",
+          "prompt_key": "seasons.order.prompt",
+          "feedback_key": "seasons.order.fb",
+          "hint_keys": [
+            "seasons.order.hint"
+          ],
+          "items": [
+            {
+              "id": "sp",
+              "label_key": "seasons.order.sp.label"
+            },
+            {
+              "id": "su",
+              "label_key": "seasons.order.su.label"
+            },
+            {
+              "id": "au",
+              "label_key": "seasons.order.au.label"
+            },
+            {
+              "id": "wi",
+              "label_key": "seasons.order.wi.label"
+            }
+          ],
+          "answer": [
+            "sp",
+            "su",
+            "au",
+            "wi"
+          ]
+        },
+        {
+          "id": "transfer-hemisphere",
+          "kind": "choice",
+          "prompt_key": "seasons.transfer-hemisphere.prompt",
+          "feedback_key": "seasons.transfer-hemisphere.fb",
+          "hint_keys": [
+            "seasons.transfer-hemisphere.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "seasons.transfer-hemisphere.a.label",
+              "feedback_key": "seasons.transfer-hemisphere.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "seasons.transfer-hemisphere.b.label",
+              "feedback_key": "seasons.transfer-hemisphere.b.fb"
+            }
+          ],
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "seasons.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "seasons.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "seasons.c1.a.label",
+              "feedback_key": "seasons.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "seasons.c1.b.label",
+              "feedback_key": "seasons.c1.b.fb"
+            }
+          ]
+        }
+      ],
+      "struggle": {
+        "challenge_key": "seasons.struggle",
+        "window_minutes": 3
+      }
+    },
+    {
+      "id": "moon-phases",
+      "order": 3,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "moon-phases.title",
+      "goal_key": "moon-phases.goal",
+      "reading_key": "moon-phases.reading",
+      "references": [],
+      "prerequisites": [
+        "seasons"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "moon-phases.worked.prompt",
+          "feedback_key": "moon-phases.worked.fb",
+          "hint_keys": [
+            "moon-phases.worked.hint"
+          ],
+          "content_key": "moon-phases.worked.content"
+        },
+        {
+          "id": "order",
+          "kind": "ordering",
+          "prompt_key": "moon-phases.order.prompt",
+          "feedback_key": "moon-phases.order.fb",
+          "hint_keys": [
+            "moon-phases.order.hint"
+          ],
+          "items": [
+            {
+              "id": "n1",
+              "label_key": "moon-phases.order.n1.label"
+            },
+            {
+              "id": "f",
+              "label_key": "moon-phases.order.f.label"
+            },
+            {
+              "id": "n2",
+              "label_key": "moon-phases.order.n2.label"
+            }
+          ],
+          "answer": [
+            "n1",
+            "f",
+            "n2"
+          ]
+        },
+        {
+          "id": "transfer-phase",
+          "kind": "choice",
+          "prompt_key": "moon-phases.transfer-phase.prompt",
+          "feedback_key": "moon-phases.transfer-phase.fb",
+          "hint_keys": [
+            "moon-phases.transfer-phase.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "moon-phases.transfer-phase.a.label",
+              "feedback_key": "moon-phases.transfer-phase.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "moon-phases.transfer-phase.b.label",
+              "feedback_key": "moon-phases.transfer-phase.b.fb"
+            }
+          ],
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "moon-phases.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "moon-phases.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "moon-phases.c1.a.label",
+              "feedback_key": "moon-phases.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "moon-phases.c1.b.label",
+              "feedback_key": "moon-phases.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "water-cycle",
+      "order": 4,
+      "mode": "study",
+      "milestone": true,
+      "title_key": "water-cycle.title",
+      "goal_key": "water-cycle.goal",
+      "reading_key": "water-cycle.reading",
+      "references": [],
+      "prerequisites": [
+        "moon-phases"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "water-cycle.worked.prompt",
+          "feedback_key": "water-cycle.worked.fb",
+          "hint_keys": [
+            "water-cycle.worked.hint"
+          ],
+          "content_key": "water-cycle.worked.content"
+        },
+        {
+          "id": "order",
+          "kind": "ordering",
+          "prompt_key": "water-cycle.order.prompt",
+          "feedback_key": "water-cycle.order.fb",
+          "hint_keys": [
+            "water-cycle.order.hint"
+          ],
+          "items": [
+            {
+              "id": "p",
+              "label_key": "water-cycle.order.p.label"
+            },
+            {
+              "id": "e",
+              "label_key": "water-cycle.order.e.label"
+            },
+            {
+              "id": "c",
+              "label_key": "water-cycle.order.c.label"
+            }
+          ],
+          "answer": [
+            "e",
+            "c",
+            "p"
+          ]
+        },
+        {
+          "id": "transfer-cloud",
+          "kind": "choice",
+          "prompt_key": "water-cycle.transfer-cloud.prompt",
+          "feedback_key": "water-cycle.transfer-cloud.fb",
+          "hint_keys": [
+            "water-cycle.transfer-cloud.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "water-cycle.transfer-cloud.a.label",
+              "feedback_key": "water-cycle.transfer-cloud.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "water-cycle.transfer-cloud.b.label",
+              "feedback_key": "water-cycle.transfer-cloud.b.fb"
+            }
+          ],
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "water-cycle.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "water-cycle.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "water-cycle.c1.a.label",
+              "feedback_key": "water-cycle.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "water-cycle.c1.b.label",
+              "feedback_key": "water-cycle.c1.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "c2",
+          "prompt_key": "water-cycle.c2.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "water-cycle.c2.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "water-cycle.c2.a.label",
+              "feedback_key": "water-cycle.c2.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "water-cycle.c2.b.label",
+              "feedback_key": "water-cycle.c2.b.fb"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
