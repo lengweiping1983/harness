@@ -15,6 +15,7 @@ import {AcademyKnowledgeChecks} from './AcademyKnowledgeChecks'
 import {AcademyLearningPath} from './AcademyLearningPath'
 import {AcademyMastery} from './AcademyMastery'
 import {AcademyTeach} from './AcademyTeach'
+import {AcademyStruggle} from './AcademyStruggle'
 import {AcademyTopicStudio} from './AcademyTopicStudio'
 import {AcademyModelLab} from './AcademyModelLab'
 import {AcademyTutor} from './AcademyTutor'
@@ -113,6 +114,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
   const [submissions, setSubmissions] = useState<AcademySubmission[]>([])
   const [modelRuns, setModelRuns] = useState<AcademyModelRun[]>([])
   const [tutorTurns, setTutorTurns] = useState<AcademyTutorTurn[]>([])
+  const [struggleGate, setStruggleGate] = useState<{lessonId: string; revealed: boolean} | null>(null)
   const [submissionId, setSubmissionId] = useState('')
   const [manageOpen, setManageOpen] = useState(!projectId)
   const [topicOpen, setTopicOpen] = useState(false)
@@ -648,10 +650,11 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
         <h3 className="ui-section-title">{t('ui.academy.lessonTitle', {order: lesson.order, title: lesson.title})}</h3>
 
         <p className="text-base leading-reading">{lesson.goal}</p>
+        {project && current && lesson.struggle ? <AcademyStruggle key={'struggle:' + JSON.stringify([projectId, lessonId])} projectId={projectId} lesson={lesson} active={active} disabled={locked || loading} onPhase={revealed => setStruggleGate(previous => previous && previous.lessonId === lesson.id && previous.revealed === revealed ? previous : {lessonId: lesson.id, revealed})} /> : null}
 
         <details key={JSON.stringify([projectId, lessonId])} ref={guideRef} open={readingLesson || !project || !current} tabIndex={-1} className="rounded-lg border border-line p-3 focus-visible:outline focus-visible:outline-brand">
           <summary className="cursor-pointer rounded-lg text-sm text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.lessonGuide')}</summary>
-          <div className="mt-3 min-w-0 space-y-4">{lesson.prerequisites.length ? <div className="space-y-2 pt-2"><p className="text-xs text-muted">{t('ui.academy.prerequisiteHint')}</p><div className="flex flex-wrap gap-2">{lesson.prerequisites.map(id => {const prerequisite = course.lessons.find(item => item.id === id); return prerequisite ? <Button key={id} size="xs" variant="ghost" disabled={locked} onClick={() => navigate(() => setLessonId(id))}>{t('ui.academy.lessonTitle', {order: prerequisite.order, title: prerequisite.title})}</Button> : null})}</div></div> : null}<div className="flex flex-wrap gap-2 text-xs text-muted">{lesson?.stage ? <span>{lesson.stage}</span> : null}{lesson?.duration_minutes ? <span>{t('ui.academy.duration', {minutes: lesson.duration_minutes})}</span> : null}</div><Section title={t('ui.academy.concept')}><Markdown workspaceLinks={false}>{lesson.reading}</Markdown></Section>
+          <div className="mt-3 min-w-0 space-y-4">{lesson.prerequisites.length ? <div className="space-y-2 pt-2"><p className="text-xs text-muted">{t('ui.academy.prerequisiteHint')}</p><div className="flex flex-wrap gap-2">{lesson.prerequisites.map(id => {const prerequisite = course.lessons.find(item => item.id === id); return prerequisite ? <Button key={id} size="xs" variant="ghost" disabled={locked} onClick={() => navigate(() => setLessonId(id))}>{t('ui.academy.lessonTitle', {order: prerequisite.order, title: prerequisite.title})}</Button> : null})}</div></div> : null}<div className="flex flex-wrap gap-2 text-xs text-muted">{lesson?.stage ? <span>{lesson.stage}</span> : null}{lesson?.duration_minutes ? <span>{t('ui.academy.duration', {minutes: lesson.duration_minutes})}</span> : null}</div>{lesson.struggle && project && current && (!struggleGate || struggleGate.lessonId !== lesson.id || !struggleGate.revealed) ? <p className="text-sm leading-reading text-muted">{t('ui.academy.struggle.gated')}</p> : <Section title={t('ui.academy.concept')}><Markdown workspaceLinks={false}>{lesson.reading}</Markdown></Section>}
           {lesson?.exercise && (readingLesson || !project || !current) ? <Section title={t('ui.academy.experiment')}><Markdown workspaceLinks={false}>{lesson.exercise}</Markdown></Section> : null}</div>
         </details>
         {project && !current ? <Button size="sm" disabled={locked || loading || dirty} onClick={() => openLesson(lesson.id)}>{t('ui.academy.openLesson')}</Button> : null}

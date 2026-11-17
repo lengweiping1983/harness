@@ -1,8 +1,8 @@
 import {isUnconfirmedWrite, request as httpRequest} from './http'
 import {hasTranslation} from '@/i18n'
-import type { AcademyAssessmentDimension, AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyDesign, AcademyDimensionId, AcademyFile, AcademyLesson, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorTurn, AcademyMastery, AcademyReviewItem, AcademyTeachQuiz, AcademyTeachMisconception, AcademyLesson } from '@/types'
+import type { AcademyAssessmentDimension, AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyDesign, AcademyDimensionId, AcademyFile, AcademyLesson, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorTurn, AcademyMastery, AcademyReviewItem, AcademyTeachQuiz, AcademyTeachMisconception, AcademyLesson, AcademyStruggleSession, AcademyStruggleView } from '@/types'
 import type {ApiResult, RequestOptions} from './http'
-import type { AcademyCompleteStudy, AcademyCreateDesign, AcademyCreateProject, AcademyExecute, AcademyModelRunRequest, AcademyRestore, AcademySaveCheckpoint, AcademyStartLesson, AcademyWriteFile, AcademySubmit, AcademyTutorRequest, AcademyTutorStop, AcademyModelStop, AcademyReviewRequest, AcademyTeachQuizRequest } from './protocol.generated'
+import type { AcademyCompleteStudy, AcademyCreateDesign, AcademyCreateProject, AcademyExecute, AcademyModelRunRequest, AcademyRestore, AcademySaveCheckpoint, AcademyStartLesson, AcademyWriteFile, AcademySubmit, AcademyTutorRequest, AcademyTutorStop, AcademyModelStop, AcademyReviewRequest, AcademyTeachQuizRequest, AcademyStruggleStart, AcademyStruggleAttempt, AcademyStruggleReveal } from './protocol.generated'
 
 const prefix = '/api/v1/academy'
 const id = encodeURIComponent
@@ -55,18 +55,22 @@ export const academyApi = {
   review: (project: string, body: AcademyReviewRequest) => post('/projects/' + id(project) + '/reviews', body),
   teachQuiz: (project: string, turn: string, body: AcademyTeachQuizRequest) => post('/projects/' + id(project) + '/tutor-turns/' + id(turn) + '/quiz', body),
   teachQuizzes: (project: string, signal?: AbortSignal) => request<{quizzes: AcademyTeachQuiz[]}>(prefix + '/projects/' + id(project) + '/teach-quizzes', {signal}),
+  struggle: (project: string, lesson: string, signal?: AbortSignal) => request<AcademyStruggleView>(prefix + '/projects/' + id(project) + '/struggle?lesson_id=' + id(lesson), {signal}),
+  struggleStart: (project: string, body: AcademyStruggleStart) => post('/projects/' + id(project) + '/struggle', body),
+  struggleAttempt: (project: string, body: AcademyStruggleAttempt) => post('/projects/' + id(project) + '/struggle/attempt', body),
+  struggleReveal: (project: string, body: AcademyStruggleReveal) => post('/projects/' + id(project) + '/struggle/reveal', body),
 }
 
 export function academyReceiptMatches(receipt: AcademyReceipt, requestId: string, projectId?: string, tutorRequestId = requestId, modelRequestId = requestId): boolean {
   if (receipt.request_id !== requestId) return false
-  if (projectId && [receipt.result.project?.id, receipt.result.run?.project_id, receipt.result.checkpoint?.project_id, receipt.result.submission?.project_id, receipt.result.model_run?.project_id, receipt.result.tutor_turn?.project_id, receipt.result.review?.project_id, receipt.result.quiz?.project_id].some(id => id !== undefined && id !== projectId)) return false
+  if (projectId && [receipt.result.project?.id, receipt.result.run?.project_id, receipt.result.checkpoint?.project_id, receipt.result.submission?.project_id, receipt.result.model_run?.project_id, receipt.result.tutor_turn?.project_id, receipt.result.review?.project_id, receipt.result.quiz?.project_id, receipt.result.struggle?.project_id].some(id => id !== undefined && id !== projectId)) return false
   if (receipt.result.submission && receipt.result.submission.request_id !== requestId) return false
   if (receipt.result.design && receipt.result.design.request_id !== requestId) return false
   if (receipt.result.review && receipt.result.review.request_id !== requestId) return false
   if (receipt.result.quiz && receipt.result.quiz.request_id !== requestId) return false
   if (receipt.result.model_run && receipt.result.model_run.request_id !== modelRequestId) return false
   if (receipt.result.tutor_turn && receipt.result.tutor_turn.request_id !== tutorRequestId) return false
-  if (receipt.status === 'ready' && !receipt.result.project && !receipt.result.checkpoint && !receipt.result.submission && !receipt.result.design && !receipt.result.model_run && !receipt.result.tutor_turn && !receipt.result.review && !receipt.result.quiz) return false
+  if (receipt.status === 'ready' && !receipt.result.project && !receipt.result.checkpoint && !receipt.result.submission && !receipt.result.design && !receipt.result.model_run && !receipt.result.tutor_turn && !receipt.result.review && !receipt.result.quiz && !receipt.result.struggle) return false
   if (receipt.status === 'failed' && !receipt.result.error_code) return false
   return true
 }
