@@ -51,6 +51,7 @@ class AcademyService:
 
     def courses(self):
         return [{key: course[key] for key in ('id', 'version', 'origin', 'title', 'description')} | {'lesson_count': len(course['lessons'])}
+                | ({'band': course['band']} if 'band' in course else {})
                 for course in self.catalog.courses()]
 
     def course(self, course_id):

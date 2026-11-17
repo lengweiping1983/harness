@@ -68,7 +68,8 @@ class AcademyCatalog:
                 ['id', 'order', 'milestone', 'title_key', 'goal_key', 'reading_key', 'references', 'prerequisites'])
             manifest = obj({'schema': {'type': 'integer', 'const': 1}, 'id': TEXT, 'version': TEXT,
                 'source_revision': TEXT, 'title_key': TEXT, 'description_key': TEXT,
-                'references': array(TEXT), 'lessons': array(manifest_lesson), 'assumptions_key': TEXT},
+                'references': array(TEXT), 'lessons': array(manifest_lesson), 'assumptions_key': TEXT,
+                'band': {'type': 'string', 'enum': ['primary', 'middle']}},
                 ['schema', 'id', 'version', 'source_revision', 'title_key', 'description_key', 'references', 'lessons'])
             if validate(course, manifest):
                 raise ValueError
@@ -207,6 +208,8 @@ class AcademyCatalog:
         course = {key: raw[key] for key in ('id', 'version', 'source_revision', 'references')}
         course['origin'] = 'provided' if self.directory(course_id).parent == self.root else 'personal'
         course.update(title=resources[raw['title_key']], description=resources[raw['description_key']])
+        if 'band' in raw:
+            course['band'] = raw['band']
         if 'assumptions_key' in raw:
             course['assumptions'] = resources[raw['assumptions_key']]
         course['lessons'] = [{**{key: lesson[key] for key in ('id', 'order', 'milestone', 'references', 'prerequisites')},

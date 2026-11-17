@@ -30658,6 +30658,13 @@
           "lesson_count": {
             "type": "integer",
             "minimum": 0
+          },
+          "band": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "middle"
+            ]
           }
         },
         "required": [
@@ -30709,6 +30716,13 @@
           },
           "assumptions": {
             "type": "string"
+          },
+          "band": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "middle"
+            ]
           }
         },
         "required": [

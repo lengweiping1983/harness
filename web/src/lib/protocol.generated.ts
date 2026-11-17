@@ -1754,6 +1754,7 @@ export interface AcademyCourseSummary {
   title: string
   description: string
   lesson_count: number
+  band?: 'primary' | 'middle'
 }
 export interface AcademyCourse {
   id: string
@@ -1765,6 +1766,7 @@ export interface AcademyCourse {
   lessons: Array<AcademyLesson>
   references: Array<string>
   assumptions?: string
+  band?: 'primary' | 'middle'
 }
 export interface AcademyProgress {
   lesson_id: string

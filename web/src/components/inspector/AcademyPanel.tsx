@@ -109,6 +109,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
   const [pending, setPending] = useState<Pending | null>(null)
   const [storageError, setStorageError] = useState(savedView.invalid === 'true')
   const [studioOpen, setStudioOpen] = useState(() => {try {return localStorage.getItem(studioKey) === 'open'} catch {return false}})
+  const [homeBand, setHomeBand] = useState<'all' | 'primary' | 'middle'>('all')
   const studioPreference = useRef<'open' | 'closed' | null>((() => {try {const value = localStorage.getItem(studioKey); return value === 'open' ? 'open' : value === 'closed' ? 'closed' : null} catch {return null}})())
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -171,7 +172,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
   const completedLessons = course && project ? course.lessons.filter(lesson => project.progress.some(row => row.lesson_id === lesson.id && row.state !== 'in_progress')).length : 0
 
   const hasProject = !!projectId
-  useEffect(() => {setManageOpen(!hasProject); setCatalogOpen(hasProject)}, [hasProject])
+  useEffect(() => {setManageOpen(false); setCatalogOpen(hasProject)}, [hasProject])
   /** 闯关式课次默认进入专注舞台；用户显式退出后尊重其持久偏好。 */
   useEffect(() => {
     if (studioPreference.current !== null || !active) return
@@ -626,9 +627,26 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
     {pending ? <div role="status" className="space-y-2 rounded-xl border border-warn/40 p-3 text-sm"><p>{t('ui.academy.pending')}</p><p className="break-all font-mono text-xs">{t('ui.academy.receiptId', {id: pending.requestId})}</p><Button size="xs" disabled={busy} onClick={() => void checkReceipt()}>{t('ui.academy.recheckReceipt')}</Button></div> : null}
     {error ? <p role="alert" className="text-sm text-danger">{noticeText(error)}</p> : null}
     {dirty ? <div className="flex flex-wrap items-center gap-2 text-sm text-warn"><span>{t('ui.academy.draftRunHint')}</span><Button size="xs" variant="ghost" onClick={() => {localStorage.removeItem(draftKey(projectId, path)); setDraft(source?.content ?? ''); setRevision(value => value + 1)}}>{t('ui.academy.discard')}</Button></div> : null}
+    {!project ? <section data-academy-home aria-label={t('ui.academy.home.title')} className="space-y-3">
+      <div className="rounded-2xl border border-brand/30 bg-brand/5 p-4">
+        <h3 className="text-lg font-semibold">{t('ui.academy.home.title')}</h3>
+        <p className="mt-1 text-sm leading-reading text-muted">{t('ui.academy.home.subtitle')}</p>
+        <div role="group" aria-label={t('ui.academy.home.bandLabel')} className="mt-3 flex flex-wrap gap-1">
+          {(['all', 'primary', 'middle'] as const).map(band => <button key={band} type="button" data-home-band={band} aria-pressed={homeBand === band} onClick={() => setHomeBand(band)}
+            className={'rounded-full border px-2.5 py-1 text-xs ' + (homeBand === band ? 'border-brand bg-brand/10 font-medium text-brand' : 'border-line text-muted')}>{t('ui.academy.home.band.' + band)}</button>)}
+        </div>
+      </div>
+      <ul className="grid gap-3 sm:grid-cols-2">{courses.filter(item => item.origin === 'provided' && (homeBand === 'all' || item.band === homeBand)).map(item => {const saved = academyCourseProject(item, projects, projectId); return <li key={item.id} data-course-id={item.id} className="flex flex-col gap-2 rounded-2xl border border-line p-4">
+        <div className="flex items-start justify-between gap-2"><h3 className="text-base font-semibold">{item.title}</h3>{item.band ? <Badge tone="brand">{t('ui.academy.home.band.' + item.band)}</Badge> : null}</div>
+        {saved ? <p className="break-words text-xs text-muted">{t('ui.academy.resumeProjectName', {name: saved.name})}</p> : null}
+        <p className="text-sm leading-reading text-muted">{item.description}</p>
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-muted">{t('ui.academy.lessonCount', {count: item.lesson_count})}</span>
+          <Button size="sm" variant="primary" disabled={locked || loading || dirty} aria-label={t(saved ? 'ui.academy.resumeCourse' : 'ui.academy.startCourse', {title: item.title})} icon={<BookOpen className="h-3.5 w-3.5" />} onClick={() => saved ? resumeProject(saved) : startCourse(item.id)}>{t(saved ? 'ui.academy.resumeCourseAction' : 'ui.academy.startDesignedCourse')}</Button></div>
+      </li>})}</ul>
+    </section> : null}
     <details data-academy-section="manage" open={manageOpen} onToggle={event => setManageOpen(event.currentTarget.open)} className="rounded-xl border border-line p-3">
       <summary className="cursor-pointer rounded-lg text-sm text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.manage')}</summary>
-      <Section title={t('ui.academy.providedCourses')} className="mt-4">
+      {project ? <Section title={t('ui.academy.providedCourses')} className="mt-4">
         <ul className="space-y-3">{courses.filter(item => item.origin === 'provided').map(item => {const saved = academyCourseProject(item, projects, projectId); return <li key={item.id} data-course-id={item.id} className="space-y-2 rounded-xl border border-line p-3">
           <h3 className="text-sm font-medium">{item.title}</h3>
           {saved ? <p className="break-words text-xs text-muted">{t('ui.academy.resumeProjectName', {name: saved.name})}</p> : null}
@@ -636,7 +654,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
           <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-muted">{t('ui.academy.lessonCount', {count: item.lesson_count})}</span>
             <Button size="sm" variant="subtle" disabled={locked || loading || dirty} aria-label={t(saved ? 'ui.academy.resumeCourse' : 'ui.academy.startCourse', {title: item.title})} icon={<BookOpen className="h-3.5 w-3.5" />} onClick={() => saved ? resumeProject(saved) : startCourse(item.id)}>{t(saved ? 'ui.academy.resumeCourseAction' : 'ui.academy.startDesignedCourse')}</Button></div>
         </li>})}</ul>
-      </Section>
+      </Section> : null}
       <details data-academy-section="topic" open={topicOpen} onToggle={event => setTopicOpen(event.currentTarget.open)} className="mt-4 rounded-xl border border-line p-3">
       <summary className="cursor-pointer rounded-lg text-sm focus-visible:outline focus-visible:outline-brand">{t('ui.academy.createTopicCourse')}</summary>
       <AcademyTopicStudio active={active && manageOpen && topicOpen} disabled={locked} onCatalogChanged={() => {

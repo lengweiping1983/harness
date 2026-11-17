@@ -30,6 +30,8 @@ class PrimaryMathCourseTests(unittest.TestCase):
         english, chinese, repeated = views
         self.assertEqual(english, repeated)
         self.assertEqual(english['origin'], 'provided')
+        self.assertEqual(english['band'], 'primary')
+        self.assertEqual(next(row for row in self.catalog.courses() if row['id'] == COURSE)['band'], 'primary')
         self.assertNotEqual(english['title'], chinese['title'])
         self.assertNotEqual(english['assumptions'], chinese['assumptions'])
         self.assertEqual(len(english['lessons']), 6)

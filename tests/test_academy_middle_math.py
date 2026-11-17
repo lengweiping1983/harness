@@ -30,6 +30,8 @@ class MiddleSchoolMathTests(unittest.TestCase):
         english, chinese, repeated = views
         self.assertEqual(english, repeated)
         self.assertEqual(english['origin'], 'provided')
+        self.assertEqual(english['band'], 'middle')
+        self.assertEqual(next(row for row in self.catalog.courses() if row['id'] == COURSE)['band'], 'middle')
         self.assertNotEqual(english['title'], chinese['title'])
         self.assertEqual(len(english['lessons']), 6)
         self.assertEqual(len({lesson['stage'] for lesson in english['lessons']}), 2)
