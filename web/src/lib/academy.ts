@@ -1,8 +1,8 @@
 import {isUnconfirmedWrite, request as httpRequest} from './http'
 import {hasTranslation} from '@/i18n'
-import type { AcademyAssessmentDimension, AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyDesign, AcademyDimensionId, AcademyFile, AcademyLesson, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorTurn, AcademyMastery, AcademyReviewItem } from '@/types'
+import type { AcademyAssessmentDimension, AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyDesign, AcademyDimensionId, AcademyFile, AcademyLesson, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorTurn, AcademyMastery, AcademyReviewItem, AcademyTeachQuiz, AcademyTeachMisconception, AcademyLesson } from '@/types'
 import type {ApiResult, RequestOptions} from './http'
-import type { AcademyCompleteStudy, AcademyCreateDesign, AcademyCreateProject, AcademyExecute, AcademyModelRunRequest, AcademyRestore, AcademySaveCheckpoint, AcademyStartLesson, AcademyWriteFile, AcademySubmit, AcademyTutorRequest, AcademyTutorStop, AcademyModelStop, AcademyReviewRequest } from './protocol.generated'
+import type { AcademyCompleteStudy, AcademyCreateDesign, AcademyCreateProject, AcademyExecute, AcademyModelRunRequest, AcademyRestore, AcademySaveCheckpoint, AcademyStartLesson, AcademyWriteFile, AcademySubmit, AcademyTutorRequest, AcademyTutorStop, AcademyModelStop, AcademyReviewRequest, AcademyTeachQuizRequest } from './protocol.generated'
 
 const prefix = '/api/v1/academy'
 const id = encodeURIComponent
@@ -53,17 +53,20 @@ export const academyApi = {
   mastery: (project: string, signal?: AbortSignal) => request<{mastery: AcademyMastery}>(prefix + '/projects/' + id(project) + '/mastery', {signal}),
   reviews: (project: string, signal?: AbortSignal) => request<{reviews: AcademyReviewItem[]}>(prefix + '/projects/' + id(project) + '/reviews', {signal}),
   review: (project: string, body: AcademyReviewRequest) => post('/projects/' + id(project) + '/reviews', body),
+  teachQuiz: (project: string, turn: string, body: AcademyTeachQuizRequest) => post('/projects/' + id(project) + '/tutor-turns/' + id(turn) + '/quiz', body),
+  teachQuizzes: (project: string, signal?: AbortSignal) => request<{quizzes: AcademyTeachQuiz[]}>(prefix + '/projects/' + id(project) + '/teach-quizzes', {signal}),
 }
 
 export function academyReceiptMatches(receipt: AcademyReceipt, requestId: string, projectId?: string, tutorRequestId = requestId, modelRequestId = requestId): boolean {
   if (receipt.request_id !== requestId) return false
-  if (projectId && [receipt.result.project?.id, receipt.result.run?.project_id, receipt.result.checkpoint?.project_id, receipt.result.submission?.project_id, receipt.result.model_run?.project_id, receipt.result.tutor_turn?.project_id, receipt.result.review?.project_id].some(id => id !== undefined && id !== projectId)) return false
+  if (projectId && [receipt.result.project?.id, receipt.result.run?.project_id, receipt.result.checkpoint?.project_id, receipt.result.submission?.project_id, receipt.result.model_run?.project_id, receipt.result.tutor_turn?.project_id, receipt.result.review?.project_id, receipt.result.quiz?.project_id].some(id => id !== undefined && id !== projectId)) return false
   if (receipt.result.submission && receipt.result.submission.request_id !== requestId) return false
   if (receipt.result.design && receipt.result.design.request_id !== requestId) return false
   if (receipt.result.review && receipt.result.review.request_id !== requestId) return false
+  if (receipt.result.quiz && receipt.result.quiz.request_id !== requestId) return false
   if (receipt.result.model_run && receipt.result.model_run.request_id !== modelRequestId) return false
   if (receipt.result.tutor_turn && receipt.result.tutor_turn.request_id !== tutorRequestId) return false
-  if (receipt.status === 'ready' && !receipt.result.project && !receipt.result.checkpoint && !receipt.result.submission && !receipt.result.design && !receipt.result.model_run && !receipt.result.tutor_turn && !receipt.result.review) return false
+  if (receipt.status === 'ready' && !receipt.result.project && !receipt.result.checkpoint && !receipt.result.submission && !receipt.result.design && !receipt.result.model_run && !receipt.result.tutor_turn && !receipt.result.review && !receipt.result.quiz) return false
   if (receipt.status === 'failed' && !receipt.result.error_code) return false
   return true
 }
@@ -216,4 +219,31 @@ export function academyMasteryCounts(mastery: Pick<AcademyMastery, 'skills'>): {
   return {durable: mastery.skills.filter(skill => skill.state === 'durable').length,
     learning: mastery.skills.filter(skill => skill.state === 'learning').length,
     fresh: mastery.skills.filter(skill => skill.state === 'new').length}
+}
+
+/** 教 AI 的误解预览与宿主冻结规则一致：首个含错误选项的自测、首个错误选项。 */
+export function academyTeachMisconception(lesson: Pick<AcademyLesson, 'knowledge_checks'>): AcademyTeachMisconception | undefined {
+  for (const check of lesson.knowledge_checks ?? []) {
+    const wrong = check.options.find(option => option.id !== check.answer_id)
+    if (wrong) return {check_id: check.id, option_id: wrong.id, prompt: check.prompt, label: wrong.label, feedback: wrong.feedback}
+  }
+  return undefined
+}
+
+/** 本课已完成或进行中的教学对话，按时间正序；普通带练不混入。 */
+export function academyTeachTurns(turns: readonly AcademyTutorTurn[], lessonId: string): AcademyTutorTurn[] {
+  return turns.filter(turn => turn.mode === 'teach' && turn.lesson_id === lessonId).sort((a, b) => a.created_at - b.created_at)
+}
+
+export function watchAcademyTeachQuizzes(projectId: string, options: {
+  publish: (quizzes: AcademyTeachQuiz[]) => void
+  failure: (failure: Exclude<ApiResult<unknown>, {ok: true}>) => void
+  read?: typeof academyApi.teachQuizzes
+  interval?: number
+  pending?: boolean
+}): () => void {
+  return watchAcademyRecords(projectId, {...options, pendingStatus: 'running', read: async signal => {
+    const result = await (options.read ?? academyApi.teachQuizzes)(projectId, signal)
+    return result.ok ? {...result, data: result.data.quizzes} : result
+  }})
 }

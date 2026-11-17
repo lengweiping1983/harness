@@ -14,6 +14,7 @@ import {AcademyAssessment, AcademyRubric} from './AcademyAssessment'
 import {AcademyKnowledgeChecks} from './AcademyKnowledgeChecks'
 import {AcademyLearningPath} from './AcademyLearningPath'
 import {AcademyMastery} from './AcademyMastery'
+import {AcademyTeach} from './AcademyTeach'
 import {AcademyTopicStudio} from './AcademyTopicStudio'
 import {AcademyModelLab} from './AcademyModelLab'
 import {AcademyTutor} from './AcademyTutor'
@@ -684,6 +685,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
         <AcademyTutor key={JSON.stringify([projectId, lessonId])} projectId={projectId} lesson={lesson} fingerprint={project.fingerprint} dirty={dirty}
           turns={tutorTurns} onStop={turn => {if (!composing.current && project && turn.project_id === project.id && turn.lesson_id === lessonId) void perform(requestId => academyApi.stopTutor(project.id, turn.id, {request_id: requestId}), true, undefined, {tutorStopInput: {turnId: turn.id, requestId: turn.request_id}})}} questionRef={tutorQuestionRef} disabled={locked || loading} proposalPath={path || undefined} onSuggest={() => askTutor(t('ui.academy.tutor.proposalPrompt'), false, false, {proposal_path: path})} onTry={tryProposal} onAsk={askTutor} onRefresh={() => setRevision(value => value + 1)} />
       </aside> : null}
+      {project && current && lesson ? <AcademyTeach key={'teach:' + JSON.stringify([projectId, lessonId])} projectId={projectId} lesson={lesson} fingerprint={project.fingerprint} turns={tutorTurns} disabled={locked || loading} active={active} onRefresh={() => setRevision(value => value + 1)} /> : null}
       {project && current ? <section ref={reflectionRef} aria-label={t('ui.academy.studyPractice')} className="academy-workbench-reflection space-y-5">
       {knowledgeChecks}
       <details key={'notes:' + studyScope} data-academy-section="notes" open={reflectionReady} className="border-t border-line pt-3"><summary className="cursor-pointer text-sm text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.notesDisclosure')}</summary><div className="mt-3"><Section><label className="block text-sm"><span className="sr-only">{t('ui.academy.note')}</span><textarea aria-label={t('ui.academy.note')} placeholder={t(readingLesson ? 'ui.academy.studyNoteHint' : modelLesson ? 'ui.academy.modelNoteHint' : 'ui.academy.noteHint')} value={note} maxLength={4000} disabled={locked} rows={4} className="ui-field w-full resize-y leading-reading" onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}} onChange={event => {setNote(event.target.value); try {localStorage.setItem(noteKey(projectId, lessonId), event.target.value)} catch {setStorageError(true)}}} /></label></Section></div></details>
