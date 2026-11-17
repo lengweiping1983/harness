@@ -669,6 +669,9 @@ class AcademyTutor:
             teach = value.get('mode', 'tutor') == 'teach'
             prompts.add_section('academy:teach' if teach else 'academy:tutor',
                                 tr('academy.teach.instructions' if teach else 'academy.tutor.instructions'), interpolate=False)
+            struggle = self.service.struggle.current(value['project_id'])
+            if struggle and struggle['lesson_id'] == value['lesson_id'] and struggle['status'] != 'revealed':
+                prompts.add_section('academy:struggle', tr('academy.struggle.guard'), interpolate=False)
             session = SessionStore().create()
             bus = EventBus()
             for event in ('request/start', 'assistant/delta', 'assistant/message'):

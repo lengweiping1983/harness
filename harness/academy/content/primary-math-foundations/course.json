@@ -169,7 +169,11 @@
             "multiply-meaning.q1.hint.1"
           ]
         }
-      ]
+      ],
+      "struggle": {
+        "challenge_key": "multiply-meaning.struggle",
+        "window_minutes": 5
+      }
     },
     {
       "id": "fraction-intuition",
@@ -209,7 +213,11 @@
             "fraction-intuition.q1.hint.1"
           ]
         }
-      ]
+      ],
+      "struggle": {
+        "challenge_key": "fraction-intuition.struggle",
+        "window_minutes": 5
+      }
     },
     {
       "id": "word-problems",

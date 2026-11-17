@@ -20817,6 +20817,250 @@
         ]
       }
     },
+    "/api/v1/academy/projects/{project_id}/struggle": {
+      "get": {
+        "operationId": "get_api_v1_academy_projects_project_id_struggle",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyStruggleView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_v1_academy_projects_project_id_struggle",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademyStruggleStart"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/academy/projects/{project_id}/struggle/attempt": {
+      "post": {
+        "operationId": "post_api_v1_academy_projects_project_id_struggle_attempt",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademyStruggleAttempt"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/academy/projects/{project_id}/struggle/reveal": {
+      "post": {
+        "operationId": "post_api_v1_academy_projects_project_id_struggle_reveal",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademyStruggleReveal"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/academy/projects/{project_id}/mastery": {
       "get": {
         "operationId": "get_api_v1_academy_projects_project_id_mastery",
@@ -29933,6 +30177,9 @@
             "items": {
               "$ref": "#/components/schemas/AcademyKnowledgeCheck"
             }
+          },
+          "struggle": {
+            "$ref": "#/components/schemas/AcademyStruggleTask"
           }
         },
         "required": [
@@ -30891,6 +31138,155 @@
           "review_notes"
         ]
       },
+      "AcademyStruggleTask": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "challenge": {
+            "type": "string"
+          },
+          "window_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          }
+        },
+        "required": [
+          "challenge",
+          "window_minutes"
+        ]
+      },
+      "AcademyStruggleSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "lesson_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "challenge": {
+            "type": "string"
+          },
+          "window_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "struggling",
+              "attempted",
+              "revealed"
+            ]
+          },
+          "attempt": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "number"
+          },
+          "attempt_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "revealed_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "lesson_id",
+          "request_id",
+          "challenge",
+          "window_minutes",
+          "status",
+          "attempt",
+          "started_at",
+          "attempt_at",
+          "revealed_at"
+        ]
+      },
+      "AcademyStruggleView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "struggle": {
+            "$ref": "#/components/schemas/AcademyStruggleSession"
+          },
+          "remaining_seconds": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "remaining_seconds"
+        ]
+      },
+      "AcademyStruggleStart": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "lesson_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "lesson_id"
+        ]
+      },
+      "AcademyStruggleAttempt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "request_id",
+          "text"
+        ]
+      },
+      "AcademyStruggleReveal": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "request_id"
+        ]
+      },
       "AcademyTeachMisconception": {
         "type": "object",
         "additionalProperties": false,
@@ -31344,6 +31740,9 @@
           },
           "quiz": {
             "$ref": "#/components/schemas/AcademyTeachQuiz"
+          },
+          "struggle": {
+            "$ref": "#/components/schemas/AcademyStruggleSession"
           },
           "backup_checkpoint_id": {
             "type": "string"

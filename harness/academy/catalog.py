@@ -50,6 +50,7 @@ class AcademyCatalog:
                 'model_prompt_key': TEXT, 'model_system_key': TEXT,
                 'duration_minutes': {'type': 'integer', 'minimum': 1, 'maximum': 180},
                 'knowledge_checks': {'type': 'array', 'items': knowledge_check, 'minItems': 1, 'maxItems': 8},
+                'struggle': obj({'challenge_key': TEXT, 'window_minutes': {'type': 'integer', 'minimum': 1, 'maximum': 30}}),
                 'trace_labels': {'type': 'object', 'additionalProperties': TEXT}},
                 ['id', 'order', 'milestone', 'title_key', 'goal_key', 'reading_key', 'references', 'prerequisites'])
             manifest = obj({'schema': {'type': 'integer', 'const': 1}, 'id': TEXT, 'version': TEXT,
@@ -107,6 +108,7 @@ class AcademyCatalog:
             keys.extend(lesson[key] for lesson in course['lessons'] for key in ('title_key', 'goal_key', 'reading_key'))
             keys.extend(key for lesson in course['lessons'] for key in lesson.get('trace_labels', {}).values())
             keys.extend(lesson[key] for lesson in course['lessons'] for key in ('stage_key', 'stage_goal_key', 'exercise_key', 'rubric_key', 'model_prompt_key', 'model_system_key') if key in lesson)
+            keys.extend(lesson['struggle']['challenge_key'] for lesson in course['lessons'] if 'struggle' in lesson)
             knowledge_keys = [key for lesson in course['lessons'] for check in lesson.get('knowledge_checks', [])
                               for key in [check['prompt_key'], *check['hint_keys'],
                                           *(option[field] for option in check['options'] for field in ('label_key', 'feedback_key'))]]
@@ -164,6 +166,10 @@ class AcademyCatalog:
                     'options': [{'id': option['id'], 'label': resources[option['label_key']],
                                  'feedback': resources[option['feedback_key']]} for option in check['options']],
                 } for check in source['knowledge_checks']]
+        for lesson, source in zip(course['lessons'], raw['lessons']):
+            if 'struggle' in source:
+                lesson['struggle'] = {'challenge': resources[source['struggle']['challenge_key']],
+                                      'window_minutes': source['struggle']['window_minutes']}
         return course
 
     def courses(self):

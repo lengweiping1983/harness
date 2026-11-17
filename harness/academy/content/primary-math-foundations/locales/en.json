@@ -73,5 +73,7 @@
   "word-problems.q1.a.fb": "Right: sharing 24 into equal groups of 6 gives the number of tables.",
   "word-problems.q1.b": "24 × 6",
   "word-problems.q1.b.fb": "Multiplying would make 144 students, more than the whole class; the answer would not make sense.",
-  "word-problems.q1.hint.1": "Are we making equal groups from a total? That is division."
+  "word-problems.q1.hint.1": "Are we making equal groups from a total? That is division.",
+  "multiply-meaning.struggle": "Before reading: use 12 small objects to show what 4 × 3 could mean. Arrange them, draw your arrangement, and write why it fits 4 × 3. There may be more than one right arrangement, or a wrong one; keep your first try.",
+  "fraction-intuition.struggle": "Before reading: draw two circles. Cut one into two equal parts and shade one; cut the other into two unequal parts and shade one. Write which shaded piece is one half and how you know. Keep your first answer even if unsure."
 }

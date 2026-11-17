@@ -1743,6 +1743,7 @@ export interface AcademyLesson {
   model_prompt?: string
   model_system?: string
   knowledge_checks?: Array<AcademyKnowledgeCheck>
+  struggle?: AcademyStruggleTask
 }
 export interface AcademyCourseSummary {
   id: string
@@ -1948,6 +1949,38 @@ export interface AcademyDesign {
   error_code?: string
   review_notes: Array<string>
 }
+export interface AcademyStruggleTask {
+  challenge: string
+  window_minutes: number
+}
+export interface AcademyStruggleSession {
+  id: string
+  project_id: string
+  lesson_id: string
+  request_id: string
+  challenge: string
+  window_minutes: number
+  status: 'struggling' | 'attempted' | 'revealed'
+  attempt: string
+  started_at: number
+  attempt_at: number | null
+  revealed_at: number | null
+}
+export interface AcademyStruggleView {
+  struggle?: AcademyStruggleSession
+  remaining_seconds: number
+}
+export interface AcademyStruggleStart {
+  request_id: string
+  lesson_id: string
+}
+export interface AcademyStruggleAttempt {
+  request_id: string
+  text: string
+}
+export interface AcademyStruggleReveal {
+  request_id: string
+}
 export interface AcademyTeachMisconception {
   check_id: string
   option_id: string
@@ -2049,6 +2082,7 @@ export interface AcademyOperationResult {
   review?: AcademyReview
   skill?: AcademySkillState
   quiz?: AcademyTeachQuiz
+  struggle?: AcademyStruggleSession
   backup_checkpoint_id?: string
   error_code?: string
 }
