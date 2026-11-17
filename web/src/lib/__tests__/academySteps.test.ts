@@ -75,3 +75,16 @@ it('adds rotating encouragement on correct steps', async () => {
   const noCheer = renderToStaticMarkup(card({feedback: {correct: false, text: 'Not yet.'}, cheer: 'Nice thinking!'}))
   expect(noCheer).not.toContain('Nice thinking!')
 })
+
+it('renders matching pairs without revealing the answer key', async () => {
+  await setLocale('en')
+  const matching = step({kind: 'matching', prompt: 'Match each expression to its value.', content: undefined,
+    left: [{id: 'e1', label: '2x + 5'}, {id: 'e2', label: '3x'}], right: [{id: 'v9', label: '9'}, {id: 'v11', label: '11'}]})
+  const html = renderToStaticMarkup(card({step: matching}))
+  expect(html).toContain('data-step-kind="matching"')
+  expect(html).toContain('2x + 5')
+  expect(html).toContain('<select')
+  expect(html).toContain('11')
+  expect(html).not.toContain('answer')
+  expect(html).toContain('disabled=""')
+})

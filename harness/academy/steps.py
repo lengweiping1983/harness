@@ -10,7 +10,7 @@ import uuid
 
 from .errors import AcademyError
 
-STEP_KINDS = ('explain', 'numeric', 'choice', 'ordering')
+STEP_KINDS = ('explain', 'numeric', 'choice', 'ordering', 'matching')
 MAX_RESPONSE_CHARS = 2000
 MAX_STEPS = 16
 MAX_RECORD_BYTES = 256 * 1024
@@ -27,6 +27,9 @@ def public_step(step):
         public['items'] = [{'id': item['id'], 'label': item['label']} for item in reversed(step['items'])]
     elif step['kind'] == 'numeric':
         public['tolerance'] = step['tolerance']
+    elif step['kind'] == 'matching':
+        public['left'] = [{'id': item['id'], 'label': item['label']} for item in step['left']]
+        public['right'] = [{'id': item['id'], 'label': item['label']} for item in reversed(step['right'])]
     return public
 
 
@@ -52,6 +55,14 @@ def grade(step, response):
         if sorted(response) != sorted(ids):
             raise AcademyError('step-invalid')
         return response == step['answer'], response
+    if kind == 'matching':
+        if not isinstance(response, dict):
+            raise AcademyError('step-invalid')
+        left_ids = [item['id'] for item in step['left']]
+        right_ids = {item['id'] for item in step['right']}
+        if set(response) != set(left_ids) or any(not isinstance(value, str) or value not in right_ids for value in response.values()):
+            raise AcademyError('step-invalid')
+        return all(response[key] == step['answer'][key] for key in left_ids), response
     raise AcademyError('step-invalid')
 
 

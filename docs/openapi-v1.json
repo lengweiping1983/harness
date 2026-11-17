@@ -31732,6 +31732,18 @@
             "items": {
               "$ref": "#/components/schemas/AcademyStepItem"
             }
+          },
+          "left": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStepItem"
+            }
+          },
+          "right": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStepItem"
+            }
           }
         },
         "required": [
@@ -31790,6 +31802,18 @@
           },
           "tolerance": {
             "type": "number"
+          },
+          "left": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStepItem"
+            }
+          },
+          "right": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStepItem"
+            }
           }
         },
         "required": [

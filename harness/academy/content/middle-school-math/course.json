@@ -84,6 +84,90 @@
             "expressions.q1.hint.1"
           ]
         }
+      ],
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "expressions.s1.prompt",
+          "feedback_key": "expressions.s1.fb",
+          "content_key": "expressions.s1.content",
+          "hint_keys": [
+            "expressions.s1.hint"
+          ]
+        },
+        {
+          "id": "match-values",
+          "kind": "matching",
+          "prompt_key": "expressions.s2.prompt",
+          "feedback_key": "expressions.s2.fb",
+          "left": [
+            {
+              "id": "e1",
+              "label_key": "expressions.s2.e1"
+            },
+            {
+              "id": "e2",
+              "label_key": "expressions.s2.e2"
+            },
+            {
+              "id": "e3",
+              "label_key": "expressions.s2.e3"
+            }
+          ],
+          "right": [
+            {
+              "id": "v11",
+              "label_key": "expressions.s2.v11"
+            },
+            {
+              "id": "v9",
+              "label_key": "expressions.s2.v9"
+            },
+            {
+              "id": "v10",
+              "label_key": "expressions.s2.v10"
+            }
+          ],
+          "answer": {
+            "e1": "v11",
+            "e2": "v9",
+            "e3": "v10"
+          },
+          "hint_keys": [
+            "expressions.s2.hint"
+          ]
+        },
+        {
+          "id": "evaluate",
+          "kind": "numeric",
+          "prompt_key": "expressions.s3.prompt",
+          "feedback_key": "expressions.s3.fb",
+          "answer": 13,
+          "tolerance": 0,
+          "hint_keys": [
+            "expressions.s3.hint"
+          ]
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "expressions.s4.prompt",
+          "feedback_key": "expressions.s4.fb",
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "expressions.s4.a",
+              "feedback_key": "expressions.s4.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "expressions.s4.b",
+              "feedback_key": "expressions.s4.b.fb"
+            }
+          ]
+        }
       ]
     },
     {

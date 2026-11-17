@@ -43,6 +43,13 @@ class StepGradeTests(unittest.TestCase):
         with self.assertRaises(AcademyError):
             steps.grade(ordering, ['x', 'y'])
 
+    def test_matching_grades_bijection(self):
+        step = {'kind': 'matching', 'left': [{'id': 'a'}, {'id': 'b'}], 'right': [{'id': 'x'}, {'id': 'y'}], 'answer': {'a': 'x', 'b': 'y'}}
+        self.assertTrue(steps.grade(step, {'a': 'x', 'b': 'y'})[0])
+        self.assertFalse(steps.grade(step, {'a': 'y', 'b': 'x'})[0])
+        for bad in ({'a': 'x'}, {'a': 'x', 'b': 'z'}, {'a': 'x', 'b': 'y', 'c': 'x'}, 'nope'):
+            with self.assertRaises(AcademyError):
+                steps.grade(step, bad)
     def test_public_step_hides_answers_and_reverses_ordering(self):
         ordering = {'id': 's', 'kind': 'ordering', 'prompt': 'p', 'items': [{'id': 'x', 'label': 'X'}, {'id': 'y', 'label': 'Y'}], 'answer': ['x', 'y']}
         public = steps.public_step(ordering)
@@ -117,6 +124,40 @@ class StepSessionTests(unittest.TestCase):
         bad = self.service.steps.answer(self.pid, 'ans-bad', LESSON, 'denominator', 'four')
         self.assertEqual(bad['result']['error_code'], 'step-invalid')
 
+
+
+class MiddleSchoolStepTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.service = AcademyService(self.root / 'home')
+        self.project = self.service.create_project('create', 'middle-school-math')['result']['project']
+        self.pid = self.project['id']
+        self.now = time.time()
+        patcher = patch('time.time', side_effect=lambda: self.now)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.temp.cleanup)
+
+    def test_expressions_step_sequence_with_matching_awards_evidence(self):
+        project = self.service.project(self.pid)
+        receipt = self.service.start_lesson(self.pid, 'open-expr', 'expressions', project['revision'], project['fingerprint'])
+        self.assertEqual(receipt['status'], 'ready')
+        view = self.service.steps.view(self.pid, 'expressions')
+        self.assertEqual([step['kind'] for step in view['steps']], ['explain', 'matching', 'numeric', 'choice'])
+        match = view['steps'][1]
+        self.assertNotIn('answer', match)
+        self.service.steps.answer(self.pid, 'a1', 'expressions', 'worked', 'Multiply first because 2x means 2 times x.')
+        wrong = self.service.steps.answer(self.pid, 'a2', 'expressions', 'match-values', {'e1': 'v9', 'e2': 'v11', 'e3': 'v10'})
+        self.assertFalse(wrong['result']['correct'])
+        right = self.service.steps.answer(self.pid, 'a3', 'expressions', 'match-values', {'e1': 'v11', 'e2': 'v9', 'e3': 'v10'})
+        self.assertTrue(right['result']['correct'])
+        self.service.steps.answer(self.pid, 'a4', 'expressions', 'evaluate', 13)
+        last = self.service.steps.answer(self.pid, 'a5', 'expressions', 'independent', 'b')
+        self.assertTrue(last['result']['completed'])
+        skill = next(row for row in self.service.mastery.view(self.pid)['skills'] if row['lesson_id'] == 'expressions')
+        self.assertEqual(skill['evidence_count'], 1)
+        self.assertEqual(skill['stability_days'], 2.5)
 
 if __name__ == '__main__':
     unittest.main()

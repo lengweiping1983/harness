@@ -57,9 +57,11 @@ class AcademyCatalog:
                 'steps': {'type': 'array', 'maxItems': 16, 'items': obj({
                     'id': TEXT, 'kind': {'type': 'string', 'enum': list(STEP_KINDS)}, 'prompt_key': TEXT, 'feedback_key': TEXT,
                     'hint_keys': {'type': 'array', 'items': TEXT, 'maxItems': 3}, 'content_key': TEXT,
-                    'answer': {'type': ['number', 'string', 'array']}, 'tolerance': {'type': 'number'}, 'answer_id': TEXT,
+                    'answer': {'type': ['number', 'string', 'array', 'object']}, 'tolerance': {'type': 'number'}, 'answer_id': TEXT,
                     'options': {'type': 'array', 'items': knowledge_option, 'minItems': 2, 'maxItems': 6},
-                    'items': {'type': 'array', 'items': obj({'id': TEXT, 'label_key': TEXT}), 'minItems': 2, 'maxItems': 8}},
+                    'items': {'type': 'array', 'items': obj({'id': TEXT, 'label_key': TEXT}), 'minItems': 2, 'maxItems': 8},
+                    'left': {'type': 'array', 'items': obj({'id': TEXT, 'label_key': TEXT}), 'minItems': 2, 'maxItems': 6},
+                    'right': {'type': 'array', 'items': obj({'id': TEXT, 'label_key': TEXT}), 'minItems': 2, 'maxItems': 6}},
                     ['id', 'kind', 'prompt_key', 'feedback_key'])},
                 'trace_labels': {'type': 'object', 'additionalProperties': TEXT}},
                 ['id', 'order', 'milestone', 'title_key', 'goal_key', 'reading_key', 'references', 'prerequisites'])
@@ -126,6 +128,16 @@ class AcademyCatalog:
                                 or sorted(answer) != sorted(item_ids)
                                 or any(key in step for key in ('answer_id', 'options', 'content_key', 'tolerance'))):
                             raise ValueError
+                    elif kind == 'matching':
+                        left_ids = [item['id'] for item in step.get('left', [])]
+                        right_ids = [item['id'] for item in step.get('right', [])]
+                        answer = step.get('answer')
+                        if (len(set(left_ids)) != len(left_ids) or len(set(right_ids)) != len(right_ids)
+                                or not isinstance(answer, dict) or set(answer) != set(left_ids)
+                                or len(set(answer.values())) != len(left_ids)
+                                or any(value not in right_ids for value in answer.values())
+                                or any(key in step for key in ('answer_id', 'options', 'items', 'content_key', 'tolerance'))):
+                            raise ValueError
                 checks = lesson.get('knowledge_checks', [])
                 if len({check['id'] for check in checks}) != len(checks):
                     raise ValueError
@@ -157,6 +169,8 @@ class AcademyCatalog:
                         keys.append(step['content_key'])
                     keys.extend(option[field] for option in step.get('options', []) for field in ('label_key', 'feedback_key'))
                     keys.extend(item['label_key'] for item in step.get('items', []))
+                    keys.extend(item['label_key'] for item in step.get('left', []))
+                    keys.extend(item['label_key'] for item in step.get('right', []))
             if any(key not in resources[0] for key in keys):
                 raise ValueError
             if any(not resource[key].strip() for resource in resources for key in knowledge_keys):
@@ -234,6 +248,10 @@ class AcademyCatalog:
                                                  'feedback': resources[option['feedback_key']]} for option in step['options']]
                     elif step['kind'] == 'ordering':
                         localized['items'] = [{'id': item['id'], 'label': resources[item['label_key']]} for item in step['items']]
+                        localized['answer'] = step['answer']
+                    elif step['kind'] == 'matching':
+                        localized['left'] = [{'id': item['id'], 'label': resources[item['label_key']]} for item in step['left']]
+                        localized['right'] = [{'id': item['id'], 'label': resources[item['label_key']]} for item in step['right']]
                         localized['answer'] = step['answer']
                     localized_steps.append(localized)
                 lesson['steps'] = localized_steps

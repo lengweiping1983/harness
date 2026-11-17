@@ -1987,6 +1987,8 @@ export interface AcademyStep {
   answer_id?: string
   options?: Array<AcademyStepOption>
   items?: Array<AcademyStepItem>
+  left?: Array<AcademyStepItem>
+  right?: Array<AcademyStepItem>
 }
 export interface AcademyStepPublic {
   id: string
@@ -1996,6 +1998,8 @@ export interface AcademyStepPublic {
   options?: Array<Record<string, unknown>>
   items?: Array<AcademyStepItem>
   tolerance?: number
+  left?: Array<AcademyStepItem>
+  right?: Array<AcademyStepItem>
 }
 export interface AcademyStepResponse {
   step_id: string

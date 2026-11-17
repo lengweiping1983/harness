@@ -10,7 +10,7 @@ type Feedback = {correct: boolean; text: string}
 
 /** 单步卡片：按类型渲染输入，提交后即时反馈；答对显示下一步。 */
 export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}: {
-  step: AcademyStepPublic; busy: boolean; feedback: Feedback | null; cheer?: string; onSubmit: (response: string | number | string[]) => void; onNext: () => void
+  step: AcademyStepPublic; busy: boolean; feedback: Feedback | null; cheer?: string; onSubmit: (response: string | number | string[] | Record<string, string>) => void; onNext: () => void
 }) {
   useLocale()
   const name = useId()
@@ -18,6 +18,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
   const [text, setText] = useState('')
   const [choice, setChoice] = useState('')
   const [order, setOrder] = useState<string[]>(() => (step.items ?? []).map(item => item.id))
+  const [pairs, setPairs] = useState<Record<string, string>>({})
   const locked = busy || feedback?.correct === true
   const move = (index: number, delta: number) => {
     const target = index + delta
@@ -35,9 +36,11 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
       if (choice) onSubmit(choice)
     } else if (step.kind === 'ordering') {
       onSubmit(order)
+    } else if (step.kind === 'matching') {
+      onSubmit(pairs)
     }
   }
-  const ready = step.kind === 'ordering' ? order.length > 0 : step.kind === 'choice' ? Boolean(choice) : Boolean(text.trim())
+  const ready = step.kind === 'ordering' ? order.length > 0 : step.kind === 'choice' ? Boolean(choice) : step.kind === 'matching' ? (step.left ?? []).every(item => Boolean(pairs[item.id])) : Boolean(text.trim())
   return <div data-academy-step={step.id} data-step-kind={step.kind} className="space-y-3 rounded-xl border border-brand/40 p-3">
     {step.kind === 'explain' && step.content ? <div className="rounded-lg bg-canvas p-3 text-base leading-reading">{step.content}</div> : null}
     <p className="whitespace-pre-wrap text-base leading-reading">{step.prompt}</p>
@@ -60,6 +63,13 @@ export function AcademyStepCard({step, busy, feedback, cheer, onSubmit, onNext}:
         <Button type="button" size="xs" variant="ghost" disabled={locked || index === 0} aria-label={t('ui.academy.steps.moveUp')} onClick={() => move(index, -1)} icon={<ArrowUp className="h-3.5 w-3.5" />} />
         <Button type="button" size="xs" variant="ghost" disabled={locked || index === order.length - 1} aria-label={t('ui.academy.steps.moveDown')} onClick={() => move(index, 1)} icon={<ArrowDown className="h-3.5 w-3.5" />} />
       </li>})}</ol> : null}
+      {step.kind === 'matching' ? <div className="space-y-2">{(step.left ?? []).map(item => <label key={item.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-line p-2 text-sm">
+        <span className="min-w-0 flex-1 break-words">{item.label}</span>
+        <select className="ui-field" disabled={locked} value={pairs[item.id] ?? ''} aria-label={item.label} onChange={event => setPairs(previous => ({...previous, [item.id]: event.target.value}))}>
+          <option value="" disabled>—</option>
+          {(step.right ?? []).map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+        </select>
+      </label>)}</div> : null}
       <Button type="submit" size="sm" disabled={locked || !ready} icon={<Send className="h-3.5 w-3.5" />}>{t('ui.academy.steps.submit')}</Button>
     </form>}
   </div>
@@ -127,7 +137,7 @@ export function AcademySteps({projectId, lesson, active, disabled}: {projectId: 
     setFeedback({correct: result.correct, text: result.feedback ?? t(result.correct ? 'ui.academy.steps.correct' : 'ui.academy.steps.tryAgain')})
     if (result.completed) setRevision(value => value + 1)
   }
-  const submit = async (response: string | number | string[]) => {
+  const submit = async (response: string | number | string[] | Record<string, string>) => {
     if (disabled || busy || pending || !current) return
     const requestId = crypto.randomUUID()
     try {sessionStorage.setItem(pendingKey, JSON.stringify({requestId, projectId}))} catch {setError({key: 'ui.academy.error.store-invalid'})}
