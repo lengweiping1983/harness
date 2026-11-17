@@ -86,7 +86,8 @@ it('renders the learning report tiles from mastery evidence bilingually', async 
   await setLocale('en')
   const mastery = {skills: [], due_count: 0, reviews: {attempts: 4, correct: 3, delayed_correct: 2},
     engagement: {constructive: 1, active: 1, total: 2, constructive_ratio: 0.5}, repairs: 2, transfers: 3, blindspots_open: 1, streak_days: 3,
-    calibration: {sure_correct: 4, sure_wrong: 1, unsure_correct: 2, unsure_wrong: 1, guess_correct: 3, guess_wrong: 0}}
+    calibration: {sure_correct: 4, sure_wrong: 1, unsure_correct: 2, unsure_wrong: 1, guess_correct: 3, guess_wrong: 0},
+    activity: Array.from({length: 14}, (_, i) => ({date: '2026-11-' + String(i + 1).padStart(2, '0'), evidence: i % 3}))}
   const html = renderToStaticMarkup(createElement(AcademyReport, {mastery}))
   expect(html).toContain('data-academy-report')
   expect(html).toContain('Blindspots repaired')
@@ -101,6 +102,8 @@ it('renders the learning report tiles from mastery evidence bilingually', async 
   expect(html).toContain('Transfer achiever')
   expect(html).toContain('3-day evidence streak')
   expect(html).not.toContain('3 durable skills')
+  expect(html).toContain('data-academy-activity')
+  expect(html).toContain('Evidence per day (last 14 days)')
   await setLocale('zh-CN')
   const chinese = renderToStaticMarkup(createElement(AcademyReport, {mastery}))
   expect(chinese).toContain('已修复盲点')

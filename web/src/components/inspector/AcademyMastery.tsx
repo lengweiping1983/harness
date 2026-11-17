@@ -93,6 +93,12 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
     {academyBadges(mastery).length ? <div className="flex flex-wrap gap-1" data-academy-badges>
       {academyBadges(mastery).map(badge => <span key={badge} className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok">{t('ui.academy.badge.' + badge)}</span>)}
     </div> : null}
+    {mastery.activity?.length ? <div className="space-y-1">
+      <p className="text-xs text-muted">{t('ui.academy.report.activity')}</p>
+      <div className="flex items-end gap-0.5" role="img" aria-label={t('ui.academy.report.activity')} data-academy-activity>
+        {mastery.activity.map(day => <span key={day.date} title={day.date + ': ' + day.evidence} className="w-2 rounded-sm bg-brand/60" style={{height: Math.max(2, Math.min(24, day.evidence * 4)) + 'px'}} />)}
+      </div>
+    </div> : null}
     <Button size="xs" variant="ghost" data-academy-export onClick={exportEvidence}>{t('ui.academy.report.export')}</Button>
   </div>
 }

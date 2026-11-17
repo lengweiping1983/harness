@@ -32794,6 +32794,23 @@
           "guess_wrong"
         ]
       },
+      "AcademyActivityDay": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "date",
+          "evidence"
+        ]
+      },
       "AcademyMastery": {
         "type": "object",
         "additionalProperties": false,
@@ -32832,6 +32849,12 @@
           },
           "calibration": {
             "$ref": "#/components/schemas/AcademyCalibration"
+          },
+          "activity": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyActivityDay"
+            }
           }
         },
         "required": [

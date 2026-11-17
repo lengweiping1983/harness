@@ -2221,6 +2221,10 @@ export interface AcademyCalibration {
   guess_correct: number
   guess_wrong: number
 }
+export interface AcademyActivityDay {
+  date: string
+  evidence: number
+}
 export interface AcademyMastery {
   skills: Array<AcademySkillState>
   due_count: number
@@ -2231,6 +2235,7 @@ export interface AcademyMastery {
   blindspots_open?: number
   streak_days?: number
   calibration?: AcademyCalibration
+  activity?: Array<AcademyActivityDay>
 }
 export interface AcademyReviewRequest {
   request_id: string

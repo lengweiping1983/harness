@@ -211,6 +211,23 @@ class AcademyMastery:
             cursor = time.localtime(time.mktime(cursor) - DAY)
         return streak
 
+    def _activity(self, project_id: str, now: float) -> list[dict]:
+        """近 14 天每日学习证据数（作答＋检查＋重测），供学习分析时间序列。"""
+        counts: dict[str, int] = {}
+        stamps = [event['at'] for event in _events(self.service.store, project_id)]
+        for value in self.service.store.list('step-progress', max_bytes=MAX_EVIDENCE_BYTES):
+            if value.get('project_id') != project_id:
+                continue
+            stamps.extend(row['at'] for row in value.get('responses', []) if isinstance(row.get('at'), (int, float)))
+        for at in stamps:
+            day = time.strftime('%Y-%m-%d', time.localtime(at))
+            counts[day] = counts.get(day, 0) + 1
+        activity = []
+        for offset in range(13, -1, -1):
+            day = time.strftime('%Y-%m-%d', time.localtime(now - offset * DAY))
+            activity.append({'date': day, 'evidence': counts.get(day, 0)})
+        return activity
+
     def view(self, project_id: str) -> dict:
         record, lessons = self._lessons(project_id)
         states = fold(self.service.store, project_id)
@@ -237,7 +254,8 @@ class AcademyMastery:
         return {'skills': skills, 'due_count': sum(1 for skill in skills if skill['state'] != 'new' and skill['retrievability'] < TARGET_RETENTION),
                 'reviews': totals, 'engagement': self._engagement(project_id),
                 'repairs': repairs, 'transfers': transfers, 'blindspots_open': blindspots_open,
-                'streak_days': self._streak_days(project_id, now), 'calibration': calibration}
+                'streak_days': self._streak_days(project_id, now), 'calibration': calibration,
+                'activity': self._activity(project_id, now)}
 
 
     def profile(self, project_id: str, lesson_id: str) -> dict:

@@ -4736,6 +4736,7 @@
   "ui.academy.badge.transferer": "Transfer achiever",
   "ui.academy.badge.consistent": "3-day evidence streak",
   "ui.academy.badge.master": "3 durable skills",
+  "ui.academy.report.activity": "Evidence per day (last 14 days)",
   "ui.academy.report.sureCorrect": "Sure & correct",
   "ui.academy.report.sureWrong": "Sure & wrong (blindspots)",
   "ui.academy.report.guessCorrect": "Guess & correct",

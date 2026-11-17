@@ -8232,6 +8232,7 @@
   "ui.academy.badge.transferer": "迁移达成者",
   "ui.academy.badge.consistent": "连续三天证据",
   "ui.academy.badge.master": "三项牢固技能",
+  "ui.academy.report.activity": "每日证据（近 14 天）",
   "ui.academy.report.sureCorrect": "高确信答对",
   "ui.academy.report.sureWrong": "高确信答错（盲点）",
   "ui.academy.report.guessCorrect": "猜测答对",
