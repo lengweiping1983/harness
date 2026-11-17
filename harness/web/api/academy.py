@@ -114,5 +114,8 @@ def build_router(ctx):
     endpoint('POST', prefix + '/projects/{project_id}/submissions', submit)
     endpoint('GET', prefix + '/projects/{project_id}/submissions', lambda service, body, params, request: {'submissions': service.submissions(**params)})
     endpoint('GET', prefix + '/projects/{project_id}/submissions/{submission_id}', lambda service, body, params, request: {'submission': service.submission(**params)})
+    endpoint('GET', prefix + '/projects/{project_id}/mastery', lambda service, body, params, request: {'mastery': service.mastery.view(**params)})
+    endpoint('GET', prefix + '/projects/{project_id}/reviews', lambda service, body, params, request: {'reviews': service.mastery.queue(**params)})
+    endpoint('POST', prefix + '/projects/{project_id}/reviews', lambda service, body, params, request: service.mastery.review(**params, **body))
     endpoint('GET', prefix + '/receipts/{request_id}', lambda service, body, params, request: service.receipt(**params))
     return router

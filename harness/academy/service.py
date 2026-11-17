@@ -21,6 +21,7 @@ from .errors import AcademyError
 from .evaluation import MAX_SUBMISSION_BYTES, PROMPT_VERSION, assess_submission
 from .experiments import AcademyExperiments
 from .files import MAX_FILE_BYTES, MAX_PROJECT_BYTES, file_path, fingerprint, read_files, version
+from .mastery import AcademyMastery
 from .runtime import AcademyRuntime
 from .protocol import SCHEMAS
 from .store import AcademyStore
@@ -40,6 +41,7 @@ class AcademyService:
         self.designer = AcademyCourseDesigner(self.store, self.catalog, self._change, self._mark_started)
         self.experiments = AcademyExperiments(self)
         self.tutor = AcademyTutor(self)
+        self.mastery = AcademyMastery(self)
 
     def courses(self):
         return [{key: course[key] for key in ('id', 'version', 'origin', 'title', 'description')} | {'lesson_count': len(course['lessons'])}

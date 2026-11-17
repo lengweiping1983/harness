@@ -20679,6 +20679,197 @@
         ]
       }
     },
+    "/api/v1/academy/projects/{project_id}/mastery": {
+      "get": {
+        "operationId": "get_api_v1_academy_projects_project_id_mastery",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "mastery": {
+                      "$ref": "#/components/schemas/AcademyMastery"
+                    }
+                  },
+                  "required": [
+                    "mastery"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/academy/projects/{project_id}/reviews": {
+      "get": {
+        "operationId": "get_api_v1_academy_projects_project_id_reviews",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "reviews": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AcademyReviewItem"
+                      }
+                    }
+                  },
+                  "required": [
+                    "reviews"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_v1_academy_projects_project_id_reviews",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademyReviewRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/academy/receipts/{request_id}": {
       "get": {
         "operationId": "get_api_v1_academy_receipts_request_id",
@@ -30568,6 +30759,288 @@
           "option_id"
         ]
       },
+      "AcademyReviewCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "prompt",
+          "options"
+        ]
+      },
+      "AcademyReviewItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lesson_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "retrievability": {
+            "type": "number"
+          },
+          "overdue_days": {
+            "type": "number"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyReviewCheck"
+            }
+          }
+        },
+        "required": [
+          "lesson_id",
+          "title",
+          "goal",
+          "stage",
+          "retrievability",
+          "overdue_days",
+          "checks"
+        ]
+      },
+      "AcademySkillReviews": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "correct": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "delayed_correct": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "attempts",
+          "correct",
+          "delayed_correct"
+        ]
+      },
+      "AcademySkillState": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lesson_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "new",
+              "learning",
+              "durable"
+            ]
+          },
+          "stability_days": {
+            "type": "number"
+          },
+          "difficulty": {
+            "type": "number"
+          },
+          "retrievability": {
+            "type": "number"
+          },
+          "due_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "last_evidence_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "evidence_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reviews": {
+            "$ref": "#/components/schemas/AcademySkillReviews"
+          }
+        },
+        "required": [
+          "lesson_id",
+          "title",
+          "stage",
+          "state",
+          "stability_days",
+          "difficulty",
+          "retrievability",
+          "due_at",
+          "last_evidence_at",
+          "evidence_count",
+          "reviews"
+        ]
+      },
+      "AcademyMastery": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademySkillState"
+            }
+          },
+          "due_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reviews": {
+            "$ref": "#/components/schemas/AcademySkillReviews"
+          }
+        },
+        "required": [
+          "skills",
+          "due_count",
+          "reviews"
+        ]
+      },
+      "AcademyReviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "lesson_id": {
+            "type": "string"
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStudyAnswer"
+            },
+            "maxItems": 8
+          }
+        },
+        "required": [
+          "request_id",
+          "lesson_id",
+          "answers"
+        ]
+      },
+      "AcademyReviewCheckResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "check_id": {
+            "type": "string"
+          },
+          "correct": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "check_id",
+          "correct"
+        ]
+      },
+      "AcademyReview": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "lesson_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyStudyAnswer"
+            }
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyReviewCheckResult"
+            }
+          },
+          "correct": {
+            "type": "boolean"
+          },
+          "elapsed_days": {
+            "type": "number"
+          },
+          "retrievability": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "lesson_id",
+          "request_id",
+          "answers",
+          "results",
+          "correct",
+          "elapsed_days",
+          "retrievability",
+          "created_at"
+        ]
+      },
       "AcademyOperationResult": {
         "type": "object",
         "additionalProperties": false,
@@ -30598,6 +31071,12 @@
           },
           "design": {
             "$ref": "#/components/schemas/AcademyDesign"
+          },
+          "review": {
+            "$ref": "#/components/schemas/AcademyReview"
+          },
+          "skill": {
+            "$ref": "#/components/schemas/AcademySkillState"
           },
           "backup_checkpoint_id": {
             "type": "string"

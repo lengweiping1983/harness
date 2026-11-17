@@ -1950,6 +1950,64 @@ export interface AcademyStudyAnswer {
   check_id: string
   option_id: string
 }
+export interface AcademyReviewCheck {
+  id: string
+  prompt: string
+  options: Array<Record<string, unknown>>
+}
+export interface AcademyReviewItem {
+  lesson_id: string
+  title: string
+  goal: string
+  stage: string
+  retrievability: number
+  overdue_days: number
+  checks: Array<AcademyReviewCheck>
+}
+export interface AcademySkillReviews {
+  attempts: number
+  correct: number
+  delayed_correct: number
+}
+export interface AcademySkillState {
+  lesson_id: string
+  title: string
+  stage: string
+  state: 'new' | 'learning' | 'durable'
+  stability_days: number
+  difficulty: number
+  retrievability: number
+  due_at: number | null
+  last_evidence_at: number | null
+  evidence_count: number
+  reviews: AcademySkillReviews
+}
+export interface AcademyMastery {
+  skills: Array<AcademySkillState>
+  due_count: number
+  reviews: AcademySkillReviews
+}
+export interface AcademyReviewRequest {
+  request_id: string
+  lesson_id: string
+  answers: Array<AcademyStudyAnswer>
+}
+export interface AcademyReviewCheckResult {
+  check_id: string
+  correct: boolean
+}
+export interface AcademyReview {
+  id: string
+  project_id: string
+  lesson_id: string
+  request_id: string
+  answers: Array<AcademyStudyAnswer>
+  results: Array<AcademyReviewCheckResult>
+  correct: boolean
+  elapsed_days: number
+  retrievability: number
+  created_at: number
+}
 export interface AcademyOperationResult {
   project?: AcademyProject
   source?: AcademySourceFile
@@ -1960,6 +2018,8 @@ export interface AcademyOperationResult {
   model_run?: AcademyModelRun
   tutor_turn?: AcademyTutorTurn
   design?: AcademyDesign
+  review?: AcademyReview
+  skill?: AcademySkillState
   backup_checkpoint_id?: string
   error_code?: string
 }

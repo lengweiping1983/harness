@@ -4520,6 +4520,8 @@
   "ui.academy.error.lesson-not-runnable": "本课使用阅读、自测和反思，没有需要运行的代码。",
   "ui.collaboration.error.academy/lesson-not-runnable": "本课使用阅读、自测和反思，没有需要运行的代码。",
   "ui.academy.error.study-incomplete": "请先核对并答对所有自测，再完成本课学习活动。",
+  "ui.academy.error.review-incomplete": "请为每道自测题选择一个选项后再提交重测。",
+  "ui.academy.error.review-not-ready": "本课还没有学习证据；请先完成学习活动或通过代码检查，再参加延迟重测。",
   "ui.collaboration.error.academy/study-incomplete": "请先核对并答对所有自测，再完成本课学习活动。",
   "ui.models.selectionSaving": "所选模型：{p0} · 正在保存选择…",
   "ui.models.routingCandidate": "路由候选：{model}",
