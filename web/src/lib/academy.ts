@@ -1,8 +1,8 @@
 import {isUnconfirmedWrite, request as httpRequest} from './http'
 import {hasTranslation} from '@/i18n'
-import type { AcademyAssessmentDimension, AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyDesign, AcademyDimensionId, AcademyFile, AcademyLesson, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorTurn, AcademyMastery, AcademyReviewItem, AcademyTeachQuiz, AcademyTeachMisconception, AcademyLesson, AcademyStruggleSession, AcademyStruggleView, AcademyWorldSession, AcademyWorldView } from '@/types'
+import type { AcademyAssessmentDimension, AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyDesign, AcademyDimensionId, AcademyFile, AcademyLesson, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorTurn, AcademyMastery, AcademyReviewItem, AcademyTeachQuiz, AcademyTeachMisconception, AcademyLesson, AcademyStruggleSession, AcademyStruggleView, AcademyWorldSession, AcademyWorldView, AcademyStepsView } from '@/types'
 import type {ApiResult, RequestOptions} from './http'
-import type { AcademyCompleteStudy, AcademyCreateDesign, AcademyCreateProject, AcademyExecute, AcademyModelRunRequest, AcademyRestore, AcademySaveCheckpoint, AcademyStartLesson, AcademyWriteFile, AcademySubmit, AcademyTutorRequest, AcademyTutorStop, AcademyModelStop, AcademyReviewRequest, AcademyTeachQuizRequest, AcademyStruggleStart, AcademyStruggleAttempt, AcademyStruggleReveal, AcademyWorldStart, AcademyWorldPredict, AcademyWorldObserve, AcademyWorldComplete } from './protocol.generated'
+import type { AcademyCompleteStudy, AcademyCreateDesign, AcademyCreateProject, AcademyExecute, AcademyModelRunRequest, AcademyRestore, AcademySaveCheckpoint, AcademyStartLesson, AcademyWriteFile, AcademySubmit, AcademyTutorRequest, AcademyTutorStop, AcademyModelStop, AcademyReviewRequest, AcademyTeachQuizRequest, AcademyStruggleStart, AcademyStruggleAttempt, AcademyStruggleReveal, AcademyWorldStart, AcademyWorldPredict, AcademyWorldObserve, AcademyWorldComplete, AcademyStepAnswer } from './protocol.generated'
 
 const prefix = '/api/v1/academy'
 const id = encodeURIComponent
@@ -64,6 +64,8 @@ export const academyApi = {
   worldPredict: (project: string, body: AcademyWorldPredict) => post('/projects/' + id(project) + '/world/predict', body),
   worldObserve: (project: string, body: AcademyWorldObserve) => post('/projects/' + id(project) + '/world/observe', body),
   worldComplete: (project: string, body: AcademyWorldComplete) => post('/projects/' + id(project) + '/world/complete', body),
+  steps: (project: string, lesson: string, signal?: AbortSignal) => request<AcademyStepsView>(prefix + '/projects/' + id(project) + '/steps?lesson_id=' + id(lesson), {signal}),
+  stepAnswer: (project: string, body: AcademyStepAnswer) => post('/projects/' + id(project) + '/steps/answer', body),
 }
 
 export function academyReceiptMatches(receipt: AcademyReceipt, requestId: string, projectId?: string, tutorRequestId = requestId, modelRequestId = requestId): boolean {
@@ -75,7 +77,7 @@ export function academyReceiptMatches(receipt: AcademyReceipt, requestId: string
   if (receipt.result.quiz && receipt.result.quiz.request_id !== requestId) return false
   if (receipt.result.model_run && receipt.result.model_run.request_id !== modelRequestId) return false
   if (receipt.result.tutor_turn && receipt.result.tutor_turn.request_id !== tutorRequestId) return false
-  if (receipt.status === 'ready' && !receipt.result.project && !receipt.result.checkpoint && !receipt.result.submission && !receipt.result.design && !receipt.result.model_run && !receipt.result.tutor_turn && !receipt.result.review && !receipt.result.quiz && !receipt.result.struggle && !receipt.result.world) return false
+  if (receipt.status === 'ready' && !receipt.result.project && !receipt.result.checkpoint && !receipt.result.submission && !receipt.result.design && !receipt.result.model_run && !receipt.result.tutor_turn && !receipt.result.review && !receipt.result.quiz && !receipt.result.struggle && !receipt.result.world && !receipt.result.step) return false
   if (receipt.status === 'failed' && !receipt.result.error_code) return false
   return true
 }

@@ -17,6 +17,7 @@ import {AcademyMastery} from './AcademyMastery'
 import {AcademyTeach} from './AcademyTeach'
 import {AcademyStruggle} from './AcademyStruggle'
 import {AcademyWorld} from './AcademyWorld'
+import {AcademySteps} from './AcademySteps'
 import {AcademyTopicStudio} from './AcademyTopicStudio'
 import {AcademyModelLab} from './AcademyModelLab'
 import {AcademyTutor} from './AcademyTutor'
@@ -653,6 +654,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
         <p className="text-base leading-reading">{lesson.goal}</p>
         {project && current && lesson.struggle ? <AcademyStruggle key={'struggle:' + JSON.stringify([projectId, lessonId])} projectId={projectId} lesson={lesson} active={active} disabled={locked || loading} onPhase={revealed => setStruggleGate(previous => previous && previous.lessonId === lesson.id && previous.revealed === revealed ? previous : {lessonId: lesson.id, revealed})} /> : null}
         {project && current && lesson.world ? <AcademyWorld key={'world:' + JSON.stringify([projectId, lessonId])} projectId={projectId} lesson={lesson} active={active} disabled={locked || loading} /> : null}
+        {project && current && lesson.steps?.length ? <AcademySteps key={'steps:' + JSON.stringify([projectId, lessonId])} projectId={projectId} lesson={lesson} active={active} disabled={locked || loading} /> : null}
 
         <details key={JSON.stringify([projectId, lessonId])} ref={guideRef} open={readingLesson || !project || !current} tabIndex={-1} className="rounded-lg border border-line p-3 focus-visible:outline focus-visible:outline-brand">
           <summary className="cursor-pointer rounded-lg text-sm text-muted focus-visible:outline focus-visible:outline-brand">{t('ui.academy.lessonGuide')}</summary>
