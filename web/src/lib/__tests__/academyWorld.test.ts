@@ -7,6 +7,20 @@ import {academyReceiptMatches, academyWorldParams} from '../academy'
 import type {AcademyLesson, AcademyReceipt, AcademyWorldSession} from '@/types'
 
 afterEach(async () => {await setLocale('zh-CN')})
+it('renders the float-sink micro-world state bilingually with submerged position', async () => {
+  await setLocale('en')
+  const floats = renderToStaticMarkup(createElement(AcademyWorldState, {kind: 'float-sink', state: {object: 6, liquid: 10, floats: true, submerged: 0.6, label: 'object 6 / liquid 10 - submerged 60%'}}))
+  expect(floats).toContain('data-world-state="float-sink"')
+  expect(floats).toContain('Floats')
+  expect(floats).toContain('top:22%')
+  const sinks = renderToStaticMarkup(createElement(AcademyWorldState, {kind: 'float-sink', state: {object: 12, liquid: 10, floats: false, submerged: 1, label: 'object 12 / liquid 10 - submerged 100%'}}))
+  expect(sinks).toContain('Sinks')
+  expect(sinks).toContain('top:80%')
+  expect(academyWorldParams['float-sink']).toEqual([{key: 'object', min: 1, max: 20}, {key: 'liquid', min: 1, max: 20}])
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(createElement(AcademyWorldState, {kind: 'float-sink', state: {object: 6, liquid: 10, floats: true, submerged: 0.6, label: '物体 6 ／ 液体 10 · 浸入 60%'}}))
+  expect(chinese).toContain('漂浮')
+})
 
 const lesson: AcademyLesson = {id: 'fraction-intuition', mode: 'study', order: 5, title: 'Fractions', goal: 'Equal parts',
   reading: 'reading', milestone: false, run_command: [], source_manifest: [], references: [], prerequisites: [], trace_labels: {},
@@ -31,7 +45,7 @@ it('matches world receipts by the write request and project', () => {
   expect(academyReceiptMatches(receipt({status: 'unknown', result: {}}), 'observe-request', 'project')).toBe(true)
   expect(academyReceiptMatches(receipt({status: 'failed', result: {error_code: 'world-invalid'}}), 'observe-request', 'project')).toBe(true)
   expect(academyReceiptMatches(receipt({result: {}}), 'observe-request', 'project')).toBe(false)
-  expect(Object.keys(academyWorldParams).sort()).toEqual(['balance-scale', 'fraction-bar', 'group-array'])
+  expect(Object.keys(academyWorldParams).sort()).toEqual(['balance-scale', 'float-sink', 'fraction-bar', 'group-array'])
 })
 
 it('visualizes kernel state for all three worlds', async () => {

@@ -32022,7 +32022,8 @@
             "enum": [
               "fraction-bar",
               "group-array",
-              "balance-scale"
+              "balance-scale",
+              "float-sink"
             ]
           }
         },
@@ -32127,7 +32128,8 @@
             "enum": [
               "fraction-bar",
               "group-array",
-              "balance-scale"
+              "balance-scale",
+              "float-sink"
             ]
           },
           "params": {

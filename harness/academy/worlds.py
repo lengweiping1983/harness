@@ -4,12 +4,14 @@ from __future__ import annotations
 import time
 import uuid
 
+from harness.i18n import tr
+
 from .errors import AcademyError
 
 MAX_OBSERVATIONS = 12
 MAX_NOTE_CHARS = 4000
 MAX_SESSION_BYTES = 512 * 1024
-KINDS = ('fraction-bar', 'group-array', 'balance-scale')
+KINDS = ('fraction-bar', 'group-array', 'balance-scale', 'float-sink')
 
 
 def _int(params, key, low, high):
@@ -41,9 +43,20 @@ def balance_state(params):
     return {'left': left, 'right': right, 'balanced': left == right, 'difference': left - right}
 
 
-KERNELS = {'fraction-bar': fraction_state, 'group-array': groups_state, 'balance-scale': balance_state}
-INITIAL = {'fraction-bar': {'parts': 4, 'shaded': 1}, 'group-array': {'groups': 2, 'per_group': 3}, 'balance-scale': {'left': 5, 'right': 3}}
-TARGETS = {'fraction-bar': {'parts': 6, 'shaded': 2}, 'group-array': {'groups': 4, 'per_group': 3}, 'balance-scale': {'left': 7, 'right': 0}}
+def float_state(params):
+    """沉浮由物体与液体密度比决定；浸入比例 = min(1, 物体密度/液体密度)。"""
+    obj = _int(params, 'object', 1, 20)
+    liquid = _int(params, 'liquid', 1, 20)
+    submerged = round(min(1.0, obj / liquid), 2)
+    return {'object': obj, 'liquid': liquid, 'floats': obj < liquid, 'submerged': submerged,
+            'label': tr('ui.academy.world.float.label', object=obj, liquid=liquid, percent=round(submerged * 100))}
+
+
+KERNELS = {'fraction-bar': fraction_state, 'group-array': groups_state, 'balance-scale': balance_state, 'float-sink': float_state}
+INITIAL = {'fraction-bar': {'parts': 4, 'shaded': 1}, 'group-array': {'groups': 2, 'per_group': 3}, 'balance-scale': {'left': 5, 'right': 3},
+           'float-sink': {'object': 6, 'liquid': 10}}
+TARGETS = {'fraction-bar': {'parts': 6, 'shaded': 2}, 'group-array': {'groups': 4, 'per_group': 3}, 'balance-scale': {'left': 7, 'right': 0},
+           'float-sink': {'object': 12, 'liquid': 10}}
 
 
 def challenge(kind):
@@ -57,11 +70,14 @@ def challenge(kind):
         state = groups_state(target)
         prompt = 'Make ' + str(target['groups']) + ' groups of ' + str(target['per_group']) + '. How many objects in total?'
         labels = [str(state['total']), str(target['groups'] + target['per_group']), str(target['groups'])]
-    else:
+    elif kind == 'balance-scale':
         target['right'] = target['left']
         state = balance_state(target)
         prompt = 'The left pan holds ' + str(target['left']) + ' g. What must the right pan hold to balance?'
         labels = [str(state['right']), str(target['left'] * 2), str(max(0, target['left'] - 1))]
+    else:
+        prompt = tr('ui.academy.world.float.challenge', object=target['object'], liquid=target['liquid'])
+        labels = [tr('ui.academy.world.float.optionSink'), tr('ui.academy.world.float.optionFloat'), tr('ui.academy.world.float.optionSuspend')]
     options = [{'id': 'option-' + str(index), 'label': label} for index, label in enumerate(labels)]
     return {'prompt': prompt, 'options': options, 'answer_id': 'option-0', 'target': target}
 

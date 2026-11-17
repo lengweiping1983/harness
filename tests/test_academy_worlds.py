@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from harness.academy import worlds
+from harness.i18n import tr
 from harness.academy.errors import AcademyError
 from harness.academy.mastery import INITIAL_STABILITY
 from harness.academy.service import AcademyService
@@ -26,6 +27,21 @@ class WorldKernelTests(unittest.TestCase):
                 worlds.fraction_state(params)
             self.assertEqual(caught.exception.code, 'world-invalid')
 
+    def test_float_kernel_truth_and_bounds(self):
+        """沉浮与浸入比例由密度比决定；越界参数明确拒绝。"""
+        state = worlds.float_state({'object': 6, 'liquid': 10})
+        self.assertTrue(state['floats'])
+        self.assertEqual(state['submerged'], 0.6)
+        sunk = worlds.float_state({'object': 12, 'liquid': 10})
+        self.assertFalse(sunk['floats'])
+        self.assertEqual(sunk['submerged'], 1.0)
+        equal = worlds.float_state({'object': 10, 'liquid': 10})
+        self.assertFalse(equal['floats'])
+        self.assertEqual(equal['submerged'], 1.0)
+        with self.assertRaises(AcademyError):
+            worlds.float_state({'object': 0, 'liquid': 10})
+        with self.assertRaises(AcademyError):
+            worlds.float_state({'object': 6, 'liquid': 21})
     def test_groups_and_balance_truth(self):
         state = worlds.groups_state({'groups': 4, 'per_group': 3})
         self.assertEqual(state['total'], 12)
@@ -49,9 +65,12 @@ class WorldKernelTests(unittest.TestCase):
             elif kind == 'group-array':
                 self.assertEqual(labels[0], str(worlds.groups_state(task['target'])['total']))
                 self.assertEqual(labels[1], '7')
-            else:
+            elif kind == 'balance-scale':
                 self.assertEqual(labels[0], '7')
                 self.assertTrue(worlds.balance_state({'left': 7, 'right': int(labels[0])})['balanced'])
+            else:
+                self.assertEqual(labels[0], tr('ui.academy.world.float.optionSink'))
+                self.assertFalse(worlds.float_state(task['target'])['floats'])
 
 
 class WorldSessionTests(unittest.TestCase):

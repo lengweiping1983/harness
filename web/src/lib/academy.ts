@@ -265,6 +265,7 @@ export const academyWorldParams: Record<string, Array<{key: string; min: number;
   'fraction-bar': [{key: 'parts', min: 2, max: 12}, {key: 'shaded', min: 0, max: 12}],
   'group-array': [{key: 'groups', min: 1, max: 9}, {key: 'per_group', min: 1, max: 9}],
   'balance-scale': [{key: 'left', min: 0, max: 100}, {key: 'right', min: 0, max: 100}],
+  'float-sink': [{key: 'object', min: 1, max: 20}, {key: 'liquid', min: 1, max: 20}],
 }
 
 /** 自适应步骤路由：答错主步骤时路由到 on_wrong 支架步骤，支架掌握后回到主步骤；支架步骤不计入完成。 */

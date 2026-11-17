@@ -2049,7 +2049,7 @@ export interface AcademyStepResult {
   response: AcademyStepResponse
 }
 export interface AcademyWorldTask {
-  kind: 'fraction-bar' | 'group-array' | 'balance-scale'
+  kind: 'fraction-bar' | 'group-array' | 'balance-scale' | 'float-sink'
 }
 export interface AcademyWorldOption {
   id: string
@@ -2074,7 +2074,7 @@ export interface AcademyWorldSession {
   project_id: string
   lesson_id: string
   request_id: string
-  kind: 'fraction-bar' | 'group-array' | 'balance-scale'
+  kind: 'fraction-bar' | 'group-array' | 'balance-scale' | 'float-sink'
   params: Record<string, unknown>
   challenge: AcademyWorldChallenge
   prediction?: AcademyWorldPrediction

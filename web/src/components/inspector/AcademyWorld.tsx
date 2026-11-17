@@ -29,6 +29,17 @@ export function AcademyWorldState({kind, state}: {kind: string; state: Record<st
       <p className="text-xs text-muted">{String(state.product)} = {String(state.total)}</p>
     </div>
   }
+  if (kind === 'float-sink') {
+    const submerged = Number(state.submerged), floats = Boolean(state.floats)
+    const top = floats ? 30 - (1 - submerged) * 20 : 80
+    return <div data-world-state="float-sink" className="space-y-2">
+      <div className="relative h-32 w-40 overflow-hidden rounded-lg border border-line bg-canvas" role="img" aria-label={String(state.label)}>
+        <div className="absolute inset-x-0 bottom-0 bg-brand/20" style={{height: '70%'}} />
+        <div className="absolute left-1/2 w-8 -translate-x-1/2 rounded border border-line bg-brand" style={{top: top + '%', height: '20%'}} />
+      </div>
+      <div className="flex items-center gap-2"><Badge tone={floats ? 'ok' : 'warn'}>{t(floats ? 'ui.academy.world.float.floats' : 'ui.academy.world.float.sinks')}</Badge><p className="text-sm font-medium">{String(state.label)}</p></div>
+    </div>
+  }
   const balanced = Boolean(state.balanced)
   return <div data-world-state="balance-scale" className="space-y-2">
     <div className="flex items-center gap-3 text-sm">
@@ -75,7 +86,7 @@ export function AcademyWorldCard({kind, session, params, note, busy, onParams, o
       <div className="space-y-2">
         <p className="text-xs font-medium text-muted">{t('ui.academy.world.paramsLabel')}</p>
         <div className="flex flex-wrap gap-2">{spec.map(item => <label key={item.key} className="flex items-center gap-1 text-sm">
-          <span className="font-mono text-xs">{item.key}</span>
+          <span className="text-xs text-muted">{t('ui.academy.world.param.' + item.key)}</span>
           <input type="number" className="ui-field w-20" min={item.min} max={item.max} step={1} value={Number.isInteger(params[item.key]) ? params[item.key] : ''}
             disabled={busy || session.status === 'completed'} onChange={event => onParams({...params, [item.key]: Math.trunc(Number(event.target.value))})} />
         </label>)}</div>
