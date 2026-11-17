@@ -249,6 +249,95 @@
             "subtract-check.q1.hint.1"
           ]
         }
+      ],
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "subtract-check.worked.prompt",
+          "feedback_key": "subtract-check.worked.fb",
+          "hint_keys": [
+            "subtract-check.worked.hint"
+          ],
+          "content_key": "subtract-check.worked.content"
+        },
+        {
+          "id": "compute",
+          "kind": "numeric",
+          "prompt_key": "subtract-check.compute.prompt",
+          "feedback_key": "subtract-check.compute.fb",
+          "hint_keys": [
+            "subtract-check.compute.hint"
+          ],
+          "scaffold_key": "subtract-check.compute.scaffold",
+          "answer": 24,
+          "tolerance": 0,
+          "number_line": {
+            "min": 0,
+            "max": 60
+          }
+        },
+        {
+          "id": "match-checks",
+          "kind": "matching",
+          "prompt_key": "subtract-check.match-checks.prompt",
+          "feedback_key": "subtract-check.match-checks.fb",
+          "hint_keys": [
+            "subtract-check.match-checks.hint"
+          ],
+          "left": [
+            {
+              "id": "s1",
+              "label_key": "subtract-check.match-checks.s1"
+            },
+            {
+              "id": "s2",
+              "label_key": "subtract-check.match-checks.s2"
+            },
+            {
+              "id": "s3",
+              "label_key": "subtract-check.match-checks.s3"
+            }
+          ],
+          "right": [
+            {
+              "id": "c1",
+              "label_key": "subtract-check.match-checks.c1"
+            },
+            {
+              "id": "c2",
+              "label_key": "subtract-check.match-checks.c2"
+            },
+            {
+              "id": "c3",
+              "label_key": "subtract-check.match-checks.c3"
+            }
+          ],
+          "answer": {
+            "s1": "c1",
+            "s2": "c2",
+            "s3": "c3"
+          }
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "subtract-check.independent.prompt",
+          "feedback_key": "subtract-check.independent.fb",
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "subtract-check.independent.a",
+              "feedback_key": "subtract-check.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "subtract-check.independent.b",
+              "feedback_key": "subtract-check.independent.b.fb"
+            }
+          ]
+        }
       ]
     },
     {
@@ -296,7 +385,82 @@
       },
       "world": {
         "kind": "group-array"
-      }
+      },
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "multiply-meaning.worked.prompt",
+          "feedback_key": "multiply-meaning.worked.fb",
+          "hint_keys": [
+            "multiply-meaning.worked.hint"
+          ],
+          "content_key": "multiply-meaning.worked.content"
+        },
+        {
+          "id": "groups",
+          "kind": "numeric",
+          "prompt_key": "multiply-meaning.groups.prompt",
+          "feedback_key": "multiply-meaning.groups.fb",
+          "hint_keys": [
+            "multiply-meaning.groups.hint"
+          ],
+          "scaffold_key": "multiply-meaning.groups.scaffold",
+          "answer": 20,
+          "tolerance": 0,
+          "number_line": {
+            "min": 0,
+            "max": 40
+          }
+        },
+        {
+          "id": "order-groups",
+          "kind": "ordering",
+          "prompt_key": "multiply-meaning.order-groups.prompt",
+          "feedback_key": "multiply-meaning.order-groups.fb",
+          "hint_keys": [
+            "multiply-meaning.order-groups.hint"
+          ],
+          "items": [
+            {
+              "id": "g",
+              "label_key": "multiply-meaning.order-groups.g"
+            },
+            {
+              "id": "p",
+              "label_key": "multiply-meaning.order-groups.p"
+            },
+            {
+              "id": "t",
+              "label_key": "multiply-meaning.order-groups.t"
+            }
+          ],
+          "answer": [
+            "g",
+            "p",
+            "t"
+          ]
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "multiply-meaning.independent.prompt",
+          "feedback_key": "multiply-meaning.independent.fb",
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "multiply-meaning.independent.a",
+              "feedback_key": "multiply-meaning.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "multiply-meaning.independent.b",
+              "feedback_key": "multiply-meaning.independent.b.fb"
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "fraction-intuition",
@@ -456,6 +620,81 @@
           "answer_id": "a",
           "hint_keys": [
             "word-problems.q1.hint.1"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "word-problems.worked.prompt",
+          "feedback_key": "word-problems.worked.fb",
+          "hint_keys": [
+            "word-problems.worked.hint"
+          ],
+          "content_key": "word-problems.worked.content"
+        },
+        {
+          "id": "tables",
+          "kind": "numeric",
+          "prompt_key": "word-problems.tables.prompt",
+          "feedback_key": "word-problems.tables.fb",
+          "hint_keys": [
+            "word-problems.tables.hint"
+          ],
+          "scaffold_key": "word-problems.tables.scaffold",
+          "answer": 6,
+          "tolerance": 0,
+          "number_line": {
+            "min": 0,
+            "max": 12
+          }
+        },
+        {
+          "id": "which-op",
+          "kind": "choice",
+          "prompt_key": "word-problems.which-op.prompt",
+          "feedback_key": "word-problems.which-op.fb",
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "word-problems.which-op.a",
+              "feedback_key": "word-problems.which-op.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "word-problems.which-op.b",
+              "feedback_key": "word-problems.which-op.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "order-solve",
+          "kind": "ordering",
+          "prompt_key": "word-problems.order-solve.prompt",
+          "feedback_key": "word-problems.order-solve.fb",
+          "hint_keys": [
+            "word-problems.order-solve.hint"
+          ],
+          "items": [
+            {
+              "id": "r",
+              "label_key": "word-problems.order-solve.r"
+            },
+            {
+              "id": "c",
+              "label_key": "word-problems.order-solve.c"
+            },
+            {
+              "id": "k",
+              "label_key": "word-problems.order-solve.k"
+            }
+          ],
+          "answer": [
+            "r",
+            "c",
+            "k"
           ]
         }
       ]

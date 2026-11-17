@@ -305,7 +305,96 @@
       ],
       "world": {
         "kind": "balance-scale"
-      }
+      },
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "equation-balance.worked.prompt",
+          "feedback_key": "equation-balance.worked.fb",
+          "hint_keys": [
+            "equation-balance.worked.hint"
+          ],
+          "content_key": "equation-balance.worked.content"
+        },
+        {
+          "id": "balance-choice",
+          "kind": "choice",
+          "prompt_key": "equation-balance.balance-choice.prompt",
+          "feedback_key": "equation-balance.balance-choice.fb",
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "equation-balance.balance-choice.a",
+              "feedback_key": "equation-balance.balance-choice.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "equation-balance.balance-choice.b",
+              "feedback_key": "equation-balance.balance-choice.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "solve",
+          "kind": "numeric",
+          "prompt_key": "equation-balance.solve.prompt",
+          "feedback_key": "equation-balance.solve.fb",
+          "hint_keys": [
+            "equation-balance.solve.hint"
+          ],
+          "scaffold_key": "equation-balance.solve.scaffold",
+          "answer": 7,
+          "tolerance": 0,
+          "number_line": {
+            "min": 0,
+            "max": 15
+          }
+        },
+        {
+          "id": "match-solutions",
+          "kind": "matching",
+          "prompt_key": "equation-balance.match-solutions.prompt",
+          "feedback_key": "equation-balance.match-solutions.fb",
+          "hint_keys": [
+            "equation-balance.match-solutions.hint"
+          ],
+          "left": [
+            {
+              "id": "e1",
+              "label_key": "equation-balance.match-solutions.e1"
+            },
+            {
+              "id": "e2",
+              "label_key": "equation-balance.match-solutions.e2"
+            },
+            {
+              "id": "e3",
+              "label_key": "equation-balance.match-solutions.e3"
+            }
+          ],
+          "right": [
+            {
+              "id": "v4",
+              "label_key": "equation-balance.match-solutions.v4"
+            },
+            {
+              "id": "v5",
+              "label_key": "equation-balance.match-solutions.v5"
+            },
+            {
+              "id": "v7",
+              "label_key": "equation-balance.match-solutions.v7"
+            }
+          ],
+          "answer": {
+            "e1": "v4",
+            "e2": "v5",
+            "e3": "v7"
+          }
+        }
+      ]
     },
     {
       "id": "solve-one-step",
@@ -464,7 +553,87 @@
       "struggle": {
         "challenge_key": "solve-two-step.struggle",
         "window_minutes": 6
-      }
+      },
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "solve-two-step.worked.prompt",
+          "feedback_key": "solve-two-step.worked.fb",
+          "hint_keys": [
+            "solve-two-step.worked.hint"
+          ],
+          "content_key": "solve-two-step.worked.content"
+        },
+        {
+          "id": "solve",
+          "kind": "numeric",
+          "prompt_key": "solve-two-step.solve.prompt",
+          "feedback_key": "solve-two-step.solve.fb",
+          "hint_keys": [
+            "solve-two-step.solve.hint"
+          ],
+          "scaffold_key": "solve-two-step.solve.scaffold",
+          "answer": 4,
+          "tolerance": 0,
+          "number_line": {
+            "min": 0,
+            "max": 10
+          }
+        },
+        {
+          "id": "order-solve",
+          "kind": "ordering",
+          "prompt_key": "solve-two-step.order-solve.prompt",
+          "feedback_key": "solve-two-step.order-solve.fb",
+          "hint_keys": [
+            "solve-two-step.order-solve.hint"
+          ],
+          "items": [
+            {
+              "id": "a",
+              "label_key": "solve-two-step.order-solve.a"
+            },
+            {
+              "id": "b",
+              "label_key": "solve-two-step.order-solve.b"
+            },
+            {
+              "id": "c",
+              "label_key": "solve-two-step.order-solve.c"
+            },
+            {
+              "id": "d",
+              "label_key": "solve-two-step.order-solve.d"
+            }
+          ],
+          "answer": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ]
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "solve-two-step.independent.prompt",
+          "feedback_key": "solve-two-step.independent.fb",
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "solve-two-step.independent.a",
+              "feedback_key": "solve-two-step.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "solve-two-step.independent.b",
+              "feedback_key": "solve-two-step.independent.b.fb"
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "word-to-equation",
@@ -503,6 +672,95 @@
           "hint_keys": [
             "word-to-equation.q1.hint.1"
           ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "word-to-equation.worked.prompt",
+          "feedback_key": "word-to-equation.worked.fb",
+          "hint_keys": [
+            "word-to-equation.worked.hint"
+          ],
+          "content_key": "word-to-equation.worked.content"
+        },
+        {
+          "id": "which-eq",
+          "kind": "choice",
+          "prompt_key": "word-to-equation.which-eq.prompt",
+          "feedback_key": "word-to-equation.which-eq.fb",
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "word-to-equation.which-eq.a",
+              "feedback_key": "word-to-equation.which-eq.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "word-to-equation.which-eq.b",
+              "feedback_key": "word-to-equation.which-eq.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "solve",
+          "kind": "numeric",
+          "prompt_key": "word-to-equation.solve.prompt",
+          "feedback_key": "word-to-equation.solve.fb",
+          "hint_keys": [
+            "word-to-equation.solve.hint"
+          ],
+          "scaffold_key": "word-to-equation.solve.scaffold",
+          "answer": 4,
+          "tolerance": 0,
+          "number_line": {
+            "min": 0,
+            "max": 10
+          }
+        },
+        {
+          "id": "match-stories",
+          "kind": "matching",
+          "prompt_key": "word-to-equation.match-stories.prompt",
+          "feedback_key": "word-to-equation.match-stories.fb",
+          "hint_keys": [
+            "word-to-equation.match-stories.hint"
+          ],
+          "left": [
+            {
+              "id": "w1",
+              "label_key": "word-to-equation.match-stories.w1"
+            },
+            {
+              "id": "w2",
+              "label_key": "word-to-equation.match-stories.w2"
+            },
+            {
+              "id": "w3",
+              "label_key": "word-to-equation.match-stories.w3"
+            }
+          ],
+          "right": [
+            {
+              "id": "q1",
+              "label_key": "word-to-equation.match-stories.q1"
+            },
+            {
+              "id": "q2",
+              "label_key": "word-to-equation.match-stories.q2"
+            },
+            {
+              "id": "q3",
+              "label_key": "word-to-equation.match-stories.q3"
+            }
+          ],
+          "answer": {
+            "w1": "q1",
+            "w2": "q2",
+            "w3": "q3"
+          }
         }
       ]
     }

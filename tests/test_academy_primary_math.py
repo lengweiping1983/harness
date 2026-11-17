@@ -55,7 +55,7 @@ class PrimaryMathCourseTests(unittest.TestCase):
                         self.assertTrue(option_zh['feedback'].strip())
                     self.assertTrue(all(hint.strip() for hint in check_en['hints']))
         self.assertEqual(positions, {0, 1})
-        self.assertGreaterEqual(sum(1 for lesson in english['lessons'] if lesson.get('steps')), 3)
+        self.assertGreaterEqual(sum(1 for lesson in english['lessons'] if lesson.get('steps')), 6)
 
     def test_study_activity_memory_review_and_teach_work_without_sandbox(self):
         with tempfile.TemporaryDirectory() as directory:

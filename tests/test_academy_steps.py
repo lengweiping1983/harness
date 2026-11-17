@@ -128,8 +128,9 @@ class StepSessionTests(unittest.TestCase):
         self.open_lesson()
         missing = self.answer('nope', 'x')
         self.assertEqual(missing['result']['error_code'], 'step-not-found')
-        self.open_lesson('subtract-check')
-        unavailable = self.service.steps.answer(self.pid, 'ans-pv', 'subtract-check', 'q1', 'x')
+        other = self.service.create_project('create-hf', 'harness-foundations')['result']['project']
+        self.service.start_lesson(other['id'], 'open-hf', 'agent-loop', other['revision'], other['fingerprint'])
+        unavailable = self.service.steps.answer(other['id'], 'ans-hf', 'agent-loop', 'q1', 'x')
         self.assertEqual(unavailable['result']['error_code'], 'steps-unavailable')
 
     def test_receipt_idempotency_and_invalid_response(self):
