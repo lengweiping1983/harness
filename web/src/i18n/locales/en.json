@@ -4588,6 +4588,7 @@
   "ui.academy.error.quiz-interrupted": "The student quiz was interrupted; its result is unconfirmed.",
   "ui.academy.error.quiz-timeout": "The student quiz timed out; its result is unconfirmed.",
   "ui.academy.error.quiz-failed": "The student quiz failed; no result was recorded.",
+  "ui.academy.mastery.engagement": "Engagement: {constructive} constructive · {active} active · {percent}% constructive",
   "ui.academy.mastery.title": "Memory & delayed review",
   "ui.academy.mastery.dueBadge": "{count} due for review",
   "ui.academy.mastery.intro": "Skills fade on a forgetting curve; due reviews come back interleaved across stages. Only independent answers count.",

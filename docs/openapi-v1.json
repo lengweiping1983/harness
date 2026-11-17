@@ -32215,6 +32215,33 @@
           "reviews"
         ]
       },
+      "AcademyEngagement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "constructive": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "constructive_ratio": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "constructive",
+          "active",
+          "total",
+          "constructive_ratio"
+        ]
+      },
       "AcademyMastery": {
         "type": "object",
         "additionalProperties": false,
@@ -32231,12 +32258,16 @@
           },
           "reviews": {
             "$ref": "#/components/schemas/AcademySkillReviews"
+          },
+          "engagement": {
+            "$ref": "#/components/schemas/AcademyEngagement"
           }
         },
         "required": [
           "skills",
           "due_count",
-          "reviews"
+          "reviews",
+          "engagement"
         ]
       },
       "AcademyReviewRequest": {

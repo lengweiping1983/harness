@@ -8084,6 +8084,7 @@
   "ui.academy.error.quiz-interrupted": "学生测验被中断，结果未确认。",
   "ui.academy.error.quiz-timeout": "学生测验超时，结果未确认。",
   "ui.academy.error.quiz-failed": "学生测验失败，未记录结果。",
+  "ui.academy.mastery.engagement": "参与度：建构 {constructive} · 主动 {active} · 建构占比 {percent}%",
   "ui.academy.mastery.title": "记忆与延迟重测",
   "ui.academy.mastery.dueBadge": "{count} 项待重测",
   "ui.academy.mastery.intro": "技能按遗忘曲线淡忘；到期重测按阶段交错回来，只有独立作答才算数。",

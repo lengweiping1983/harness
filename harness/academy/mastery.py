@@ -148,6 +148,40 @@ class AcademyMastery:
         self.service._require_course(record)
         return record, self.service.course(record['course_id'])['lessons']
 
+
+    def _engagement(self, project_id: str) -> dict:
+        """认知参与度从证据类型确定性评级：生成解释为建构，作答检查为主动。"""
+        constructive = active = 0
+        for value in self.service.store.list('review', max_bytes=MAX_EVIDENCE_BYTES):
+            if value.get('project_id') == project_id:
+                active += 1
+        for value in self.service.store.list('run', max_bytes=MAX_EVIDENCE_BYTES):
+            if value.get('project_id') == project_id and value.get('kind') == 'check':
+                active += 1
+        for kind in ('study-completion', 'submission'):
+            for value in self.service.store.list(kind, max_bytes=MAX_EVIDENCE_BYTES):
+                if value.get('project_id') == project_id:
+                    constructive += 1
+        for value in self.service.store.list('struggle', max_bytes=MAX_EVIDENCE_BYTES):
+            if value.get('project_id') == project_id and isinstance(value.get('attempt'), str) and value['attempt'].strip():
+                constructive += 1
+        for value in self.service.store.list('world', max_bytes=MAX_EVIDENCE_BYTES):
+            if value.get('project_id') != project_id:
+                continue
+            if value.get('status') == 'completed':
+                constructive += 1
+            elif value.get('prediction'):
+                active += 1
+        for value in self.service.store.list('tutor-turn:' + project_id, max_bytes=MAX_EVIDENCE_BYTES):
+            if value.get('status') == 'completed':
+                if value.get('mode') == 'teach':
+                    constructive += 1
+                else:
+                    active += 1
+        total = constructive + active
+        return {'constructive': constructive, 'active': active, 'total': total,
+                'constructive_ratio': round(constructive / total, 4) if total else 0.0}
+
     def view(self, project_id: str) -> dict:
         record, lessons = self._lessons(project_id)
         states = fold(self.service.store, project_id)
@@ -155,7 +189,7 @@ class AcademyMastery:
         skills = [_skill_view(lesson, states.get(lesson['id']), now) for lesson in lessons]
         totals = {key: sum(skill['reviews'][key] for skill in skills) for key in ('attempts', 'correct', 'delayed_correct')}
         return {'skills': skills, 'due_count': sum(1 for skill in skills if skill['state'] != 'new' and skill['retrievability'] < TARGET_RETENTION),
-                'reviews': totals}
+                'reviews': totals, 'engagement': self._engagement(project_id)}
 
 
     def profile(self, project_id: str, lesson_id: str) -> dict:

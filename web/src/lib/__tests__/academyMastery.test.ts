@@ -2,7 +2,7 @@ import {createElement} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
 import {afterEach, expect, it} from 'vitest'
 import {setLocale} from '@/i18n'
-import {AcademyMastery, AcademyReviewCard, AcademySkillList} from '@/components/inspector/AcademyMastery'
+import {AcademyEngagementStats, AcademyMastery, AcademyReviewCard, AcademySkillList} from '@/components/inspector/AcademyMastery'
 import {academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete} from '../academy'
 import type {AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState} from '@/types'
 
@@ -105,4 +105,17 @@ it('renders the mastery entry collapsed without fetching when inactive', async (
   expect(html).toContain('data-academy-section="mastery"')
   expect(html).toContain('Memory &amp; delayed review')
   expect(html).not.toContain('role="status"')
+})
+
+it('rates engagement without projecting zero evidence as participation', async () => {
+  await setLocale('en')
+  expect(renderToStaticMarkup(createElement(AcademyEngagementStats, {engagement: {constructive: 0, active: 0, total: 0, constructive_ratio: 0}}))).toBe('')
+  const html = renderToStaticMarkup(createElement(AcademyEngagementStats, {engagement: {constructive: 1, active: 2, total: 3, constructive_ratio: 0.3333}}))
+  expect(html).toContain('data-academy-engagement')
+  expect(html).toContain('1 constructive')
+  expect(html).toContain('2 active')
+  expect(html).toContain('33% constructive')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(createElement(AcademyEngagementStats, {engagement: {constructive: 1, active: 2, total: 3, constructive_ratio: 0.3333}}))
+  expect(chinese).toContain('建构占比 33%')
 })

@@ -1,11 +1,19 @@
 import {useEffect, useId, useRef, useState} from 'react'
 import {t, useLocale} from '@/i18n'
-import type {AcademyMastery as AcademyMasteryView, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, NoticeText} from '@/types'
+import type {AcademyEngagement, AcademyMastery as AcademyMasteryView, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, NoticeText} from '@/types'
 import {academyApi, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
 import {noticeText} from '@/lib/noticeText'
 import {Badge, Button, Section, Spinner} from '@/components/ui/primitives'
 
 type PendingReview = {requestId: string; lessonId: string}
+
+
+/** 认知参与度统计；没有证据时不显示，不投影为零参与。 */
+export function AcademyEngagementStats({engagement}: {engagement: AcademyEngagement}) {
+  useLocale()
+  if (engagement.total === 0) return null
+  return <p data-academy-engagement className="text-xs text-muted">{t('ui.academy.mastery.engagement', {constructive: engagement.constructive, active: engagement.active, percent: Math.round(engagement.constructive_ratio * 100)})}</p>
+}
 
 /** 技能记忆列表；没有证据的技能保持未开始，不投影为已掌握。 */
 export function AcademySkillList({skills}: {skills: readonly AcademySkillState[]}) {
@@ -148,6 +156,7 @@ export function AcademyMastery({projectId, active}: {projectId: string; active: 
       </div> : null}
       {view ? <>
         <p className="text-xs text-muted">{t('ui.academy.mastery.statAttempts', {count: view.reviews.attempts})} · {t('ui.academy.mastery.statCorrect', {count: view.reviews.correct})} · {t('ui.academy.mastery.statDelayed', {count: view.reviews.delayed_correct})}</p>
+        <AcademyEngagementStats engagement={view.engagement} />
         <AcademySkillList skills={view.skills} />
       </> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
       {result ? <div role="status" className="space-y-1 rounded-lg bg-canvas p-3 text-sm">

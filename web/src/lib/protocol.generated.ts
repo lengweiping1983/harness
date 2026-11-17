@@ -2114,10 +2114,17 @@ export interface AcademySkillState {
   evidence_count: number
   reviews: AcademySkillReviews
 }
+export interface AcademyEngagement {
+  constructive: number
+  active: number
+  total: number
+  constructive_ratio: number
+}
 export interface AcademyMastery {
   skills: Array<AcademySkillState>
   due_count: number
   reviews: AcademySkillReviews
+  engagement: AcademyEngagement
 }
 export interface AcademyReviewRequest {
   request_id: string

@@ -251,6 +251,18 @@ class MasteryServiceTests(unittest.TestCase):
         self.assertEqual(skill['evidence_count'], 1)
         self.assertEqual(skill['stability_days'], mastery.INITIAL_STABILITY['check'])
 
+
+    def test_engagement_rates_constructive_and_active_evidence(self):
+        empty = self.service.mastery.view(self.pid)['engagement']
+        self.assertEqual(empty, {'constructive': 0, 'active': 0, 'total': 0, 'constructive_ratio': 0.0})
+        self.complete('fractions')
+        self.service.store.put('run', {'id': 'run_check', 'project_id': self.pid, 'lesson_id': 'fractions', 'kind': 'check',
+                                       'input_changed': False, 'result': {'status': 'failed'}, 'created_at': self.now})
+        self.advance(3)
+        self.service.mastery.review(self.pid, 'review-1', 'fractions', self.answers('fractions'))
+        engagement = self.service.mastery.view(self.pid)['engagement']
+        self.assertEqual(engagement, {'constructive': 1, 'active': 2, 'total': 3, 'constructive_ratio': 0.3333})
+
     def test_corrupt_review_record_fails_explicitly(self):
         self.service.store.put('review', {'id': 'review_bad', 'project_id': self.pid,
                                           'lesson_id': 'fractions', 'created_at': self.now})
