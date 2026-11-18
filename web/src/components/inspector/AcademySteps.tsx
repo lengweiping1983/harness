@@ -13,12 +13,24 @@ type Feedback = {correct: boolean; text: string; scaffold?: string; numberLine?:
 export type AcademyConfidence = 'guess' | 'unsure' | 'sure'
 
 /** 数轴可视化：把数值答案落到数轴上（表象支持），不揭示正确答案。 */
-export function AcademyNumberLine({min, max, value}: {min: number; max: number; value: number}) {
+export function AcademyNumberLine({min, max, value, onChange}: {min: number; max: number; value: number; onChange?: (v: number) => void}) {
   useLocale()
+  const track = useRef<HTMLDivElement | null>(null)
   const span = max - min || 1
   const pct = Math.max(0, Math.min(100, ((value - min) / span) * 100))
+  /** 拖拽数轴点直接作答（可探索输入）；指针位置映射到区间整数。 */
+  const pointTo = (clientX: number) => {
+    if (!onChange || !track.current) return
+    const rect = track.current.getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / (rect.width || 1)))
+    onChange(Math.round(min + ratio * span))
+  }
   return <div data-academy-number-line className="space-y-1 rounded-lg bg-canvas p-3">
-    <div className="relative h-6" role="img" aria-label={t('ui.academy.steps.numberLineLabel', {value})}>
+    <div ref={track} className={'relative h-6 ' + (onChange ? 'cursor-pointer touch-none' : '')}
+      role={onChange ? 'slider' : 'img'} aria-label={t('ui.academy.steps.numberLineLabel', {value})}
+      aria-valuenow={onChange ? value : undefined} aria-valuemin={onChange ? min : undefined} aria-valuemax={onChange ? max : undefined}
+      onPointerDown={onChange ? event => {event.preventDefault(); pointTo(event.clientX)} : undefined}
+      onPointerMove={onChange ? event => {if (event.buttons === 1) pointTo(event.clientX)} : undefined}>
       <div className="absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 bg-line" />
       <div className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand" style={{left: pct + '%'}} />
     </div>
@@ -115,7 +127,10 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
         <textarea className="ui-field min-h-20 w-full" value={text} disabled={locked} placeholder={t('ui.academy.steps.explainPlaceholder')} aria-label={t('ui.academy.steps.explainPrompt')} onChange={event => setText(event.target.value)} />
         <AcademyVoiceButton active={!locked} disabled={locked} onText={value => setText(previous => previous ? previous + ' ' + value : value)} />
       </div> : null}
-      {step.kind === 'numeric' ? <input type="number" className="ui-field w-32" value={text} disabled={locked} placeholder={t('ui.academy.steps.numericPlaceholder')} onChange={event => setText(event.target.value)} /> : null}
+      {step.kind === 'numeric' ? <div className="space-y-2">
+        <input type="number" className="ui-field w-32" value={text} disabled={locked} placeholder={t('ui.academy.steps.numericPlaceholder')} onChange={event => setText(event.target.value)} />
+        {step.number_line ? <AcademyNumberLine min={step.number_line.min} max={step.number_line.max} value={Number(text) || step.number_line.min} onChange={locked ? undefined : v => setText(String(v))} /> : null}
+      </div> : null}
       {step.kind === 'choice' ? <fieldset className="space-y-2" disabled={locked}>{(step.options ?? []).map(option => <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-lg border border-line p-3 text-sm focus-within:border-brand">
         <input type="radio" name={name} value={option.id} checked={choice === option.id} className="mt-1 accent-brand" onChange={() => setChoice(option.id)} />
         <span className="min-w-0 break-words">{option.label}</span></label>)}</fieldset> : null}

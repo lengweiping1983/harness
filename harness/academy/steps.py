@@ -27,6 +27,8 @@ def public_step(step):
         public['items'] = [{'id': item['id'], 'label': item['label']} for item in reversed(step['items'])]
     elif step['kind'] == 'numeric':
         public['tolerance'] = step['tolerance']
+        if step.get('number_line'):
+            public['number_line'] = {'min': step['number_line']['min'], 'max': step['number_line']['max']}
     elif step['kind'] == 'matching':
         public['left'] = [{'id': item['id'], 'label': item['label']} for item in step['left']]
         public['right'] = [{'id': item['id'], 'label': item['label']} for item in reversed(step['right'])]

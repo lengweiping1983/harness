@@ -2006,6 +2006,10 @@ export interface AcademyStep {
   right?: Array<AcademyStepItem>
   transfer?: boolean
 }
+export interface AcademyNumberLineRange {
+  min: number
+  max: number
+}
 export interface AcademyStepPublic {
   id: string
   kind: 'explain' | 'numeric' | 'choice' | 'ordering' | 'matching'
@@ -2019,6 +2023,7 @@ export interface AcademyStepPublic {
   right?: Array<AcademyStepItem>
   on_wrong?: string
   transfer?: boolean
+  number_line?: AcademyNumberLineRange
 }
 export interface AcademyStepResponse {
   step_id: string

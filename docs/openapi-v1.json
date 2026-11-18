@@ -31885,6 +31885,22 @@
           "feedback"
         ]
       },
+      "AcademyNumberLineRange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "min",
+          "max"
+        ]
+      },
       "AcademyStepPublic": {
         "type": "object",
         "additionalProperties": false,
@@ -31943,6 +31959,9 @@
           },
           "transfer": {
             "type": "boolean"
+          },
+          "number_line": {
+            "$ref": "#/components/schemas/AcademyNumberLineRange"
           }
         },
         "required": [

@@ -12,12 +12,14 @@ import {setLocale, useLocale} from '/src/i18n/index.ts'
 import '/src/styles.css'
 window.locale=setLocale;window.shaded=null;window.asked=[]
 const ordering={id:'ord',kind:'ordering',prompt:'Order the steps.',feedback:'Think order.',items:[{id:'a',label:'Alpha'},{id:'b',label:'Beta'},{id:'c',label:'Gamma'}]}
+const numeric={id:'num',kind:'numeric',prompt:'Pick on the line.',feedback:'Think.',tolerance:0,number_line:{min:0,max:12}}
 const matching={id:'mat',kind:'matching',prompt:'Pair them.',feedback:'Match.',left:[{id:'l1',label:'Left one'},{id:'l2',label:'Left two'}],right:[{id:'r1',label:'Right one'},{id:'r2',label:'Right two'}]}
 const lesson={id:'l1',mode:'study',order:1,title:'Lesson',goal:'Goal',reading:'Reading',milestone:false,run_command:[],source_manifest:[],references:[],prerequisites:[],trace_labels:{},knowledge_checks:[]}
 const course={id:'c1',version:'1',origin:'provided',source_revision:'f',title:'Course',description:'',references:[],lessons:[lesson]}
 const project={id:'p1',course_id:'c1',course_version:'1',name:'Lab',revision:1,active_lesson_id:'l1',course_fingerprint:'a'.repeat(64),created_at:1,progress:[],root:'/x',fingerprint:'a'.repeat(64),sandbox:'unavailable'}
 function App(){useLocale();return React.createElement('div',{className:'space-y-6 p-4'},
  React.createElement('div',{id:'order-card'},React.createElement(AcademyStepCard,{step:ordering,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
+ React.createElement('div',{id:'num-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'match-card'},React.createElement(AcademyStepCard,{step:matching,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'world-card'},React.createElement(AcademyWorldCard,{kind:'fraction-bar',session:{id:'w1',project_id:'p1',lesson_id:'l1',request_id:'r1',kind:'fraction-bar',params:{parts:4,shaded:1},challenge:{prompt:'Shade it.',options:[],target:{}},status:'observing',observations:[{params:{parts:4,shaded:1},state:{parts:4,shaded:1,label:'1/4'},at:1}],note:'',created_at:1,completed_at:null},params:{parts:4,shaded:1},note:'',busy:false,onParams:p=>{window.shaded=p.shaded},onNote:()=>{},onStart:()=>{},onPredict:()=>{},onObserve:()=>{},onComplete:()=>{}})),
  React.createElement('div',{id:'studio-done',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{course,project,lesson,active:false,disabled:false,tutorTurns:[],struggleRevealed:false,checkAnswers:new Map(),note:'done',studyReady:true,studyCompleted:true,onClose:()=>{},onOpenLesson:()=>{},onAskCoach:p=>{window.asked.push(p)},onStrugglePhase:()=>{},onCheckAnswer:()=>{},onNote:()=>{},onComplete:()=>{},onRefresh:()=>{}})))}
@@ -46,6 +48,11 @@ await browserScenario(async({server,browser}) => {
     await board.locator('[data-match-right="r1"]').click()
     await board.locator('[data-match-left="l1"]').getByText('Right one',{exact:true}).waitFor()
     assert.equal(await board.locator('[data-match-right="r1"]').isDisabled(),true,'assigned right disabled')
+    // 可探索数轴：点/拖数轴点直接作答。
+    const slider=page.locator('#num-card [role="slider"]')
+    const box=await slider.boundingBox()
+    await slider.click({position:{x:box.width*0.75,y:box.height/2}})
+    assert.equal(await page.locator('#num-card input[type="number"]').inputValue(),'9','number line drag sets answer')
     // 可探索分数条：点/拖涂色格直接改 shaded。
     await page.locator('#world-card [data-shade-index="2"]').click()
     assert.equal(await page.evaluate(()=>window.shaded),3,'click shade sets shaded=3')
