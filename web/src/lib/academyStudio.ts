@@ -63,9 +63,12 @@ export function academyStudioCoachPrompt(level: AcademyStudioCoachLevel, questio
 }
 
 /** 教练开场白记得学习者的状态：到期重测优先，其次未修复盲点，否则默认陪伴（确定性，不调用模型）。 */
-export function academyStudioCoachOpening(mastery: {due_count: number; blindspots_open?: number} | null): string {
+export function academyStudioCoachOpening(mastery: {due_count: number; blindspots_open?: number; mistakes?: ReadonlyArray<{repaired?: boolean; lesson_title: string; at: number}>} | null): string {
   if (mastery && mastery.due_count > 0) return t('ui.academy.studio.coach.openingDue', {count: mastery.due_count})
   if (mastery && (mastery.blindspots_open ?? 0) > 0) return t('ui.academy.studio.coach.openingBlindspot', {count: mastery.blindspots_open})
+  // 成长型思维：无待办时庆祝最近一次盲点修复（表扬进步而非能力），让教练的记得被感受到。
+  const recentRepair = mastery?.mistakes?.filter(item => item.repaired).sort((a, b) => b.at - a.at)[0]
+  if (recentRepair) return t('ui.academy.studio.coach.openingRepair', {title: recentRepair.lesson_title})
   return t('ui.academy.studio.coach.empty')
 }
 

@@ -8112,6 +8112,7 @@
   "ui.academy.studio.coach.empty": "I'm your learning coach. Try first yourself; tap a follow-up below or ask me directly whenever you need.",
   "ui.academy.studio.coach.openingDue": "I remember you have {count} reviews due today - repair old gaps before moving on. Tap a follow-up or ask me when you need.",
   "ui.academy.studio.coach.openingBlindspot": "You still have {count} blindspots to repair (practice them in the mistake journal). I will guide you based on your actual answers.",
+  "ui.academy.studio.coach.openingRepair": "You recently repaired a blindspot in '{title}' - that's progress. Keep it up; I'm here when you need me.",
   "ui.academy.studio.coach.awaiting": "The coach is waiting for your reply",
   "ui.academy.studio.coach.answered": "The coach answered",
   "ui.academy.studio.coach.context.phase": "Current phase: {phase}.",

@@ -81,9 +81,15 @@ it('coach opening remembers due reviews and open blindspots before default compa
   expect(academyStudioCoachOpening({due_count: 3})).toContain('3 reviews due today')
   expect(academyStudioCoachOpening({due_count: 0, blindspots_open: 2})).toContain('2 blindspots to repair')
   expect(academyStudioCoachOpening({due_count: 2, blindspots_open: 5})).toContain('2 reviews due today')
+  // 成长型思维：无待办时庆祝最近修复；待办优先于庆祝。
+  const repaired = {due_count: 0, blindspots_open: 0, mistakes: [{repaired: true, lesson_title: 'Fractions', at: 5}, {repaired: true, lesson_title: 'Decimals', at: 9}, {repaired: false, lesson_title: 'Ratios', at: 20}]}
+  expect(academyStudioCoachOpening(repaired)).toContain("repaired a blindspot in 'Decimals'")
+  expect(academyStudioCoachOpening({...repaired, due_count: 1})).toContain('1 reviews due today')
+  expect(academyStudioCoachOpening({due_count: 0, mistakes: [{repaired: false, lesson_title: 'Ratios', at: 20}]})).toContain('your learning coach')
   await setLocale('zh-CN')
   expect(academyStudioCoachOpening({due_count: 4})).toContain('4 个重测到期')
   expect(academyStudioCoachOpening({due_count: 0, blindspots_open: 1})).toContain('1 个盲点待修复')
+  expect(academyStudioCoachOpening(repaired)).toContain('你最近修复了《Decimals》的盲点')
 })
 
 it('appends learning context to coach prompts without altering the base instruction', async () => {
