@@ -8,13 +8,17 @@ import {Badge, Button} from '@/components/ui/primitives'
 type PendingWorld = {kind: 'start' | 'predict' | 'observe' | 'complete'; requestId: string}
 
 /** 微世界状态可视化；只渲染宿主内核返回的结构化状态。 */
-export function AcademyWorldState({kind, state}: {kind: string; state: Record<string, unknown>}) {
+export function AcademyWorldState({kind, state, onShade}: {kind: string; state: Record<string, unknown>; onShade?: (n: number) => void}) {
   useLocale()
   if (kind === 'fraction-bar') {
     const parts = Number(state.parts), shaded = Number(state.shaded)
     return <div data-world-state="fraction-bar" className="space-y-2">
-      <div className="flex flex-wrap gap-1" role="img" aria-label={String(state.label)}>
-        {Array.from({length: parts}, (_, index) => <span key={index} className={'h-8 w-8 rounded border border-line ' + (index < shaded ? 'bg-brand' : 'bg-canvas')} />)}
+      <div className="flex flex-wrap gap-1" role={onShade ? 'group' : 'img'} aria-label={String(state.label)}>
+        {Array.from({length: parts}, (_, index) => onShade
+          ? <button key={index} type="button" data-shade-index={index} aria-label={String(index + 1)} onClick={() => onShade(index + 1)}
+            onPointerDown={event => {event.preventDefault(); onShade(index + 1)}} onPointerEnter={event => {if (event.buttons === 1) onShade(index + 1)}}
+            className={'h-8 w-8 rounded border border-line transition-colors ' + (index < shaded ? 'bg-brand' : 'bg-canvas hover:bg-brand/30')} />
+          : <span key={index} className={'h-8 w-8 rounded border border-line ' + (index < shaded ? 'bg-brand' : 'bg-canvas')} />)}
       </div>
       <p className="text-sm font-medium">{String(state.label)}</p>
     </div>
@@ -94,7 +98,7 @@ export function AcademyWorldCard({kind, session, params, note, busy, onParams, o
       </div>
       {last ? <div className="space-y-1 rounded-lg bg-canvas p-3">
         <p className="text-xs font-medium text-muted">{t('ui.academy.world.stateLabel')}</p>
-        <AcademyWorldState kind={kind} state={last.state} />
+        <AcademyWorldState kind={kind} state={last.state} onShade={kind === 'fraction-bar' && session.status !== 'completed' ? n => onParams({...params, shaded: Math.max(0, Math.min(n, Number(last.state.parts)))}) : undefined} />
       </div> : null}
       <p className="text-xs text-muted">{t('ui.academy.world.observations', {count: session.observations.length})}</p>
       {session.status === 'completed' ? <div role="status" className="space-y-1 rounded-lg bg-canvas p-3 text-sm">

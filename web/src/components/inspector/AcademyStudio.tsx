@@ -192,7 +192,15 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     className="fixed inset-0 z-50 flex flex-col bg-canvas focus-visible:outline focus-visible:outline-brand"
     data-reduced-motion={prefs.reducedMotion ? 'true' : undefined}
     style={prefs.large ? {zoom: 1.15} : undefined}
-    onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}>
+    onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}
+    onKeyDown={event => {
+      const target = event.target as HTMLElement
+      if (composing.current || event.nativeEvent.isComposing || target.closest('input, textarea, select')) return
+      if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+      const index = phases.findIndex(item => item.id === phase)
+      const next = phases[index + (event.key === 'ArrowRight' ? 1 : -1)]
+      if (next) {event.preventDefault(); manual.current = true; setPhase(next.id)}
+    }}>
     {celebrate ? <div data-confetti aria-hidden className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
       {Array.from({length: 24}, (_, i) => <span key={i} className="academy-confetti-piece" style={{left: (i * 4.16) + '%', animationDelay: (i % 6) * 0.08 + 's', background: ['#22c55e', '#3b82f6', '#f59e0b', '#ec4899'][i % 4]}} />)}
     </div> : null}
