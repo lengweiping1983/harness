@@ -8199,6 +8199,8 @@
   "ui.academy.steps.moveUp": "上移",
   "ui.academy.steps.moveDown": "下移",
   "ui.academy.steps.matchEmpty": "点选卡片配对",
+  "ui.academy.steps.undo": "撤销重排",
+  "ui.academy.steps.redo": "重做重排",
   "ui.academy.steps.pending": "结果未确认；只按原请求号回查。",
   "ui.academy.error.steps-unavailable": "本课没有声明引导步骤。",
   "ui.academy.error.step-not-found": "本课没有这个步骤。",

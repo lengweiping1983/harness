@@ -1,5 +1,5 @@
 import {useEffect, useId, useRef, useState} from 'react'
-import {ArrowDown, ArrowUp, Check, GripVertical, Send} from 'lucide-react'
+import {ArrowDown, ArrowUp, Check, GripVertical, Redo2, Send, Undo2} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyLesson, AcademyReceipt, AcademyStepPublic, AcademyStepsView, NoticeText} from '@/types'
 import {academyApi, academyNextStep, academyReceiptMatches, isAcademyUnconfirmedWrite} from '@/lib/academy'
@@ -52,13 +52,35 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
   const [confidence, setConfidence] = useState<AcademyConfidence | null>(null)
   const [diagnosis, setDiagnosis] = useState('')
   const dragIndex = useRef<number | null>(null)
+  const [past, setPast] = useState<string[][]>([])
+  const [future, setFuture] = useState<string[][]>([])
   const [selectedLeft, setSelectedLeft] = useState<string | null>(null)
   const locked = busy || feedback?.correct === true
   /** 拖拽排序：直接操纵卡片顺序；键盘上下按钮保留为无障碍等价路径。 */
+  const pushHistory = () => {setPast(previous => [...previous, order]); setFuture([])}
+  const undo = () => {
+    setPast(previous => {
+      if (!previous.length) return previous
+      const last = previous[previous.length - 1]
+      setFuture(f => [order, ...f])
+      setOrder(last)
+      return previous.slice(0, -1)
+    })
+  }
+  const redo = () => {
+    setFuture(previous => {
+      if (!previous.length) return previous
+      const [first, ...rest] = previous
+      setPast(p => [...p, order])
+      setOrder(first)
+      return rest
+    })
+  }
   const dropOn = (target: number) => {
     const source = dragIndex.current
     dragIndex.current = null
     if (source === null || source === target) return
+    pushHistory()
     const next = [...order]
     const [moved] = next.splice(source, 1)
     next.splice(target, 0, moved)
@@ -73,6 +95,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
   const move = (index: number, delta: number) => {
     const target = index + delta
     if (target < 0 || target >= order.length) return
+    pushHistory()
     const next = [...order]
     ;[next[index], next[target]] = [next[target], next[index]]
     setOrder(next)
@@ -134,14 +157,23 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
       {step.kind === 'choice' ? <fieldset className="space-y-2" disabled={locked}>{(step.options ?? []).map(option => <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-lg border border-line p-3 text-sm focus-within:border-brand">
         <input type="radio" name={name} value={option.id} checked={choice === option.id} className="mt-1 accent-brand" onChange={() => setChoice(option.id)} />
         <span className="min-w-0 break-words">{option.label}</span></label>)}</fieldset> : null}
-      {step.kind === 'ordering' ? <ol className="space-y-2" data-ordering-list>{order.map((id, index) => {const item = (step.items ?? []).find(entry => entry.id === id); return <li key={id} data-order-index={index} draggable={!locked}
+      {step.kind === 'ordering' ? <div className="space-y-2">
+        <div className="flex items-center gap-1">
+          <Button type="button" size="xs" variant="ghost" data-order-undo disabled={locked || !past.length} aria-label={t('ui.academy.steps.undo')} onClick={undo} icon={<Undo2 className="h-3.5 w-3.5" />} />
+          <Button type="button" size="xs" variant="ghost" data-order-redo disabled={locked || !future.length} aria-label={t('ui.academy.steps.redo')} onClick={redo} icon={<Redo2 className="h-3.5 w-3.5" />} />
+        </div>
+        <ol className="space-y-2" data-ordering-list onKeyDown={event => {
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {event.preventDefault(); if (event.shiftKey) redo(); else undo()}
+          else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {event.preventDefault(); redo()}
+        }}>{order.map((id, index) => {const item = (step.items ?? []).find(entry => entry.id === id); return <li key={id} data-order-index={index} draggable={!locked}
         onDragStart={() => {dragIndex.current = index}} onDragOver={event => event.preventDefault()} onDrop={() => dropOn(index)} onDragEnd={() => {dragIndex.current = null}}
         className="flex cursor-grab items-center gap-2 rounded-lg border border-line p-2 text-sm active:cursor-grabbing">
         <GripVertical className="h-4 w-4 shrink-0 text-muted" aria-hidden />
         <span className="min-w-0 flex-1 break-words">{item?.label}</span>
         <Button type="button" size="xs" variant="ghost" disabled={locked || index === 0} aria-label={t('ui.academy.steps.moveUp')} onClick={() => move(index, -1)} icon={<ArrowUp className="h-3.5 w-3.5" />} />
         <Button type="button" size="xs" variant="ghost" disabled={locked || index === order.length - 1} aria-label={t('ui.academy.steps.moveDown')} onClick={() => move(index, 1)} icon={<ArrowDown className="h-3.5 w-3.5" />} />
-      </li>})}</ol> : null}
+      </li>})}</ol>
+      </div> : null}
       {step.kind === 'matching' ? <div className="space-y-3" data-matching-board>
         <div className="flex flex-wrap gap-2">{(step.left ?? []).map(item => <button key={item.id} type="button" data-match-left={item.id} disabled={locked} aria-pressed={selectedLeft === item.id}
           onClick={() => setSelectedLeft(previous => previous === item.id ? null : item.id)}

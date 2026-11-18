@@ -35,6 +35,9 @@ await browserScenario(async({server,browser}) => {
     await page.waitForFunction(()=>typeof window.locale==='function')
     await page.evaluate(theme=>document.documentElement.className=theme,theme)
     await page.evaluate(()=>window.locale('en'))
+    // 完成庆祝＋进度环（挂载即检查，彩带短暂）。
+    await page.locator('#studio-done [data-progress-ring]').waitFor()
+    await page.locator('#studio-done [data-confetti]').waitFor()
     // 拖拽排序：把第一张拖到第三张位置，顺序改变。
     const list=page.locator('#order-card [data-ordering-list]')
     const before=await list.locator('li span.min-w-0').allTextContents()
@@ -42,6 +45,10 @@ await browserScenario(async({server,browser}) => {
     const after=await list.locator('li span.min-w-0').allTextContents()
     assert.notDeepEqual(after,before,'drag must reorder')
     assert.equal(after[2],'Alpha','dragged item lands at target')
+    await page.locator('#order-card [data-order-undo]').click()
+    assert.deepEqual(await list.locator('li span.min-w-0').allTextContents(),before,'undo restores original order')
+    await page.locator('#order-card [data-order-redo]').click()
+    assert.equal((await list.locator('li span.min-w-0').allTextContents())[2],'Alpha','redo reapplies reorder')
     // 点选配对：先左后右，左槽显示右标签。
     const board=page.locator('#match-card [data-matching-board]')
     await board.locator('[data-match-left="l1"]').click()
@@ -64,10 +71,6 @@ await browserScenario(async({server,browser}) => {
     await page.locator('#studio-done [data-coach-suggest="hint"]').click()
     assert.equal(await page.evaluate(()=>window.asked.length),1,'suggestion chip asks coach')
     assert.ok((await page.evaluate(()=>window.asked[0])).includes('Lesson'),'prompt carries lesson context')
-    // 完成庆祝＋进度环。
-    const studio=page.locator('#studio-done [data-academy-studio]')
-    await studio.locator('[data-progress-ring]').waitFor()
-    await studio.locator('[data-confetti]').waitFor()
     // 语言矩阵：交互文案随语言解析。
     for (const language of ['en','zh-CN','en']) {
       const copy=JSON.parse(await readFile(new URL('../src/i18n/locales/'+language+'.json',import.meta.url),'utf-8'))
