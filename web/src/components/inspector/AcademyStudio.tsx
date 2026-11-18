@@ -83,6 +83,12 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   const journey = academyStudioJourney(course.lessons, project.progress, lesson.id, skills, recommended?.id)
   const coachTurns = academyStudioCoachTurns(tutorTurns, project.id, lesson.id)
   const coachRunning = coachTurns.some(turn => turn.status === 'running')
+  const latestCoachTurn = coachTurns.at(-1)
+  /** 苏格拉底回应邀请：教练最近一次回答以问题收尾时，一键聚焦输入框回应。 */
+  const awaitingReply = Boolean(latestCoachTurn && latestCoachTurn.status === 'completed' && /[?？]\s*$/.test(latestCoachTurn.response.trim()))
+  const threadRef = useRef<HTMLOListElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const threadSignature = coachTurns.map(turn => turn.id + ':' + turn.status + ':' + (turn.partial_response?.length ?? 0) + ':' + turn.response.length).join('|')
   const lessonIndex = course.lessons.findIndex(item => item.id === lesson.id)
   const nextLesson = lessonIndex >= 0 ? course.lessons[lessonIndex + 1] : undefined
   const completedCount = course.lessons.filter(item => project.progress.some(row => row.lesson_id === item.id && row.state === 'completed')).length
@@ -136,6 +142,12 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     const timer = setInterval(() => setElapsed(value => value + 1), 1000)
     return () => clearInterval(timer)
   }, [active, visible])
+
+  /** 对话流自动滚动到最新内容；仅内容签名变化时滚动，尊重减少动效偏好。 */
+  useEffect(() => {
+    const el = threadRef.current
+    if (el) el.scrollTo({top: el.scrollHeight, behavior: prefs.reducedMotion ? 'auto' : 'smooth'})
+  }, [threadSignature, prefs.reducedMotion])
 
   /** 键盘-first：切换环节即聚焦该环节主输入（输入框优先，其次首个可用按钮），零鼠标流转。 */
   useEffect(() => {
@@ -318,6 +330,30 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
           {renderPhase()}
           {currentPhase?.optional && !done.has(phase) && phase !== 'finish' ? <Button size="xs" variant="ghost" onClick={() => markDone(phase)}>{t('ui.academy.studio.skip')}</Button> : null}
         </section>
+        {/* 教练对话进入舞台：与练习同屏的流式苏格拉底陪伴，而非页脚一次性问答。 */}
+        <section data-studio-coach-stream aria-label={t('ui.academy.studio.coach.title')} className="space-y-2">
+          <ol ref={threadRef} data-studio-coach-thread className="max-h-72 space-y-3 overflow-y-auto rounded-2xl border border-line bg-canvas p-4 text-sm">
+            {coachTurns.length ? coachTurns.slice(-6).map(turn => <li key={turn.id} className="space-y-2">
+              <div className="ml-auto max-w-xl rounded-2xl rounded-br-sm bg-brand/10 p-3">
+                <p className="text-xs font-medium text-muted">{t('ui.academy.studio.coach.you')}</p>
+                <p className="whitespace-pre-wrap break-words leading-reading">{turn.prompt.includes('\n') ? turn.prompt.slice(turn.prompt.indexOf('\n') + 1) : t('ui.academy.studio.coach.generalAsk')}</p>
+              </div>
+              <div className="max-w-2xl rounded-2xl rounded-bl-sm border border-line bg-raised p-3">
+                <p className="flex items-center gap-1 text-xs font-medium text-brand"><Sparkles className="h-3 w-3" aria-hidden />{t('ui.academy.studio.coach.title')}</p>
+                {turn.status === 'running' ? (turn.partial_response && !turn.stopping
+                  ? <p aria-label={t('ui.academy.tutor.partial')} aria-busy="true" className="whitespace-pre-wrap break-words leading-reading">{turn.partial_response}<span className="streaming-caret" aria-hidden /></p>
+                  : <p role="status" className="flex gap-2 text-muted"><Spinner />{t('ui.academy.loading')}</p>)
+                  : turn.status === 'completed' ? <div className="min-w-0 leading-reading"><Markdown workspaceLinks={false}>{turn.response}</Markdown></div>
+                  : <p className="text-warn">{t('ui.academy.studio.coach.failed')}</p>}
+              </div>
+            </li>) : <li className="max-w-2xl rounded-2xl rounded-bl-sm border border-line bg-raised p-3">
+              <p className="flex items-center gap-1 text-xs font-medium text-brand"><Sparkles className="h-3 w-3" aria-hidden />{t('ui.academy.studio.coach.title')}</p>
+              <p className="leading-reading text-muted">{t('ui.academy.studio.coach.empty')}</p>
+            </li>}
+          </ol>
+          <p className="sr-only" role="status">{latestCoachTurn?.status === 'completed' ? t('ui.academy.studio.coach.answered') : ''}</p>
+          {awaitingReply ? <Button size="xs" variant="subtle" data-coach-awaiting onClick={() => composerRef.current?.focus()}>{t('ui.academy.studio.coach.awaiting')}</Button> : null}
+        </section>
       </div>
     </main>
     <footer data-studio-coach className="shrink-0 border-t border-line px-4 py-3">
@@ -335,15 +371,6 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
           <Button size="xs" variant="subtle" disabled={disabled || coachRunning} onClick={() => {setCoachLevel(1); onAskCoach(academyStudioCoachPrompt(1, t('ui.academy.studio.nudge.prompt.' + nudge), lesson.title)); setNudge(null)}}>{t('ui.academy.studio.nudge.action')}</Button>
           <Button size="xs" variant="ghost" aria-label={t('ui.academy.studio.nudge.dismiss')} onClick={() => setNudge(null)}>{t('ui.academy.studio.nudge.dismiss')}</Button>
         </div> : null}
-        {coachTurns.length ? <ol data-studio-coach-thread className="max-h-48 space-y-2 overflow-y-auto rounded-lg bg-canvas p-3 text-sm">
-          {coachTurns.slice(-3).map(turn => <li key={turn.id} className="space-y-1">
-            <p className="text-xs font-medium text-muted">{t('ui.academy.studio.coach.you')}</p>
-            <p className="whitespace-pre-wrap leading-reading">{turn.prompt.includes('\n') ? turn.prompt.slice(turn.prompt.indexOf('\n') + 1) : t('ui.academy.studio.coach.generalAsk')}</p>
-            {turn.status === 'running' ? <p role="status" className="flex gap-2 text-muted"><Spinner />{t('ui.academy.loading')}</p>
-              : turn.status === 'completed' ? <div className="min-w-0 leading-reading"><Markdown workspaceLinks={false}>{turn.response}</Markdown></div>
-              : <p className="text-warn">{t('ui.academy.studio.coach.failed')}</p>}
-          </li>)}
-        </ol> : <p className="text-xs text-muted">{t('ui.academy.studio.coach.empty')}</p>}
         <div className="flex flex-wrap gap-1" data-coach-suggestions>
           {coachSuggestions.map(suggestion => <button key={suggestion.key} type="button" data-coach-suggest={suggestion.key} disabled={disabled || coachRunning}
             onClick={() => {setCoachLevel(suggestion.level); onAskCoach(academyStudioCoachPrompt(suggestion.level, t('ui.academy.studio.coach.suggest.' + suggestion.key), lesson.title))}}
@@ -352,7 +379,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
         <form className="flex items-end gap-2"
           onKeyDown={event => {if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault()}}
           onSubmit={event => {event.preventDefault(); sendCoach()}}>
-          <textarea rows={1} className="ui-field max-h-24 min-h-10 flex-1 resize-y leading-reading" value={coachDraft} placeholder={t('ui.academy.studio.coach.placeholder')} aria-label={t('ui.academy.studio.coach.placeholder')}
+          <textarea ref={composerRef} rows={1} className="ui-field max-h-24 min-h-10 flex-1 resize-y leading-reading" value={coachDraft} placeholder={t('ui.academy.studio.coach.placeholder')} aria-label={t('ui.academy.studio.coach.placeholder')}
             onChange={event => setCoachDraft(event.target.value)}
             onKeyDown={event => {if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {event.preventDefault(); sendCoach()}}} />
           <AcademyVoiceButton active={active && !disabled} disabled={disabled || coachRunning} onText={value => setCoachDraft(previous => previous ? previous + ' ' + value : value)} />

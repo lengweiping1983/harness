@@ -98,7 +98,7 @@ it('renders the immersive studio with journey, single focus phase and coach stri
   expect(html).toContain('data-coach-level="0"')
   expect(html).toContain('data-coach-level="2"')
   expect(html).toContain('Coach involvement')
-  expect(html).toContain('The coach is nearby')
+  expect(html).toContain('your learning coach')
   await setLocale('zh-CN')
   const chinese = renderToStaticMarkup(studio())
   expect(chinese).toContain('专注学习舞台')
@@ -225,6 +225,35 @@ it('restores the last visited phase per project+lesson with safe fallbacks', asy
   } finally {
     vi.unstubAllGlobals()
   }
+})
+
+it('streams the coach conversation inside the stage with a reply invitation', async () => {
+  await setLocale('en')
+  const running = coachTurn({id: 'run', status: 'running', response: '', partial_response: 'First think about equal parts'})
+  const html = renderToStaticMarkup(studio({tutorTurns: [running]}))
+  expect(html).toContain('data-studio-coach-stream')
+  expect(html).toContain('aria-busy="true"')
+  expect(html).toContain('First think about equal parts')
+  expect(html).toContain('streaming-caret')
+  expect(html).toContain('Answer in progress')
+  // 对话流位于舞台主区而非页脚。
+  const main = html.slice(html.indexOf('<main'), html.indexOf('</main>'))
+  expect(main).toContain('data-studio-coach-thread')
+  expect(html.slice(html.indexOf('<footer'))).not.toContain('data-studio-coach-thread')
+  // 完成后以问题收尾 → 回应邀请与单次读屏播报。
+  const asked = coachTurn({id: 'done', status: 'completed', response: 'Because halves share one name. Why do you think so?'})
+  const completed = renderToStaticMarkup(studio({tutorTurns: [asked]}))
+  expect(completed).toContain('data-coach-awaiting')
+  expect(completed).toContain('The coach is waiting for your reply')
+  expect(completed).toContain('The coach answered')
+  // 无对话 → 教练开场白气泡；不以问题收尾 → 无回应邀请。
+  expect(renderToStaticMarkup(studio())).toContain('your learning coach')
+  const stated = coachTurn({id: 'state', status: 'completed', response: 'Halves share one name.'})
+  expect(renderToStaticMarkup(studio({tutorTurns: [stated]}))).not.toContain('data-coach-awaiting')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(studio({tutorTurns: [asked]}))
+  expect(chinese).toContain('教练在等你回应')
+  expect(chinese).toContain('教练回答了')
 })
 
 it('shows the finish checklist from existing evidence and celebrates completion with the next lesson', async () => {

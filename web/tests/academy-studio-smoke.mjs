@@ -97,7 +97,7 @@ await browserScenario(async({server,browser}) => {
       await page.getByRole('dialog',{name:localeStrings['ui.academy.studio.dialogLabel'],exact:true}).waitFor()
       await page.getByRole('button',{name:localeStrings['ui.academy.studio.exit'],exact:true}).waitFor()
       await page.getByText(localeStrings['ui.academy.studio.finish.done'],{exact:true}).waitFor()
-      await page.getByText(localeStrings['ui.academy.studio.coach.title'],{exact:true}).waitFor()
+      await page.locator('[data-studio-coach]').getByText(localeStrings['ui.academy.studio.coach.title'],{exact:true}).waitFor()
       await page.getByText(localeStrings['ui.academy.studio.session.label'],{exact:true}).waitFor()
       assert.equal(await page.locator('[data-studio-journey] [aria-current="step"]').count(),1)
       const bounds=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))

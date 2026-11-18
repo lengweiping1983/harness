@@ -23,7 +23,7 @@ const liveProps={course,project:{...project,id:'p2'},lesson,active:false,disable
 academyApi.mastery=async()=>({ok:true,data:{mastery:{skills:[{lesson_id:'l1',title:'Lesson',stage:'',state:'learning',stability_days:2,difficulty:5,retrievability:0.62,due_at:null,last_evidence_at:1,evidence_count:3,reviews:{attempts:1,correct:1,delayed_correct:0}}],due_count:0,reviews:{attempts:1,correct:1,delayed_correct:0},engagement:{constructive:1,active:1,total:2,constructive_ratio:0.5}}}})
 const reviewItem={lesson_id:'l1',title:'Lesson',goal:'Goal',stage:'',retrievability:0.8,overdue_days:1,checks:[{id:'q1',prompt:'Which is larger?',options:[{id:'right',label:'One half'},{id:'wrong',label:'One third'}]},{id:'q2',prompt:'Which is smaller?',options:[{id:'a',label:'One third'},{id:'b',label:'One half'}]}]}
 const haloProps={...liveProps,project:{...project,id:'p3'},active:true}
-function App(){useLocale();return React.createElement('div',{className:'space-y-6 p-4'},
+function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);window.setCoachTurns=setCoachTurns;return React.createElement('div',{className:'space-y-6 p-4'},
  React.createElement('div',{id:'order-card'},React.createElement(AcademyStepCard,{step:ordering,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'hint-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:{correct:false,text:'Not yet.',hints:['First hint','Second hint','Third hint']},onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'num-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
@@ -32,6 +32,7 @@ function App(){useLocale();return React.createElement('div',{className:'space-y-
  React.createElement('div',{id:'studio-live',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,liveProps)),
  React.createElement('div',{id:'review-card'},React.createElement(AcademyReviewCard,{item:reviewItem,busy:false,onSubmit:a=>{window.reviewed=a}})),
  React.createElement('div',{id:'studio-halo',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,haloProps)),
+ React.createElement('div',{id:'studio-coach',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{...liveProps,project:{...project,id:'p4'},tutorTurns:coachTurns})),
  React.createElement('div',{id:'studio-done',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{course,project,lesson,active:false,disabled:false,tutorTurns:[],struggleRevealed:false,checkAnswers:new Map(),note:'done',studyReady:true,studyCompleted:true,onClose:()=>{},onOpenLesson:()=>{},onAskCoach:p=>{window.asked.push(p)},onStrugglePhase:()=>{},onCheckAnswer:()=>{},onNote:()=>{},onComplete:()=>{},onRefresh:()=>{}})))}
 createRoot(document.getElementById('root')).render(React.createElement(App))
 `
@@ -116,6 +117,21 @@ await browserScenario(async({server,browser}) => {
     // 记忆光环：旅程节点以 FSRS 可提取性渲染记忆保持环。
     await page.locator('#studio-halo [data-journey-memory]').waitFor()
     assert.equal(await page.locator('#studio-halo [data-journey-memory]').getAttribute('aria-label'),'Memory retention 62%','halo shows retrievability')
+    // 教练对话流：舞台内流式陪伴，partial 实时更新，问题收尾触发回应邀请。
+    const coachTurnBase={project_id:'p4',lesson_id:'l1',request_id:'r',input_fingerprint:'a'.repeat(64),allow_execution:false,require_execution:false,model:'m',language:'en',actions:[],created_at:1}
+    const coachThread=page.locator('#studio-coach main [data-studio-coach-thread]')
+    await coachThread.getByText('your learning coach',{exact:false}).waitFor()
+    assert.equal(await page.locator('#studio-coach footer [data-studio-coach-thread]').count(),0,'conversation lives in the stage, not the footer')
+    await page.evaluate(base=>window.setCoachTurns([{...base,id:'run',status:'running',prompt:'ask\nWhy equal parts?',response:'',partial_response:'First think about equal parts'}]),coachTurnBase)
+    await coachThread.getByText('First think about equal parts',{exact:false}).waitFor()
+    assert.equal(await coachThread.locator('[aria-busy="true"]').count(),1,'partial stream is busy')
+    assert.equal(await coachThread.locator('.streaming-caret').count(),1,'streaming caret present')
+    await page.evaluate(base=>window.setCoachTurns([{...base,id:'run',status:'running',prompt:'ask\nWhy equal parts?',response:'',partial_response:'First think about equal parts, then compare'}]),coachTurnBase)
+    await coachThread.getByText('First think about equal parts, then compare',{exact:false}).waitFor()
+    await page.evaluate(base=>window.setCoachTurns([{...base,id:'run',status:'completed',prompt:'ask\nWhy equal parts?',response:'Because halves share one name. Why do you think so?'}]),coachTurnBase)
+    await page.locator('#studio-coach [data-coach-awaiting]').waitFor()
+    await page.locator('#studio-coach [data-coach-awaiting]').click()
+    assert.equal(await page.evaluate(()=>document.activeElement?.tagName),'TEXTAREA','reply invitation focuses composer')
     // 专注模式：收敛旅程/会话条为环节圆点，Ctrl+. 切换，偏好重载后保留。
     await page.locator('#studio-live [data-academy-pref-zen]').click()
     await page.waitForFunction(()=>!document.querySelector('#studio-live [data-studio-journey]'))
@@ -164,7 +180,7 @@ await browserScenario(async({server,browser}) => {
     assert.deepEqual(errors,[])
     await page.close()
   }
-  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow, zen mode, swipe, memory halo, language/theme/width matrix verified')
+  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow, zen mode, swipe, memory halo, streaming coach conversation, language/theme/width matrix verified')
 },{entry:'/__academy-interaction-entry.js',vite:{plugins:[{
   name:'academy-interaction-fixture',resolveId(id){if(id==='/__academy-interaction-entry.js')return id},load(id){if(id==='/__academy-interaction-entry.js')return entry},
   configureServer(server){server.middlewares.use('/__academy-interaction',async(_req,res,next)=>{try{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__academy-interaction',html))}catch(error){next(error)}})},
