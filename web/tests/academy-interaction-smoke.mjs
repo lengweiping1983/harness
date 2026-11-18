@@ -67,6 +67,7 @@ await browserScenario(async({server,browser}) => {
     await page.locator('#studio-done ol button').last().click()
     await page.keyboard.press('ArrowLeft')
     await page.locator('#studio-done [data-studio-phase="note"]').waitFor()
+    assert.equal(await page.evaluate(()=>document.activeElement?.tagName),'TEXTAREA','phase change auto-focuses primary input')
     // 对话式快捷追问：点击 chip 以对应自主档发送教练请求。
     await page.locator('#studio-done [data-coach-suggest="hint"]').click()
     assert.equal(await page.evaluate(()=>window.asked.length),1,'suggestion chip asks coach')

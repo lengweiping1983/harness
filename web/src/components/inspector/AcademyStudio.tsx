@@ -127,6 +127,12 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     return () => clearInterval(timer)
   }, [active, visible])
 
+  /** 键盘-first：切换环节即聚焦该环节主输入（输入框优先，其次首个可用按钮），零鼠标流转。 */
+  useEffect(() => {
+    const stage = dialog.current?.querySelector('[data-studio-phase="' + phase + '"]')
+    const target = stage?.querySelector('input:not([disabled]), textarea:not([disabled])') ?? stage?.querySelector('button:not([disabled])')
+    if (target instanceof HTMLElement) target.focus()
+  }, [phase])
   useEffect(() => {
     dialog.current?.focus()
     const onKey = (event: KeyboardEvent) => {if (event.key === 'Escape' && !composing.current) closeRef.current()}
