@@ -180,6 +180,29 @@ it('offers a dismissible proactive coach nudge after the struggle reveal without
   expect(chinese).toContain('刚才的挣扎很有价值')
 })
 
+it('focus mode collapses chrome to clickable phase dots and keeps stage plus coach', async () => {
+  await setLocale('en')
+  vi.stubGlobal('localStorage', {getItem: (key: string) => key === 'harness.academy.prefs.v1' ? JSON.stringify({zen: true}) : null, setItem: () => {}, removeItem: () => {}})
+  try {
+    const html = renderToStaticMarkup(studio())
+    expect(html).toContain('data-academy-pref-zen')
+    expect(html).not.toContain('data-studio-journey')
+    expect(html).not.toContain('data-studio-session')
+    expect(html).not.toContain('data-academy-pref-font')
+    expect(html).toContain('data-studio-phases')
+    expect(html).toContain('data-phase-dot="struggle"')
+    expect(html).toContain('data-phase-dot="finish"')
+    expect(html).toContain('data-studio-phase="struggle"')
+    expect(html).toContain('data-studio-coach')
+  } finally {
+    vi.unstubAllGlobals()
+  }
+  const full = renderToStaticMarkup(studio())
+  expect(full).toContain('data-studio-journey')
+  expect(full).toContain('data-studio-session')
+  expect(full).not.toContain('data-phase-dot')
+})
+
 it('restores the last visited phase per project+lesson with safe fallbacks', async () => {
   await setLocale('en')
   const store = new Map<string, string>()

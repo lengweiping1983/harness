@@ -129,6 +129,27 @@ it('renders review questions without answers, feedback or hints and disables inc
   expect(html).not.toContain('hint')
 })
 
+it('presents one review question at a time with progress dots and gated submission', async () => {
+  await setLocale('en')
+  const item = reviewItem({checks: [
+    {id: 'q1', prompt: 'Which is larger?', options: [{id: 'right', label: 'One half'}, {id: 'wrong', label: 'One third'}]},
+    {id: 'q2', prompt: 'Which is smaller?', options: [{id: 'a', label: 'One third'}, {id: 'b', label: 'One half'}]},
+  ]})
+  const html = renderToStaticMarkup(createElement(AcademyReviewCard, {item, busy: false, onSubmit: () => {}}))
+  expect(html).toContain('data-review-card')
+  expect(html).toContain('Which is larger?')
+  expect(html).not.toContain('Which is smaller?')
+  expect(html).toContain('data-review-dot="0"')
+  expect(html).toContain('data-review-dot="1"')
+  expect(html).toContain('Question 1 of 2')
+  expect(html).toContain('data-review-prev')
+  expect(html).toContain('data-review-next')
+  expect(html).not.toContain('data-review-continue')
+  expect(html).toContain('disabled')
+  expect(html).not.toContain('answer_id')
+  expect(html).not.toContain('feedback')
+})
+
 it('switches interface language without rewriting option identities', async () => {
   await setLocale('en')
   const english = renderToStaticMarkup(createElement(AcademyReviewCard, {item: reviewItem(), busy: false, onSubmit: () => {}}))

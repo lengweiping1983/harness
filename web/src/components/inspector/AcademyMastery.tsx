@@ -3,6 +3,7 @@ import {t, useLocale} from '@/i18n'
 import type {AcademyEngagement, AcademyMastery as AcademyMasteryView, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, NoticeText} from '@/types'
 import {academyApi, academyBadges, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
 import {noticeText} from '@/lib/noticeText'
+import {cn} from '@/lib/utils'
 import {Badge, Button, Section, Spinner} from '@/components/ui/primitives'
 
 type PendingReview = {requestId: string; lessonId: string}
@@ -40,23 +41,74 @@ function ReviewCheck({check, value, disabled, onSelect}: {check: AcademyReviewIt
   </fieldset>
 }
 
-/** 独立重测卡片：只有题干与选项，没有答案、反馈与提示；选择按题目身份保存。 */
+/** 独立重测卡片流：一次一题单焦点检索，进度点＋键盘 1-9 选项/Enter 继续或提交；只有题干与选项，没有答案、反馈与提示；选择按题目身份保存，全部作答后显式提交。 */
 export function AcademyReviewCard({item, busy, onSubmit}: {item: AcademyReviewItem; busy: boolean; onSubmit: (answers: Array<{check_id: string; option_id: string}>) => void}) {
   useLocale()
   const [selections, setSelections] = useState<Record<string, string>>({})
+  const [index, setIndex] = useState(0)
   const composing = useRef(false)
+  const mounted = useRef(false)
+  const cardRef = useRef<HTMLFormElement>(null)
   const complete = academyReviewComplete(item, selections)
-  return <form data-academy-review-lesson={item.lesson_id} className="space-y-3 rounded-xl border border-line p-3"
+  const check = item.checks[index] ?? item.checks[0]
+  const answered = Boolean(check && selections[check.id])
+  const remaining = item.checks.some((row, position) => position !== index && !selections[row.id])
+  /** 切题即聚焦新题首个选项（挂载时不抢焦点），键盘 1-9 直接作答。 */
+  useEffect(() => {
+    if (mounted.current) cardRef.current?.querySelector<HTMLInputElement>('input[type="radio"]')?.focus()
+    else mounted.current = true
+  }, [index])
+  if (!check) return null
+  const advance = () => {
+    const after = item.checks.findIndex((row, position) => position > index && !selections[row.id])
+    const target = after >= 0 ? after : item.checks.findIndex(row => !selections[row.id])
+    if (target >= 0 && target !== index) setIndex(target)
+  }
+  const select = (option: string) => setSelections(previous => ({...previous, [check.id]: option}))
+  return <form ref={cardRef} data-academy-review-lesson={item.lesson_id} data-review-card className="space-y-4 rounded-xl border border-line p-4"
     onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}
-    onKeyDown={event => {if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault()}}
+    onKeyDown={event => {
+      if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) {event.preventDefault(); return}
+      const target = event.target as HTMLElement
+      if (composing.current || busy || target.closest('textarea, select, input:not([type="radio"]), button')) return
+      if (/^[1-9]$/.test(event.key)) {
+        const option = check.options[Number(event.key) - 1]
+        if (option) {event.preventDefault(); select(option.id)}
+        return
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        if (complete) onSubmit(academyReviewAnswers(item, selections))
+        else if (answered) advance()
+      }
+    }}
     onSubmit={event => {event.preventDefault(); if (!composing.current && !busy && complete) onSubmit(academyReviewAnswers(item, selections))}}>
     <div className="space-y-1">
       <h4 className="break-words text-sm font-medium">{item.title}</h4>
       <p className="text-xs leading-reading text-muted">{item.goal}</p>
       <p className="text-xs text-warn">{t('ui.academy.mastery.overdue', {days: item.overdue_days})}</p>
     </div>
-    {item.checks.map(check => <ReviewCheck key={check.id} check={check} value={selections[check.id] ?? ''} disabled={busy} onSelect={option => setSelections(previous => ({...previous, [check.id]: option}))} />)}
-    <Button type="submit" size="sm" disabled={busy || !complete}>{t('ui.academy.mastery.submit')}</Button>
+    {item.checks.length > 1 ? <ol data-review-progress className="flex flex-wrap items-center gap-1.5" aria-label={t('ui.academy.mastery.progress')}>
+      {item.checks.map((row, position) => <li key={row.id}>
+        <button type="button" data-review-dot={position} aria-current={position === index ? 'step' : undefined} aria-label={t('ui.academy.mastery.questionN', {n: position + 1})}
+          onClick={() => setIndex(position)}
+          className={cn('h-3 w-3 rounded-full border transition-colors', position === index ? 'border-brand bg-brand' : selections[row.id] ? 'border-ok/60 bg-ok/50' : 'border-line bg-line')} />
+      </li>)}
+    </ol> : null}
+    <div key={check.id} className="academy-card-enter">
+      <ReviewCheck check={check} value={selections[check.id] ?? ''} disabled={busy} onSelect={select} />
+    </div>
+    <div className="flex flex-wrap items-center gap-2">
+      {item.checks.length > 1 ? <>
+        <Button type="button" size="xs" variant="ghost" data-review-prev disabled={busy || index === 0} onClick={() => setIndex(value => value - 1)}>{t('ui.academy.mastery.prev')}</Button>
+        <span className="text-xs text-muted">{t('ui.academy.mastery.questionOf', {n: index + 1, total: item.checks.length})}</span>
+        <Button type="button" size="xs" variant="ghost" data-review-next disabled={busy || index === item.checks.length - 1} onClick={() => setIndex(value => value + 1)}>{t('ui.academy.mastery.next')}</Button>
+      </> : null}
+      <div className="ml-auto flex gap-2">
+        {answered && remaining ? <Button type="button" size="sm" variant="subtle" data-review-continue onClick={advance}>{t('ui.academy.mastery.continue')}</Button> : null}
+        <Button type="submit" size="sm" disabled={busy || !complete}>{t('ui.academy.mastery.submit')}</Button>
+      </div>
+    </div>
   </form>
 }
 

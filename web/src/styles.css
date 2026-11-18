@@ -191,6 +191,10 @@ body {
 [data-reduced-motion="true"] *, [data-reduced-motion="true"] *::before, [data-reduced-motion="true"] *::after {
   animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important;
 }
+/* 重测卡片流：切题滑入单焦点，尊重系统减少动效偏好（舞台内另由显式偏好覆盖）。 */
+.academy-card-enter { animation: academy-card-in 220ms ease-out; }
+@keyframes academy-card-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .academy-card-enter { animation: none; } }
 .app-shell { --workspace-header-height: 46px; }
 .sidebar-tab-header {
   height: var(--workspace-header-height, 46px);

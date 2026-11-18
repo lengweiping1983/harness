@@ -20,7 +20,7 @@ export function AcademyQuizResult({quiz}: {quiz: AcademyTeachQuiz}) {
   </div>
 }
 
-/** 教 AI 学生：教学对话复用带练观察列表，测验独立评分；未知写入只回查原请求。 */
+/** 讲给 AI 听：讲解对话复用带练观察列表，测验独立评分；未知写入只回查原请求。 */
 export function AcademyTeach({projectId, lesson, fingerprint, turns, disabled, active, onRefresh, embedded = false, onCompleted}: {
   projectId: string; lesson: AcademyLesson; fingerprint: string; turns: AcademyTutorTurn[]
   disabled: boolean; active: boolean; onRefresh: () => void; embedded?: boolean; onCompleted?: () => void

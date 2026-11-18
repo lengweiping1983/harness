@@ -246,7 +246,7 @@ export function academyMasteryCounts(mastery: Pick<AcademyMastery, 'skills'>): {
     fresh: mastery.skills.filter(skill => skill.state === 'new').length}
 }
 
-/** 教 AI 的误解预览与宿主冻结规则一致：首个含错误选项的自测、首个错误选项。 */
+/** 讲给 AI 听的误解预览与宿主冻结规则一致：首个含错误选项的自测、首个错误选项。 */
 export function academyTeachMisconception(lesson: Pick<AcademyLesson, 'knowledge_checks'>): AcademyTeachMisconception | undefined {
   for (const check of lesson.knowledge_checks ?? []) {
     const wrong = check.options.find(option => option.id !== check.answer_id)

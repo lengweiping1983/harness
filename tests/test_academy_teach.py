@@ -1,4 +1,4 @@
-"""教 AI 模式：误解冻结、无执行边界、学生独立测验与教学证据回归。"""
+"""讲给 AI 听（teach）模式：误解冻结、无执行边界、同学独立测验与教学证据回归。"""
 from __future__ import annotations
 
 import asyncio

@@ -4,7 +4,7 @@ import type {AcademyLesson, AcademyProject, AcademyTutorTurn} from '@/types'
 export type AcademyStudioPhaseId = 'review' | 'struggle' | 'world' | 'steps' | 'reading' | 'teach' | 'checks' | 'note' | 'finish'
 export interface AcademyStudioPhase {id: AcademyStudioPhaseId; optional: boolean}
 
-/** 专注舞台环节编排：问题先行 → 动手世界 → 步步闯关 → 概念阅读 → 教 AI 学生（可跳过）→ 快速测试 → 一句话反思 → 结课。 */
+/** 专注舞台环节编排：问题先行 → 动手世界 → 步步闯关 → 概念阅读 → 讲给 AI 听（可跳过）→ 快速测试 → 一句话反思 → 结课。 */
 export function academyStudioPhases(lesson: Pick<AcademyLesson, 'struggle' | 'world' | 'steps' | 'knowledge_checks' | 'reading'>, dueReviews = false): AcademyStudioPhase[] {
   const phases: AcademyStudioPhase[] = []
   if (dueReviews) phases.push({id: 'review', optional: true})
@@ -57,7 +57,7 @@ export function academyStudioCoachPrompt(level: AcademyStudioCoachLevel, questio
   return trimmed ? base + '\n' + trimmed : base
 }
 
-/** 舞台教练对话：排除教 AI 学生（teach）回合，按时间排序。 */
+/** 舞台教练对话：排除讲给 AI 听（teach）回合，按时间排序。 */
 export function academyStudioCoachTurns(turns: ReadonlyArray<AcademyTutorTurn>, projectId: string, lessonId: string): AcademyTutorTurn[] {
   return turns.filter(turn => turn.project_id === projectId && turn.lesson_id === lessonId && turn.mode !== 'teach').sort((a, b) => a.created_at - b.created_at)
 }
