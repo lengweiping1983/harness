@@ -134,6 +134,12 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  /** 对话式快捷追问：按当前环节给出苏格拉底式低摩擦追问 chips，点击即以对应自主档发送。 */
+  const coachSuggestions: Array<{key: string; level: AcademyStudioCoachLevel}> = phase === 'steps'
+    ? [{key: 'hint', level: 1}, {key: 'whyWrong', level: 1}, {key: 'simpler', level: 2}]
+    : phase === 'review'
+      ? [{key: 'whyDue', level: 2}, {key: 'hint', level: 1}]
+      : [{key: 'explain', level: 2}, {key: 'hint', level: 1}]
   const sendCoach = () => {
     if (composing.current || disabled || coachRunning) return
     onAskCoach(academyStudioCoachPrompt(coachLevel, coachDraft, lesson.title))
@@ -292,6 +298,11 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
               : <p className="text-warn">{t('ui.academy.studio.coach.failed')}</p>}
           </li>)}
         </ol> : <p className="text-xs text-muted">{t('ui.academy.studio.coach.empty')}</p>}
+        <div className="flex flex-wrap gap-1" data-coach-suggestions>
+          {coachSuggestions.map(suggestion => <button key={suggestion.key} type="button" data-coach-suggest={suggestion.key} disabled={disabled || coachRunning}
+            onClick={() => {setCoachLevel(suggestion.level); onAskCoach(academyStudioCoachPrompt(suggestion.level, t('ui.academy.studio.coach.suggest.' + suggestion.key), lesson.title))}}
+            className="rounded-full border border-line px-2.5 py-1 text-xs text-muted hover:border-brand hover:text-brand">{t('ui.academy.studio.coach.suggest.' + suggestion.key)}</button>)}
+        </div>
         <form className="flex items-end gap-2"
           onKeyDown={event => {if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault()}}
           onSubmit={event => {event.preventDefault(); sendCoach()}}>

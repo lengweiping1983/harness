@@ -10,7 +10,7 @@ import {AcademyWorldCard} from '/src/components/inspector/AcademyWorld.tsx'
 import {AcademyStudio} from '/src/components/inspector/AcademyStudio.tsx'
 import {setLocale, useLocale} from '/src/i18n/index.ts'
 import '/src/styles.css'
-window.locale=setLocale;window.shaded=null
+window.locale=setLocale;window.shaded=null;window.asked=[]
 const ordering={id:'ord',kind:'ordering',prompt:'Order the steps.',feedback:'Think order.',items:[{id:'a',label:'Alpha'},{id:'b',label:'Beta'},{id:'c',label:'Gamma'}]}
 const matching={id:'mat',kind:'matching',prompt:'Pair them.',feedback:'Match.',left:[{id:'l1',label:'Left one'},{id:'l2',label:'Left two'}],right:[{id:'r1',label:'Right one'},{id:'r2',label:'Right two'}]}
 const lesson={id:'l1',mode:'study',order:1,title:'Lesson',goal:'Goal',reading:'Reading',milestone:false,run_command:[],source_manifest:[],references:[],prerequisites:[],trace_labels:{},knowledge_checks:[]}
@@ -20,7 +20,7 @@ function App(){useLocale();return React.createElement('div',{className:'space-y-
  React.createElement('div',{id:'order-card'},React.createElement(AcademyStepCard,{step:ordering,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'match-card'},React.createElement(AcademyStepCard,{step:matching,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'world-card'},React.createElement(AcademyWorldCard,{kind:'fraction-bar',session:{id:'w1',project_id:'p1',lesson_id:'l1',request_id:'r1',kind:'fraction-bar',params:{parts:4,shaded:1},challenge:{prompt:'Shade it.',options:[],target:{}},status:'observing',observations:[{params:{parts:4,shaded:1},state:{parts:4,shaded:1,label:'1/4'},at:1}],note:'',created_at:1,completed_at:null},params:{parts:4,shaded:1},note:'',busy:false,onParams:p=>{window.shaded=p.shaded},onNote:()=>{},onStart:()=>{},onPredict:()=>{},onObserve:()=>{},onComplete:()=>{}})),
- React.createElement('div',{id:'studio-done',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{course,project,lesson,active:false,disabled:false,tutorTurns:[],struggleRevealed:false,checkAnswers:new Map(),note:'done',studyReady:true,studyCompleted:true,onClose:()=>{},onOpenLesson:()=>{},onAskCoach:()=>{},onStrugglePhase:()=>{},onCheckAnswer:()=>{},onNote:()=>{},onComplete:()=>{},onRefresh:()=>{}})))}
+ React.createElement('div',{id:'studio-done',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{course,project,lesson,active:false,disabled:false,tutorTurns:[],struggleRevealed:false,checkAnswers:new Map(),note:'done',studyReady:true,studyCompleted:true,onClose:()=>{},onOpenLesson:()=>{},onAskCoach:p=>{window.asked.push(p)},onStrugglePhase:()=>{},onCheckAnswer:()=>{},onNote:()=>{},onComplete:()=>{},onRefresh:()=>{}})))}
 createRoot(document.getElementById('root')).render(React.createElement(App))
 `
 const html='<html><body><div id="root"></div><script type="module" src="/__academy-interaction-entry.js"></script></body></html>'
@@ -53,6 +53,10 @@ await browserScenario(async({server,browser}) => {
     await page.locator('#studio-done ol button').last().click()
     await page.keyboard.press('ArrowLeft')
     await page.locator('#studio-done [data-studio-phase="note"]').waitFor()
+    // 对话式快捷追问：点击 chip 以对应自主档发送教练请求。
+    await page.locator('#studio-done [data-coach-suggest="hint"]').click()
+    assert.equal(await page.evaluate(()=>window.asked.length),1,'suggestion chip asks coach')
+    assert.ok((await page.evaluate(()=>window.asked[0])).includes('Lesson'),'prompt carries lesson context')
     // 完成庆祝＋进度环。
     const studio=page.locator('#studio-done [data-academy-studio]')
     await studio.locator('[data-progress-ring]').waitFor()
