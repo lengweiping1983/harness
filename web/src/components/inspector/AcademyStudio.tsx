@@ -343,7 +343,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
           </li>)}
         </ol>
         <section data-studio-phase={phase} aria-label={t(phaseLabelKey[phase])} className="space-y-3 rounded-2xl border border-line p-4 sm:p-6">
-          {renderPhase()}
+          <div key={phase} className="academy-phase-enter">{renderPhase()}</div>
           {currentPhase?.optional && !done.has(phase) && phase !== 'finish' ? <Button size="xs" variant="ghost" onClick={() => markDone(phase)}>{t('ui.academy.studio.skip')}</Button> : null}
         </section>
         {/* 教练对话进入舞台：与练习同屏的流式苏格拉底陪伴，而非页脚一次性问答。 */}

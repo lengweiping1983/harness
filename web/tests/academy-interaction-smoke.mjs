@@ -103,6 +103,7 @@ await browserScenario(async({server,browser}) => {
     await page.keyboard.press('ArrowLeft')
     await page.locator('#studio-done [data-studio-phase="note"]').waitFor()
     assert.equal(await page.evaluate(()=>document.activeElement?.tagName),'TEXTAREA','phase change auto-focuses primary input')
+    assert.equal(await page.locator('#studio-done [data-studio-phase] .academy-phase-enter').count(),1,'phase content animates on switch')
     // 会话连续性：live 舞台切到 note 后重载仍停留 note（按项目+课次持久化）。
     await page.locator('#studio-live [data-studio-phases] button').nth(1).click()
     await page.locator('#studio-live [data-studio-phase="note"]').waitFor()
@@ -117,6 +118,8 @@ await browserScenario(async({server,browser}) => {
     await review.getByText('Which is larger?',{exact:true}).waitFor()
     assert.equal(await review.getByText('Which is smaller?',{exact:true}).count(),0,'one question at a time')
     assert.equal(await review.locator('[data-review-dot]').count(),2,'progress dot per question')
+    assert.ok((await review.locator('[data-review-rationale]').innerText()).includes('Retention 80%'),'review card explains why now')
+    assert.equal(await review.locator('[data-review-retention]').evaluate(el=>el.style.width),'80%','retention bar reflects retrievability')
     assert.equal(await review.locator('button[type="submit"]').isDisabled(),true,'submit disabled until all answered')
     await review.locator('input[type="radio"]').first().focus()
     await page.keyboard.press('2')
@@ -252,7 +255,7 @@ await browserScenario(async({server,browser}) => {
     assert.deepEqual(errors,[])
     await page.close()
   }
-  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow, zen mode, swipe, memory halo, skill map, streaming coach, context-aware coach, mistake journal, daily goal + heatmap, language/theme/width matrix verified')
+  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow + rationale, zen mode, swipe, memory halo, skill map, streaming coach, context-aware coach, mistake journal, daily goal + heatmap, phase flow, language/theme/width matrix verified')
 },{entry:'/__academy-interaction-entry.js',vite:{plugins:[{
   name:'academy-interaction-fixture',resolveId(id){if(id==='/__academy-interaction-entry.js')return id},load(id){if(id==='/__academy-interaction-entry.js')return entry},
   configureServer(server){server.middlewares.use('/__academy-interaction',async(_req,res,next)=>{try{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__academy-interaction',html))}catch(error){next(error)}})},

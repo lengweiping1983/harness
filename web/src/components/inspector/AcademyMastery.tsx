@@ -31,6 +31,7 @@ export function AcademySkillList({skills}: {skills: readonly AcademySkillState[]
     </div>
     {skill.evidence_count > 0 ? <p className="mt-1 text-xs text-muted">{t('ui.academy.mastery.retrievability', {percent: Math.round(skill.retrievability * 100)})} · {t('ui.academy.mastery.stability', {days: skill.stability_days})}</p> : null}
     {skill.evidence_count > 0 && skill.due_at != null ? <p className="mt-1 text-xs text-warn">{t('ui.academy.mastery.nextDue', {date: new Date(skill.due_at * 1000).toLocaleDateString(locale === 'zh-CN' ? 'zh-CN' : 'en')})}</p> : null}
+    {skill.evidence_count > 0 && skill.reviews.delayed_correct > 0 ? <p className="mt-1 text-xs text-ok" data-skill-delayed={skill.reviews.delayed_correct}>{t('ui.academy.mastery.delayedEvidence', {count: skill.reviews.delayed_correct})}</p> : null}
   </li>)}</ul>
 }
 
@@ -94,6 +95,17 @@ export function AcademyReviewCard({item, busy, onSubmit}: {item: AcademyReviewIt
       <h4 className="break-words text-sm font-medium">{item.title}</h4>
       <p className="text-xs leading-reading text-muted">{item.goal}</p>
       <p className="text-xs text-warn">{t('ui.academy.mastery.overdue', {days: item.overdue_days})}</p>
+    </div>
+    {/* 检索透明化：把 FSRS 调度器的"为什么现在重测"可见化（间隔效应／合意困难）。 */}
+    <div data-review-rationale className="space-y-1 rounded-lg bg-canvas p-2">
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 text-xs text-muted">{t('ui.academy.mastery.retentionLabel')}</span>
+        <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-line" aria-hidden>
+          <div data-review-retention className={cn('h-full rounded-full', item.retrievability >= 0.8 ? 'bg-ok' : item.retrievability >= 0.5 ? 'bg-warn' : 'bg-danger')} style={{width: Math.max(2, Math.min(100, Math.round(item.retrievability * 100))) + '%'}} />
+        </div>
+        <span className="shrink-0 text-xs font-medium">{Math.round(item.retrievability * 100)}%</span>
+      </div>
+      <p className="text-xs leading-reading text-muted">{t('ui.academy.mastery.rationale', {percent: Math.round(item.retrievability * 100)})}</p>
     </div>
     {item.checks.length > 1 ? <ol data-review-progress className="flex flex-wrap items-center gap-1.5" aria-label={t('ui.academy.mastery.progress')}>
       {item.checks.map((row, position) => <li key={row.id}>

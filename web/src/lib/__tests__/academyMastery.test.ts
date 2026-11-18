@@ -127,6 +127,10 @@ it('renders review questions without answers, feedback or hints and disables inc
   expect(html).toContain('Which is larger?')
   expect(html).toContain('One half')
   expect(html).toContain('Overdue 1.2 days')
+  expect(html).toContain('data-review-rationale')
+  expect(html).toContain('Retention 81%')
+  expect(html).toContain('spacing effect')
+  expect(html).toContain('width:81%')
   expect(html).toContain('disabled')
   expect(html).not.toContain('answer_id')
   expect(html).not.toContain('feedback')
@@ -196,6 +200,17 @@ it('renders the mistake journal with badges, open filter and retry for open mist
   expect(chinese).toContain('盲点')
   expect(chinese).toContain('已修复')
   expect(chinese).toContain('你的作答：9')
+})
+
+it('shows delayed-review evidence per skill only when it exists', async () => {
+  await setLocale('en')
+  const html = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({reviews: {attempts: 3, correct: 3, delayed_correct: 2}}), skill({lesson_id: 'decimals', title: 'Decimals', reviews: {attempts: 1, correct: 1, delayed_correct: 0}})]}))
+  expect(html).toContain('data-skill-delayed="2"')
+  expect(html).toContain('Delayed review correct 2x')
+  expect(html).not.toContain('data-skill-delayed="0"')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({reviews: {attempts: 3, correct: 3, delayed_correct: 2}})]}))
+  expect(chinese).toContain('延迟重测答对 2 次')
 })
 
 it('renders the mastery entry collapsed without fetching when inactive', async () => {
