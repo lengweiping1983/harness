@@ -158,6 +158,16 @@ await browserScenario(async({server,browser}) => {
     await map.locator('[data-skill-map-node="m2"]').focus()
     await page.keyboard.press('Enter')
     assert.deepEqual(await page.evaluate(()=>window.mapOpened),['m3','m2'],'keyboard opens lesson')
+    // 空间方向键导航＋漫游 tabindex。
+    await map.locator('[data-skill-map-node="m1"]').focus()
+    await page.keyboard.press('ArrowRight')
+    await page.waitForFunction(()=>document.activeElement?.getAttribute('data-skill-map-node')==='m3')
+    await page.keyboard.press('ArrowDown')
+    await page.waitForFunction(()=>document.activeElement?.getAttribute('data-skill-map-node')==='m2')
+    await page.keyboard.press('ArrowUp')
+    await page.waitForFunction(()=>document.activeElement?.getAttribute('data-skill-map-node')==='m1')
+    assert.equal(await map.locator('[data-skill-map-node="m1"]').getAttribute('tabindex'),'0','roving tabindex follows focus')
+    assert.equal(await map.locator('[data-skill-map-node="m3"]').getAttribute('tabindex'),'-1','non-focused nodes rove out')
     // 教练对话流：舞台内流式陪伴，partial 实时更新，问题收尾触发回应邀请。
     const coachTurnBase={project_id:'p4',lesson_id:'l1',request_id:'r',input_fingerprint:'a'.repeat(64),allow_execution:false,require_execution:false,model:'m',language:'en',actions:[],created_at:1}
     const coachThread=page.locator('#studio-coach main [data-studio-coach-thread]')

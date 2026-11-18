@@ -8272,6 +8272,7 @@
   "ui.academy.mastery.title": "记忆与延迟重测",
   "ui.academy.map.title": "技能地图",
   "ui.academy.map.intro": "先修关系与记忆保持一览：光环越满记忆越牢，黄点表示待重测；点击节点开课。",
+  "ui.academy.map.keyboardHint": "方向键在技能间移动，Enter 或空格开课。",
   "ui.academy.map.empty": "课程结构加载后显示技能地图。",
   "ui.academy.map.legend.completed": "已完成",
   "ui.academy.map.legend.learning": "巩固中",

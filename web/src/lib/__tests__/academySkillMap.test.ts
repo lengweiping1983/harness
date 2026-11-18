@@ -71,6 +71,10 @@ it('renders the skill map with halos, legend and keyboard-openable nodes in both
   expect(html).toContain('Memory retention 62%')
   expect(html).toContain('role="button"')
   expect(html).toContain('tabindex="0"')
+  // 漫游 tabindex：仅首节点可 Tab 进入，其余 -1；键盘提示存在。
+  expect(html).toContain('data-skill-map-node="fractions" transform="translate(95,52)" role="button" tabindex="0"')
+  expect(html).toContain('data-skill-map-node="decimals" transform="translate(95,156)" role="button" tabindex="-1"')
+  expect(html).toContain('Arrow keys move between skills')
   expect(html).toContain('aria-current="step"')
   expect(html).toContain('Skill map')
   expect(html).toContain('Completed')
@@ -78,6 +82,7 @@ it('renders the skill map with halos, legend and keyboard-openable nodes in both
   const readOnly = renderToStaticMarkup(createElement(AcademySkillMap, {lessons, progress, skills: []}))
   expect(readOnly).toContain('role="img"')
   expect(readOnly).not.toContain('data-skill-map-halo')
+  expect(readOnly).not.toContain('Arrow keys move between skills')
   const empty = renderToStaticMarkup(createElement(AcademySkillMap, {lessons: [], progress: [], skills: []}))
   expect(empty).toContain('The skill map appears once the course structure loads.')
   await setLocale('zh-CN')

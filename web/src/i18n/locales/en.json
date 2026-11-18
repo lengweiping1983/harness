@@ -4776,6 +4776,7 @@
   "ui.academy.mastery.title": "Memory & delayed review",
   "ui.academy.map.title": "Skill map",
   "ui.academy.map.intro": "Prerequisites and memory retention at a glance: a fuller halo means stronger memory, an amber dot means due for review; click a node to open its lesson.",
+  "ui.academy.map.keyboardHint": "Arrow keys move between skills; Enter or Space opens a lesson.",
   "ui.academy.map.empty": "The skill map appears once the course structure loads.",
   "ui.academy.map.legend.completed": "Completed",
   "ui.academy.map.legend.learning": "Learning",

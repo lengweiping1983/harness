@@ -1,8 +1,8 @@
-import {useId} from 'react'
+import {useId, useRef, useState} from 'react'
 import {Check} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyLesson, AcademyProject, AcademySkillState} from '@/types'
-import {academySkillMap, academySkillMapEdgePath} from '@/lib/academySkillMap'
+import {academySkillMap, academySkillMapEdgePath, type AcademySkillMapNode} from '@/lib/academySkillMap'
 import {cn} from '@/lib/utils'
 
 /** 技能地图：先修关系图＋FSRS 记忆光环；点击节点复用面板开课写入准入，键盘 Enter/空格等价。 */
@@ -12,11 +12,36 @@ export function AcademySkillMap({lessons, progress, skills, activeLessonId, reco
 }) {
   useLocale()
   const markerId = 'academy-map-arrow-' + useId().replace(/:/g, '')
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [focusId, setFocusId] = useState<string | null>(null)
   const layout = academySkillMap(lessons, progress, skills, activeLessonId, recommendedId)
+  const interactive = Boolean(onOpenLesson)
+  const activeFocusId = focusId ?? layout.nodes[0]?.id
+  /** 空间方向键导航：在指定方向上取最近的节点（横向按 y 近似、纵向按 x 近似），漫游 tabindex 跟随焦点。 */
+  const moveFocus = (from: AcademySkillMapNode, key: string) => {
+    const horizontal = key === 'ArrowRight' || key === 'ArrowLeft'
+    const candidates = layout.nodes.filter(node => {
+      if (key === 'ArrowRight') return node.x > from.x
+      if (key === 'ArrowLeft') return node.x < from.x
+      if (key === 'ArrowDown') return node.y > from.y
+      return node.y < from.y
+    })
+    if (!candidates.length) return
+    candidates.sort((a, b) => {
+      const perpA = horizontal ? Math.abs(a.y - from.y) : Math.abs(a.x - from.x)
+      const perpB = horizontal ? Math.abs(b.y - from.y) : Math.abs(b.x - from.x)
+      if (perpA !== perpB) return perpA - perpB
+      return horizontal ? Math.abs(a.x - from.x) - Math.abs(b.x - from.x) : Math.abs(a.y - from.y) - Math.abs(b.y - from.y)
+    })
+    const target = candidates[0]
+    setFocusId(target.id)
+    requestAnimationFrame(() => {containerRef.current?.querySelector<SVGGElement>('[data-skill-map-node="' + target.id + '"]')?.focus()})
+  }
   if (!lessons.length) return <p className="text-xs text-muted">{t('ui.academy.map.empty')}</p>
-  return <div data-academy-skill-map className="space-y-2">
+  return <div ref={containerRef} data-academy-skill-map className="space-y-2">
     <p className="text-xs font-medium">{t('ui.academy.map.title')}</p>
     <p className="text-xs leading-reading text-muted">{t('ui.academy.map.intro')}</p>
+    {interactive ? <p className="sr-only">{t('ui.academy.map.keyboardHint')}</p> : null}
     <div className="overflow-x-auto rounded-xl border border-line bg-canvas p-3">
       <svg data-skill-map-canvas viewBox={`0 0 ${layout.width} ${layout.height}`} width="100%" height={layout.height} style={{minWidth: layout.columns * 150}} role="group" aria-label={t('ui.academy.map.title')}>
         <defs>
@@ -30,13 +55,16 @@ export function AcademySkillMap({lessons, progress, skills, activeLessonId, reco
           const label = node.title + ' · ' + t('ui.academy.mastery.state.' + (node.mastery ?? 'new'))
             + (retention != null ? ' · ' + t('ui.academy.studio.journey.memory', {percent: retention}) : '')
             + (node.due ? ' · ' + t('ui.academy.map.legend.due') : '')
-          const interactive = Boolean(onOpenLesson)
           return <g key={node.id} data-skill-map-node={node.id} transform={`translate(${node.x},${node.y})`}
-            role={interactive ? 'button' : 'img'} tabIndex={interactive ? 0 : -1}
+            role={interactive ? 'button' : 'img'} tabIndex={interactive ? (node.id === activeFocusId ? 0 : -1) : -1}
             aria-current={node.active ? 'step' : undefined} aria-label={label}
             className={cn('focus-visible:outline focus-visible:outline-brand', interactive && 'cursor-pointer')}
             onClick={interactive ? () => onOpenLesson?.(node.id) : undefined}
-            onKeyDown={interactive ? event => {if (event.key === 'Enter' || event.key === ' ') {event.preventDefault(); onOpenLesson?.(node.id)}} : undefined}>
+            onFocus={interactive ? () => setFocusId(node.id) : undefined}
+            onKeyDown={interactive ? event => {
+              if (event.key === 'Enter' || event.key === ' ') {event.preventDefault(); onOpenLesson?.(node.id); return}
+              if (event.key === 'ArrowRight' || event.key === 'ArrowLeft' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {event.preventDefault(); moveFocus(node, event.key)}
+            } : undefined}>
             <title>{node.title + (retention != null ? ' · ' + t('ui.academy.studio.journey.memory', {percent: retention}) : '')}</title>
             {retention != null ? <>
               <circle r="21" fill="none" strokeWidth="3" className="stroke-line" />
