@@ -23,15 +23,15 @@ const lesson={id:'l1',mode:'study',order:1,title:'Lesson',goal:'Goal',reading:'R
 const course={id:'c1',version:'1',origin:'provided',source_revision:'f',title:'Course',description:'',references:[],lessons:[lesson]}
 const project={id:'p1',course_id:'c1',course_version:'1',name:'Lab',revision:1,active_lesson_id:'l1',course_fingerprint:'a'.repeat(64),created_at:1,progress:[],root:'/x',fingerprint:'a'.repeat(64),sandbox:'unavailable'}
 const liveProps={course,project:{...project,id:'p2'},lesson,active:false,disabled:false,tutorTurns:[],struggleRevealed:false,checkAnswers:new Map(),note:'',studyReady:false,studyCompleted:false,onClose:()=>{},onOpenLesson:()=>{},onAskCoach:()=>{},onStrugglePhase:()=>{},onCheckAnswer:()=>{},onNote:()=>{},onComplete:()=>{},onRefresh:()=>{}}
-academyApi.mastery=async()=>({ok:true,data:{mastery:{skills:[{lesson_id:'l1',title:'Lesson',stage:'',state:'learning',stability_days:2,difficulty:5,retrievability:0.62,due_at:null,last_evidence_at:1,evidence_count:3,reviews:{attempts:1,correct:1,delayed_correct:0}}],due_count:0,reviews:{attempts:1,correct:1,delayed_correct:0},engagement:{constructive:1,active:1,total:2,constructive_ratio:0.5}}}})
+academyApi.mastery=async()=>({ok:true,data:{mastery:{skills:[{lesson_id:'l1',title:'Lesson',stage:'',state:'learning',stability_days:2,difficulty:5,retrievability:0.62,due_at:null,last_evidence_at:1,evidence_count:3,reviews:{attempts:1,correct:1,delayed_correct:0,delayed_attempts:0}}],due_count:0,reviews:{attempts:1,correct:1,delayed_correct:0,delayed_attempts:0},engagement:{constructive:1,active:1,total:2,constructive_ratio:0.5}}}})
 const reviewItem={lesson_id:'l1',title:'Lesson',goal:'Goal',stage:'',retrievability:0.8,overdue_days:1,checks:[{id:'q1',prompt:'Which is larger?',options:[{id:'right',label:'One half'},{id:'wrong',label:'One third'}]},{id:'q2',prompt:'Which is smaller?',options:[{id:'a',label:'One third'},{id:'b',label:'One half'}]}]}
 const haloProps={...liveProps,project:{...project,id:'p3'},active:true}
 const mapLesson=(id,order,stage,prerequisites=[])=>({id,order,mode:'study',title:id,goal:id,reading:id,milestone:false,run_command:[],source_manifest:[],references:[],prerequisites,trace_labels:{},stage,knowledge_checks:[]})
 const mapLessons=[mapLesson('m1',1,'Stage A'),mapLesson('m2',2,'Stage A'),mapLesson('m3',3,'Stage B',['m1'])]
-const mapSkills=[{lesson_id:'m1',title:'m1',stage:'Stage A',state:'learning',stability_days:2,difficulty:5,retrievability:0.62,due_at:100,last_evidence_at:1,evidence_count:3,reviews:{attempts:1,correct:1,delayed_correct:0}}]
+const mapSkills=[{lesson_id:'m1',title:'m1',stage:'Stage A',state:'learning',stability_days:2,difficulty:5,retrievability:0.62,due_at:100,last_evidence_at:1,evidence_count:3,reviews:{attempts:1,correct:1,delayed_correct:0,delayed_attempts:0}}]
 const mapProgress=[{lesson_id:'m1',state:'completed',checkpoint_id:'',evidence_ids:[],attempt_count:1}]
 const goalActivity=Array.from({length:14},(_,i)=>{const d=new Date(Date.now()-(13-i)*86400000);return {date:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),evidence:i===13?5:i%3}})
-const goalMastery={skills:[],due_count:0,reviews:{attempts:1,correct:1,delayed_correct:0},engagement:{constructive:1,active:1,total:2,constructive_ratio:0.5},activity:goalActivity}
+const goalMastery={skills:[],due_count:0,reviews:{attempts:1,correct:1,delayed_correct:0,delayed_attempts:0},engagement:{constructive:1,active:1,total:2,constructive_ratio:0.5},activity:goalActivity}
 const stepsLesson={...lesson,id:'l2',steps:[{id:'s1',kind:'numeric',prompt:'Pick on the line.',feedback:'Think.',tolerance:0,number_line:{min:0,max:12}}]}
 const stepsCourse={...course,lessons:[stepsLesson]}
 const journalMistakes=[{lesson_id:'m1',lesson_title:'m1',step_id:'s1',prompt:'How many?',response:'9',confidence:'sure',diagnosis:'Unequal parts',blindspot:true,repaired:false,at:100},{lesson_id:'m2',lesson_title:'m2',step_id:'s2',prompt:'Which?',response:'0.3',blindspot:true,repaired:true,at:90}]
@@ -215,6 +215,7 @@ await browserScenario(async({server,browser}) => {
     assert.ok((await page.locator('#daily-goal [data-daily-goal]').getAttribute('aria-label')).includes('5/3'),'attained chip shows evidence/goal')
     const todayKey=await page.evaluate(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')})
     assert.equal(await page.locator('#goal-report [data-activity-day]').count(),14,'heatmap renders 14 days')
+    assert.equal(await page.locator('#goal-report [data-academy-retention]').count(),1,'report shows retention comparison')
     await page.waitForFunction(key=>{const el=document.querySelector('#goal-report [data-activity-day="'+key+'"]');return Boolean(el&&el.className.includes('ring-ok'))},todayKey)
     assert.ok((await page.locator('#goal-report [data-activity-day="'+todayKey+'"]').getAttribute('class')).includes('ring-ok'),'heatmap marks attained today')
     await page.reload()

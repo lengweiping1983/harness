@@ -31,7 +31,7 @@ export function AcademySkillList({skills}: {skills: readonly AcademySkillState[]
     </div>
     {skill.evidence_count > 0 ? <p className="mt-1 text-xs text-muted">{t('ui.academy.mastery.retrievability', {percent: Math.round(skill.retrievability * 100)})} · {t('ui.academy.mastery.stability', {days: skill.stability_days})}</p> : null}
     {skill.evidence_count > 0 && skill.due_at != null ? <p className="mt-1 text-xs text-warn">{t('ui.academy.mastery.nextDue', {date: new Date(skill.due_at * 1000).toLocaleDateString(locale === 'zh-CN' ? 'zh-CN' : 'en')})}</p> : null}
-    {skill.evidence_count > 0 && skill.reviews.delayed_correct > 0 ? <p className="mt-1 text-xs text-ok" data-skill-delayed={skill.reviews.delayed_correct}>{t('ui.academy.mastery.delayedEvidence', {count: skill.reviews.delayed_correct})}</p> : null}
+    {skill.evidence_count > 0 && (skill.reviews.delayed_attempts ?? 0) > 0 ? <p className="mt-1 text-xs text-ok" data-skill-delayed={skill.reviews.delayed_correct}>{t('ui.academy.mastery.delayedEvidence', {count: skill.reviews.delayed_correct})} · {t('ui.academy.mastery.delayedRate', {percent: Math.round(skill.reviews.delayed_correct / skill.reviews.delayed_attempts * 100)})}</p> : null}
   </li>)}</ul>
 }
 
@@ -148,7 +148,12 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
     window.addEventListener(ACADEMY_GOAL_EVENT, onGoal)
     return () => window.removeEventListener(ACADEMY_GOAL_EVENT, onGoal)
   }, [])
-  const delayed = mastery.reviews.attempts ? Math.round((mastery.reviews.delayed_correct / mastery.reviews.attempts) * 100) : 0
+  const delayedAttempts = mastery.reviews.delayed_attempts ?? 0
+  const delayed = delayedAttempts ? Math.round((mastery.reviews.delayed_correct / delayedAttempts) * 100) : 0
+  const immediateAttempts = Math.max(0, mastery.reviews.attempts - delayedAttempts)
+  const immediateCorrect = Math.max(0, mastery.reviews.correct - mastery.reviews.delayed_correct)
+  const immediateRate = immediateAttempts ? Math.round((immediateCorrect / immediateAttempts) * 100) : null
+  const delayedRate = delayedAttempts ? Math.round((mastery.reviews.delayed_correct / delayedAttempts) * 100) : null
   const tiles: Array<[string | number, string]> = [
     [counts.durable, 'ui.academy.report.durable'], [counts.learning, 'ui.academy.report.learning'], [counts.fresh, 'ui.academy.report.fresh'],
     [mastery.repairs ?? 0, 'ui.academy.report.repairs'], [mastery.blindspots_open ?? 0, 'ui.academy.report.blindspots'], [mastery.transfers ?? 0, 'ui.academy.report.transfers'],
@@ -176,6 +181,21 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
     {academyBadges(mastery).length ? <div className="flex flex-wrap gap-1" data-academy-badges>
       {academyBadges(mastery).map(badge => <span key={badge} className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok">{t('ui.academy.badge.' + badge)}</span>)}
     </div> : null}
+    {/* 保持率对比：即时 vs 延迟（间隔≥1天）正确率，把测试效应可见化；延迟保持才是长期理解证据。 */}
+    <div data-academy-retention className="space-y-2 rounded-xl border border-line p-3">
+      <p className="text-xs font-medium">{t('ui.academy.report.retentionTitle')}</p>
+      <p className="text-xs leading-reading text-muted">{t('ui.academy.report.retentionHint')}</p>
+      {immediateRate == null && delayedRate == null ? <p className="text-xs text-muted">{t('ui.academy.report.retentionEmpty')}</p> : <div className="space-y-2">
+        <div data-retention-immediate className="space-y-0.5">
+          <div className="flex items-center justify-between text-xs"><span className="text-muted">{t('ui.academy.report.immediate')}</span><span className="font-medium">{immediateRate == null ? '—' : immediateRate + '%'} <span className="text-muted">({immediateCorrect}/{immediateAttempts})</span></span></div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-line" aria-hidden><div className="h-full rounded-full bg-brand" style={{width: (immediateRate ?? 0) + '%'}} /></div>
+        </div>
+        <div data-retention-delayed className="space-y-0.5">
+          <div className="flex items-center justify-between text-xs"><span className="text-muted">{t('ui.academy.report.delayedRate')}</span><span className="font-medium">{delayedRate == null ? '—' : delayedRate + '%'} <span className="text-muted">({mastery.reviews.delayed_correct}/{delayedAttempts})</span></span></div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-line" aria-hidden><div className="h-full rounded-full bg-ok" style={{width: (delayedRate ?? 0) + '%'}} /></div>
+        </div>
+      </div>}
+    </div>
     {mastery.activity?.length ? <div className="space-y-1">
       <p className="text-xs text-muted">{t('ui.academy.report.activity')}</p>
       {/* 近 14 天证据热图：强度分级，今日描边，设定目标后达成日绿环。 */}

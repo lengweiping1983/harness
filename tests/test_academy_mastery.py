@@ -180,8 +180,18 @@ class MasteryServiceTests(unittest.TestCase):
         self.assertAlmostEqual(review['elapsed_days'], 3.0, places=3)
         skill = receipt['result']['skill']
         self.assertGreater(skill['stability_days'], mastery.INITIAL_STABILITY['study'])
-        self.assertEqual(skill['reviews'], {'attempts': 1, 'correct': 1, 'delayed_correct': 1})
+        self.assertEqual(skill['reviews'], {'attempts': 1, 'correct': 1, 'delayed_correct': 1, 'delayed_attempts': 1})
         self.assertEqual(len(self.service.store.list('review')), 1)
+
+    def test_delayed_attempts_counts_interval_reviews(self):
+        """延迟重测尝试单独计数：即时重测不计入延迟分母，间隔≥1天计入。"""
+        self.complete('fractions')
+        self.advance(0.5)
+        self.service.mastery.review(self.pid, 'r0', 'fractions', self.answers('fractions'))
+        self.assertEqual(self.skill('fractions')['reviews']['delayed_attempts'], 0)
+        self.advance(3)
+        self.service.mastery.review(self.pid, 'r1', 'fractions', self.answers('fractions'))
+        self.assertEqual(self.skill('fractions')['reviews'], {'attempts': 2, 'correct': 2, 'delayed_correct': 1, 'delayed_attempts': 1})
 
     def test_review_wrong_lapses_stability(self):
         self.complete('fractions')

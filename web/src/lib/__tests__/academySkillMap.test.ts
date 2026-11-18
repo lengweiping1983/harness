@@ -15,7 +15,7 @@ const lesson = (id: string, order: number, stage: string, prerequisites: string[
 const lessons = [lesson('fractions', 1, 'Stage A'), lesson('decimals', 2, 'Stage A'), lesson('ratios', 3, 'Stage B', ['fractions'])]
 const skill = (patch: Partial<AcademySkillState> = {}): AcademySkillState => ({
   lesson_id: 'fractions', title: 'fractions', stage: 'Stage A', state: 'learning', stability_days: 2, difficulty: 5,
-  retrievability: 0.62, due_at: 100, last_evidence_at: 1, evidence_count: 3, reviews: {attempts: 1, correct: 1, delayed_correct: 0}, ...patch,
+  retrievability: 0.62, due_at: 100, last_evidence_at: 1, evidence_count: 3, reviews: {attempts: 1, correct: 1, delayed_correct: 0, delayed_attempts: 0}, ...patch,
 })
 const progress: AcademyProject['progress'] = [{lesson_id: 'fractions', state: 'completed', checkpoint_id: '', evidence_ids: [], attempt_count: 1}]
 

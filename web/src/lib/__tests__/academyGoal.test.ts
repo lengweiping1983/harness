@@ -69,7 +69,7 @@ it('renders goal states bilingually: unset, active, attained', async () => {
 it('renders the activity heatmap with intensity levels and attained-today ring', async () => {
   await setLocale('en')
   stubStorage({'harness.academy.goal.v1': '3'})
-  const mastery: AcademyMastery = {skills: [], due_count: 0, reviews: {attempts: 1, correct: 1, delayed_correct: 0},
+  const mastery: AcademyMastery = {skills: [], due_count: 0, reviews: {attempts: 1, correct: 1, delayed_correct: 0, delayed_attempts: 0},
     engagement: {constructive: 1, active: 1, total: 2, constructive_ratio: 0.5}, activity: activity(5)}
   const html = renderToStaticMarkup(createElement(AcademyReport, {mastery}))
   expect(html).toContain('data-academy-activity')

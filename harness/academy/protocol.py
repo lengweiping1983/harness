@@ -161,7 +161,7 @@ SCHEMAS = {
     'AcademyReviewCheck': obj({'id': TEXT, 'prompt': TEXT, 'options': array(ref('AcademyReviewOption'))}),
     'AcademyReviewItem': obj({'lesson_id': TEXT, 'title': TEXT, 'goal': TEXT, 'stage': TEXT,
         'retrievability': NUMBER, 'overdue_days': NUMBER, 'checks': array(ref('AcademyReviewCheck'))}),
-    'AcademySkillReviews': obj({'attempts': VERSION, 'correct': VERSION, 'delayed_correct': VERSION}),
+    'AcademySkillReviews': obj({'attempts': VERSION, 'correct': VERSION, 'delayed_correct': VERSION, 'delayed_attempts': VERSION}),
     'AcademySkillState': obj({'lesson_id': TEXT, 'title': TEXT, 'stage': TEXT,
         'state': {'type': 'string', 'enum': ['new', 'learning', 'durable']},
         'stability_days': NUMBER, 'difficulty': NUMBER, 'retrievability': NUMBER,

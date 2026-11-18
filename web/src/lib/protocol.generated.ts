@@ -2200,6 +2200,7 @@ export interface AcademySkillReviews {
   attempts: number
   correct: number
   delayed_correct: number
+  delayed_attempts: number
 }
 export interface AcademySkillState {
   lesson_id: string

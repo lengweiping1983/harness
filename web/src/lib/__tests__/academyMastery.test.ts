@@ -12,7 +12,7 @@ afterEach(async () => {await setLocale('zh-CN')})
 const skill = (patch: Partial<AcademySkillState> = {}): AcademySkillState => ({
   lesson_id: 'fractions', title: 'Fractions', stage: 'Stage A', state: 'learning',
   stability_days: 2.5, difficulty: 5, retrievability: 0.81, due_at: 100, last_evidence_at: 1,
-  evidence_count: 1, reviews: {attempts: 1, correct: 1, delayed_correct: 0}, ...patch,
+  evidence_count: 1, reviews: {attempts: 1, correct: 1, delayed_correct: 0, delayed_attempts: 0}, ...patch,
 })
 const reviewItem = (patch: Partial<AcademyReviewItem> = {}): AcademyReviewItem => ({
   lesson_id: 'fractions', title: 'Fractions', goal: 'Compare fractions', stage: 'Stage A',
@@ -88,7 +88,7 @@ it('shows the next review date on skills with evidence', async () => {
 })
 it('renders the learning report tiles from mastery evidence bilingually', async () => {
   await setLocale('en')
-  const mastery = {skills: [], due_count: 0, reviews: {attempts: 4, correct: 3, delayed_correct: 2},
+  const mastery = {skills: [], due_count: 0, reviews: {attempts: 4, correct: 3, delayed_correct: 2, delayed_attempts: 2},
     engagement: {constructive: 1, active: 1, total: 2, constructive_ratio: 0.5}, repairs: 2, transfers: 3, blindspots_open: 1, streak_days: 3,
     calibration: {sure_correct: 4, sure_wrong: 1, unsure_correct: 2, unsure_wrong: 1, guess_correct: 3, guess_wrong: 0},
     activity: Array.from({length: 14}, (_, i) => ({date: '2026-11-' + String(i + 1).padStart(2, '0'), evidence: i % 3}))}
@@ -204,13 +204,33 @@ it('renders the mistake journal with badges, open filter and retry for open mist
 
 it('shows delayed-review evidence per skill only when it exists', async () => {
   await setLocale('en')
-  const html = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({reviews: {attempts: 3, correct: 3, delayed_correct: 2}}), skill({lesson_id: 'decimals', title: 'Decimals', reviews: {attempts: 1, correct: 1, delayed_correct: 0}})]}))
+  const html = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({reviews: {attempts: 3, correct: 3, delayed_correct: 2, delayed_attempts: 2}}), skill({lesson_id: 'decimals', title: 'Decimals', reviews: {attempts: 1, correct: 1, delayed_correct: 0, delayed_attempts: 0}})]}))
   expect(html).toContain('data-skill-delayed="2"')
   expect(html).toContain('Delayed review correct 2x')
   expect(html).not.toContain('data-skill-delayed="0"')
   await setLocale('zh-CN')
-  const chinese = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({reviews: {attempts: 3, correct: 3, delayed_correct: 2}})]}))
+  const chinese = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({reviews: {attempts: 3, correct: 3, delayed_correct: 2, delayed_attempts: 2}})]}))
   expect(chinese).toContain('延迟重测答对 2 次')
+})
+
+it('compares immediate and delayed retention with honest empty states', async () => {
+  await setLocale('en')
+  const mastery = {skills: [], due_count: 0, reviews: {attempts: 5, correct: 4, delayed_correct: 2, delayed_attempts: 3},
+    engagement: {constructive: 1, active: 1, total: 2, constructive_ratio: 0.5}}
+  const html = renderToStaticMarkup(createElement(AcademyReport, {mastery}))
+  expect(html).toContain('data-academy-retention')
+  expect(html).toContain('Retention comparison (testing effect)')
+  expect(html).toContain('data-retention-immediate')
+  expect(html).toContain('(2/2)')
+  expect(html).toContain('data-retention-delayed')
+  expect(html).toContain('67%')
+  expect(html).toContain('(2/3)')
+  const empty = renderToStaticMarkup(createElement(AcademyReport, {mastery: {...mastery, reviews: {attempts: 0, correct: 0, delayed_correct: 0, delayed_attempts: 0}}}))
+  expect(empty).toContain('No review evidence yet')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(createElement(AcademyReport, {mastery}))
+  expect(chinese).toContain('保持率对比')
+  expect(chinese).toContain('延迟正确率')
 })
 
 it('renders the mastery entry collapsed without fetching when inactive', async () => {

@@ -52,7 +52,7 @@ def lapse(stability: float, difficulty: float) -> tuple[float, float]:
 
 def _new_state() -> dict:
     return {'stability': 0.0, 'difficulty': INITIAL_DIFFICULTY, 'last_at': None,
-            'evidence_count': 0, 'attempts': 0, 'correct': 0, 'delayed_correct': 0}
+            'evidence_count': 0, 'attempts': 0, 'correct': 0, 'delayed_correct': 0, 'delayed_attempts': 0}
 
 
 def _apply(state: dict, event: dict) -> dict:
@@ -69,6 +69,9 @@ def _apply(state: dict, event: dict) -> dict:
         state['stability'], state['difficulty'] = lapse(state['stability'], state['difficulty'])
     if event['kind'] == 'review':
         state['attempts'] += 1
+        # 延迟重测尝试（间隔≥1天）单独计数，作为延迟保持率的真实分母；与延迟答对对称。
+        if elapsed is not None and elapsed >= DURABLE_DELAY_DAYS:
+            state['delayed_attempts'] += 1
         if event['correct']:
             state['correct'] += 1
             if elapsed is not None and elapsed >= DURABLE_DELAY_DAYS:
@@ -144,7 +147,7 @@ def _skill_view(lesson: dict, state: dict | None, now: float) -> dict:
             'state': label, 'stability_days': round(state['stability'], 2), 'difficulty': round(state['difficulty'], 2),
             'retrievability': round(recall, 4), 'due_at': due_at, 'last_evidence_at': state['last_at'],
             'evidence_count': state['evidence_count'],
-            'reviews': {'attempts': state['attempts'], 'correct': state['correct'], 'delayed_correct': state['delayed_correct']}}
+            'reviews': {'attempts': state['attempts'], 'correct': state['correct'], 'delayed_correct': state['delayed_correct'], 'delayed_attempts': state['delayed_attempts']}}
 
 
 class AcademyMastery:
@@ -234,7 +237,7 @@ class AcademyMastery:
         states = fold(self.service.store, project_id)
         now = time.time()
         skills = [_skill_view(lesson, states.get(lesson['id']), now) for lesson in lessons]
-        totals = {key: sum(skill['reviews'][key] for skill in skills) for key in ('attempts', 'correct', 'delayed_correct')}
+        totals = {key: sum(skill['reviews'][key] for skill in skills) for key in ('attempts', 'correct', 'delayed_correct', 'delayed_attempts')}
         # 学习报告聚合：修复的盲点、未修复盲点与迁移成功，全部来自持久作答记录。
         transfer_ids = {step['id'] for lesson in lessons for step in lesson.get('steps', []) if step.get('transfer')}
         repairs = transfers = blindspots_open = 0
