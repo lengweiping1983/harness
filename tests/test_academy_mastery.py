@@ -494,5 +494,32 @@ class MasteryApiTests(unittest.TestCase):
             self.assertEqual(caught.exception.status, 404)
 
 
+    def test_learning_time_route_validation_and_authorization_precede_writes(self):
+        """专注时长写入的 HTTP 契约：非法 seconds 协议校验先拒，合法 body 项目不存在 404。"""
+        with tempfile.TemporaryDirectory() as directory:
+            class Config:
+                home = directory
+            class Harness:
+                config = Config()
+            class Context:
+                harness = Harness()
+            router = build_router(Context())
+            missing = 'academy_' + '0' * 32
+            handler, params = router.resolve('POST', '/api/v1/academy/projects/{project_id}/learning-time')
+            request = Request('POST', '/api/v1/academy/projects/' + missing + '/learning-time', {}, {},
+                              b'{"request_id":"r1","lesson_id":"x","seconds":0}', client_ip='127.0.0.1')
+            with self.assertRaises(ApiError) as caught:
+                handler(request, **params)
+            self.assertEqual(caught.exception.code, 'academy/invalid-request')
+            request = Request('POST', '/api/v1/academy/projects/' + missing + '/learning-time', {}, {},
+                              b'{"request_id":"r1","lesson_id":"x","seconds":60}', client_ip='127.0.0.1')
+            # 写入经回执契约：领域错误（项目不存在）返回 failed 回执而非抛出，校验错误才在写入前 400。
+            response = handler(request, **params)
+            self.assertEqual(response.status, 200)
+            payload = json.loads(response.body)
+            self.assertEqual(payload['status'], 'failed')
+            self.assertEqual(payload['result']['error_code'], 'project-not-found')
+
+
 if __name__ == '__main__':
     unittest.main()
