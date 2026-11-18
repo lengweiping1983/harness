@@ -914,7 +914,7 @@ export type {
   AcademyCourse, AcademyCourseSummary, AcademyLesson, AcademyProgress, AcademyProject,
   AcademySourceFile, AcademyRun, AcademyTraceEvent, AcademyReceipt, AcademyCheckpoint,
   AcademyRestorePreview, AcademyFile, AcademySubmission, AcademyAssessmentDimension, AcademyAssessment,
-  AcademyKnowledgeCheck, AcademyDesign, AcademyModelRun, AcademyTutorTurn, AcademyTutorProposal, AcademyMastery, AcademySkillState, AcademySkillReviews, AcademyReviewItem, AcademyReviewCheck, AcademyReview, AcademyStudyAnswer, AcademyTeachQuiz, AcademyTeachMisconception, AcademyStruggleSession, AcademyStruggleView, AcademyStruggleTask, AcademyWorldSession, AcademyWorldView, AcademyWorldTask, AcademyWorldObservation, AcademyEngagement, AcademyActivityDay, AcademyStep, AcademyStepPublic, AcademyStepsView, AcademyStepResult,
+  AcademyKnowledgeCheck, AcademyDesign, AcademyModelRun, AcademyTutorTurn, AcademyTutorProposal, AcademyMastery, AcademySkillState, AcademySkillReviews, AcademyReviewItem, AcademyReviewCheck, AcademyReview, AcademyStudyAnswer, AcademyTeachQuiz, AcademyTeachMisconception, AcademyStruggleSession, AcademyStruggleView, AcademyStruggleTask, AcademyWorldSession, AcademyWorldView, AcademyWorldTask, AcademyWorldObservation, AcademyEngagement, AcademyActivityDay, AcademyMistake, AcademyStep, AcademyStepPublic, AcademyStepsView, AcademyStepResult,
 } from './lib/protocol.generated'
 
 export type AcademyDimensionId = import('./lib/protocol.generated').AcademyAssessmentDimension['id']

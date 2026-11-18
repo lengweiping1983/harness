@@ -20,7 +20,7 @@ from harness.web.router import Request
 DAY = mastery.DAY
 
 
-def write_memory_fixture(root):
+def write_memory_fixture(root, with_steps=False):
     """三节 study 课、两个阶段、各一道自测；不依赖沙箱与模型。"""
     directory = root / 'memory-fixture'
     directory.mkdir(parents=True)
@@ -29,18 +29,23 @@ def write_memory_fixture(root):
                  'stage.a': 'Stage A', 'stage.b': 'Stage B'}
     plan = [('fractions', 'stage.a', []), ('decimals', 'stage.a', []), ('ratios', 'stage.b', ['fractions'])]
     for order, (identity, stage, prerequisites) in enumerate(plan, 1):
-        lessons.append({'id': identity, 'order': order, 'mode': 'study', 'milestone': False,
-                        'title_key': identity + '.title', 'goal_key': identity + '.goal', 'reading_key': identity + '.reading',
-                        'stage_key': stage, 'references': [], 'prerequisites': prerequisites,
-                        'knowledge_checks': [{'id': 'q1', 'prompt_key': identity + '.q',
-                            'options': [{'id': 'right', 'label_key': identity + '.right', 'feedback_key': identity + '.right.fb'},
-                                        {'id': 'wrong', 'label_key': identity + '.wrong', 'feedback_key': identity + '.wrong.fb'}],
-                            'answer_id': 'right', 'hint_keys': [identity + '.hint']}]})
+        lesson = {'id': identity, 'order': order, 'mode': 'study', 'milestone': False,
+                  'title_key': identity + '.title', 'goal_key': identity + '.goal', 'reading_key': identity + '.reading',
+                  'stage_key': stage, 'references': [], 'prerequisites': prerequisites,
+                  'knowledge_checks': [{'id': 'q1', 'prompt_key': identity + '.q',
+                      'options': [{'id': 'right', 'label_key': identity + '.right', 'feedback_key': identity + '.right.fb'},
+                                  {'id': 'wrong', 'label_key': identity + '.wrong', 'feedback_key': identity + '.wrong.fb'}],
+                      'answer_id': 'right', 'hint_keys': [identity + '.hint']}]}
+        if with_steps and identity == 'fractions':
+            lesson['steps'] = [{'id': 's1', 'kind': 'numeric', 'prompt_key': 'fractions.s1', 'feedback_key': 'fractions.s1.fb', 'answer': 4, 'tolerance': 0}]
+        lessons.append(lesson)
         resources.update({identity + '.title': identity, identity + '.goal': identity, identity + '.reading': identity,
                           identity + '.q': 'Pick the right answer for ' + identity,
                           identity + '.right': 'Right', identity + '.right.fb': 'Yes',
                           identity + '.wrong': 'Wrong', identity + '.wrong.fb': 'No',
                           identity + '.hint': 'Think again'})
+    if with_steps:
+        resources.update({'fractions.s1': 'How many equal parts?', 'fractions.s1.fb': 'Think equal parts.'})
     manifest = {'schema': 1, 'id': directory.name, 'version': '1.0.0', 'source_revision': 'fixture',
                 'title_key': 'title', 'description_key': 'description', 'references': [], 'lessons': lessons}
     (directory / 'course.json').write_text(json.dumps(manifest), encoding='utf-8')
@@ -318,6 +323,57 @@ class MasteryServiceTests(unittest.TestCase):
         # 置信度枚举在答案 schema 直接校验；请求内嵌 $ref 项由宿主校验兜底（与选项身份一致）。
         self.assertFalse(validate({'check_id': 'q1', 'option_id': 'right', 'confidence': 'sure'}, SCHEMAS['AcademyStudyAnswer']))
         self.assertTrue(validate({'check_id': 'q1', 'option_id': 'right', 'confidence': 'bogus'}, SCHEMAS['AcademyStudyAnswer']))
+
+
+class MistakeJournalTests(unittest.TestCase):
+    """错题本：当前答错与已修复盲点的持久投影、作答序列化与置信度/诊断携带。"""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.library = self.root / 'library'
+        write_memory_fixture(self.library, with_steps=True)
+        self.service = AcademyService(self.root / 'home', catalog_root=self.library)
+        receipt = self.service.create_project('create', 'memory-fixture')
+        self.pid = receipt['result']['project']['id']
+        self.now = time.time()
+        patcher = patch('time.time', side_effect=lambda: self.now)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.temp.cleanup)
+        project = self.service.project(self.pid)
+        started = self.service.start_lesson(self.pid, 'start-fractions', 'fractions', project['revision'], project['fingerprint'])
+        self.assertEqual(started['status'], 'ready')
+
+    def test_wrong_sure_answer_becomes_blindspot_then_repaired(self):
+        self.assertEqual(self.service.mastery.view(self.pid)['mistakes'], [])
+        wrong = self.service.steps.answer(self.pid, 'ans-1', 'fractions', 's1', 9, confidence='sure', diagnosis='I counted unequal parts')
+        self.assertEqual(wrong['status'], 'ready')
+        mistakes = self.service.mastery.view(self.pid)['mistakes']
+        self.assertEqual(len(mistakes), 1)
+        entry = mistakes[0]
+        self.assertEqual(entry['lesson_id'], 'fractions')
+        self.assertEqual(entry['lesson_title'], 'fractions')
+        self.assertEqual(entry['step_id'], 's1')
+        self.assertEqual(entry['prompt'], 'How many equal parts?')
+        self.assertEqual(entry['response'], '9')
+        self.assertEqual(entry['confidence'], 'sure')
+        self.assertEqual(entry['diagnosis'], 'I counted unequal parts')
+        self.assertTrue(entry['blindspot'])
+        self.assertFalse(entry['repaired'])
+        fixed = self.service.steps.answer(self.pid, 'ans-2', 'fractions', 's1', 4, confidence='unsure')
+        self.assertEqual(fixed['status'], 'ready')
+        repaired = self.service.mastery.view(self.pid)['mistakes']
+        self.assertEqual(len(repaired), 1)
+        self.assertTrue(repaired[0]['repaired'])
+        self.assertTrue(repaired[0]['blindspot'])
+        self.assertEqual(repaired[0]['response'], '4')
+
+    def test_low_confidence_wrong_is_journal_wrong_without_blindspot(self):
+        self.service.steps.answer(self.pid, 'ans-1', 'fractions', 's1', 9, confidence='guess')
+        entry = self.service.mastery.view(self.pid)['mistakes'][0]
+        self.assertFalse(entry['blindspot'])
+        self.assertFalse(entry['repaired'])
+        self.assertEqual(entry['confidence'], 'guess')
 
 
 class MasteryApiTests(unittest.TestCase):

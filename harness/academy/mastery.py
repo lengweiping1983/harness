@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import math
 import time
 import uuid
@@ -238,6 +239,10 @@ class AcademyMastery:
         transfer_ids = {step['id'] for lesson in lessons for step in lesson.get('steps', []) if step.get('transfer')}
         repairs = transfers = blindspots_open = 0
         calibration = {'sure_correct': 0, 'sure_wrong': 0, 'unsure_correct': 0, 'unsure_wrong': 0, 'guess_correct': 0, 'guess_wrong': 0}
+        # 错题本：当前答错与已修复盲点的持久投影，供跨课错误分析与重练；不依赖模型。
+        step_meta = {(lesson['id'], step['id']): {'lesson_title': lesson['title'], 'prompt': step['prompt']}
+                     for lesson in lessons for step in lesson.get('steps', [])}
+        mistakes = []
         for value in self.service.store.list('step-progress', max_bytes=MAX_EVIDENCE_BYTES):
             if value.get('project_id') != project_id:
                 continue
@@ -251,6 +256,18 @@ class AcademyMastery:
                 confidence = row.get('confidence')
                 if confidence in ('sure', 'unsure', 'guess'):
                     calibration[confidence + ('_correct' if row.get('correct') else '_wrong')] += 1
+                if row.get('correct') is False or row.get('repaired'):
+                    meta = step_meta.get((value.get('lesson_id'), row.get('step_id')))
+                    if meta:
+                        response = row.get('response')
+                        mistake = {'lesson_id': value['lesson_id'], 'lesson_title': meta['lesson_title'], 'step_id': row['step_id'],
+                                   'prompt': meta['prompt'], 'response': response if isinstance(response, str) else json.dumps(response, ensure_ascii=False),
+                                   'blindspot': bool(row.get('blindspot')), 'repaired': bool(row.get('repaired')), 'at': row.get('at', 0)}
+                        if confidence in ('sure', 'unsure', 'guess'):
+                            mistake['confidence'] = confidence
+                        if isinstance(row.get('diagnosis'), str) and row['diagnosis']:
+                            mistake['diagnosis'] = row['diagnosis']
+                        mistakes.append(mistake)
         # 延迟独立重测的置信度同样计入校准六格；旧记录无置信度则不计入，不做隐式迁移。
         for value in self.service.store.list('review', max_bytes=MAX_EVIDENCE_BYTES):
             if value.get('project_id') != project_id:
@@ -266,7 +283,7 @@ class AcademyMastery:
                 'reviews': totals, 'engagement': self._engagement(project_id),
                 'repairs': repairs, 'transfers': transfers, 'blindspots_open': blindspots_open,
                 'streak_days': self._streak_days(project_id, now), 'calibration': calibration,
-                'activity': self._activity(project_id, now)}
+                'activity': self._activity(project_id, now), 'mistakes': sorted(mistakes, key=lambda item: item['at'], reverse=True)[:50]}
 
 
     def profile(self, project_id: str, lesson_id: str) -> dict:

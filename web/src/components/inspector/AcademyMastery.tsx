@@ -7,6 +7,7 @@ import {noticeText} from '@/lib/noticeText'
 import {cn} from '@/lib/utils'
 import {AcademySkillMap} from './AcademySkillMap'
 import {AcademyDailyGoal} from './AcademyDailyGoal'
+import {AcademyMistakeJournal} from './AcademyMistakeJournal'
 import {Badge, Button, Section, Spinner} from '@/components/ui/primitives'
 
 type PendingReview = {requestId: string; lessonId: string}
@@ -313,6 +314,7 @@ export function AcademyMastery({projectId, active, onOpenLesson, course, progres
         <AcademyDailyGoal activity={view.activity} />
         {course ? <AcademySkillMap lessons={course.lessons} progress={progress ?? []} skills={view.skills} activeLessonId={activeLessonId} recommendedId={recommendedId} onOpenLesson={onOpenLesson} /> : null}
         <AcademySkillList skills={view.skills} />
+        <AcademyMistakeJournal mistakes={view.mistakes} onOpenLesson={onOpenLesson} />
       </> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
       {view ? <AcademyReport mastery={view} /> : null}
       <Button size="xs" variant="ghost" data-academy-cumulative-toggle aria-pressed={cumulative} onClick={() => setCumulative(value => !value)}>{t(cumulative ? 'ui.academy.mastery.backToDue' : 'ui.academy.mastery.cumulative')}</Button>

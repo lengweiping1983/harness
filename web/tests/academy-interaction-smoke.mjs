@@ -10,11 +10,12 @@ import {AcademyWorldCard} from '/src/components/inspector/AcademyWorld.tsx'
 import {AcademyStudio} from '/src/components/inspector/AcademyStudio.tsx'
 import {AcademyReviewCard, AcademyReport} from '/src/components/inspector/AcademyMastery.tsx'
 import {AcademyDailyGoal} from '/src/components/inspector/AcademyDailyGoal.tsx'
+import {AcademyMistakeJournal} from '/src/components/inspector/AcademyMistakeJournal.tsx'
 import {AcademySkillMap} from '/src/components/inspector/AcademySkillMap.tsx'
 import {academyApi} from '/src/lib/academy.ts'
 import {setLocale, useLocale} from '/src/i18n/index.ts'
 import '/src/styles.css'
-window.locale=setLocale;window.shaded=null;window.asked=[];window.reviewed=null;window.mapOpened=[];window.stepsAsked=[]
+window.locale=setLocale;window.shaded=null;window.asked=[];window.reviewed=null;window.mapOpened=[];window.stepsAsked=[];window.journalOpened=[]
 const ordering={id:'ord',kind:'ordering',prompt:'Order the steps.',feedback:'Think order.',items:[{id:'a',label:'Alpha'},{id:'b',label:'Beta'},{id:'c',label:'Gamma'}]}
 const numeric={id:'num',kind:'numeric',prompt:'Pick on the line.',feedback:'Think.',tolerance:0,number_line:{min:0,max:12}}
 const matching={id:'mat',kind:'matching',prompt:'Pair them.',feedback:'Match.',left:[{id:'l1',label:'Left one'},{id:'l2',label:'Left two'}],right:[{id:'r1',label:'Right one'},{id:'r2',label:'Right two'}]}
@@ -33,6 +34,7 @@ const goalActivity=Array.from({length:14},(_,i)=>{const d=new Date(Date.now()-(1
 const goalMastery={skills:[],due_count:0,reviews:{attempts:1,correct:1,delayed_correct:0},engagement:{constructive:1,active:1,total:2,constructive_ratio:0.5},activity:goalActivity}
 const stepsLesson={...lesson,id:'l2',steps:[{id:'s1',kind:'numeric',prompt:'Pick on the line.',feedback:'Think.',tolerance:0,number_line:{min:0,max:12}}]}
 const stepsCourse={...course,lessons:[stepsLesson]}
+const journalMistakes=[{lesson_id:'m1',lesson_title:'m1',step_id:'s1',prompt:'How many?',response:'9',confidence:'sure',diagnosis:'Unequal parts',blindspot:true,repaired:false,at:100},{lesson_id:'m2',lesson_title:'m2',step_id:'s2',prompt:'Which?',response:'0.3',blindspot:true,repaired:true,at:90}]
 academyApi.steps=async()=>({ok:true,data:{steps:stepsLesson.steps,responses:[{step_id:'s1',correct:false,response:'4',attempts:1,at:1,confidence:'sure'}],completed:false}})
 function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);window.setCoachTurns=setCoachTurns;return React.createElement('div',{className:'space-y-6 p-4'},
  React.createElement('div',{id:'order-card'},React.createElement(AcademyStepCard,{step:ordering,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
@@ -44,6 +46,7 @@ function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);w
  React.createElement('div',{id:'review-card'},React.createElement(AcademyReviewCard,{item:reviewItem,busy:false,onSubmit:a=>{window.reviewed=a}})),
  React.createElement('div',{id:'skill-map'},React.createElement(AcademySkillMap,{lessons:mapLessons,progress:mapProgress,skills:mapSkills,activeLessonId:'m2',recommendedId:'m3',onOpenLesson:id=>{window.mapOpened.push(id)}})),
  React.createElement('div',{id:'studio-steps',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{...liveProps,course:stepsCourse,project:{...project,id:'p5'},lesson:stepsLesson,active:true,onAskCoach:p=>{window.stepsAsked.push(p)}})),
+ React.createElement('div',{id:'mistake-journal'},React.createElement(AcademyMistakeJournal,{mistakes:journalMistakes,onOpenLesson:id=>{window.journalOpened.push(id)}})),
  React.createElement('div',{id:'daily-goal'},React.createElement(AcademyDailyGoal,{activity:goalActivity})),
  React.createElement('div',{id:'goal-report'},React.createElement(AcademyReport,{mastery:goalMastery})),
  React.createElement('div',{id:'studio-halo',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,haloProps)),
@@ -167,6 +170,16 @@ await browserScenario(async({server,browser}) => {
     await page.locator('#studio-coach [data-coach-awaiting]').waitFor()
     await page.locator('#studio-coach [data-coach-awaiting]').click()
     assert.equal(await page.evaluate(()=>document.activeElement?.tagName),'TEXTAREA','reply invitation focuses composer')
+    // 错题本：盲点/修复徽标、待修复过滤、重练入口。
+    const journal=page.locator('#mistake-journal [data-academy-journal]')
+    await journal.locator('[data-journal-item]').first().waitFor()
+    assert.equal(await journal.locator('[data-journal-badge="blindspot"]').count(),1,'open blindspot badge')
+    assert.equal(await journal.locator('[data-journal-badge="repaired"]').count(),1,'repaired badge')
+    assert.equal(await journal.locator('[data-journal-retry]').count(),1,'retry only for open mistakes')
+    await journal.locator('[data-journal-filter="open"]').click()
+    assert.equal(await journal.locator('[data-journal-item]').count(),1,'open filter hides repaired')
+    await journal.locator('[data-journal-retry="m1"]').click()
+    assert.deepEqual(await page.evaluate(()=>window.journalOpened),['m1'],'retry opens the lesson')
     // 教练看见你的工作：步骤环节追问携带当前步骤与最近作答（含结果与置信度）。
     await page.locator('#studio-steps [data-studio-phase="steps"]').waitFor()
     await page.locator('#studio-steps [data-coach-suggestions][data-coach-context="step"]').waitFor()
@@ -239,7 +252,7 @@ await browserScenario(async({server,browser}) => {
     assert.deepEqual(errors,[])
     await page.close()
   }
-  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow, zen mode, swipe, memory halo, skill map, streaming coach, context-aware coach, daily goal + heatmap, language/theme/width matrix verified')
+  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow, zen mode, swipe, memory halo, skill map, streaming coach, context-aware coach, mistake journal, daily goal + heatmap, language/theme/width matrix verified')
 },{entry:'/__academy-interaction-entry.js',vite:{plugins:[{
   name:'academy-interaction-fixture',resolveId(id){if(id==='/__academy-interaction-entry.js')return id},load(id){if(id==='/__academy-interaction-entry.js')return entry},
   configureServer(server){server.middlewares.use('/__academy-interaction',async(_req,res,next)=>{try{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__academy-interaction',html))}catch(error){next(error)}})},

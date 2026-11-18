@@ -3,8 +3,9 @@ import {renderToStaticMarkup} from 'react-dom/server'
 import {afterEach, expect, it} from 'vitest'
 import {setLocale} from '@/i18n'
 import {AcademyEngagementStats, AcademyMastery, AcademyReport, AcademyReviewCard, AcademyReviewSession, AcademySkillList} from '@/components/inspector/AcademyMastery'
+import {AcademyMistakeJournal} from '@/components/inspector/AcademyMistakeJournal'
 import {academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete} from '../academy'
-import type {AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState} from '@/types'
+import type {AcademyMistake, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState} from '@/types'
 
 afterEach(async () => {await setLocale('zh-CN')})
 
@@ -168,6 +169,33 @@ it('switches interface language without rewriting option identities', async () =
     expect(html).toContain('value="wrong"')
     expect(html).toContain('One half')
   }
+})
+
+it('renders the mistake journal with badges, open filter and retry for open mistakes only', async () => {
+  await setLocale('en')
+  const mistakes: AcademyMistake[] = [
+    {lesson_id: 'fractions', lesson_title: 'Fractions', step_id: 's1', prompt: 'How many?', response: '9', confidence: 'sure', diagnosis: 'Unequal parts', blindspot: true, repaired: false, at: 100},
+    {lesson_id: 'decimals', lesson_title: 'Decimals', step_id: 's2', prompt: 'Which?', response: '0.3', blindspot: true, repaired: true, at: 90},
+  ]
+  const html = renderToStaticMarkup(createElement(AcademyMistakeJournal, {mistakes, onOpenLesson: () => {}}))
+  expect(html).toContain('data-academy-journal')
+  expect(html).toContain('Mistake journal')
+  expect(html).toContain('data-journal-badge="blindspot"')
+  expect(html).toContain('data-journal-badge="repaired"')
+  expect(html).toContain('Your answer: 9')
+  expect(html).toContain('Your diagnosis: Unequal parts')
+  expect(html).toContain('data-journal-retry="fractions"')
+  expect(html).not.toContain('data-journal-retry="decimals"')
+  expect(html).toContain('data-journal-filter="open"')
+  const empty = renderToStaticMarkup(createElement(AcademyMistakeJournal, {}))
+  expect(empty).toContain('data-academy-journal-empty')
+  expect(empty).toContain('No mistakes yet')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(createElement(AcademyMistakeJournal, {mistakes}))
+  expect(chinese).toContain('错题本')
+  expect(chinese).toContain('盲点')
+  expect(chinese).toContain('已修复')
+  expect(chinese).toContain('你的作答：9')
 })
 
 it('renders the mastery entry collapsed without fetching when inactive', async () => {

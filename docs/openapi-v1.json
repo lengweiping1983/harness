@@ -32910,6 +32910,57 @@
           "evidence"
         ]
       },
+      "AcademyMistake": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lesson_id": {
+            "type": "string"
+          },
+          "lesson_title": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "response": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "guess",
+              "unsure",
+              "sure"
+            ]
+          },
+          "diagnosis": {
+            "type": "string"
+          },
+          "blindspot": {
+            "type": "boolean"
+          },
+          "repaired": {
+            "type": "boolean"
+          },
+          "at": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "lesson_id",
+          "lesson_title",
+          "step_id",
+          "prompt",
+          "response",
+          "blindspot",
+          "repaired",
+          "at"
+        ]
+      },
       "AcademyMastery": {
         "type": "object",
         "additionalProperties": false,
@@ -32953,6 +33004,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AcademyActivityDay"
+            }
+          },
+          "mistakes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcademyMistake"
             }
           }
         },
