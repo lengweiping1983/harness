@@ -53,6 +53,9 @@ it('requires every check answered with a real option before submission', () => {
 it('builds answers by check identity in course order', () => {
   const item = reviewItem({checks: [...reviewItem().checks, {id: 'q2', prompt: 'Again?', options: [{id: 'a', label: 'A'}, {id: 'b', label: 'B'}]}]})
   expect(academyReviewAnswers(item, {q2: 'b', q1: 'right'})).toEqual([{check_id: 'q1', option_id: 'right'}, {check_id: 'q2', option_id: 'b'}])
+  // 置信度可选：合法值随答案提交，非法值不携带。
+  expect(academyReviewAnswers(item, {q2: 'b', q1: 'right'}, {q1: 'sure', q2: 'guess'})).toEqual([{check_id: 'q1', option_id: 'right', confidence: 'sure'}, {check_id: 'q2', option_id: 'b', confidence: 'guess'}])
+  expect(academyReviewAnswers(item, {q2: 'b', q1: 'right'}, {q1: 'bogus'})).toEqual([{check_id: 'q1', option_id: 'right'}, {check_id: 'q2', option_id: 'b'}])
 })
 
 it('counts mastery states without projecting missing evidence as mastery', () => {
@@ -145,6 +148,9 @@ it('presents one review question at a time with progress dots and gated submissi
   expect(html).toContain('data-review-prev')
   expect(html).toContain('data-review-next')
   expect(html).not.toContain('data-review-continue')
+  expect(html).toContain('data-confidence="sure"')
+  expect(html).toContain('data-confidence="guess"')
+  expect(html).toContain('Before you answer: how sure are you?')
   expect(html).toContain('disabled')
   expect(html).not.toContain('answer_id')
   expect(html).not.toContain('feedback')

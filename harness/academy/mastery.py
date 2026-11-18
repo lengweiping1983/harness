@@ -251,6 +251,17 @@ class AcademyMastery:
                 confidence = row.get('confidence')
                 if confidence in ('sure', 'unsure', 'guess'):
                     calibration[confidence + ('_correct' if row.get('correct') else '_wrong')] += 1
+        # 延迟独立重测的置信度同样计入校准六格；旧记录无置信度则不计入，不做隐式迁移。
+        for value in self.service.store.list('review', max_bytes=MAX_EVIDENCE_BYTES):
+            if value.get('project_id') != project_id:
+                continue
+            results = {row['check_id']: row.get('correct') for row in value.get('results', []) if isinstance(row, dict) and isinstance(row.get('check_id'), str)}
+            for answer in value.get('answers', []):
+                if not isinstance(answer, dict):
+                    continue
+                confidence = answer.get('confidence')
+                if confidence in ('sure', 'unsure', 'guess') and answer.get('check_id') in results:
+                    calibration[confidence + ('_correct' if results[answer['check_id']] else '_wrong')] += 1
         return {'skills': skills, 'due_count': sum(1 for skill in skills if skill['state'] != 'new' and skill['retrievability'] < TARGET_RETENTION),
                 'reviews': totals, 'engagement': self._engagement(project_id),
                 'repairs': repairs, 'transfers': transfers, 'blindspots_open': blindspots_open,
@@ -325,9 +336,12 @@ class AcademyMastery:
             if lesson is None:
                 raise AcademyError('lesson-not-found')
             checks = lesson.get('knowledge_checks', [])
+            # 答案可携带可选置信度（与步骤校准同一枚举），用于延迟检索的元认知校准；缺失不影响评分。
             if (not checks or not isinstance(answers, list)
-                    or any(not isinstance(item, dict) or set(item) != {'check_id', 'option_id'}
-                           or not isinstance(item['check_id'], str) or not isinstance(item['option_id'], str) for item in answers)):
+                    or any(not isinstance(item, dict) or not {'check_id', 'option_id'} <= set(item)
+                           or set(item) - {'check_id', 'option_id', 'confidence'}
+                           or not isinstance(item['check_id'], str) or not isinstance(item['option_id'], str)
+                           or ('confidence' in item and item['confidence'] not in ('guess', 'unsure', 'sure')) for item in answers)):
                 raise AcademyError('review-incomplete')
             actual = {answer['check_id']: answer['option_id'] for answer in answers}
             if len(actual) != len(answers) or set(actual) != {check['id'] for check in checks}:

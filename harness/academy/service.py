@@ -405,8 +405,11 @@ class AcademyService:
                 raise AcademyError('invalid-request')
             if fingerprint(read_files(self._root(record))) != expected_fingerprint:
                 raise AcademyError('stale-project')
-            if (not isinstance(answers, list) or any(not isinstance(item, dict) or set(item) != {'check_id', 'option_id'}
-                    or not isinstance(item['check_id'], str) or not isinstance(item['option_id'], str) for item in answers)):
+            # 与公共协议一致：答案可携带可选置信度（当前仅重测消费），缺失不影响结业评分。
+            if (not isinstance(answers, list) or any(not isinstance(item, dict) or not {'check_id', 'option_id'} <= set(item)
+                    or set(item) - {'check_id', 'option_id', 'confidence'}
+                    or not isinstance(item['check_id'], str) or not isinstance(item['option_id'], str)
+                    or ('confidence' in item and item['confidence'] not in ('guess', 'unsure', 'sure')) for item in answers)):
                 raise AcademyError('invalid-request')
             expected = {check['id']: check['answer_id'] for check in lesson.get('knowledge_checks', [])}
             actual = {answer['check_id']: answer['option_id'] for answer in answers}

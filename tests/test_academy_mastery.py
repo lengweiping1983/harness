@@ -209,12 +209,51 @@ class MasteryServiceTests(unittest.TestCase):
         self.complete('fractions')
         for index, answers in enumerate(([], [{'check_id': 'q1', 'option_id': 'nope'}],
                         [{'check_id': 'unknown', 'option_id': 'right'}],
-                        [{'check_id': 'q1', 'option_id': 'right'}, {'check_id': 'q1', 'option_id': 'right'}])):
+                        [{'check_id': 'q1', 'option_id': 'right'}, {'check_id': 'q1', 'option_id': 'right'}],
+                        [{'check_id': 'q1', 'option_id': 'right', 'confidence': 'bogus'}],
+                        [{'check_id': 'q1', 'option_id': 'right', 'extra': 1}])):
             receipt = self.service.mastery.review(self.pid, 'review-x' + str(index), 'fractions', answers)
             self.assertEqual(receipt['status'], 'failed')
             self.assertEqual(receipt['result']['error_code'], 'review-incomplete')
         receipt = self.service.mastery.review(self.pid, 'review-y', 'missing-lesson', self.answers('fractions'))
         self.assertEqual(receipt['result']['error_code'], 'lesson-not-found')
+
+    def test_review_confidence_feeds_calibration(self):
+        """延迟重测置信度计入校准六格；无置信度的答案不计入，不做隐式迁移。"""
+        self.complete('fractions')
+        self.complete('decimals')
+        self.advance(3)
+        receipt = self.service.mastery.review(self.pid, 'review-1', 'fractions',
+                                              [{'check_id': 'q1', 'option_id': 'right', 'confidence': 'sure'}])
+        self.assertEqual(receipt['status'], 'ready')
+        self.assertEqual(receipt['result']['review']['answers'][0]['confidence'], 'sure')
+        receipt = self.service.mastery.review(self.pid, 'review-2', 'decimals',
+                                              [{'check_id': 'q1', 'option_id': 'wrong', 'confidence': 'guess'}])
+        self.assertEqual(receipt['status'], 'ready')
+        receipt = self.service.mastery.review(self.pid, 'review-3', 'decimals', self.answers('decimals'))
+        self.assertEqual(receipt['status'], 'ready')
+        calibration = self.service.mastery.view(self.pid)['calibration']
+        self.assertEqual(calibration['sure_correct'], 1)
+        self.assertEqual(calibration['guess_wrong'], 1)
+        self.assertEqual(calibration['sure_wrong'], 0)
+        self.assertEqual(calibration['guess_correct'], 0)
+        self.assertEqual(calibration['unsure_correct'], 0)
+        self.assertEqual(calibration['unsure_wrong'], 0)
+
+    def test_complete_study_accepts_optional_confidence(self):
+        """结业答案与公共协议一致：可选置信度被接受，非法值拒绝。"""
+        project = self.service.project(self.pid)
+        if project['active_lesson_id'] != 'fractions':
+            receipt = self.service.start_lesson(self.pid, 'start-conf', 'fractions', project['revision'], project['fingerprint'])
+            self.assertEqual(receipt['status'], 'ready')
+            project = receipt['result']['project']
+        rejected = self.service.complete_study(self.pid, 'complete-bad', 'fractions', project['fingerprint'],
+                                               'my own explanation', [{'check_id': 'q1', 'option_id': 'right', 'confidence': 'bogus'}])
+        self.assertEqual(rejected['status'], 'failed')
+        self.assertEqual(rejected['result']['error_code'], 'invalid-request')
+        receipt = self.service.complete_study(self.pid, 'complete-conf', 'fractions', project['fingerprint'],
+                                              'my own explanation', [{'check_id': 'q1', 'option_id': 'right', 'confidence': 'unsure'}])
+        self.assertEqual(receipt['status'], 'ready')
 
     def test_review_does_not_require_active_lesson(self):
         self.complete('fractions')
@@ -275,6 +314,10 @@ class MasteryServiceTests(unittest.TestCase):
         self.assertFalse(validate(body, SCHEMAS['AcademyReviewRequest']))
         self.assertTrue(validate({'request_id': 'r1', 'lesson_id': 'fractions'}, SCHEMAS['AcademyReviewRequest']))
         self.assertTrue(validate({**body, 'extra': 1}, SCHEMAS['AcademyReviewRequest']))
+        self.assertFalse(validate({**body, 'answers': [{'check_id': 'q1', 'option_id': 'right', 'confidence': 'sure'}]}, SCHEMAS['AcademyReviewRequest']))
+        # 置信度枚举在答案 schema 直接校验；请求内嵌 $ref 项由宿主校验兜底（与选项身份一致）。
+        self.assertFalse(validate({'check_id': 'q1', 'option_id': 'right', 'confidence': 'sure'}, SCHEMAS['AcademyStudyAnswer']))
+        self.assertTrue(validate({'check_id': 'q1', 'option_id': 'right', 'confidence': 'bogus'}, SCHEMAS['AcademyStudyAnswer']))
 
 
 class MasteryApiTests(unittest.TestCase):

@@ -222,9 +222,14 @@ export function academyReviewComplete(item: Pick<AcademyReviewItem, 'checks'>, s
   return item.checks.length > 0 && item.checks.every(check => check.options.some(option => option.id === selections[check.id]))
 }
 
-/** 按课程题目身份组装答案，不携带界面译文。 */
-export function academyReviewAnswers(item: Pick<AcademyReviewItem, 'checks'>, selections: Readonly<Record<string, string>>): AcademyReviewRequest['answers'] {
-  return item.checks.map(check => ({check_id: check.id, option_id: selections[check.id]}))
+/** 按课程题目身份组装答案，不携带界面译文；置信度可选，供延迟检索的元认知校准。 */
+export function academyReviewAnswers(item: Pick<AcademyReviewItem, 'checks'>, selections: Readonly<Record<string, string>>, confidences: Readonly<Record<string, string>> = {}): AcademyReviewRequest['answers'] {
+  return item.checks.map(check => {
+    const confidence = confidences[check.id]
+    return confidence === 'guess' || confidence === 'unsure' || confidence === 'sure'
+      ? {check_id: check.id, option_id: selections[check.id], confidence}
+      : {check_id: check.id, option_id: selections[check.id]}
+  })
 }
 
 /** 记忆仪表盘计数；没有证据的技能保持未开始，不投影为已掌握。 */

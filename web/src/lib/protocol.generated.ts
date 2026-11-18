@@ -2176,6 +2176,7 @@ export interface AcademyTeachQuizRequest {
 export interface AcademyStudyAnswer {
   check_id: string
   option_id: string
+  confidence?: 'guess' | 'unsure' | 'sure'
 }
 export interface AcademyReviewOption {
   id: string

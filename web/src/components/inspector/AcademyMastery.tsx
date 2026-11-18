@@ -1,6 +1,6 @@
 import {useEffect, useId, useRef, useState} from 'react'
 import {t, useLocale} from '@/i18n'
-import type {AcademyEngagement, AcademyMastery as AcademyMasteryView, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, NoticeText} from '@/types'
+import type {AcademyEngagement, AcademyMastery as AcademyMasteryView, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, AcademyStudyAnswer, NoticeText} from '@/types'
 import {academyApi, academyBadges, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
 import {noticeText} from '@/lib/noticeText'
 import {cn} from '@/lib/utils'
@@ -42,16 +42,19 @@ function ReviewCheck({check, value, disabled, onSelect}: {check: AcademyReviewIt
 }
 
 /** 独立重测卡片流：一次一题单焦点检索，进度点＋键盘 1-9 选项/Enter 继续或提交；只有题干与选项，没有答案、反馈与提示；选择按题目身份保存，全部作答后显式提交。 */
-export function AcademyReviewCard({item, busy, onSubmit}: {item: AcademyReviewItem; busy: boolean; onSubmit: (answers: Array<{check_id: string; option_id: string}>) => void}) {
+export function AcademyReviewCard({item, busy, onSubmit}: {item: AcademyReviewItem; busy: boolean; onSubmit: (answers: AcademyStudyAnswer[]) => void}) {
   useLocale()
   const [selections, setSelections] = useState<Record<string, string>>({})
+  const [confidences, setConfidences] = useState<Record<string, string>>({})
   const [index, setIndex] = useState(0)
   const composing = useRef(false)
   const mounted = useRef(false)
   const cardRef = useRef<HTMLFormElement>(null)
   const complete = academyReviewComplete(item, selections)
+  const calibrated = item.checks.every(row => confidences[row.id])
   const check = item.checks[index] ?? item.checks[0]
   const answered = Boolean(check && selections[check.id])
+  const currentConfidence = check ? confidences[check.id] : undefined
   const remaining = item.checks.some((row, position) => position !== index && !selections[row.id])
   /** 切题即聚焦新题首个选项（挂载时不抢焦点），键盘 1-9 直接作答。 */
   useEffect(() => {
@@ -78,11 +81,11 @@ export function AcademyReviewCard({item, busy, onSubmit}: {item: AcademyReviewIt
       }
       if (event.key === 'Enter') {
         event.preventDefault()
-        if (complete) onSubmit(academyReviewAnswers(item, selections))
-        else if (answered) advance()
+        if (complete && calibrated) onSubmit(academyReviewAnswers(item, selections, confidences))
+        else if (answered && currentConfidence) advance()
       }
     }}
-    onSubmit={event => {event.preventDefault(); if (!composing.current && !busy && complete) onSubmit(academyReviewAnswers(item, selections))}}>
+    onSubmit={event => {event.preventDefault(); if (!composing.current && !busy && complete && calibrated) onSubmit(academyReviewAnswers(item, selections, confidences))}}>
     <div className="space-y-1">
       <h4 className="break-words text-sm font-medium">{item.title}</h4>
       <p className="text-xs leading-reading text-muted">{item.goal}</p>
@@ -95,8 +98,14 @@ export function AcademyReviewCard({item, busy, onSubmit}: {item: AcademyReviewIt
           className={cn('h-3 w-3 rounded-full border transition-colors', position === index ? 'border-brand bg-brand' : selections[row.id] ? 'border-ok/60 bg-ok/50' : 'border-line bg-line')} />
       </li>)}
     </ol> : null}
-    <div key={check.id} className="academy-card-enter">
+    <div key={check.id} className="academy-card-enter space-y-3">
       <ReviewCheck check={check} value={selections[check.id] ?? ''} disabled={busy} onSelect={select} />
+      <div role="group" aria-label={t('ui.academy.steps.confidence.label')} className="flex flex-wrap items-center gap-1">
+        <span className="mr-1 text-xs text-muted">{t('ui.academy.steps.confidence.label')}</span>
+        {(['guess', 'unsure', 'sure'] as const).map(level => <button key={level} type="button" data-confidence={level} aria-pressed={confidences[check.id] === level} disabled={busy}
+          onClick={() => {setConfidences(previous => ({...previous, [check.id]: level})); requestAnimationFrame(() => {const action = cardRef.current?.querySelector<HTMLButtonElement>('[data-review-continue]') ?? cardRef.current?.querySelector<HTMLButtonElement>('button[type="submit"]'); action?.focus()})}}
+          className={cn('rounded-full border px-2.5 py-1 text-xs', confidences[check.id] === level ? 'border-brand bg-brand/10 font-medium text-brand' : 'border-line text-muted')}>{t('ui.academy.steps.confidence.' + level)}</button>)}
+      </div>
     </div>
     <div className="flex flex-wrap items-center gap-2">
       {item.checks.length > 1 ? <>
@@ -105,8 +114,8 @@ export function AcademyReviewCard({item, busy, onSubmit}: {item: AcademyReviewIt
         <Button type="button" size="xs" variant="ghost" data-review-next disabled={busy || index === item.checks.length - 1} onClick={() => setIndex(value => value + 1)}>{t('ui.academy.mastery.next')}</Button>
       </> : null}
       <div className="ml-auto flex gap-2">
-        {answered && remaining ? <Button type="button" size="sm" variant="subtle" data-review-continue onClick={advance}>{t('ui.academy.mastery.continue')}</Button> : null}
-        <Button type="submit" size="sm" disabled={busy || !complete}>{t('ui.academy.mastery.submit')}</Button>
+        {answered && currentConfidence && remaining ? <Button type="button" size="sm" variant="subtle" data-review-continue onClick={advance}>{t('ui.academy.mastery.continue')}</Button> : null}
+        <Button type="submit" size="sm" disabled={busy || !complete || !calibrated}>{t('ui.academy.mastery.submit')}</Button>
       </div>
     </div>
   </form>
@@ -213,7 +222,7 @@ export function AcademyReviewSession({projectId, active, disabled = false, onCom
     setResult({review: receipt.result.review, skill: receipt.result.skill})
     setRevision(value => value + 1)
   }
-  const submit = async (answers: Array<{check_id: string; option_id: string}>) => {
+  const submit = async (answers: AcademyStudyAnswer[]) => {
     const item = queue[0]
     if (disabled || busy || pending || !item) return
     const identity: PendingReview = {requestId: crypto.randomUUID(), lessonId: item.lesson_id}

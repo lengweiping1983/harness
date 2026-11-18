@@ -32648,6 +32648,14 @@
           },
           "option_id": {
             "type": "string"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "guess",
+              "unsure",
+              "sure"
+            ]
           }
         },
         "required": [

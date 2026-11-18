@@ -156,7 +156,7 @@ SCHEMAS = {
         'correct': BOOL, 'model': TEXT, 'language': TEXT, 'error_code': TEXT, 'created_at': NUMBER, 'completed_at': NUMBER},
         ['id', 'project_id', 'lesson_id', 'turn_id', 'request_id', 'status', 'answers', 'results', 'correct', 'model', 'language', 'created_at']),
     'AcademyTeachQuizRequest': obj({'request_id': REQUEST}),
-    'AcademyStudyAnswer': obj({'check_id': TEXT, 'option_id': TEXT}),
+    'AcademyStudyAnswer': obj({'check_id': TEXT, 'option_id': TEXT, 'confidence': CONFIDENCE}, ['check_id', 'option_id']),
     'AcademyReviewOption': obj({'id': TEXT, 'label': TEXT}),
     'AcademyReviewCheck': obj({'id': TEXT, 'prompt': TEXT, 'options': array(ref('AcademyReviewOption'))}),
     'AcademyReviewItem': obj({'lesson_id': TEXT, 'title': TEXT, 'goal': TEXT, 'stage': TEXT,
