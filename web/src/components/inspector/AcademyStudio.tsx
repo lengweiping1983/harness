@@ -37,6 +37,13 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   const [skills, setSkills] = useState<Readonly<Record<string, string>>>({})
   const [masteryView, setMasteryView] = useState<AcademyMasteryView | null>(null)
   const [cumulativeMode, setCumulativeMode] = useState(false)
+  const [prefs, setPrefs] = useState<{large: boolean; reducedMotion: boolean}>(() => {
+    try {const raw = JSON.parse(localStorage.getItem('harness.academy.prefs.v1') ?? '{}'); return {large: raw.large === true, reducedMotion: raw.reducedMotion === true}} catch {return {large: false, reducedMotion: false}}
+  })
+  const updatePrefs = (next: {large: boolean; reducedMotion: boolean}) => {
+    setPrefs(next)
+    try {localStorage.setItem('harness.academy.prefs.v1', JSON.stringify(next))} catch { /* 存储不可用时仅本次会话生效 */ }
+  }
   const manual = useRef(false)
   const phases = useMemo(() => academyStudioPhases(lesson, dueCount > 0), [lesson, dueCount])
   const checks = lesson.knowledge_checks ?? []
@@ -175,6 +182,8 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   const currentPhase = phases.find(item => item.id === phase)
   return <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('ui.academy.studio.dialogLabel')} data-academy-studio
     className="fixed inset-0 z-50 flex flex-col bg-canvas focus-visible:outline focus-visible:outline-brand"
+    data-reduced-motion={prefs.reducedMotion ? 'true' : undefined}
+    style={prefs.large ? {zoom: 1.15} : undefined}
     onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}>
     <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-4 py-3">
       <div className="flex min-w-0 items-center gap-2">
@@ -182,6 +191,8 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
         <h2 className="truncate text-base font-semibold">{course.title}</h2>
         <span className="shrink-0 text-xs text-muted">{t('ui.academy.progress', {done: completedCount, total: course.lessons.length})}</span>
       </div>
+      <Button size="xs" variant="ghost" data-academy-pref-font aria-pressed={prefs.large} onClick={() => updatePrefs({...prefs, large: !prefs.large})}>{t(prefs.large ? 'ui.academy.studio.prefs.fontNormal' : 'ui.academy.studio.prefs.fontLarge')}</Button>
+      <Button size="xs" variant="ghost" data-academy-pref-motion aria-pressed={prefs.reducedMotion} onClick={() => updatePrefs({...prefs, reducedMotion: !prefs.reducedMotion})}>{t('ui.academy.studio.prefs.motion')}</Button>
       <Button size="xs" variant="ghost" data-academy-studio-exit icon={<X className="h-3.5 w-3.5" />} onClick={onClose}>{t('ui.academy.studio.exit')}</Button>
     </header>
     <nav data-studio-journey aria-label={t('ui.academy.studio.journeyLabel')} className="shrink-0 overflow-x-auto border-b border-line px-4 py-2">

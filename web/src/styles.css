@@ -185,6 +185,10 @@ body {
 .workspace-action:focus-visible { outline: 2px solid rgb(var(--c-brand)); outline-offset: 2px; }
 .workspace-action:disabled { opacity: .45; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .workspace-action { transition: none; } }
+/* 学习区显式减少动效偏好：覆盖系统设置之外的用户选择。 */
+[data-reduced-motion="true"] *, [data-reduced-motion="true"] *::before, [data-reduced-motion="true"] *::after {
+  animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important;
+}
 .app-shell { --workspace-header-height: 46px; }
 .sidebar-tab-header {
   height: var(--workspace-header-height, 46px);

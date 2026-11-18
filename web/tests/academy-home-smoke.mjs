@@ -105,6 +105,12 @@ try {
   await studio.locator('[data-academy-export]').click()
   const download = await downloadPromise
   assert.equal(download.suggestedFilename(), 'harness-academy-evidence.json')
+  // 无障碍偏好：字号放大与减少动效生效并持久化属性。
+  await studio.locator('[data-academy-pref-font]').click()
+  assert.equal(await studio.locator('[data-academy-pref-font]').getAttribute('aria-pressed'), 'true')
+  assert.equal(await studio.evaluate(el => el.style.zoom), '1.15')
+  await studio.locator('[data-academy-pref-motion]').click()
+  assert.equal(await studio.getAttribute('data-reduced-motion'), 'true')
   // 结业挑战：覆盖已学但尚未到期的课次（到期队列为空时仍有题）；经面板掌握区切换。
   await studio.locator('[data-academy-studio-exit]').click()
   await panel.locator('details[data-academy-section="mastery"] > summary').click()
