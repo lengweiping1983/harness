@@ -1,13 +1,14 @@
 import {useEffect, useId, useRef, useState} from 'react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyCourse, AcademyEngagement, AcademyMastery as AcademyMasteryView, AcademyProject, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, AcademyStudyAnswer, NoticeText} from '@/types'
-import {academyApi, academyBadges, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
+import {academyApi, academyBadges, academyExportEvidence, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
 import {ACADEMY_GOAL_EVENT, academyDailyGoalRead, academyTodayKey} from '@/lib/academyGoal'
 import {noticeText} from '@/lib/noticeText'
 import {cn} from '@/lib/utils'
 import {AcademySkillMap} from './AcademySkillMap'
 import {AcademyDailyGoal} from './AcademyDailyGoal'
 import {AcademyMistakeJournal} from './AcademyMistakeJournal'
+import {AcademyMeasurement} from './AcademyMeasurement'
 import {Badge, Button, Section, Spinner} from '@/components/ui/primitives'
 
 type PendingReview = {requestId: string; lessonId: string}
@@ -165,16 +166,7 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
     [mastery.calibration?.sure_correct ?? 0, 'ui.academy.report.sureCorrect'], [mastery.calibration?.sure_wrong ?? 0, 'ui.academy.report.sureWrong'],
     [mastery.calibration?.guess_correct ?? 0, 'ui.academy.report.guessCorrect'],
   ]
-  /** 导出原始证据聚合为 JSON，供家长教师核对与实测研究；纯客户端下载，不上传。 */
-  const exportEvidence = () => {
-    const blob = new Blob([JSON.stringify(mastery, null, 2)], {type: 'application/json'})
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = 'harness-academy-evidence.json'
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }
+  const exportEvidence = () => academyExportEvidence(mastery)
   return <div className="space-y-2">
     <div data-academy-report aria-label={t('ui.academy.report.title')} className="grid gap-2 sm:grid-cols-4">
       {tiles.map(([value, key]) => <div key={key} className="rounded-xl border border-line p-3">
@@ -353,6 +345,7 @@ export function AcademyMastery({projectId, active, onOpenLesson, course, progres
         <AcademyMistakeJournal mistakes={view.mistakes} onOpenLesson={onOpenLesson} />
       </> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
       {view ? <AcademyReport mastery={view} /> : null}
+      {view ? <AcademyMeasurement mastery={view} /> : null}
       <Button size="xs" variant="ghost" data-academy-cumulative-toggle aria-pressed={cumulative} onClick={() => setCumulative(value => !value)}>{t(cumulative ? 'ui.academy.mastery.backToDue' : 'ui.academy.mastery.cumulative')}</Button>
       <AcademyReviewSession projectId={projectId} active={active && open} onCompleted={() => setRevision(value => value + 1)} onOpenLesson={onOpenLesson} mode={cumulative ? 'cumulative' : 'due'} />
     </div>

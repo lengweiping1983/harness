@@ -252,6 +252,52 @@ export function academyMasteryCounts(mastery: Pick<AcademyMastery, 'skills'>): {
     fresh: mastery.skills.filter(skill => skill.state === 'new').length}
 }
 
+/** 学习效果实测指标：从证据账本聚合延迟保持/迁移/修复/效率，全部可核验；null 表示尚无相应证据，不投影。 */
+export interface AcademyEfficacyMetrics {
+  delayedRate: number | null; delayedCorrect: number; delayedAttempts: number
+  transferRate: number | null; transfers: number; transferAttempts: number
+  repairRate: number | null; repairs: number; blindspotsOpen: number
+  durable: number; learning: number; fresh: number
+  minutesPerDurable: number | null; totalFocusMinutes: number; streak: number
+  hasDelayedEvidence: boolean
+}
+export function academyEfficacyMetrics(mastery: AcademyMastery): AcademyEfficacyMetrics {
+  const delayedAttempts = mastery.reviews.delayed_attempts ?? 0
+  const delayedCorrect = mastery.reviews.delayed_correct
+  const transferAttempts = mastery.transfer_attempts ?? 0
+  const transfers = mastery.transfers ?? 0
+  const repairs = mastery.repairs ?? 0
+  const blindspotsOpen = mastery.blindspots_open ?? 0
+  const counts = academyMasteryCounts(mastery)
+  const durableSkills = mastery.skills.filter(skill => skill.state === 'durable')
+  const durableSeconds = durableSkills.reduce((sum, skill) => sum + (skill.learning_seconds ?? 0), 0)
+  const totalSeconds = mastery.skills.reduce((sum, skill) => sum + (skill.learning_seconds ?? 0), 0)
+  return {
+    delayedRate: delayedAttempts ? Math.round((delayedCorrect / delayedAttempts) * 100) : null,
+    delayedCorrect, delayedAttempts,
+    transferRate: transferAttempts ? Math.round((transfers / transferAttempts) * 100) : null,
+    transfers, transferAttempts,
+    repairRate: repairs + blindspotsOpen ? Math.round((repairs / (repairs + blindspotsOpen)) * 100) : null,
+    repairs, blindspotsOpen,
+    ...counts,
+    minutesPerDurable: durableSkills.length ? Math.round(durableSeconds / durableSkills.length / 60) : null,
+    totalFocusMinutes: Math.round(totalSeconds / 60),
+    streak: mastery.streak_days ?? 0,
+    hasDelayedEvidence: delayedAttempts > 0,
+  }
+}
+
+/** 导出原始证据聚合为 JSON，供家长教师核对与实测研究；纯客户端下载，不上传。 */
+export function academyExportEvidence(mastery: AcademyMastery): void {
+  const blob = new Blob([JSON.stringify(mastery, null, 2)], {type: 'application/json'})
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = 'harness-academy-evidence.json'
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 /** 讲给 AI 听的误解预览与宿主冻结规则一致：首个含错误选项的自测、首个错误选项。 */
 export function academyTeachMisconception(lesson: Pick<AcademyLesson, 'knowledge_checks'>): AcademyTeachMisconception | undefined {
   for (const check of lesson.knowledge_checks ?? []) {

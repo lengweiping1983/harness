@@ -11,6 +11,7 @@ import {AcademyStudio} from '/src/components/inspector/AcademyStudio.tsx'
 import {AcademyReviewCard, AcademyReport} from '/src/components/inspector/AcademyMastery.tsx'
 import {AcademyDailyGoal} from '/src/components/inspector/AcademyDailyGoal.tsx'
 import {AcademyMistakeJournal} from '/src/components/inspector/AcademyMistakeJournal.tsx'
+import {AcademyMeasurement} from '/src/components/inspector/AcademyMeasurement.tsx'
 import {AcademySkillMap} from '/src/components/inspector/AcademySkillMap.tsx'
 import {academyApi} from '/src/lib/academy.ts'
 import {setLocale, useLocale} from '/src/i18n/index.ts'
@@ -50,6 +51,7 @@ function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);w
  React.createElement('div',{id:'mistake-journal'},React.createElement(AcademyMistakeJournal,{mistakes:journalMistakes,onOpenLesson:id=>{window.journalOpened.push(id)}})),
  React.createElement('div',{id:'daily-goal'},React.createElement(AcademyDailyGoal,{activity:goalActivity})),
  React.createElement('div',{id:'goal-report'},React.createElement(AcademyReport,{mastery:goalMastery})),
+ React.createElement('div',{id:'measurement'},React.createElement(AcademyMeasurement,{mastery:goalMastery})),
  React.createElement('div',{id:'studio-halo',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,haloProps)),
  React.createElement('div',{id:'studio-coach',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{...liveProps,project:{...project,id:'p4'},tutorTurns:coachTurns})),
  React.createElement('div',{id:'studio-done',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{course,project,lesson,active:false,disabled:false,tutorTurns:[],struggleRevealed:false,checkAnswers:new Map(),note:'done',studyReady:true,studyCompleted:true,onClose:()=>{},onOpenLesson:()=>{},onAskCoach:p=>{window.asked.push(p)},onStrugglePhase:()=>{},onCheckAnswer:()=>{},onNote:()=>{},onComplete:()=>{},onRefresh:()=>{}})))}
@@ -235,6 +237,8 @@ await browserScenario(async({server,browser}) => {
     assert.equal(await page.locator('#goal-report [data-activity-day]').count(),14,'heatmap renders 14 days')
     assert.equal(await page.locator('#goal-report [data-academy-retention]').count(),1,'report shows retention comparison')
     assert.ok((await page.locator('#goal-report').innerText()).includes('Transfer pass rate'),'report shows transfer pass rate')
+    assert.ok((await page.locator('#measurement [data-measurement-transfer]').innerText()).includes('50%'),'measurement shows transfer pass rate')
+    assert.ok((await page.locator('#measurement').innerText()).includes('Rigorous measurement protocol'),'measurement shows the protocol')
     assert.equal(await page.locator('#studio-halo [data-coach-opening]').count(),1,'coach opening remembers learner state')
     await page.waitForFunction(key=>{const el=document.querySelector('#goal-report [data-activity-day="'+key+'"]');return Boolean(el&&el.className.includes('ring-ok'))},todayKey)
     assert.ok((await page.locator('#goal-report [data-activity-day="'+todayKey+'"]').getAttribute('class')).includes('ring-ok'),'heatmap marks attained today')

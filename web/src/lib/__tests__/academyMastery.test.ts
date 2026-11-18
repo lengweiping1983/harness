@@ -4,7 +4,8 @@ import {afterEach, expect, it} from 'vitest'
 import {setLocale} from '@/i18n'
 import {AcademyEngagementStats, AcademyMastery, AcademyReport, AcademyReviewCard, AcademyReviewSession, AcademySkillList} from '@/components/inspector/AcademyMastery'
 import {AcademyMistakeJournal} from '@/components/inspector/AcademyMistakeJournal'
-import {academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete} from '../academy'
+import {AcademyMeasurement} from '@/components/inspector/AcademyMeasurement'
+import {academyEfficacyMetrics, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete} from '../academy'
 import type {AcademyMistake, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState} from '@/types'
 
 afterEach(async () => {await setLocale('zh-CN')})
@@ -257,6 +258,51 @@ it('shows focused learning time per skill when recorded', async () => {
   await setLocale('zh-CN')
   const chinese = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({learning_seconds: 90})]}))
   expect(chinese).toContain('专注 2 分钟')
+})
+
+it('aggregates efficacy metrics with honest null states and minutes per durable skill', () => {
+  const mastery = {skills: [skill({state: 'durable', learning_seconds: 180}), skill({lesson_id: 'decimals', state: 'learning', learning_seconds: 60}), skill({lesson_id: 'ratios', state: 'new'})],
+    due_count: 0, reviews: {attempts: 5, correct: 4, delayed_correct: 2, delayed_attempts: 3},
+    engagement: {constructive: 1, active: 1, total: 2, constructive_ratio: 0.5}, transfers: 1, transfer_attempts: 2, repairs: 3, blindspots_open: 1, streak_days: 4}
+  const metrics = academyEfficacyMetrics(mastery)
+  expect(metrics.delayedRate).toBe(67)
+  expect(metrics.transferRate).toBe(50)
+  expect(metrics.repairRate).toBe(75)
+  expect(metrics.durable).toBe(1)
+  expect(metrics.minutesPerDurable).toBe(3)
+  expect(metrics.totalFocusMinutes).toBe(4)
+  expect(metrics.hasDelayedEvidence).toBe(true)
+  const empty = academyEfficacyMetrics({skills: [], due_count: 0, reviews: {attempts: 0, correct: 0, delayed_correct: 0, delayed_attempts: 0}, engagement: {constructive: 0, active: 0, total: 0, constructive_ratio: 0}})
+  expect(empty.delayedRate).toBeNull()
+  expect(empty.transferRate).toBeNull()
+  expect(empty.repairRate).toBeNull()
+  expect(empty.minutesPerDurable).toBeNull()
+  expect(empty.hasDelayedEvidence).toBe(false)
+})
+
+it('renders the measurement dashboard with metrics, protocol and honest empty states', async () => {
+  await setLocale('en')
+  const mastery = {skills: [skill({state: 'durable', learning_seconds: 180})], due_count: 0, reviews: {attempts: 3, correct: 2, delayed_correct: 2, delayed_attempts: 3},
+    engagement: {constructive: 1, active: 1, total: 2, constructive_ratio: 0.5}, transfers: 1, transfer_attempts: 2, repairs: 1, blindspots_open: 1}
+  const html = renderToStaticMarkup(createElement(AcademyMeasurement, {mastery}))
+  expect(html).toContain('data-academy-measurement')
+  expect(html).toContain('Learning efficacy measurement')
+  expect(html).toContain('observational evidence')
+  expect(html).toContain('data-measurement-retention')
+  expect(html).toContain('67%')
+  expect(html).toContain('data-measurement-transfer')
+  expect(html).toContain('50%')
+  expect(html).toContain('Rigorous measurement protocol')
+  expect(html).toContain('data-measurement-export')
+  expect(html).not.toContain('No delayed-review evidence yet')
+  const empty = renderToStaticMarkup(createElement(AcademyMeasurement, {mastery: {skills: [], due_count: 0, reviews: {attempts: 0, correct: 0, delayed_correct: 0, delayed_attempts: 0}, engagement: {constructive: 0, active: 0, total: 0, constructive_ratio: 0}}}))
+  expect(empty).toContain('No delayed-review evidence yet')
+  expect(empty).toContain('No durable skills yet')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(createElement(AcademyMeasurement, {mastery}))
+  expect(chinese).toContain('学习效果实测')
+  expect(chinese).toContain('延迟保持率')
+  expect(chinese).toContain('严谨实测协议')
 })
 
 it('renders the mastery entry collapsed without fetching when inactive', async () => {
