@@ -14,6 +14,7 @@ import {AcademyTeach} from './AcademyTeach'
 import {AcademyKnowledgeChecks} from './AcademyKnowledgeChecks'
 import {AcademyReport, AcademyReviewSession} from './AcademyMastery'
 import {AcademyVoiceButton} from './AcademyVoice'
+import {AcademyDailyGoal} from './AcademyDailyGoal'
 
 const phaseLabelKey: Record<AcademyStudioPhaseId, string> = {
   review: 'ui.academy.studio.phase.review', struggle: 'ui.academy.studio.phase.struggle', world: 'ui.academy.studio.phase.world', steps: 'ui.academy.studio.phase.steps',
@@ -304,6 +305,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
       </svg>
       <span data-studio-elapsed>{t('ui.academy.studio.session.elapsed', {minutes: Math.floor(elapsed / 60)})}</span>
       {masteryView && (masteryView.streak_days ?? 0) > 0 ? <span className="flex items-center gap-1 rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-ok"><Flame className="h-3 w-3" aria-hidden />{t('ui.academy.studio.session.streak', {days: masteryView.streak_days})}</span> : null}
+      <AcademyDailyGoal activity={masteryView?.activity} compact />
       {elapsed >= (lesson.duration_minutes ?? 15) * 60 ? <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-warn">{t('ui.academy.studio.session.rest')}</span> : null}
       <span aria-label={t('ui.academy.studio.session.progress', {done: done.size, total: phases.length})}>{t('ui.academy.studio.session.progress', {done: done.size, total: phases.length})}</span>
     </div> : null}

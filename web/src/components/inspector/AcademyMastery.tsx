@@ -2,9 +2,11 @@ import {useEffect, useId, useRef, useState} from 'react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyCourse, AcademyEngagement, AcademyMastery as AcademyMasteryView, AcademyProject, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, AcademyStudyAnswer, NoticeText} from '@/types'
 import {academyApi, academyBadges, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
+import {ACADEMY_GOAL_EVENT, academyDailyGoalRead, academyTodayKey} from '@/lib/academyGoal'
 import {noticeText} from '@/lib/noticeText'
 import {cn} from '@/lib/utils'
 import {AcademySkillMap} from './AcademySkillMap'
+import {AcademyDailyGoal} from './AcademyDailyGoal'
 import {Badge, Button, Section, Spinner} from '@/components/ui/primitives'
 
 type PendingReview = {requestId: string; lessonId: string}
@@ -127,6 +129,12 @@ export function AcademyReviewCard({item, busy, onSubmit}: {item: AcademyReviewIt
 export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
   useLocale()
   const counts = academyMasteryCounts(mastery)
+  const [goal, setGoal] = useState<number | null>(() => academyDailyGoalRead())
+  useEffect(() => {
+    const onGoal = () => setGoal(academyDailyGoalRead())
+    window.addEventListener(ACADEMY_GOAL_EVENT, onGoal)
+    return () => window.removeEventListener(ACADEMY_GOAL_EVENT, onGoal)
+  }, [])
   const delayed = mastery.reviews.attempts ? Math.round((mastery.reviews.delayed_correct / mastery.reviews.attempts) * 100) : 0
   const tiles: Array<[string | number, string]> = [
     [counts.durable, 'ui.academy.report.durable'], [counts.learning, 'ui.academy.report.learning'], [counts.fresh, 'ui.academy.report.fresh'],
@@ -157,8 +165,15 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
     </div> : null}
     {mastery.activity?.length ? <div className="space-y-1">
       <p className="text-xs text-muted">{t('ui.academy.report.activity')}</p>
-      <div className="flex items-end gap-0.5" role="img" aria-label={t('ui.academy.report.activity')} data-academy-activity>
-        {mastery.activity.map(day => <span key={day.date} title={day.date + ': ' + day.evidence} className="w-2 rounded-sm bg-brand/60" style={{height: Math.max(2, Math.min(24, day.evidence * 4)) + 'px'}} />)}
+      {/* 近 14 天证据热图：强度分级，今日描边，设定目标后达成日绿环。 */}
+      <div className="flex flex-wrap gap-1" role="img" aria-label={t('ui.academy.report.activity')} data-academy-activity>
+        {mastery.activity.map(day => {
+          const level = day.evidence <= 0 ? 0 : day.evidence <= 2 ? 1 : day.evidence <= 4 ? 2 : 3
+          const today = day.date === academyTodayKey()
+          const attained = goal != null && day.evidence >= goal
+          return <span key={day.date} data-activity-day={day.date} title={day.date + ': ' + day.evidence}
+            className={cn('h-4 w-4 rounded-sm', level === 0 ? 'bg-line' : level === 1 ? 'bg-brand/30' : level === 2 ? 'bg-brand/60' : 'bg-brand', attained ? 'ring-1 ring-ok' : today ? 'ring-1 ring-brand' : undefined)} />
+        })}
       </div>
     </div> : null}
     <Button size="xs" variant="ghost" data-academy-export onClick={exportEvidence}>{t('ui.academy.report.export')}</Button>
@@ -295,6 +310,7 @@ export function AcademyMastery({projectId, active, onOpenLesson, course, progres
       {view ? <>
         <p className="text-xs text-muted">{t('ui.academy.mastery.statAttempts', {count: view.reviews.attempts})} · {t('ui.academy.mastery.statCorrect', {count: view.reviews.correct})} · {t('ui.academy.mastery.statDelayed', {count: view.reviews.delayed_correct})}</p>
         <AcademyEngagementStats engagement={view.engagement} />
+        <AcademyDailyGoal activity={view.activity} />
         {course ? <AcademySkillMap lessons={course.lessons} progress={progress ?? []} skills={view.skills} activeLessonId={activeLessonId} recommendedId={recommendedId} onOpenLesson={onOpenLesson} /> : null}
         <AcademySkillList skills={view.skills} />
       </> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}

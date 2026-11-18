@@ -8,7 +8,8 @@ import {createRoot} from 'react-dom/client'
 import {AcademyStepCard} from '/src/components/inspector/AcademySteps.tsx'
 import {AcademyWorldCard} from '/src/components/inspector/AcademyWorld.tsx'
 import {AcademyStudio} from '/src/components/inspector/AcademyStudio.tsx'
-import {AcademyReviewCard} from '/src/components/inspector/AcademyMastery.tsx'
+import {AcademyReviewCard, AcademyReport} from '/src/components/inspector/AcademyMastery.tsx'
+import {AcademyDailyGoal} from '/src/components/inspector/AcademyDailyGoal.tsx'
 import {AcademySkillMap} from '/src/components/inspector/AcademySkillMap.tsx'
 import {academyApi} from '/src/lib/academy.ts'
 import {setLocale, useLocale} from '/src/i18n/index.ts'
@@ -28,6 +29,8 @@ const mapLesson=(id,order,stage,prerequisites=[])=>({id,order,mode:'study',title
 const mapLessons=[mapLesson('m1',1,'Stage A'),mapLesson('m2',2,'Stage A'),mapLesson('m3',3,'Stage B',['m1'])]
 const mapSkills=[{lesson_id:'m1',title:'m1',stage:'Stage A',state:'learning',stability_days:2,difficulty:5,retrievability:0.62,due_at:100,last_evidence_at:1,evidence_count:3,reviews:{attempts:1,correct:1,delayed_correct:0}}]
 const mapProgress=[{lesson_id:'m1',state:'completed',checkpoint_id:'',evidence_ids:[],attempt_count:1}]
+const goalActivity=Array.from({length:14},(_,i)=>{const d=new Date(Date.now()-(13-i)*86400000);return {date:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),evidence:i===13?5:i%3}})
+const goalMastery={skills:[],due_count:0,reviews:{attempts:1,correct:1,delayed_correct:0},engagement:{constructive:1,active:1,total:2,constructive_ratio:0.5},activity:goalActivity}
 function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);window.setCoachTurns=setCoachTurns;return React.createElement('div',{className:'space-y-6 p-4'},
  React.createElement('div',{id:'order-card'},React.createElement(AcademyStepCard,{step:ordering,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'hint-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:{correct:false,text:'Not yet.',hints:['First hint','Second hint','Third hint']},onSubmit:()=>{},onNext:()=>{}})),
@@ -37,6 +40,8 @@ function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);w
  React.createElement('div',{id:'studio-live',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,liveProps)),
  React.createElement('div',{id:'review-card'},React.createElement(AcademyReviewCard,{item:reviewItem,busy:false,onSubmit:a=>{window.reviewed=a}})),
  React.createElement('div',{id:'skill-map'},React.createElement(AcademySkillMap,{lessons:mapLessons,progress:mapProgress,skills:mapSkills,activeLessonId:'m2',recommendedId:'m3',onOpenLesson:id=>{window.mapOpened.push(id)}})),
+ React.createElement('div',{id:'daily-goal'},React.createElement(AcademyDailyGoal,{activity:goalActivity})),
+ React.createElement('div',{id:'goal-report'},React.createElement(AcademyReport,{mastery:goalMastery})),
  React.createElement('div',{id:'studio-halo',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,haloProps)),
  React.createElement('div',{id:'studio-coach',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{...liveProps,project:{...project,id:'p4'},tutorTurns:coachTurns})),
  React.createElement('div',{id:'studio-done',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{course,project,lesson,active:false,disabled:false,tutorTurns:[],struggleRevealed:false,checkAnswers:new Map(),note:'done',studyReady:true,studyCompleted:true,onClose:()=>{},onOpenLesson:()=>{},onAskCoach:p=>{window.asked.push(p)},onStrugglePhase:()=>{},onCheckAnswer:()=>{},onNote:()=>{},onComplete:()=>{},onRefresh:()=>{}})))}
@@ -175,6 +180,21 @@ await browserScenario(async({server,browser}) => {
     assert.equal(await page.locator('#studio-live [data-studio-journey]').count(),0,'zen preference survives reload')
     await page.locator('#studio-live [data-academy-pref-zen]').click()
     await page.locator('#studio-live [data-studio-journey]').waitFor()
+    // 每日证据目标：设定→达成→重载保留→关闭；热图标记达成今日。
+    await page.locator('#daily-goal [data-daily-goal="unset"]').click()
+    await page.locator('#daily-goal [data-goal-preset="3"]').click()
+    await page.locator('#daily-goal [data-daily-goal="attained"]').waitFor()
+    assert.ok((await page.locator('#daily-goal [data-daily-goal]').getAttribute('aria-label')).includes('5/3'),'attained chip shows evidence/goal')
+    const todayKey=await page.evaluate(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')})
+    assert.equal(await page.locator('#goal-report [data-activity-day]').count(),14,'heatmap renders 14 days')
+    await page.waitForFunction(key=>{const el=document.querySelector('#goal-report [data-activity-day="'+key+'"]');return Boolean(el&&el.className.includes('ring-ok'))},todayKey)
+    assert.ok((await page.locator('#goal-report [data-activity-day="'+todayKey+'"]').getAttribute('class')).includes('ring-ok'),'heatmap marks attained today')
+    await page.reload()
+    await page.waitForFunction(()=>typeof window.locale==='function')
+    await page.locator('#daily-goal [data-daily-goal="attained"]').waitFor()
+    await page.locator('#daily-goal [data-daily-goal]').click()
+    await page.locator('#daily-goal [data-goal-preset="off"]').click()
+    await page.locator('#daily-goal [data-daily-goal="unset"]').waitFor()
     // 触摸滑动：水平滑动切换环节（与方向键等价），起点在控件上时不拦截。
     const swipe=async(selector,dx)=>{await page.evaluate(({selector,dx})=>{
       const target=document.querySelector(selector)
@@ -206,7 +226,7 @@ await browserScenario(async({server,browser}) => {
     assert.deepEqual(errors,[])
     await page.close()
   }
-  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow, zen mode, swipe, memory halo, skill map, streaming coach conversation, language/theme/width matrix verified')
+  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow, zen mode, swipe, memory halo, skill map, streaming coach, daily goal + heatmap, language/theme/width matrix verified')
 },{entry:'/__academy-interaction-entry.js',vite:{plugins:[{
   name:'academy-interaction-fixture',resolveId(id){if(id==='/__academy-interaction-entry.js')return id},load(id){if(id==='/__academy-interaction-entry.js')return entry},
   configureServer(server){server.middlewares.use('/__academy-interaction',async(_req,res,next)=>{try{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__academy-interaction',html))}catch(error){next(error)}})},
