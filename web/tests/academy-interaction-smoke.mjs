@@ -9,10 +9,11 @@ import {AcademyStepCard} from '/src/components/inspector/AcademySteps.tsx'
 import {AcademyWorldCard} from '/src/components/inspector/AcademyWorld.tsx'
 import {AcademyStudio} from '/src/components/inspector/AcademyStudio.tsx'
 import {AcademyReviewCard} from '/src/components/inspector/AcademyMastery.tsx'
+import {AcademySkillMap} from '/src/components/inspector/AcademySkillMap.tsx'
 import {academyApi} from '/src/lib/academy.ts'
 import {setLocale, useLocale} from '/src/i18n/index.ts'
 import '/src/styles.css'
-window.locale=setLocale;window.shaded=null;window.asked=[];window.reviewed=null
+window.locale=setLocale;window.shaded=null;window.asked=[];window.reviewed=null;window.mapOpened=[]
 const ordering={id:'ord',kind:'ordering',prompt:'Order the steps.',feedback:'Think order.',items:[{id:'a',label:'Alpha'},{id:'b',label:'Beta'},{id:'c',label:'Gamma'}]}
 const numeric={id:'num',kind:'numeric',prompt:'Pick on the line.',feedback:'Think.',tolerance:0,number_line:{min:0,max:12}}
 const matching={id:'mat',kind:'matching',prompt:'Pair them.',feedback:'Match.',left:[{id:'l1',label:'Left one'},{id:'l2',label:'Left two'}],right:[{id:'r1',label:'Right one'},{id:'r2',label:'Right two'}]}
@@ -23,6 +24,10 @@ const liveProps={course,project:{...project,id:'p2'},lesson,active:false,disable
 academyApi.mastery=async()=>({ok:true,data:{mastery:{skills:[{lesson_id:'l1',title:'Lesson',stage:'',state:'learning',stability_days:2,difficulty:5,retrievability:0.62,due_at:null,last_evidence_at:1,evidence_count:3,reviews:{attempts:1,correct:1,delayed_correct:0}}],due_count:0,reviews:{attempts:1,correct:1,delayed_correct:0},engagement:{constructive:1,active:1,total:2,constructive_ratio:0.5}}}})
 const reviewItem={lesson_id:'l1',title:'Lesson',goal:'Goal',stage:'',retrievability:0.8,overdue_days:1,checks:[{id:'q1',prompt:'Which is larger?',options:[{id:'right',label:'One half'},{id:'wrong',label:'One third'}]},{id:'q2',prompt:'Which is smaller?',options:[{id:'a',label:'One third'},{id:'b',label:'One half'}]}]}
 const haloProps={...liveProps,project:{...project,id:'p3'},active:true}
+const mapLesson=(id,order,stage,prerequisites=[])=>({id,order,mode:'study',title:id,goal:id,reading:id,milestone:false,run_command:[],source_manifest:[],references:[],prerequisites,trace_labels:{},stage,knowledge_checks:[]})
+const mapLessons=[mapLesson('m1',1,'Stage A'),mapLesson('m2',2,'Stage A'),mapLesson('m3',3,'Stage B',['m1'])]
+const mapSkills=[{lesson_id:'m1',title:'m1',stage:'Stage A',state:'learning',stability_days:2,difficulty:5,retrievability:0.62,due_at:100,last_evidence_at:1,evidence_count:3,reviews:{attempts:1,correct:1,delayed_correct:0}}]
+const mapProgress=[{lesson_id:'m1',state:'completed',checkpoint_id:'',evidence_ids:[],attempt_count:1}]
 function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);window.setCoachTurns=setCoachTurns;return React.createElement('div',{className:'space-y-6 p-4'},
  React.createElement('div',{id:'order-card'},React.createElement(AcademyStepCard,{step:ordering,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'hint-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:{correct:false,text:'Not yet.',hints:['First hint','Second hint','Third hint']},onSubmit:()=>{},onNext:()=>{}})),
@@ -31,6 +36,7 @@ function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);w
  React.createElement('div',{id:'world-card'},React.createElement(AcademyWorldCard,{kind:'fraction-bar',session:{id:'w1',project_id:'p1',lesson_id:'l1',request_id:'r1',kind:'fraction-bar',params:{parts:4,shaded:1},challenge:{prompt:'Shade it.',options:[],target:{}},status:'observing',observations:[{params:{parts:4,shaded:1},state:{parts:4,shaded:1,label:'1/4'},at:1}],note:'',created_at:1,completed_at:null},params:{parts:4,shaded:1},note:'',busy:false,onParams:p=>{window.shaded=p.shaded},onNote:()=>{},onStart:()=>{},onPredict:()=>{},onObserve:()=>{},onComplete:()=>{}})),
  React.createElement('div',{id:'studio-live',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,liveProps)),
  React.createElement('div',{id:'review-card'},React.createElement(AcademyReviewCard,{item:reviewItem,busy:false,onSubmit:a=>{window.reviewed=a}})),
+ React.createElement('div',{id:'skill-map'},React.createElement(AcademySkillMap,{lessons:mapLessons,progress:mapProgress,skills:mapSkills,activeLessonId:'m2',recommendedId:'m3',onOpenLesson:id=>{window.mapOpened.push(id)}})),
  React.createElement('div',{id:'studio-halo',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,haloProps)),
  React.createElement('div',{id:'studio-coach',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{...liveProps,project:{...project,id:'p4'},tutorTurns:coachTurns})),
  React.createElement('div',{id:'studio-done',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{course,project,lesson,active:false,disabled:false,tutorTurns:[],struggleRevealed:false,checkAnswers:new Map(),note:'done',studyReady:true,studyCompleted:true,onClose:()=>{},onOpenLesson:()=>{},onAskCoach:p=>{window.asked.push(p)},onStrugglePhase:()=>{},onCheckAnswer:()=>{},onNote:()=>{},onComplete:()=>{},onRefresh:()=>{}})))}
@@ -125,6 +131,18 @@ await browserScenario(async({server,browser}) => {
     // 记忆光环：旅程节点以 FSRS 可提取性渲染记忆保持环。
     await page.locator('#studio-halo [data-journey-memory]').waitFor()
     assert.equal(await page.locator('#studio-halo [data-journey-memory]').getAttribute('aria-label'),'Memory retention 62%','halo shows retrievability')
+    // 技能地图：先修边＋记忆光环，点击/键盘开课。
+    const map=page.locator('#skill-map [data-academy-skill-map]')
+    await map.locator('[data-skill-map-node]').first().waitFor()
+    assert.equal(await map.locator('[data-skill-map-node]').count(),3,'one node per lesson')
+    assert.equal(await map.locator('[data-skill-map-edge]').count(),1,'prerequisite edge rendered')
+    assert.equal(await map.locator('[data-skill-map-halo]').count(),1,'halo only for evidenced skill')
+    assert.ok((await map.locator('[data-skill-map-node="m1"]').getAttribute('aria-label')).includes('Memory retention 62%'),'node reports retention')
+    await map.locator('[data-skill-map-node="m3"]').click()
+    assert.deepEqual(await page.evaluate(()=>window.mapOpened),['m3'],'click opens lesson')
+    await map.locator('[data-skill-map-node="m2"]').focus()
+    await page.keyboard.press('Enter')
+    assert.deepEqual(await page.evaluate(()=>window.mapOpened),['m3','m2'],'keyboard opens lesson')
     // 教练对话流：舞台内流式陪伴，partial 实时更新，问题收尾触发回应邀请。
     const coachTurnBase={project_id:'p4',lesson_id:'l1',request_id:'r',input_fingerprint:'a'.repeat(64),allow_execution:false,require_execution:false,model:'m',language:'en',actions:[],created_at:1}
     const coachThread=page.locator('#studio-coach main [data-studio-coach-thread]')
@@ -188,7 +206,7 @@ await browserScenario(async({server,browser}) => {
     assert.deepEqual(errors,[])
     await page.close()
   }
-  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow, zen mode, swipe, memory halo, streaming coach conversation, language/theme/width matrix verified')
+  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow, zen mode, swipe, memory halo, skill map, streaming coach conversation, language/theme/width matrix verified')
 },{entry:'/__academy-interaction-entry.js',vite:{plugins:[{
   name:'academy-interaction-fixture',resolveId(id){if(id==='/__academy-interaction-entry.js')return id},load(id){if(id==='/__academy-interaction-entry.js')return entry},
   configureServer(server){server.middlewares.use('/__academy-interaction',async(_req,res,next)=>{try{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__academy-interaction',html))}catch(error){next(error)}})},

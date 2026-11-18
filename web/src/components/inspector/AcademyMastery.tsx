@@ -1,9 +1,10 @@
 import {useEffect, useId, useRef, useState} from 'react'
 import {t, useLocale} from '@/i18n'
-import type {AcademyEngagement, AcademyMastery as AcademyMasteryView, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, AcademyStudyAnswer, NoticeText} from '@/types'
+import type {AcademyCourse, AcademyEngagement, AcademyMastery as AcademyMasteryView, AcademyProject, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, AcademyStudyAnswer, NoticeText} from '@/types'
 import {academyApi, academyBadges, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
 import {noticeText} from '@/lib/noticeText'
 import {cn} from '@/lib/utils'
+import {AcademySkillMap} from './AcademySkillMap'
 import {Badge, Button, Section, Spinner} from '@/components/ui/primitives'
 
 type PendingReview = {requestId: string; lessonId: string}
@@ -263,7 +264,7 @@ export function AcademyReviewSession({projectId, active, disabled = false, onCom
     </Section> : loaded ? <p className="text-sm leading-reading text-muted">{t('ui.academy.mastery.queueEmpty')}</p> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
   </div>
 }
-export function AcademyMastery({projectId, active, onOpenLesson}: {projectId: string; active: boolean; onOpenLesson?: (lessonId: string) => void}) {
+export function AcademyMastery({projectId, active, onOpenLesson, course, progress, activeLessonId, recommendedId}: {projectId: string; active: boolean; onOpenLesson?: (lessonId: string) => void; course?: AcademyCourse; progress?: AcademyProject['progress']; activeLessonId?: string; recommendedId?: string}) {
   useLocale()
   const [open, setOpen] = useState(false)
   const [cumulative, setCumulative] = useState(false)
@@ -294,6 +295,7 @@ export function AcademyMastery({projectId, active, onOpenLesson}: {projectId: st
       {view ? <>
         <p className="text-xs text-muted">{t('ui.academy.mastery.statAttempts', {count: view.reviews.attempts})} · {t('ui.academy.mastery.statCorrect', {count: view.reviews.correct})} · {t('ui.academy.mastery.statDelayed', {count: view.reviews.delayed_correct})}</p>
         <AcademyEngagementStats engagement={view.engagement} />
+        {course ? <AcademySkillMap lessons={course.lessons} progress={progress ?? []} skills={view.skills} activeLessonId={activeLessonId} recommendedId={recommendedId} onOpenLesson={onOpenLesson} /> : null}
         <AcademySkillList skills={view.skills} />
       </> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
       {view ? <AcademyReport mastery={view} /> : null}

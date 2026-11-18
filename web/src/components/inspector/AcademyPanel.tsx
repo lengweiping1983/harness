@@ -687,7 +687,7 @@ export function AcademyPanel({active = true}: {active?: boolean}) {
     {!project && course ? <Section title={t('ui.academy.createProject')}><p className="text-base leading-reading text-muted">{course.description}</p><div className="mt-3 flex flex-wrap gap-2"><input className="ui-field" aria-label={t('ui.academy.projectName')} value={name} maxLength={80} onChange={event => setName(event.target.value)} /><Button size="sm" disabled={locked} onClick={() => void perform(requestId => academyApi.create({course_id: courseId, request_id: requestId, ...(name.trim() ? {name: name.trim()} : {})}))}>{t('ui.academy.createProjectAction')}</Button></div></Section> : null}
       </details>
     </details>
-    {project ? <AcademyMastery projectId={project.id} active={active} onOpenLesson={openLesson} /> : null}
+    {project ? <AcademyMastery projectId={project.id} active={active} onOpenLesson={openLesson} course={course ?? undefined} progress={project.progress} activeLessonId={project.active_lesson_id} recommendedId={course ? academyResumeLesson(course, project)?.id : undefined} /> : null}
 
     {!loading && !course && !error ? <EmptyHint icon={<BookOpen className="h-5 w-5" />} title={t('ui.academy.loadEmpty')} /> : null}
     {course && (project || catalogOpen) ? <>

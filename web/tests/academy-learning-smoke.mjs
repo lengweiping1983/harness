@@ -81,7 +81,7 @@ await browserScenario(async({server,browser}) => {
       const path=page.locator('summary').filter({hasText:strings['ui.academy.learningPath'].replace('{count}','2')})
       if (await path.locator('..').getAttribute('open')===null) await path.click()
       assert.equal(await page.getByRole('list',{name:strings['ui.academy.pathStages'],exact:true}).locator(':scope > li').count(),2)
-      assert.equal(await page.locator('[aria-current="step"]').count(),1)
+      assert.equal(await page.getByRole('list',{name:strings['ui.academy.pathStages'],exact:true}).locator('[aria-current="step"]').count(),1)
       const bounds=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
       assert.ok(bounds.scroll<=bounds.width,[theme,width,language].join('/'))
     }
