@@ -233,6 +233,21 @@ it('compares immediate and delayed retention with honest empty states', async ()
   expect(chinese).toContain('延迟正确率')
 })
 
+it('shows transfer pass rate only when transfer steps were attempted', async () => {
+  await setLocale('en')
+  const base = {skills: [], due_count: 0, reviews: {attempts: 0, correct: 0, delayed_correct: 0, delayed_attempts: 0},
+    engagement: {constructive: 0, active: 0, total: 0, constructive_ratio: 0}}
+  const attempted = renderToStaticMarkup(createElement(AcademyReport, {mastery: {...base, transfers: 1, transfer_attempts: 2}}))
+  expect(attempted).toContain('Transfer pass rate')
+  expect(attempted).toContain('50%')
+  const none = renderToStaticMarkup(createElement(AcademyReport, {mastery: base}))
+  expect(none).not.toContain('Transfer pass rate')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(createElement(AcademyReport, {mastery: {...base, transfers: 2, transfer_attempts: 2}}))
+  expect(chinese).toContain('迁移通过率')
+  expect(chinese).toContain('100%')
+})
+
 it('renders the mastery entry collapsed without fetching when inactive', async () => {
   await setLocale('en')
   const html = renderToStaticMarkup(createElement(AcademyMastery, {projectId: 'project', active: false}))

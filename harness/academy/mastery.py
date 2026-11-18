@@ -240,7 +240,7 @@ class AcademyMastery:
         totals = {key: sum(skill['reviews'][key] for skill in skills) for key in ('attempts', 'correct', 'delayed_correct', 'delayed_attempts')}
         # 学习报告聚合：修复的盲点、未修复盲点与迁移成功，全部来自持久作答记录。
         transfer_ids = {step['id'] for lesson in lessons for step in lesson.get('steps', []) if step.get('transfer')}
-        repairs = transfers = blindspots_open = 0
+        repairs = transfers = blindspots_open = transfer_attempts = 0
         calibration = {'sure_correct': 0, 'sure_wrong': 0, 'unsure_correct': 0, 'unsure_wrong': 0, 'guess_correct': 0, 'guess_wrong': 0}
         # 错题本：当前答错与已修复盲点的持久投影，供跨课错误分析与重练；不依赖模型。
         step_meta = {(lesson['id'], step['id']): {'lesson_title': lesson['title'], 'prompt': step['prompt']}
@@ -254,8 +254,10 @@ class AcademyMastery:
                     repairs += 1
                 if row.get('blindspot') and not row.get('repaired'):
                     blindspots_open += 1
-                if row.get('correct') and row.get('step_id') in transfer_ids:
-                    transfers += 1
+                if row.get('step_id') in transfer_ids:
+                    transfer_attempts += 1
+                    if row.get('correct'):
+                        transfers += 1
                 confidence = row.get('confidence')
                 if confidence in ('sure', 'unsure', 'guess'):
                     calibration[confidence + ('_correct' if row.get('correct') else '_wrong')] += 1
@@ -284,7 +286,7 @@ class AcademyMastery:
                     calibration[confidence + ('_correct' if results[answer['check_id']] else '_wrong')] += 1
         return {'skills': skills, 'due_count': sum(1 for skill in skills if skill['state'] != 'new' and skill['retrievability'] < TARGET_RETENTION),
                 'reviews': totals, 'engagement': self._engagement(project_id),
-                'repairs': repairs, 'transfers': transfers, 'blindspots_open': blindspots_open,
+                'repairs': repairs, 'transfers': transfers, 'transfer_attempts': transfer_attempts, 'blindspots_open': blindspots_open,
                 'streak_days': self._streak_days(project_id, now), 'calibration': calibration,
                 'activity': self._activity(project_id, now), 'mistakes': sorted(mistakes, key=lambda item: item['at'], reverse=True)[:50]}
 

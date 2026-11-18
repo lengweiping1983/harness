@@ -31,7 +31,7 @@ const mapLessons=[mapLesson('m1',1,'Stage A'),mapLesson('m2',2,'Stage A'),mapLes
 const mapSkills=[{lesson_id:'m1',title:'m1',stage:'Stage A',state:'learning',stability_days:2,difficulty:5,retrievability:0.62,due_at:100,last_evidence_at:1,evidence_count:3,reviews:{attempts:1,correct:1,delayed_correct:0,delayed_attempts:0}}]
 const mapProgress=[{lesson_id:'m1',state:'completed',checkpoint_id:'',evidence_ids:[],attempt_count:1}]
 const goalActivity=Array.from({length:14},(_,i)=>{const d=new Date(Date.now()-(13-i)*86400000);return {date:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),evidence:i===13?5:i%3}})
-const goalMastery={skills:[],due_count:0,reviews:{attempts:1,correct:1,delayed_correct:0,delayed_attempts:0},engagement:{constructive:1,active:1,total:2,constructive_ratio:0.5},activity:goalActivity}
+const goalMastery={skills:[],due_count:0,reviews:{attempts:1,correct:1,delayed_correct:0,delayed_attempts:0},engagement:{constructive:1,active:1,total:2,constructive_ratio:0.5},activity:goalActivity,transfers:1,transfer_attempts:2}
 const stepsLesson={...lesson,id:'l2',steps:[{id:'s1',kind:'numeric',prompt:'Pick on the line.',feedback:'Think.',tolerance:0,number_line:{min:0,max:12}}]}
 const stepsCourse={...course,lessons:[stepsLesson]}
 const journalMistakes=[{lesson_id:'m1',lesson_title:'m1',step_id:'s1',prompt:'How many?',response:'9',confidence:'sure',diagnosis:'Unequal parts',blindspot:true,repaired:false,at:100},{lesson_id:'m2',lesson_title:'m2',step_id:'s2',prompt:'Which?',response:'0.3',blindspot:true,repaired:true,at:90}]
@@ -216,6 +216,8 @@ await browserScenario(async({server,browser}) => {
     const todayKey=await page.evaluate(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')})
     assert.equal(await page.locator('#goal-report [data-activity-day]').count(),14,'heatmap renders 14 days')
     assert.equal(await page.locator('#goal-report [data-academy-retention]').count(),1,'report shows retention comparison')
+    assert.ok((await page.locator('#goal-report').innerText()).includes('Transfer pass rate'),'report shows transfer pass rate')
+    assert.equal(await page.locator('#studio-halo [data-coach-opening]').count(),1,'coach opening remembers learner state')
     await page.waitForFunction(key=>{const el=document.querySelector('#goal-report [data-activity-day="'+key+'"]');return Boolean(el&&el.className.includes('ring-ok'))},todayKey)
     assert.ok((await page.locator('#goal-report [data-activity-day="'+todayKey+'"]').getAttribute('class')).includes('ring-ok'),'heatmap marks attained today')
     await page.reload()

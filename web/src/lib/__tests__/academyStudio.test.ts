@@ -3,7 +3,7 @@ import {renderToStaticMarkup} from 'react-dom/server'
 import {afterEach, expect, it, vi} from 'vitest'
 import {setLocale} from '@/i18n'
 import {AcademyStudio} from '@/components/inspector/AcademyStudio'
-import {academyStudioChecksDone, academyStudioCoachPrompt, academyStudioCoachTurns, academyStudioJourney, academyStudioNextPhase, academyStudioPhases} from '../academyStudio'
+import {academyStudioChecksDone, academyStudioCoachOpening, academyStudioCoachPrompt, academyStudioCoachTurns, academyStudioJourney, academyStudioNextPhase, academyStudioPhases} from '../academyStudio'
 import type {AcademyCourse, AcademyLesson, AcademyProject, AcademyStep, AcademyTutorTurn} from '@/types'
 
 afterEach(async () => {await setLocale('zh-CN')})
@@ -72,6 +72,18 @@ it('builds coach prompts per autonomy level in both languages and appends the le
   expect(academyStudioCoachPrompt(0, '', '分数')).toContain('一个简短问题')
   expect(academyStudioCoachPrompt(1, '', '分数')).toContain('不要直接给答案')
   expect(academyStudioCoachPrompt(2, '', '分数')).toContain('一步步讲解')
+})
+
+it('coach opening remembers due reviews and open blindspots before default companionship', async () => {
+  await setLocale('en')
+  expect(academyStudioCoachOpening(null)).toContain('your learning coach')
+  expect(academyStudioCoachOpening({due_count: 0, blindspots_open: 0})).toContain('your learning coach')
+  expect(academyStudioCoachOpening({due_count: 3})).toContain('3 reviews due today')
+  expect(academyStudioCoachOpening({due_count: 0, blindspots_open: 2})).toContain('2 blindspots to repair')
+  expect(academyStudioCoachOpening({due_count: 2, blindspots_open: 5})).toContain('2 reviews due today')
+  await setLocale('zh-CN')
+  expect(academyStudioCoachOpening({due_count: 4})).toContain('4 个重测到期')
+  expect(academyStudioCoachOpening({due_count: 0, blindspots_open: 1})).toContain('1 个盲点待修复')
 })
 
 it('appends learning context to coach prompts without altering the base instruction', async () => {

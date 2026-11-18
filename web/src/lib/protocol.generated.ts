@@ -2252,6 +2252,7 @@ export interface AcademyMastery {
   engagement: AcademyEngagement
   repairs?: number
   transfers?: number
+  transfer_attempts?: number
   blindspots_open?: number
   streak_days?: number
   calibration?: AcademyCalibration

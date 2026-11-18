@@ -154,9 +154,12 @@ export function AcademyReport({mastery}: {mastery: AcademyMasteryView}) {
   const immediateCorrect = Math.max(0, mastery.reviews.correct - mastery.reviews.delayed_correct)
   const immediateRate = immediateAttempts ? Math.round((immediateCorrect / immediateAttempts) * 100) : null
   const delayedRate = delayedAttempts ? Math.round((mastery.reviews.delayed_correct / delayedAttempts) * 100) : null
+  const transferAttempts = mastery.transfer_attempts ?? 0
+  const transferRate = transferAttempts ? Math.round(((mastery.transfers ?? 0) / transferAttempts) * 100) + '%' : null
   const tiles: Array<[string | number, string]> = [
     [counts.durable, 'ui.academy.report.durable'], [counts.learning, 'ui.academy.report.learning'], [counts.fresh, 'ui.academy.report.fresh'],
     [mastery.repairs ?? 0, 'ui.academy.report.repairs'], [mastery.blindspots_open ?? 0, 'ui.academy.report.blindspots'], [mastery.transfers ?? 0, 'ui.academy.report.transfers'],
+    ...(transferRate ? [[transferRate, 'ui.academy.report.transferRate'] as [string, string]] : []),
     [delayed + '%', 'ui.academy.report.delayed'], [mastery.streak_days ?? 0, 'ui.academy.report.streak'],
     [mastery.calibration?.sure_correct ?? 0, 'ui.academy.report.sureCorrect'], [mastery.calibration?.sure_wrong ?? 0, 'ui.academy.report.sureWrong'],
     [mastery.calibration?.guess_correct ?? 0, 'ui.academy.report.guessCorrect'],

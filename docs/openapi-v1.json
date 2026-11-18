@@ -32994,6 +32994,10 @@
             "type": "integer",
             "minimum": 0
           },
+          "transfer_attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
           "blindspots_open": {
             "type": "integer",
             "minimum": 0

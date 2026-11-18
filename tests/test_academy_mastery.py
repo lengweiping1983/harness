@@ -37,7 +37,11 @@ def write_memory_fixture(root, with_steps=False):
                                   {'id': 'wrong', 'label_key': identity + '.wrong', 'feedback_key': identity + '.wrong.fb'}],
                       'answer_id': 'right', 'hint_keys': [identity + '.hint']}]}
         if with_steps and identity == 'fractions':
-            lesson['steps'] = [{'id': 's1', 'kind': 'numeric', 'prompt_key': 'fractions.s1', 'feedback_key': 'fractions.s1.fb', 'answer': 4, 'tolerance': 0}]
+            lesson['steps'] = [
+                {'id': 's1', 'kind': 'numeric', 'prompt_key': 'fractions.s1', 'feedback_key': 'fractions.s1.fb', 'answer': 4, 'tolerance': 0},
+                {'id': 's2', 'kind': 'choice', 'prompt_key': 'fractions.s2', 'feedback_key': 'fractions.s2.fb', 'transfer': True,
+                 'answer_id': 'a', 'options': [{'id': 'a', 'label_key': 'fractions.s2.a', 'feedback_key': 'fractions.s2.a.fb'},
+                                              {'id': 'b', 'label_key': 'fractions.s2.b', 'feedback_key': 'fractions.s2.b.fb'}]}]
         lessons.append(lesson)
         resources.update({identity + '.title': identity, identity + '.goal': identity, identity + '.reading': identity,
                           identity + '.q': 'Pick the right answer for ' + identity,
@@ -45,7 +49,10 @@ def write_memory_fixture(root, with_steps=False):
                           identity + '.wrong': 'Wrong', identity + '.wrong.fb': 'No',
                           identity + '.hint': 'Think again'})
     if with_steps:
-        resources.update({'fractions.s1': 'How many equal parts?', 'fractions.s1.fb': 'Think equal parts.'})
+        resources.update({'fractions.s1': 'How many equal parts?', 'fractions.s1.fb': 'Think equal parts.',
+                          'fractions.s2': 'Which transfer case is half?', 'fractions.s2.fb': 'Think new context.',
+                          'fractions.s2.a': 'Two of four equal parts', 'fractions.s2.a.fb': 'Yes.',
+                          'fractions.s2.b': 'Any two pieces', 'fractions.s2.b.fb': 'No.'})
     manifest = {'schema': 1, 'id': directory.name, 'version': '1.0.0', 'source_revision': 'fixture',
                 'title_key': 'title', 'description_key': 'description', 'references': [], 'lessons': lessons}
     (directory / 'course.json').write_text(json.dumps(manifest), encoding='utf-8')
@@ -384,6 +391,37 @@ class MistakeJournalTests(unittest.TestCase):
         self.assertFalse(entry['blindspot'])
         self.assertFalse(entry['repaired'])
         self.assertEqual(entry['confidence'], 'guess')
+
+
+class TransferRateTests(unittest.TestCase):
+    """迁移通过率：已作答迁移步骤为分母，答对为分子；重试以最近作答投影。"""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.library = self.root / 'library'
+        write_memory_fixture(self.library, with_steps=True)
+        self.service = AcademyService(self.root / 'home', catalog_root=self.library)
+        receipt = self.service.create_project('create', 'memory-fixture')
+        self.pid = receipt['result']['project']['id']
+        self.now = time.time()
+        patcher = patch('time.time', side_effect=lambda: self.now)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.temp.cleanup)
+        project = self.service.project(self.pid)
+        started = self.service.start_lesson(self.pid, 'start-fractions', 'fractions', project['revision'], project['fingerprint'])
+        self.assertEqual(started['status'], 'ready')
+
+    def test_transfer_pass_rate_counts_attempted_transfer_steps(self):
+        self.assertEqual(self.service.mastery.view(self.pid)['transfer_attempts'], 0)
+        self.service.steps.answer(self.pid, 't1', 'fractions', 's2', 'b', confidence='unsure')
+        view = self.service.mastery.view(self.pid)
+        self.assertEqual(view['transfer_attempts'], 1)
+        self.assertEqual(view['transfers'], 0)
+        self.service.steps.answer(self.pid, 't2', 'fractions', 's2', 'a', confidence='unsure')
+        view = self.service.mastery.view(self.pid)
+        self.assertEqual(view['transfer_attempts'], 1)
+        self.assertEqual(view['transfers'], 1)
 
 
 class MasteryApiTests(unittest.TestCase):

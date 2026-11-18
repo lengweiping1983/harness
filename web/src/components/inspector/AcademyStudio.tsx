@@ -3,7 +3,7 @@ import {Check, Flame, Send, Sparkles, X} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyCourse, AcademyLesson, AcademyMastery as AcademyMasteryView, AcademyProject, AcademyTutorTurn} from '@/types'
 import {academyApi, academyResumeLesson} from '@/lib/academy'
-import {academyStudioChecksDone, academyStudioCoachPrompt, academyStudioCoachTurns, academyStudioJourney, academyStudioNextPhase, academyStudioPhases, type AcademyStudioCoachLevel, type AcademyStudioPhaseId, type AcademyStepContext} from '@/lib/academyStudio'
+import {academyStudioChecksDone, academyStudioCoachOpening, academyStudioCoachPrompt, academyStudioCoachTurns, academyStudioJourney, academyStudioNextPhase, academyStudioPhases, type AcademyStudioCoachLevel, type AcademyStudioPhaseId, type AcademyStepContext} from '@/lib/academyStudio'
 import {cn} from '@/lib/utils'
 import {Markdown} from '@/components/markdown/Markdown'
 import {Button, Spinner} from '@/components/ui/primitives'
@@ -364,7 +364,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
               </div>
             </li>) : <li className="max-w-2xl rounded-2xl rounded-bl-sm border border-line bg-raised p-3">
               <p className="flex items-center gap-1 text-xs font-medium text-brand"><Sparkles className="h-3 w-3" aria-hidden />{t('ui.academy.studio.coach.title')}</p>
-              <p className="leading-reading text-muted">{t('ui.academy.studio.coach.empty')}</p>
+              <p className="leading-reading text-muted" data-coach-opening>{academyStudioCoachOpening(masteryView)}</p>
             </li>}
           </ol>
           <p className="sr-only" role="status">{latestCoachTurn?.status === 'completed' ? t('ui.academy.studio.coach.answered') : ''}</p>

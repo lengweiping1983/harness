@@ -62,6 +62,13 @@ export function academyStudioCoachPrompt(level: AcademyStudioCoachLevel, questio
   return trimmedContext ? withQuestion + '\n' + trimmedContext : withQuestion
 }
 
+/** 教练开场白记得学习者的状态：到期重测优先，其次未修复盲点，否则默认陪伴（确定性，不调用模型）。 */
+export function academyStudioCoachOpening(mastery: {due_count: number; blindspots_open?: number} | null): string {
+  if (mastery && mastery.due_count > 0) return t('ui.academy.studio.coach.openingDue', {count: mastery.due_count})
+  if (mastery && (mastery.blindspots_open ?? 0) > 0) return t('ui.academy.studio.coach.openingBlindspot', {count: mastery.blindspots_open})
+  return t('ui.academy.studio.coach.empty')
+}
+
 /** 舞台教练对话：排除讲给 AI 听（teach）回合，按时间排序。 */
 export function academyStudioCoachTurns(turns: ReadonlyArray<AcademyTutorTurn>, projectId: string, lessonId: string): AcademyTutorTurn[] {
   return turns.filter(turn => turn.project_id === projectId && turn.lesson_id === lessonId && turn.mode !== 'teach').sort((a, b) => a.created_at - b.created_at)

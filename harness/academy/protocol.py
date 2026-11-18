@@ -175,7 +175,7 @@ SCHEMAS = {
                            'confidence': CONFIDENCE, 'diagnosis': TEXT, 'blindspot': BOOL, 'repaired': BOOL, 'at': NUMBER},
                           ['lesson_id', 'lesson_title', 'step_id', 'prompt', 'response', 'blindspot', 'repaired', 'at']),
     'AcademyMastery': obj({'skills': array(ref('AcademySkillState')), 'due_count': VERSION, 'reviews': ref('AcademySkillReviews'), 'engagement': ref('AcademyEngagement'),
-                         'repairs': VERSION, 'transfers': VERSION, 'blindspots_open': VERSION, 'streak_days': VERSION,
+                         'repairs': VERSION, 'transfers': VERSION, 'transfer_attempts': VERSION, 'blindspots_open': VERSION, 'streak_days': VERSION,
                          'calibration': ref('AcademyCalibration'), 'activity': array(ref('AcademyActivityDay')), 'mistakes': array(ref('AcademyMistake'))},
                         ['skills', 'due_count', 'reviews', 'engagement']),
     'AcademyReviewRequest': obj({'request_id': REQUEST, 'lesson_id': TEXT,
