@@ -17,12 +17,14 @@ const matching={id:'mat',kind:'matching',prompt:'Pair them.',feedback:'Match.',l
 const lesson={id:'l1',mode:'study',order:1,title:'Lesson',goal:'Goal',reading:'Reading',milestone:false,run_command:[],source_manifest:[],references:[],prerequisites:[],trace_labels:{},knowledge_checks:[]}
 const course={id:'c1',version:'1',origin:'provided',source_revision:'f',title:'Course',description:'',references:[],lessons:[lesson]}
 const project={id:'p1',course_id:'c1',course_version:'1',name:'Lab',revision:1,active_lesson_id:'l1',course_fingerprint:'a'.repeat(64),created_at:1,progress:[],root:'/x',fingerprint:'a'.repeat(64),sandbox:'unavailable'}
+const liveProps={course,project:{...project,id:'p2'},lesson,active:false,disabled:false,tutorTurns:[],struggleRevealed:false,checkAnswers:new Map(),note:'',studyReady:false,studyCompleted:false,onClose:()=>{},onOpenLesson:()=>{},onAskCoach:()=>{},onStrugglePhase:()=>{},onCheckAnswer:()=>{},onNote:()=>{},onComplete:()=>{},onRefresh:()=>{}}
 function App(){useLocale();return React.createElement('div',{className:'space-y-6 p-4'},
  React.createElement('div',{id:'order-card'},React.createElement(AcademyStepCard,{step:ordering,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'hint-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:{correct:false,text:'Not yet.',hints:['First hint','Second hint','Third hint']},onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'num-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'match-card'},React.createElement(AcademyStepCard,{step:matching,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'world-card'},React.createElement(AcademyWorldCard,{kind:'fraction-bar',session:{id:'w1',project_id:'p1',lesson_id:'l1',request_id:'r1',kind:'fraction-bar',params:{parts:4,shaded:1},challenge:{prompt:'Shade it.',options:[],target:{}},status:'observing',observations:[{params:{parts:4,shaded:1},state:{parts:4,shaded:1,label:'1/4'},at:1}],note:'',created_at:1,completed_at:null},params:{parts:4,shaded:1},note:'',busy:false,onParams:p=>{window.shaded=p.shaded},onNote:()=>{},onStart:()=>{},onPredict:()=>{},onObserve:()=>{},onComplete:()=>{}})),
+ React.createElement('div',{id:'studio-live',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,liveProps)),
  React.createElement('div',{id:'studio-done',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{course,project,lesson,active:false,disabled:false,tutorTurns:[],struggleRevealed:false,checkAnswers:new Map(),note:'done',studyReady:true,studyCompleted:true,onClose:()=>{},onOpenLesson:()=>{},onAskCoach:p=>{window.asked.push(p)},onStrugglePhase:()=>{},onCheckAnswer:()=>{},onNote:()=>{},onComplete:()=>{},onRefresh:()=>{}})))}
 createRoot(document.getElementById('root')).render(React.createElement(App))
 `
@@ -71,10 +73,19 @@ await browserScenario(async({server,browser}) => {
     await page.locator('#world-card [data-shade-index="2"]').click()
     assert.equal(await page.evaluate(()=>window.shaded),3,'click shade sets shaded=3')
     // 键盘-first：方向键切换环节。
-    await page.locator('#studio-done ol button').last().click()
+    await page.locator('#studio-done [data-studio-phases] button').last().click()
     await page.keyboard.press('ArrowLeft')
     await page.locator('#studio-done [data-studio-phase="note"]').waitFor()
     assert.equal(await page.evaluate(()=>document.activeElement?.tagName),'TEXTAREA','phase change auto-focuses primary input')
+    // 会话连续性：live 舞台切到 note 后重载仍停留 note（按项目+课次持久化）。
+    await page.locator('#studio-live [data-studio-phases] button').nth(1).click()
+    await page.locator('#studio-live [data-studio-phase="note"]').waitFor()
+    const phaseStorageKey='harness.academy.phase.v1:'+JSON.stringify(['p2','l1'])
+    assert.equal(await page.evaluate(key=>localStorage.getItem(key),phaseStorageKey),'note','phase persisted per project+lesson')
+    await page.reload()
+    await page.waitForFunction(()=>typeof window.locale==='function')
+    await page.locator('#studio-live [data-studio-phase="note"]').waitFor()
+    assert.equal(await page.evaluate(key=>localStorage.getItem(key),phaseStorageKey),'note','saved phase survives reload')
     // 对话式快捷追问：点击 chip 以对应自主档发送教练请求。
     await page.locator('#studio-done [data-coach-suggest="hint"]').click()
     assert.equal(await page.evaluate(()=>window.asked.length),1,'suggestion chip asks coach')

@@ -58,7 +58,17 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     if (studyCompleted) initial.add('finish')
     return initial
   })
-  const [phase, setPhase] = useState<AcademyStudioPhaseId>(() => studyCompleted || studyReady ? 'finish' : phases[0].id)
+  /** 会话连续性：重开舞台回到上次停留环节（按项目+课次持久化）。 */
+  const phaseKey = 'harness.academy.phase.v1:' + JSON.stringify([project.id, lesson.id])
+  const [phase, setPhase] = useState<AcademyStudioPhaseId>(() => {
+    if (studyCompleted || studyReady) return 'finish'
+    try {
+      const saved = localStorage.getItem(phaseKey)
+      if (saved && phases.some(item => item.id === saved)) return saved as AcademyStudioPhaseId
+    } catch { /* 存储不可用时从首环节开始 */ }
+    return phases[0].id
+  })
+  useEffect(() => {try {localStorage.setItem(phaseKey, phase)} catch { /* 忽略存储失败 */ }}, [phase, phaseKey])
   const [coachLevel, setCoachLevel] = useState<AcademyStudioCoachLevel>(0)
   const [nudge, setNudge] = useState<'struggle' | 'blindspot' | null>(() => struggleRevealed ? 'struggle' : null)
   const [coachDraft, setCoachDraft] = useState('')
@@ -264,7 +274,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
           <p className="text-xs text-muted">{t('ui.academy.lessonTitle', {order: lesson.order, title: lesson.title})}</p>
           <h3 className="mt-1 text-xl font-semibold leading-snug">{lesson.goal}</h3>
         </div>
-        <ol className="flex flex-wrap gap-1" aria-label={t('ui.academy.studio.phaseLabel')}>
+        <ol data-studio-phases className="flex flex-wrap gap-1" aria-label={t('ui.academy.studio.phaseLabel')}>
           {phases.map(item => <li key={item.id}>
             <button type="button" aria-current={item.id === phase ? 'step' : undefined} onClick={() => {manual.current = true; setPhase(item.id)}}
               className={cn('flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs', item.id === phase ? 'border-brand bg-brand/10 font-medium text-brand' : done.has(item.id) ? 'border-ok/40 text-ok' : 'border-line text-muted')}>

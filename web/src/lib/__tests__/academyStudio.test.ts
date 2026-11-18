@@ -1,6 +1,6 @@
 import {createElement} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
-import {afterEach, expect, it} from 'vitest'
+import {afterEach, expect, it, vi} from 'vitest'
 import {setLocale} from '@/i18n'
 import {AcademyStudio} from '@/components/inspector/AcademyStudio'
 import {academyStudioChecksDone, academyStudioCoachPrompt, academyStudioCoachTurns, academyStudioJourney, academyStudioNextPhase, academyStudioPhases} from '../academyStudio'
@@ -178,6 +178,30 @@ it('offers a dismissible proactive coach nudge after the struggle reveal without
   await setLocale('zh-CN')
   const chinese = renderToStaticMarkup(studio({struggleRevealed: true}))
   expect(chinese).toContain('刚才的挣扎很有价值')
+})
+
+it('restores the last visited phase per project+lesson with safe fallbacks', async () => {
+  await setLocale('en')
+  const store = new Map<string, string>()
+  vi.stubGlobal('localStorage', {getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => {store.set(key, value)}, removeItem: (key: string) => {store.delete(key)}})
+  try {
+    const key = 'harness.academy.phase.v1:' + JSON.stringify(['project', 'fractions'])
+    // 无存档：问题优先，从首个环节开始。
+    expect(renderToStaticMarkup(studio())).toContain('data-studio-phase="struggle"')
+    // 有存档：重开舞台回到上次停留环节。
+    store.set(key, 'note')
+    expect(renderToStaticMarkup(studio())).toContain('data-studio-phase="note"')
+    // 存档环节不存在：回退首环节而不是崩溃。
+    store.set(key, 'not-a-phase')
+    expect(renderToStaticMarkup(studio())).toContain('data-studio-phase="struggle"')
+    // 已完成课次：结课优先于存档。
+    store.set(key, 'note')
+    expect(renderToStaticMarkup(studio({studyCompleted: true, studyReady: true}))).toContain('data-studio-phase="finish"')
+    // 其他项目的存档不串用。
+    expect(renderToStaticMarkup(studio({project: {...project, id: 'other'}}))).toContain('data-studio-phase="struggle"')
+  } finally {
+    vi.unstubAllGlobals()
+  }
 })
 
 it('shows the finish checklist from existing evidence and celebrates completion with the next lesson', async () => {
