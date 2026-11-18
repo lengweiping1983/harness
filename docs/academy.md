@@ -417,6 +417,18 @@ references 中的 harness/ 路径读取当前安装包的生产源码；其他�
 
 接口只向本机完整宿主开放，受邀对话和远程地址没有 Academy 文件或执行权限。`run` 与 `check` 请求可选 `source` 对象，包含当前已有文件的 `path`、`content` 与 `expected_version`；未提供时只执行已保存代码，提供时先保存再执行，不用于新建文件。公开字段与输入限制见生成的 [OpenAPI](openapi-v1.json)。
 
+## 验证矩阵
+
+集体复核（本分支当前状态）：
+
+| 层 | 入口 | 结果 |
+| --- | --- | --- |
+| 后端合同/引擎 | `python -m unittest discover -s tests -p "test_academy_*.py"` | 216 OK（22 沙箱依赖跳过，需 Linux/macOS） |
+| 前端组件/逻辑 | `vitest run src/lib/__tests__/academy*.test.*`（9 文件） | 85 OK |
+| 真实浏览器矩阵 | `node web/tests/run-core.mjs <academy-*-smoke>`（18 场景，含交互专项） | 18/18，语言/主题/尺寸矩阵＋输入/构建指纹未变 |
+| 类型/构建 | `npx tsc -b --noEmit`＋`npm run build` | 通过，产物发布 |
+
+沙箱依赖场景（执行/检查类）在 Windows 无 bubblewrap/seatbelt 时按设计跳过或明确失败，不计入跨平台验收；voice 录音/转写真机路径待真机验收。交互专项（academy-interaction-smoke）覆盖拖拽排序/撤销重做/点选配对/拖拽涂色/拖拽数轴/渐进提示/教练 chips/彩带/进度环/键盘换环节与自动聚焦。
 ## 验证依据
 
 `tests/test_academy_tutor.py` 使用真实核心循环、确定性模型传输与隔离临时项目核对工具续接、沙箱输出、保存后指纹、重复执行去重、提示权限、英中英资源消费、代码变化、连续取消、重启不重放、缺失运行证据的明确失败、本机访问及有界损坏数据保护。`academy-tutor-smoke.mjs` 通过真实页面与接口核对编辑后提问、丢失回执后的刷新恢复、真实输出关联、运行按钮的执行要求、输入法、同实例语言／主题／尺寸矩阵、项目草稿隔离和隐藏观察。`academyTutor.test.ts` 核对回执身份及异步观察归属；确定性传输不代表在线教学质量。
