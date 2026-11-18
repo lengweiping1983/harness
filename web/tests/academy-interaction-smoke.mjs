@@ -14,7 +14,7 @@ import {AcademySkillMap} from '/src/components/inspector/AcademySkillMap.tsx'
 import {academyApi} from '/src/lib/academy.ts'
 import {setLocale, useLocale} from '/src/i18n/index.ts'
 import '/src/styles.css'
-window.locale=setLocale;window.shaded=null;window.asked=[];window.reviewed=null;window.mapOpened=[]
+window.locale=setLocale;window.shaded=null;window.asked=[];window.reviewed=null;window.mapOpened=[];window.stepsAsked=[]
 const ordering={id:'ord',kind:'ordering',prompt:'Order the steps.',feedback:'Think order.',items:[{id:'a',label:'Alpha'},{id:'b',label:'Beta'},{id:'c',label:'Gamma'}]}
 const numeric={id:'num',kind:'numeric',prompt:'Pick on the line.',feedback:'Think.',tolerance:0,number_line:{min:0,max:12}}
 const matching={id:'mat',kind:'matching',prompt:'Pair them.',feedback:'Match.',left:[{id:'l1',label:'Left one'},{id:'l2',label:'Left two'}],right:[{id:'r1',label:'Right one'},{id:'r2',label:'Right two'}]}
@@ -31,6 +31,9 @@ const mapSkills=[{lesson_id:'m1',title:'m1',stage:'Stage A',state:'learning',sta
 const mapProgress=[{lesson_id:'m1',state:'completed',checkpoint_id:'',evidence_ids:[],attempt_count:1}]
 const goalActivity=Array.from({length:14},(_,i)=>{const d=new Date(Date.now()-(13-i)*86400000);return {date:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),evidence:i===13?5:i%3}})
 const goalMastery={skills:[],due_count:0,reviews:{attempts:1,correct:1,delayed_correct:0},engagement:{constructive:1,active:1,total:2,constructive_ratio:0.5},activity:goalActivity}
+const stepsLesson={...lesson,id:'l2',steps:[{id:'s1',kind:'numeric',prompt:'Pick on the line.',feedback:'Think.',tolerance:0,number_line:{min:0,max:12}}]}
+const stepsCourse={...course,lessons:[stepsLesson]}
+academyApi.steps=async()=>({ok:true,data:{steps:stepsLesson.steps,responses:[{step_id:'s1',correct:false,response:'4',attempts:1,at:1,confidence:'sure'}],completed:false}})
 function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);window.setCoachTurns=setCoachTurns;return React.createElement('div',{className:'space-y-6 p-4'},
  React.createElement('div',{id:'order-card'},React.createElement(AcademyStepCard,{step:ordering,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'hint-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:{correct:false,text:'Not yet.',hints:['First hint','Second hint','Third hint']},onSubmit:()=>{},onNext:()=>{}})),
@@ -40,6 +43,7 @@ function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);w
  React.createElement('div',{id:'studio-live',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,liveProps)),
  React.createElement('div',{id:'review-card'},React.createElement(AcademyReviewCard,{item:reviewItem,busy:false,onSubmit:a=>{window.reviewed=a}})),
  React.createElement('div',{id:'skill-map'},React.createElement(AcademySkillMap,{lessons:mapLessons,progress:mapProgress,skills:mapSkills,activeLessonId:'m2',recommendedId:'m3',onOpenLesson:id=>{window.mapOpened.push(id)}})),
+ React.createElement('div',{id:'studio-steps',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{...liveProps,course:stepsCourse,project:{...project,id:'p5'},lesson:stepsLesson,active:true,onAskCoach:p=>{window.stepsAsked.push(p)}})),
  React.createElement('div',{id:'daily-goal'},React.createElement(AcademyDailyGoal,{activity:goalActivity})),
  React.createElement('div',{id:'goal-report'},React.createElement(AcademyReport,{mastery:goalMastery})),
  React.createElement('div',{id:'studio-halo',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,haloProps)),
@@ -163,6 +167,14 @@ await browserScenario(async({server,browser}) => {
     await page.locator('#studio-coach [data-coach-awaiting]').waitFor()
     await page.locator('#studio-coach [data-coach-awaiting]').click()
     assert.equal(await page.evaluate(()=>document.activeElement?.tagName),'TEXTAREA','reply invitation focuses composer')
+    // 教练看见你的工作：步骤环节追问携带当前步骤与最近作答（含结果与置信度）。
+    await page.locator('#studio-steps [data-studio-phase="steps"]').waitFor()
+    await page.locator('#studio-steps [data-coach-suggestions][data-coach-context="step"]').waitFor()
+    await page.locator('#studio-steps [data-coach-suggest="hint"]').click()
+    const stepsPrompt=await page.evaluate(()=>window.stepsAsked[0])
+    assert.ok(stepsPrompt.includes('Current phase:'),'coach prompt carries phase context')
+    assert.ok(stepsPrompt.includes('Current step: Pick on the line.'),'coach prompt carries current step')
+    assert.ok(stepsPrompt.includes('My last answer: 4; result: wrong'),'coach prompt carries last answer and result')
     // 专注模式：收敛旅程/会话条为环节圆点，Ctrl+. 切换，偏好重载后保留。
     await page.locator('#studio-live [data-academy-pref-zen]').click()
     await page.waitForFunction(()=>!document.querySelector('#studio-live [data-studio-journey]'))
@@ -215,6 +227,7 @@ await browserScenario(async({server,browser}) => {
     await page.locator('#studio-done [data-coach-suggest="hint"]').click()
     assert.equal(await page.evaluate(()=>window.asked.length),1,'suggestion chip asks coach')
     assert.ok((await page.evaluate(()=>window.asked[0])).includes('Lesson'),'prompt carries lesson context')
+    assert.ok((await page.evaluate(()=>window.asked[0])).includes('Current phase:'),'prompt carries phase context')
     // 语言矩阵：交互文案随语言解析。
     for (const language of ['en','zh-CN','en']) {
       const copy=JSON.parse(await readFile(new URL('../src/i18n/locales/'+language+'.json',import.meta.url),'utf-8'))
@@ -226,7 +239,7 @@ await browserScenario(async({server,browser}) => {
     assert.deepEqual(errors,[])
     await page.close()
   }
-  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow, zen mode, swipe, memory halo, skill map, streaming coach, daily goal + heatmap, language/theme/width matrix verified')
+  console.log('Academy interaction: drag reorder, click-to-pair, confetti, progress ring, session continuity, review card flow, zen mode, swipe, memory halo, skill map, streaming coach, context-aware coach, daily goal + heatmap, language/theme/width matrix verified')
 },{entry:'/__academy-interaction-entry.js',vite:{plugins:[{
   name:'academy-interaction-fixture',resolveId(id){if(id==='/__academy-interaction-entry.js')return id},load(id){if(id==='/__academy-interaction-entry.js')return entry},
   configureServer(server){server.middlewares.use('/__academy-interaction',async(_req,res,next)=>{try{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__academy-interaction',html))}catch(error){next(error)}})},

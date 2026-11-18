@@ -3,6 +3,7 @@ import {ArrowDown, ArrowUp, Check, GripVertical, Redo2, Send, Undo2} from 'lucid
 import {t, useLocale} from '@/i18n'
 import type {AcademyLesson, AcademyReceipt, AcademyStepPublic, AcademyStepsView, NoticeText} from '@/types'
 import {academyApi, academyNextStep, academyReceiptMatches, isAcademyUnconfirmedWrite} from '@/lib/academy'
+import type {AcademyStepContext} from '@/lib/academyStudio'
 import {noticeText} from '@/lib/noticeText'
 import {Button} from '@/components/ui/primitives'
 import {AcademyVoiceButton} from './AcademyVoice'
@@ -197,7 +198,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
 }
 
 /** 步骤播放器容器：一次一步、即时反馈、进度指示；未知回执只回查。 */
-export function AcademySteps({projectId, lesson, active, disabled, onCompleted, onCalibration}: {projectId: string; lesson: AcademyLesson; active: boolean; disabled: boolean; onCompleted?: () => void; onCalibration?: (code: string) => void}) {
+export function AcademySteps({projectId, lesson, active, disabled, onCompleted, onCalibration, onContext}: {projectId: string; lesson: AcademyLesson; active: boolean; disabled: boolean; onCompleted?: () => void; onCalibration?: (code: string) => void; onContext?: (context: AcademyStepContext | null) => void}) {
   useLocale()
   const steps = lesson.steps
   const pendingKey = 'academy.steps.pending.' + projectId
@@ -234,12 +235,22 @@ export function AcademySteps({projectId, lesson, active, disabled, onCompleted, 
 
   useEffect(() => {if (view?.completed) onCompleted?.()}, [view?.completed, onCompleted])
 
-  if (!steps?.length) return null
   const responses = view?.responses ?? []
+  const current = steps?.length ? academyNextStep(steps, responses) : null
+  const currentResponse = current ? responses.find(item => item.step_id === current.id) : undefined
+  const answerText = currentResponse ? (typeof currentResponse.response === 'string' ? currentResponse.response : JSON.stringify(currentResponse.response)).slice(0, 200) : undefined
+  /** 向舞台教练上报当前步骤与最近作答，使引导针对学习者的实际工作而非泛泛而谈。 */
+  useEffect(() => {
+    if (!onContext) return
+    if (!current) {onContext(null); return}
+    onContext({stepId: current.id, prompt: current.prompt,
+      ...(answerText !== undefined ? {answer: answerText} : {}),
+      ...(currentResponse ? {correct: currentResponse.correct, ...(currentResponse.confidence ? {confidence: currentResponse.confidence} : {})} : {})})
+  }, [onContext, current, currentResponse, answerText])
+
+  if (!steps?.length) return null
   const done = new Set(responses.filter(response => response.correct).map(response => response.step_id))
   const total = steps.length
-  const current = academyNextStep(steps, responses)
-  const currentResponse = current ? responses.find(item => item.step_id === current.id) : undefined
   const currentIndex = current ? steps.findIndex(step => step.id === current.id) : -1
   const completed = view?.completed || current === null
   const correctCount = done.size

@@ -50,11 +50,16 @@ export function academyStudioCoachPromptKey(level: AcademyStudioCoachLevel): str
   return level === 0 ? 'ui.academy.studio.coach.prompt.try' : level === 1 ? 'ui.academy.studio.coach.prompt.hint' : 'ui.academy.studio.coach.prompt.explain'
 }
 
-/** 组装教练请求：档位指令 + 学习者问题（可为空），附带课程标题上下文。 */
-export function academyStudioCoachPrompt(level: AcademyStudioCoachLevel, question: string, lessonTitle: string): string {
+/** 步骤视图上报给舞台教练的当前步骤上下文。 */
+export interface AcademyStepContext {stepId: string; prompt: string; answer?: string; correct?: boolean; confidence?: string}
+
+/** 组装教练请求：档位指令 + 学习者问题（可为空）+ 课程标题与当前学习上下文，使苏格拉底引导指向学习者的实际作答。 */
+export function academyStudioCoachPrompt(level: AcademyStudioCoachLevel, question: string, lessonTitle: string, context?: string): string {
   const base = t(academyStudioCoachPromptKey(level), {title: lessonTitle})
   const trimmed = question.trim()
-  return trimmed ? base + '\n' + trimmed : base
+  const withQuestion = trimmed ? base + '\n' + trimmed : base
+  const trimmedContext = context?.trim()
+  return trimmedContext ? withQuestion + '\n' + trimmedContext : withQuestion
 }
 
 /** 舞台教练对话：排除讲给 AI 听（teach）回合，按时间排序。 */

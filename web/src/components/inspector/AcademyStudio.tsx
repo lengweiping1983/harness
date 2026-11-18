@@ -3,7 +3,7 @@ import {Check, Flame, Send, Sparkles, X} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyCourse, AcademyLesson, AcademyMastery as AcademyMasteryView, AcademyProject, AcademyTutorTurn} from '@/types'
 import {academyApi, academyResumeLesson} from '@/lib/academy'
-import {academyStudioChecksDone, academyStudioCoachPrompt, academyStudioCoachTurns, academyStudioJourney, academyStudioNextPhase, academyStudioPhases, type AcademyStudioCoachLevel, type AcademyStudioPhaseId} from '@/lib/academyStudio'
+import {academyStudioChecksDone, academyStudioCoachPrompt, academyStudioCoachTurns, academyStudioJourney, academyStudioNextPhase, academyStudioPhases, type AcademyStudioCoachLevel, type AcademyStudioPhaseId, type AcademyStepContext} from '@/lib/academyStudio'
 import {cn} from '@/lib/utils'
 import {Markdown} from '@/components/markdown/Markdown'
 import {Button, Spinner} from '@/components/ui/primitives'
@@ -89,7 +89,21 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   const awaitingReply = Boolean(latestCoachTurn && latestCoachTurn.status === 'completed' && /[?？]\s*$/.test(latestCoachTurn.response.trim()))
   const threadRef = useRef<HTMLOListElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const [stepContext, setStepContext] = useState<AcademyStepContext | null>(null)
   const threadSignature = coachTurns.map(turn => turn.id + ':' + turn.status + ':' + (turn.partial_response?.length ?? 0) + ':' + turn.response.length).join('|')
+  /** 教练学习上下文：当前环节常驻；步骤环节另附当前步骤与最近作答（含置信度），使引导针对实际工作。 */
+  const coachContext = (() => {
+    const lines = [t('ui.academy.studio.coach.context.phase', {phase: t(phaseLabelKey[phase])})]
+    if (phase === 'steps' && stepContext) {
+      lines.push(t('ui.academy.studio.coach.context.step', {prompt: stepContext.prompt}))
+      if (stepContext.answer !== undefined) {
+        const result = t(stepContext.correct ? 'ui.academy.studio.coach.context.correct' : 'ui.academy.studio.coach.context.wrong')
+          + (stepContext.confidence ? ' · ' + t('ui.academy.steps.confidence.' + stepContext.confidence) : '')
+        lines.push(t('ui.academy.studio.coach.context.answer', {answer: stepContext.answer, result}))
+      }
+    }
+    return lines.join('\n')
+  })()
   const lessonIndex = course.lessons.findIndex(item => item.id === lesson.id)
   const nextLesson = lessonIndex >= 0 ? course.lessons[lessonIndex + 1] : undefined
   const completedCount = course.lessons.filter(item => project.progress.some(row => row.lesson_id === item.id && row.state === 'completed')).length
@@ -189,7 +203,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   }
   const sendCoach = () => {
     if (composing.current || disabled || coachRunning) return
-    onAskCoach(academyStudioCoachPrompt(coachLevel, coachDraft, lesson.title))
+    onAskCoach(academyStudioCoachPrompt(coachLevel, coachDraft, lesson.title, coachContext))
     setCoachDraft('')
   }
 
@@ -200,7 +214,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     </div>
     if (phase === 'struggle') return <AcademyStruggle projectId={project.id} lesson={lesson} active={active} disabled={disabled} onPhase={onStrugglePhase} />
     if (phase === 'world') return <AcademyWorld projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('world')} />
-    if (phase === 'steps') return <AcademySteps projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('steps')} onCalibration={code => {if (code === 'blindspot') setNudge('blindspot')}} />
+    if (phase === 'steps') return <AcademySteps projectId={project.id} lesson={lesson} active={active} disabled={disabled} onCompleted={() => markDone('steps')} onCalibration={code => {if (code === 'blindspot') setNudge('blindspot')}} onContext={setStepContext} />
     if (phase === 'reading') {
       if (lesson.struggle && !struggleRevealed) return <p className="text-sm leading-reading text-muted">{t('ui.academy.struggle.gated')}</p>
       return <div className="space-y-3">
@@ -370,12 +384,12 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
         <p className="text-xs text-muted">{t('ui.academy.studio.coach.levelHint.' + coachLevelNames[coachLevel])}</p>
         {nudge ? <div role="status" data-studio-nudge={nudge} className="flex flex-wrap items-center gap-2 rounded-lg border border-brand/40 bg-brand/5 p-2 text-sm">
           <p className="min-w-0 flex-1 leading-reading">{t('ui.academy.studio.nudge.' + nudge)}</p>
-          <Button size="xs" variant="subtle" disabled={disabled || coachRunning} onClick={() => {setCoachLevel(1); onAskCoach(academyStudioCoachPrompt(1, t('ui.academy.studio.nudge.prompt.' + nudge), lesson.title)); setNudge(null)}}>{t('ui.academy.studio.nudge.action')}</Button>
+          <Button size="xs" variant="subtle" disabled={disabled || coachRunning} onClick={() => {setCoachLevel(1); onAskCoach(academyStudioCoachPrompt(1, t('ui.academy.studio.nudge.prompt.' + nudge), lesson.title, coachContext)); setNudge(null)}}>{t('ui.academy.studio.nudge.action')}</Button>
           <Button size="xs" variant="ghost" aria-label={t('ui.academy.studio.nudge.dismiss')} onClick={() => setNudge(null)}>{t('ui.academy.studio.nudge.dismiss')}</Button>
         </div> : null}
-        <div className="flex flex-wrap gap-1" data-coach-suggestions>
+        <div className="flex flex-wrap gap-1" data-coach-suggestions data-coach-context={phase === 'steps' && stepContext ? 'step' : 'phase'}>
           {coachSuggestions.map(suggestion => <button key={suggestion.key} type="button" data-coach-suggest={suggestion.key} disabled={disabled || coachRunning}
-            onClick={() => {setCoachLevel(suggestion.level); onAskCoach(academyStudioCoachPrompt(suggestion.level, t('ui.academy.studio.coach.suggest.' + suggestion.key), lesson.title))}}
+            onClick={() => {setCoachLevel(suggestion.level); onAskCoach(academyStudioCoachPrompt(suggestion.level, t('ui.academy.studio.coach.suggest.' + suggestion.key), lesson.title, coachContext))}}
             className="rounded-full border border-line px-2.5 py-1 text-xs text-muted hover:border-brand hover:text-brand">{t('ui.academy.studio.coach.suggest.' + suggestion.key)}</button>)}
         </div>
         <form className="flex items-end gap-2"

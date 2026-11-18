@@ -63,10 +63,11 @@ await browserScenario(async({server,browser}) => {
     await coachInput.dispatchEvent('compositionend')
     await coachInput.press('Enter')
     const explainPrompt=strings['ui.academy.studio.coach.prompt.explain'].replace('{title}','Fractions')
-    assert.deepEqual(await page.evaluate(()=>window.asked.at(-1)),explainPrompt+'\nWhy equal parts?')
+    const phaseContext=strings['ui.academy.studio.coach.context.phase'].replace('{phase}',strings['ui.academy.studio.phase.struggle'])
+    assert.deepEqual(await page.evaluate(()=>window.asked.at(-1)),explainPrompt+'\nWhy equal parts?\n'+phaseContext)
     await page.locator('[data-coach-level="0"]').click()
     await coachInput.press('Enter')
-    assert.deepEqual(await page.evaluate(()=>window.asked.at(-1)),strings['ui.academy.studio.coach.prompt.try'].replace('{title}','Fractions'))
+    assert.deepEqual(await page.evaluate(()=>window.asked.at(-1)),strings['ui.academy.studio.coach.prompt.try'].replace('{title}','Fractions')+'\n'+phaseContext)
 
     // 单焦点环节轨道：步步闯关渲染步骤卡；快速测试答对后自动进入反思，反思后自动进入结课。
     await page.getByRole('button',{name:strings['ui.academy.studio.phase.steps'],exact:true}).click()

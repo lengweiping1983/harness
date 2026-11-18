@@ -74,6 +74,16 @@ it('builds coach prompts per autonomy level in both languages and appends the le
   expect(academyStudioCoachPrompt(2, '', '分数')).toContain('一步步讲解')
 })
 
+it('appends learning context to coach prompts without altering the base instruction', async () => {
+  await setLocale('en')
+  const base = academyStudioCoachPrompt(1, '', 'Fractions')
+  expect(academyStudioCoachPrompt(1, '', 'Fractions', 'Current phase: Steps.')).toBe(base + '\nCurrent phase: Steps.')
+  expect(academyStudioCoachPrompt(1, 'Why?', 'Fractions', '   ')).toBe(academyStudioCoachPrompt(1, 'Why?', 'Fractions'))
+  expect(academyStudioCoachPrompt(0, 'Q', 'Fractions', 'ctx').endsWith('Q\nctx')).toBe(true)
+  await setLocale('zh-CN')
+  expect(academyStudioCoachPrompt(1, '', '分数', '当前环节：步步闯关。')).toContain('当前环节：步步闯关。')
+})
+
 it('keeps coach turns separate from teach turns and sorted by time', () => {
   const turn = (patch: Partial<AcademyTutorTurn>): AcademyTutorTurn => ({id: 't', project_id: 'project', lesson_id: 'fractions', request_id: 'r',
     input_fingerprint: 'a'.repeat(64), prompt: 'p', allow_execution: false, require_execution: false, response: 'ok', model: 'm', language: 'en',
