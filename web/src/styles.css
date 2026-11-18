@@ -199,6 +199,12 @@ body {
 .academy-phase-enter { animation: academy-phase-in 220ms ease-out; }
 @keyframes academy-phase-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .academy-phase-enter { animation: none; } }
+/* 步骤反馈游戏手感：答对弹入、答错轻晃，尊重系统与显式减少动效偏好。 */
+[data-step-feedback="correct"] { animation: academy-feedback-correct 450ms ease-out; }
+[data-step-feedback="wrong"] { animation: academy-feedback-wrong 400ms ease-out; }
+@keyframes academy-feedback-correct { 0% { transform: scale(0.96); opacity: 0.4; } 60% { transform: scale(1.02); } 100% { transform: scale(1); opacity: 1; } }
+@keyframes academy-feedback-wrong { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); } }
+@media (prefers-reduced-motion: reduce) { [data-step-feedback] { animation: none; } }
 .app-shell { --workspace-header-height: 46px; }
 .sidebar-tab-header {
   height: var(--workspace-header-height, 46px);

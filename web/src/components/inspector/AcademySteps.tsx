@@ -121,7 +121,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
     {step.transfer ? <p className="inline-flex rounded-full border border-brand/40 bg-brand/5 px-2 py-0.5 text-xs font-medium text-brand" title={t('ui.academy.steps.transferHint')}>{t('ui.academy.steps.transferLabel')}</p> : null}
     {blindspot && feedback?.correct !== true ? <p className="inline-flex rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-xs font-medium text-warn">{t('ui.academy.steps.blindspotChip')}</p> : null}
     <p className="whitespace-pre-wrap text-base leading-reading">{step.prompt}</p>
-    {feedback ? <div role="status" className="space-y-1">
+    {feedback ? <div role="status" data-step-feedback={feedback.correct ? 'correct' : 'wrong'} className="space-y-1">
       {feedback.correct && cheer ? <p className="text-sm font-medium text-ok">{cheer}</p> : null}
       <p className={'flex items-center gap-1 text-sm font-medium ' + (feedback.correct ? 'text-ok' : 'text-warn')}>
         {feedback.correct ? <Check className="h-4 w-4" /> : null}{feedback.text}</p>

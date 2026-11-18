@@ -90,6 +90,7 @@ await browserScenario(async({server,browser}) => {
     // 渐进式提示：初始只揭示第一条，点击揭示下一条。
     const hintBox=page.locator('#hint-card [data-progressive-hints]')
     await hintBox.getByText('First hint',{exact:true}).waitFor()
+    assert.equal(await page.locator('#hint-card [data-step-feedback="wrong"]').evaluate(el=>getComputedStyle(el).animationName),'academy-feedback-wrong','wrong feedback plays the shake animation')
     assert.equal(await hintBox.getByText('Second hint',{exact:true}).count(),0,'second hint hidden initially')
     await page.locator('#hint-card [data-next-hint]').click()
     await hintBox.getByText('Second hint',{exact:true}).waitFor()
