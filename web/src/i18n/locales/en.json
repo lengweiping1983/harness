@@ -4697,6 +4697,7 @@
   "ui.academy.steps.completed": "Guided practice complete. You built it step by step.",
   "ui.academy.steps.moveUp": "Move up",
   "ui.academy.steps.moveDown": "Move down",
+  "ui.academy.steps.matchEmpty": "tap a card to pair",
   "ui.academy.steps.pending": "The result is unconfirmed; only the original request is rechecked.",
   "ui.academy.error.steps-unavailable": "This lesson does not declare guided steps.",
   "ui.academy.error.step-not-found": "That step does not exist in this lesson.",

@@ -1,5 +1,5 @@
 import {useEffect, useId, useRef, useState} from 'react'
-import {ArrowDown, ArrowUp, Check, Send} from 'lucide-react'
+import {ArrowDown, ArrowUp, Check, GripVertical, Send} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyLesson, AcademyReceipt, AcademyStepPublic, AcademyStepsView, NoticeText} from '@/types'
 import {academyApi, academyNextStep, academyReceiptMatches, isAcademyUnconfirmedWrite} from '@/lib/academy'
@@ -39,7 +39,25 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
   const [pairs, setPairs] = useState<Record<string, string>>({})
   const [confidence, setConfidence] = useState<AcademyConfidence | null>(null)
   const [diagnosis, setDiagnosis] = useState('')
+  const dragIndex = useRef<number | null>(null)
+  const [selectedLeft, setSelectedLeft] = useState<string | null>(null)
   const locked = busy || feedback?.correct === true
+  /** 拖拽排序：直接操纵卡片顺序；键盘上下按钮保留为无障碍等价路径。 */
+  const dropOn = (target: number) => {
+    const source = dragIndex.current
+    dragIndex.current = null
+    if (source === null || source === target) return
+    const next = [...order]
+    const [moved] = next.splice(source, 1)
+    next.splice(target, 0, moved)
+    setOrder(next)
+  }
+  const assignRight = (rightId: string) => {
+    const slot = selectedLeft ?? (step.left ?? []).find(item => !pairs[item.id])?.id ?? (step.left ?? [])[0]?.id
+    if (!slot) return
+    setPairs(previous => ({...previous, [slot]: rightId}))
+    setSelectedLeft(null)
+  }
   const move = (index: number, delta: number) => {
     const target = index + delta
     if (target < 0 || target >= order.length) return
@@ -101,18 +119,25 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
       {step.kind === 'choice' ? <fieldset className="space-y-2" disabled={locked}>{(step.options ?? []).map(option => <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-lg border border-line p-3 text-sm focus-within:border-brand">
         <input type="radio" name={name} value={option.id} checked={choice === option.id} className="mt-1 accent-brand" onChange={() => setChoice(option.id)} />
         <span className="min-w-0 break-words">{option.label}</span></label>)}</fieldset> : null}
-      {step.kind === 'ordering' ? <ol className="space-y-2">{order.map((id, index) => {const item = (step.items ?? []).find(entry => entry.id === id); return <li key={id} className="flex items-center gap-2 rounded-lg border border-line p-2 text-sm">
+      {step.kind === 'ordering' ? <ol className="space-y-2" data-ordering-list>{order.map((id, index) => {const item = (step.items ?? []).find(entry => entry.id === id); return <li key={id} data-order-index={index} draggable={!locked}
+        onDragStart={() => {dragIndex.current = index}} onDragOver={event => event.preventDefault()} onDrop={() => dropOn(index)} onDragEnd={() => {dragIndex.current = null}}
+        className="flex cursor-grab items-center gap-2 rounded-lg border border-line p-2 text-sm active:cursor-grabbing">
+        <GripVertical className="h-4 w-4 shrink-0 text-muted" aria-hidden />
         <span className="min-w-0 flex-1 break-words">{item?.label}</span>
         <Button type="button" size="xs" variant="ghost" disabled={locked || index === 0} aria-label={t('ui.academy.steps.moveUp')} onClick={() => move(index, -1)} icon={<ArrowUp className="h-3.5 w-3.5" />} />
         <Button type="button" size="xs" variant="ghost" disabled={locked || index === order.length - 1} aria-label={t('ui.academy.steps.moveDown')} onClick={() => move(index, 1)} icon={<ArrowDown className="h-3.5 w-3.5" />} />
       </li>})}</ol> : null}
-      {step.kind === 'matching' ? <div className="space-y-2">{(step.left ?? []).map(item => <label key={item.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-line p-2 text-sm">
-        <span className="min-w-0 flex-1 break-words">{item.label}</span>
-        <select className="ui-field" disabled={locked} value={pairs[item.id] ?? ''} aria-label={item.label} onChange={event => setPairs(previous => ({...previous, [item.id]: event.target.value}))}>
-          <option value="" disabled>—</option>
-          {(step.right ?? []).map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
-        </select>
-      </label>)}</div> : null}
+      {step.kind === 'matching' ? <div className="space-y-3" data-matching-board>
+        <div className="flex flex-wrap gap-2">{(step.left ?? []).map(item => <button key={item.id} type="button" data-match-left={item.id} disabled={locked} aria-pressed={selectedLeft === item.id}
+          onClick={() => setSelectedLeft(previous => previous === item.id ? null : item.id)}
+          className={'flex min-w-24 flex-col items-start gap-1 rounded-lg border p-2 text-sm ' + (selectedLeft === item.id ? 'border-brand bg-brand/10' : pairs[item.id] ? 'border-ok/40' : 'border-line')}>
+          <span className="break-words">{item.label}</span>
+          <span className={'text-xs ' + (pairs[item.id] ? 'text-ok' : 'text-muted')}>{pairs[item.id] ? (step.right ?? []).find(option => option.id === pairs[item.id])?.label : t('ui.academy.steps.matchEmpty')}</span>
+        </button>)}</div>
+        <div className="flex flex-wrap gap-2">{(step.right ?? []).map(option => <button key={option.id} type="button" data-match-right={option.id} disabled={locked || Object.values(pairs).includes(option.id)}
+          onClick={() => assignRight(option.id)}
+          className="rounded-full border border-line px-3 py-1.5 text-sm hover:border-brand disabled:opacity-40">{option.label}</button>)}</div>
+      </div> : null}
       <Button type="submit" size="sm" disabled={locked || !ready} icon={<Send className="h-3.5 w-3.5" />}>{t('ui.academy.steps.submit')}</Button>
     </form>}
   </div>

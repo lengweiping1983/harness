@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
-import {Check, Send, Sparkles, X} from 'lucide-react'
+import {Check, Flame, Send, Sparkles, X} from 'lucide-react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyCourse, AcademyLesson, AcademyMastery as AcademyMasteryView, AcademyProject, AcademyTutorTurn} from '@/types'
 import {academyApi, academyResumeLesson} from '@/lib/academy'
@@ -37,6 +37,7 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   const [skills, setSkills] = useState<Readonly<Record<string, string>>>({})
   const [masteryView, setMasteryView] = useState<AcademyMasteryView | null>(null)
   const [cumulativeMode, setCumulativeMode] = useState(false)
+  const [celebrate, setCelebrate] = useState(false)
   const [prefs, setPrefs] = useState<{large: boolean; reducedMotion: boolean}>(() => {
     try {const raw = JSON.parse(localStorage.getItem('harness.academy.prefs.v1') ?? '{}'); return {large: raw.large === true, reducedMotion: raw.reducedMotion === true}} catch {return {large: false, reducedMotion: false}}
   })
@@ -93,6 +94,13 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   useEffect(() => {if (checksDone) markDone('checks')}, [checksDone, markDone])
   useEffect(() => {if (note.trim()) markDone('note')}, [note, markDone])
   useEffect(() => {if (studyCompleted) markDone('finish')}, [studyCompleted, markDone])
+  /** 完成庆祝：短暂彩带爆发，尊重减少动效偏好；不阻塞交互。 */
+  useEffect(() => {
+    if (!studyCompleted || prefs.reducedMotion) return
+    setCelebrate(true)
+    const timer = setTimeout(() => setCelebrate(false), 1600)
+    return () => clearTimeout(timer)
+  }, [studyCompleted, prefs.reducedMotion])
 
   /** 到期独立重测优先于新内容：掌握学习先补旧缺口再前进。 */
   useEffect(() => {
@@ -185,6 +193,9 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
     data-reduced-motion={prefs.reducedMotion ? 'true' : undefined}
     style={prefs.large ? {zoom: 1.15} : undefined}
     onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}>
+    {celebrate ? <div data-confetti aria-hidden className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
+      {Array.from({length: 24}, (_, i) => <span key={i} className="academy-confetti-piece" style={{left: (i * 4.16) + '%', animationDelay: (i % 6) * 0.08 + 's', background: ['#22c55e', '#3b82f6', '#f59e0b', '#ec4899'][i % 4]}} />)}
+    </div> : null}
     <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-4 py-3">
       <div className="flex min-w-0 items-center gap-2">
         <Sparkles className="h-4 w-4 shrink-0 text-brand" aria-hidden />
@@ -217,8 +228,13 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
       <span className="rounded-full border border-line px-2 py-0.5">{t('ui.academy.studio.session.plan.reflect')}</span>
       {recommended && recommended.id !== lesson.id ? <span className="rounded-full border border-brand/40 bg-brand/10 px-2 py-0.5 text-brand">{t('ui.academy.studio.session.plan.recommended', {title: recommended.title})}</span> : null}
       <span className="ml-auto">{t('ui.academy.studio.session.estimate', {minutes: lesson.duration_minutes ?? 15})}</span>
+      <svg data-progress-ring width="26" height="26" viewBox="0 0 26 26" role="img" aria-label={t('ui.academy.studio.session.progress', {done: done.size, total: phases.length})}>
+        <circle cx="13" cy="13" r="11" fill="none" strokeWidth="3" className="stroke-line" />
+        <circle cx="13" cy="13" r="11" fill="none" strokeWidth="3" strokeLinecap="round" className="stroke-brand transition-all duration-500"
+          strokeDasharray={2 * Math.PI * 11} strokeDashoffset={2 * Math.PI * 11 * (1 - (phases.length ? done.size / phases.length : 0))} transform="rotate(-90 13 13)" />
+      </svg>
       <span data-studio-elapsed>{t('ui.academy.studio.session.elapsed', {minutes: Math.floor(elapsed / 60)})}</span>
-      {masteryView && (masteryView.streak_days ?? 0) > 0 ? <span className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-ok">{t('ui.academy.studio.session.streak', {days: masteryView.streak_days})}</span> : null}
+      {masteryView && (masteryView.streak_days ?? 0) > 0 ? <span className="flex items-center gap-1 rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-ok"><Flame className="h-3 w-3" aria-hidden />{t('ui.academy.studio.session.streak', {days: masteryView.streak_days})}</span> : null}
       {elapsed >= (lesson.duration_minutes ?? 15) * 60 ? <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-warn">{t('ui.academy.studio.session.rest')}</span> : null}
       <span aria-label={t('ui.academy.studio.session.progress', {done: done.size, total: phases.length})}>{t('ui.academy.studio.session.progress', {done: done.size, total: phases.length})}</span>
     </div>

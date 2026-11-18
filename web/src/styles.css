@@ -186,6 +186,8 @@ body {
 .workspace-action:disabled { opacity: .45; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .workspace-action { transition: none; } }
 /* 学习区显式减少动效偏好：覆盖系统设置之外的用户选择。 */
+.academy-confetti-piece { position: absolute; top: -12px; width: 8px; height: 12px; border-radius: 2px; opacity: 0.9; animation: academy-confetti-fall 1.5s ease-in forwards; }
+@keyframes academy-confetti-fall { to { transform: translateY(105vh) rotate(540deg); opacity: 0.2; } }
 [data-reduced-motion="true"] *, [data-reduced-motion="true"] *::before, [data-reduced-motion="true"] *::after {
   animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important;
 }
