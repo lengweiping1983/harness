@@ -1,0 +1,352 @@
+{
+  "schema": 1,
+  "id": "primary-math-money",
+  "version": "1.0.0",
+  "source_revision": "fixture-money-1",
+  "title_key": "title",
+  "description_key": "description",
+  "assumptions_key": "assumptions",
+  "references": [],
+  "band": "primary",
+  "lessons": [
+    {
+      "id": "coin-values",
+      "order": 1,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "coin-values.title",
+      "goal_key": "coin-values.goal",
+      "reading_key": "coin-values.reading",
+      "references": [],
+      "prerequisites": [],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "coin-values.worked.prompt",
+          "feedback_key": "coin-values.worked.fb",
+          "hint_keys": [
+            "coin-values.worked.hint"
+          ],
+          "content_key": "coin-values.worked.content"
+        },
+        {
+          "id": "total",
+          "kind": "numeric",
+          "prompt_key": "coin-values.total.prompt",
+          "feedback_key": "coin-values.total.fb",
+          "hint_keys": [
+            "coin-values.total.hint"
+          ],
+          "answer": 17,
+          "tolerance": 0
+        },
+        {
+          "id": "independent",
+          "kind": "choice",
+          "prompt_key": "coin-values.independent.prompt",
+          "feedback_key": "coin-values.independent.fb",
+          "hint_keys": [
+            "coin-values.independent.hint"
+          ],
+          "answer_id": "a",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "coin-values.independent.a.label",
+              "feedback_key": "coin-values.independent.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "coin-values.independent.b.label",
+              "feedback_key": "coin-values.independent.b.fb"
+            }
+          ]
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "coin-values.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "coin-values.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "coin-values.c1.a.label",
+              "feedback_key": "coin-values.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "coin-values.c1.b.label",
+              "feedback_key": "coin-values.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "making-change",
+      "order": 2,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "making-change.title",
+      "goal_key": "making-change.goal",
+      "reading_key": "making-change.reading",
+      "references": [],
+      "prerequisites": [
+        "coin-values"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage1",
+      "stage_goal_key": "stage1goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "making-change.worked.prompt",
+          "feedback_key": "making-change.worked.fb",
+          "hint_keys": [
+            "making-change.worked.hint"
+          ],
+          "content_key": "making-change.worked.content"
+        },
+        {
+          "id": "change",
+          "kind": "numeric",
+          "prompt_key": "making-change.change.prompt",
+          "feedback_key": "making-change.change.fb",
+          "hint_keys": [
+            "making-change.change.hint"
+          ],
+          "answer": 18,
+          "tolerance": 0
+        },
+        {
+          "id": "transfer-change",
+          "kind": "numeric",
+          "prompt_key": "making-change.transfer-change.prompt",
+          "feedback_key": "making-change.transfer-change.fb",
+          "hint_keys": [
+            "making-change.transfer-change.hint"
+          ],
+          "answer": 32,
+          "tolerance": 0,
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "making-change.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "making-change.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "making-change.c1.a.label",
+              "feedback_key": "making-change.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "making-change.c1.b.label",
+              "feedback_key": "making-change.c1.b.fb"
+            }
+          ]
+        }
+      ],
+      "struggle": {
+        "challenge_key": "making-change.struggle",
+        "window_minutes": 3
+      }
+    },
+    {
+      "id": "budget-plan",
+      "order": 3,
+      "mode": "study",
+      "milestone": false,
+      "title_key": "budget-plan.title",
+      "goal_key": "budget-plan.goal",
+      "reading_key": "budget-plan.reading",
+      "references": [],
+      "prerequisites": [
+        "making-change"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 15,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "budget-plan.worked.prompt",
+          "feedback_key": "budget-plan.worked.fb",
+          "hint_keys": [
+            "budget-plan.worked.hint"
+          ],
+          "content_key": "budget-plan.worked.content"
+        },
+        {
+          "id": "sum",
+          "kind": "numeric",
+          "prompt_key": "budget-plan.sum.prompt",
+          "feedback_key": "budget-plan.sum.fb",
+          "hint_keys": [
+            "budget-plan.sum.hint"
+          ],
+          "answer": 43,
+          "tolerance": 0
+        },
+        {
+          "id": "transfer-budget",
+          "kind": "choice",
+          "prompt_key": "budget-plan.transfer-budget.prompt",
+          "feedback_key": "budget-plan.transfer-budget.fb",
+          "hint_keys": [
+            "budget-plan.transfer-budget.hint"
+          ],
+          "answer_id": "b",
+          "options": [
+            {
+              "id": "a",
+              "label_key": "budget-plan.transfer-budget.a.label",
+              "feedback_key": "budget-plan.transfer-budget.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "budget-plan.transfer-budget.b.label",
+              "feedback_key": "budget-plan.transfer-budget.b.fb"
+            }
+          ],
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "budget-plan.c1.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "budget-plan.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "budget-plan.c1.a.label",
+              "feedback_key": "budget-plan.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "budget-plan.c1.b.label",
+              "feedback_key": "budget-plan.c1.b.fb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shopping-transfer",
+      "order": 4,
+      "mode": "study",
+      "milestone": true,
+      "title_key": "shopping-transfer.title",
+      "goal_key": "shopping-transfer.goal",
+      "reading_key": "shopping-transfer.reading",
+      "references": [],
+      "prerequisites": [
+        "budget-plan"
+      ],
+      "trace_labels": {},
+      "duration_minutes": 12,
+      "stage_key": "stage2",
+      "stage_goal_key": "stage2goal",
+      "steps": [
+        {
+          "id": "worked",
+          "kind": "explain",
+          "prompt_key": "shopping-transfer.worked.prompt",
+          "feedback_key": "shopping-transfer.worked.fb",
+          "hint_keys": [
+            "shopping-transfer.worked.hint"
+          ],
+          "content_key": "shopping-transfer.worked.content"
+        },
+        {
+          "id": "total",
+          "kind": "numeric",
+          "prompt_key": "shopping-transfer.total.prompt",
+          "feedback_key": "shopping-transfer.total.fb",
+          "hint_keys": [
+            "shopping-transfer.total.hint"
+          ],
+          "answer": 35,
+          "tolerance": 0
+        },
+        {
+          "id": "transfer-chain",
+          "kind": "numeric",
+          "prompt_key": "shopping-transfer.transfer-chain.prompt",
+          "feedback_key": "shopping-transfer.transfer-chain.fb",
+          "hint_keys": [
+            "shopping-transfer.transfer-chain.hint"
+          ],
+          "answer": 15,
+          "tolerance": 0,
+          "transfer": true
+        }
+      ],
+      "knowledge_checks": [
+        {
+          "id": "c1",
+          "prompt_key": "shopping-transfer.c1.prompt",
+          "answer_id": "a",
+          "hint_keys": [
+            "shopping-transfer.c1.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "shopping-transfer.c1.a.label",
+              "feedback_key": "shopping-transfer.c1.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "shopping-transfer.c1.b.label",
+              "feedback_key": "shopping-transfer.c1.b.fb"
+            }
+          ]
+        },
+        {
+          "id": "c2",
+          "prompt_key": "shopping-transfer.c2.prompt",
+          "answer_id": "b",
+          "hint_keys": [
+            "shopping-transfer.c2.hint"
+          ],
+          "options": [
+            {
+              "id": "a",
+              "label_key": "shopping-transfer.c2.a.label",
+              "feedback_key": "shopping-transfer.c2.a.fb"
+            },
+            {
+              "id": "b",
+              "label_key": "shopping-transfer.c2.b.label",
+              "feedback_key": "shopping-transfer.c2.b.fb"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
