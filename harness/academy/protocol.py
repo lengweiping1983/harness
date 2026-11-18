@@ -122,7 +122,7 @@ SCHEMAS = {
     'AcademyStepsView': obj({'steps': array(ref('AcademyStepPublic')), 'responses': array(ref('AcademyStepResponse')), 'completed': BOOL}),
     'AcademyStepAnswer': obj({'request_id': REQUEST, 'lesson_id': TEXT, 'step_id': TEXT,
         'response': {}, 'confidence': CONFIDENCE, 'diagnosis': TEXT}, ['request_id', 'lesson_id', 'step_id', 'response']),
-    'AcademyStepResult': obj({'correct': BOOL, 'feedback': TEXT, 'scaffold': TEXT, 'number_line': ref('AcademyNumberLineMark'), 'completed': BOOL,
+    'AcademyStepResult': obj({'correct': BOOL, 'feedback': TEXT, 'scaffold': TEXT, 'hints': array(TEXT), 'number_line': ref('AcademyNumberLineMark'), 'completed': BOOL,
         'calibration': CALIBRATION, 'step': ref('AcademyStepPublic'), 'response': ref('AcademyStepResponse')}, ['correct', 'completed', 'step', 'response']),
     'AcademyWorldTask': obj({'kind': {'type': 'string', 'enum': ['fraction-bar', 'group-array', 'balance-scale', 'float-sink']}}),
     'AcademyWorldOption': obj({'id': TEXT, 'label': TEXT}),

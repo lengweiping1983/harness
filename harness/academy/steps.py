@@ -8,6 +8,8 @@ from __future__ import annotations
 import time
 import uuid
 
+from harness.i18n import tr
+
 from .errors import AcademyError
 
 STEP_KINDS = ('explain', 'numeric', 'choice', 'ordering', 'matching')
@@ -154,7 +156,7 @@ class AcademySteps:
                                 transfer=any(step.get('transfer') and answered[step['id']]['correct'] for step in steps))
             self.service._mark_started()
             self.store.put('step-progress', progress)
-            feedback = step['feedback'] if correct else (step['hints'][0] if step.get('hints') else None)
+            feedback = step['feedback'] if correct else tr('ui.academy.steps.tryAgain')
             scaffold = None if correct else step.get('scaffold')
             number_line = None
             if step['kind'] == 'numeric' and step.get('number_line') and type(normalized) in (int, float):
@@ -176,6 +178,8 @@ class AcademySteps:
                 result['scaffold'] = scaffold
             if number_line is not None:
                 result['number_line'] = number_line
+            if not correct and step.get('hints'):
+                result['hints'] = step['hints']
             if calibration is not None:
                 result['calibration'] = calibration
             # 回执契约：步骤结果嵌套在 result.step，公开步骤在其 step 字段。

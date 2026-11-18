@@ -95,6 +95,8 @@ class StepSessionTests(unittest.TestCase):
         wrong = self.answer('denominator', 5)
         self.assertFalse(wrong['result']['step']['correct'])
         self.assertIsNotNone(wrong['result']['step']['feedback'])
+        self.assertTrue(wrong['result']['step']['hints'])
+        self.assertNotEqual(wrong['result']['step']['feedback'], wrong['result']['step']['hints'][0])
         retry = self.answer('denominator', 4, request='ans-denominator-2')
         self.assertTrue(retry['result']['step']['correct'])
         self.assertEqual(retry['result']['step']['response']['attempts'], 2)

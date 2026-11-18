@@ -2053,6 +2053,7 @@ export interface AcademyStepResult {
   correct: boolean
   feedback?: string
   scaffold?: string
+  hints?: Array<string>
   number_line?: AcademyNumberLineMark
   completed: boolean
   calibration?: 'calibrated' | 'lucky' | 'blindspot' | 'expected' | 'repaired'

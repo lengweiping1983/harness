@@ -32087,6 +32087,12 @@
           "scaffold": {
             "type": "string"
           },
+          "hints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "number_line": {
             "$ref": "#/components/schemas/AcademyNumberLineMark"
           },

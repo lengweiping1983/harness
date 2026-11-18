@@ -19,6 +19,7 @@ const course={id:'c1',version:'1',origin:'provided',source_revision:'f',title:'C
 const project={id:'p1',course_id:'c1',course_version:'1',name:'Lab',revision:1,active_lesson_id:'l1',course_fingerprint:'a'.repeat(64),created_at:1,progress:[],root:'/x',fingerprint:'a'.repeat(64),sandbox:'unavailable'}
 function App(){useLocale();return React.createElement('div',{className:'space-y-6 p-4'},
  React.createElement('div',{id:'order-card'},React.createElement(AcademyStepCard,{step:ordering,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
+ React.createElement('div',{id:'hint-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:{correct:false,text:'Not yet.',hints:['First hint','Second hint','Third hint']},onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'num-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'match-card'},React.createElement(AcademyStepCard,{step:matching,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'world-card'},React.createElement(AcademyWorldCard,{kind:'fraction-bar',session:{id:'w1',project_id:'p1',lesson_id:'l1',request_id:'r1',kind:'fraction-bar',params:{parts:4,shaded:1},challenge:{prompt:'Shade it.',options:[],target:{}},status:'observing',observations:[{params:{parts:4,shaded:1},state:{parts:4,shaded:1,label:'1/4'},at:1}],note:'',created_at:1,completed_at:null},params:{parts:4,shaded:1},note:'',busy:false,onParams:p=>{window.shaded=p.shaded},onNote:()=>{},onStart:()=>{},onPredict:()=>{},onObserve:()=>{},onComplete:()=>{}})),
@@ -55,6 +56,12 @@ await browserScenario(async({server,browser}) => {
     await board.locator('[data-match-right="r1"]').click()
     await board.locator('[data-match-left="l1"]').getByText('Right one',{exact:true}).waitFor()
     assert.equal(await board.locator('[data-match-right="r1"]').isDisabled(),true,'assigned right disabled')
+    // 渐进式提示：初始只揭示第一条，点击揭示下一条。
+    const hintBox=page.locator('#hint-card [data-progressive-hints]')
+    await hintBox.getByText('First hint',{exact:true}).waitFor()
+    assert.equal(await hintBox.getByText('Second hint',{exact:true}).count(),0,'second hint hidden initially')
+    await page.locator('#hint-card [data-next-hint]').click()
+    await hintBox.getByText('Second hint',{exact:true}).waitFor()
     // 可探索数轴：点/拖数轴点直接作答。
     const slider=page.locator('#num-card [role="slider"]')
     const box=await slider.boundingBox()

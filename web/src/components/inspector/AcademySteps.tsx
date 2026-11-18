@@ -7,7 +7,7 @@ import {noticeText} from '@/lib/noticeText'
 import {Button} from '@/components/ui/primitives'
 import {AcademyVoiceButton} from './AcademyVoice'
 
-type Feedback = {correct: boolean; text: string; scaffold?: string; numberLine?: {min: number; max: number; value: number}; calibration?: string}
+type Feedback = {correct: boolean; text: string; scaffold?: string; hints?: string[]; numberLine?: {min: number; max: number; value: number}; calibration?: string}
 
 /** 作答前的元认知置信度档位。 */
 export type AcademyConfidence = 'guess' | 'unsure' | 'sure'
@@ -55,6 +55,7 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
   const [past, setPast] = useState<string[][]>([])
   const [future, setFuture] = useState<string[][]>([])
   const [selectedLeft, setSelectedLeft] = useState<string | null>(null)
+  const [hintCount, setHintCount] = useState(1)
   const locked = busy || feedback?.correct === true
   /** 拖拽排序：直接操纵卡片顺序；键盘上下按钮保留为无障碍等价路径。 */
   const pushHistory = () => {setPast(previous => [...previous, order]); setFuture([])}
@@ -131,6 +132,11 @@ export function AcademyStepCard({step, busy, feedback, cheer, blindspot, onSubmi
       <p className="mt-1 text-xs text-muted">{t('ui.academy.steps.compareHint')}</p>
     </details> : null}
     {feedback && !feedback.correct && feedback.scaffold ? <div className="rounded-lg border border-warn/40 bg-canvas p-3 text-sm leading-reading"><p className="text-xs font-medium text-warn">{t('ui.academy.steps.scaffoldLabel')}</p><p className="mt-1 whitespace-pre-wrap">{feedback.scaffold}</p></div> : null}
+    {feedback && !feedback.correct && feedback.hints?.length ? <div className="space-y-1 rounded-lg border border-line p-3 text-sm leading-reading" data-progressive-hints>
+      <p className="text-xs font-medium text-muted">{t('ui.academy.steps.hintsLabel')}</p>
+      <ol className="list-decimal space-y-1 pl-4">{feedback.hints.slice(0, hintCount).map((hint, index) => <li key={index} className="whitespace-pre-wrap">{hint}</li>)}</ol>
+      {hintCount < feedback.hints.length ? <Button type="button" size="xs" variant="ghost" data-next-hint onClick={() => setHintCount(count => count + 1)}>{t('ui.academy.steps.nextHint', {number: hintCount + 1, total: feedback.hints.length})}</Button> : null}
+    </div> : null}
     {feedback?.numberLine ? <AcademyNumberLine min={feedback.numberLine.min} max={feedback.numberLine.max} value={feedback.numberLine.value} /> : null}
     {feedback?.correct ? <Button size="sm" onClick={onNext}>{t('ui.academy.steps.next')}</Button> : <form className="space-y-2"
       onCompositionStart={() => {composing.current = true}} onCompositionEnd={() => {composing.current = false}}
@@ -253,7 +259,7 @@ export function AcademySteps({projectId, lesson, active, disabled, onCompleted, 
     }
     clearPending()
     const result = receipt.result.step
-    setFeedback({correct: result.correct, text: result.feedback ?? t(result.correct ? 'ui.academy.steps.correct' : 'ui.academy.steps.tryAgain'), scaffold: result.scaffold ?? undefined, numberLine: result.number_line ?? undefined, calibration: result.calibration ?? undefined})
+    setFeedback({correct: result.correct, text: result.feedback ?? t(result.correct ? 'ui.academy.steps.correct' : 'ui.academy.steps.tryAgain'), scaffold: result.scaffold ?? undefined, hints: result.hints ?? undefined, numberLine: result.number_line ?? undefined, calibration: result.calibration ?? undefined})
     if (result.calibration) onCalibration?.(result.calibration)
     if (result.completed) setRevision(value => value + 1)
   }
