@@ -1,7 +1,7 @@
 import {useEffect, useId, useRef, useState} from 'react'
 import {t, useLocale} from '@/i18n'
 import type {AcademyCourse, AcademyEngagement, AcademyMastery as AcademyMasteryView, AcademyProject, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState, AcademyStudyAnswer, NoticeText} from '@/types'
-import {academyApi, academyBadges, academyExportEvidence, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, isAcademyUnconfirmedWrite} from '@/lib/academy'
+import {academyApi, academyBadges, academyExportEvidence, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, academyReviewOrder, isAcademyUnconfirmedWrite} from '@/lib/academy'
 import {ACADEMY_GOAL_EVENT, academyDailyGoalRead, academyTodayKey} from '@/lib/academyGoal'
 import {noticeText} from '@/lib/noticeText'
 import {cn} from '@/lib/utils'
@@ -221,6 +221,9 @@ export function AcademyReviewSession({projectId, active, disabled = false, onCom
   const [pending, setPending] = useState<PendingReview | null>(null)
   const pendingKey = 'academy.mastery.pending.' + projectId
   const completedRef = useRef(onCompleted); completedRef.current = onCompleted
+  const [weakestFirst, setWeakestFirst] = useState(false)
+  // 复习顺序可选：默认阶段交错（Rohrer）；"最弱优先"按可提取性升序，先提取记忆最弱者（合意困难）。
+  const orderedQueue = academyReviewOrder(queue, weakestFirst)
 
   useEffect(() => {
     try {
@@ -268,7 +271,7 @@ export function AcademyReviewSession({projectId, active, disabled = false, onCom
     setRevision(value => value + 1)
   }
   const submit = async (answers: AcademyStudyAnswer[]) => {
-    const item = queue[0]
+    const item = orderedQueue[0]
     if (disabled || busy || pending || !item) return
     const identity: PendingReview = {requestId: crypto.randomUUID(), lessonId: item.lesson_id}
     try {sessionStorage.setItem(pendingKey, JSON.stringify({...identity, projectId}))} catch {setError({key: 'ui.academy.error.store-invalid'})}
@@ -302,9 +305,13 @@ export function AcademyReviewSession({projectId, active, disabled = false, onCom
       {!result.review.correct && onOpenLesson ? <Button size="xs" variant="subtle" data-academy-restudy onClick={() => onOpenLesson(result.review.lesson_id)}>{t('ui.academy.mastery.restudy')}</Button> : null}
     </div> : null}
     {queue.length ? <Section title={t(mode === 'cumulative' ? 'ui.academy.mastery.cumulative' : 'ui.academy.mastery.reviewHeading')}>
-      {mode === 'cumulative' ? <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.cumulativeHint')}</p> : queue.length > 1 ? <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.interleavedHint')}</p> : null}
+      {mode === 'cumulative' ? <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.cumulativeHint')}</p> : queue.length > 1 ? <p className="mb-2 text-xs leading-reading text-muted">{t(weakestFirst ? 'ui.academy.mastery.weakestHint' : 'ui.academy.mastery.interleavedHint')}</p> : null}
+      {mode === 'due' && queue.length > 1 ? <div role="group" aria-label={t('ui.academy.mastery.orderLabel')} className="mb-2 flex rounded-lg border border-line p-0.5 text-xs">
+        {([false, true] as const).map(weak => <button key={String(weak)} type="button" data-review-order={weak ? 'weakest' : 'interleaved'} aria-pressed={weakestFirst === weak} onClick={() => setWeakestFirst(weak)}
+          className={cn('rounded-md px-2 py-1', weakestFirst === weak ? 'bg-brand/15 font-medium text-brand' : 'text-muted')}>{t(weak ? 'ui.academy.mastery.orderWeakest' : 'ui.academy.mastery.orderInterleaved')}</button>)}
+      </div> : null}
       <p className="mb-2 text-xs leading-reading text-muted">{t('ui.academy.mastery.reviewHint')}</p>
-      <AcademyReviewCard key={queue[0].lesson_id + ':' + revision} item={queue[0]} busy={busy || disabled || pending !== null} onSubmit={answers => void submit(answers)} />
+      <AcademyReviewCard key={orderedQueue[0].lesson_id + ':' + revision} item={orderedQueue[0]} busy={busy || disabled || pending !== null} onSubmit={answers => void submit(answers)} />
     </Section> : loaded ? <p className="text-sm leading-reading text-muted">{t('ui.academy.mastery.queueEmpty')}</p> : active ? <p role="status" className="flex gap-2 text-sm text-muted"><Spinner />{t('ui.academy.loading')}</p> : null}
   </div>
 }

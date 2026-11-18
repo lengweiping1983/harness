@@ -5,7 +5,7 @@ import {setLocale} from '@/i18n'
 import {AcademyEngagementStats, AcademyMastery, AcademyReport, AcademyReviewCard, AcademyReviewSession, AcademySkillList} from '@/components/inspector/AcademyMastery'
 import {AcademyMistakeJournal} from '@/components/inspector/AcademyMistakeJournal'
 import {AcademyMeasurement} from '@/components/inspector/AcademyMeasurement'
-import {academyEfficacyMetrics, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete} from '../academy'
+import {academyEfficacyMetrics, academyMasteryCounts, academyReceiptMatches, academyReviewAnswers, academyReviewComplete, academyReviewOrder} from '../academy'
 import type {AcademyMistake, AcademyReceipt, AcademyReview, AcademyReviewItem, AcademySkillState} from '@/types'
 
 afterEach(async () => {await setLocale('zh-CN')})
@@ -258,6 +258,13 @@ it('shows focused learning time per skill when recorded', async () => {
   await setLocale('zh-CN')
   const chinese = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({learning_seconds: 90})]}))
   expect(chinese).toContain('专注 2 分钟')
+})
+
+it('orders review queue interleaved by default and weakest-first on demand', () => {
+  const queue = [{retrievability: 0.8, id: 'a'}, {retrievability: 0.3, id: 'b'}, {retrievability: 0.6, id: 'c'}]
+  expect(academyReviewOrder(queue, false).map(item => item.id)).toEqual(['a', 'b', 'c'])
+  expect(academyReviewOrder(queue, true).map(item => item.id)).toEqual(['b', 'c', 'a'])
+  expect(queue.map(item => item.id)).toEqual(['a', 'b', 'c'])
 })
 
 it('aggregates efficacy metrics with honest null states and minutes per durable skill', () => {

@@ -8,7 +8,7 @@ import {createRoot} from 'react-dom/client'
 import {AcademyStepCard} from '/src/components/inspector/AcademySteps.tsx'
 import {AcademyWorldCard} from '/src/components/inspector/AcademyWorld.tsx'
 import {AcademyStudio} from '/src/components/inspector/AcademyStudio.tsx'
-import {AcademyReviewCard, AcademyReport} from '/src/components/inspector/AcademyMastery.tsx'
+import {AcademyReviewCard, AcademyReport, AcademyReviewSession} from '/src/components/inspector/AcademyMastery.tsx'
 import {AcademyDailyGoal} from '/src/components/inspector/AcademyDailyGoal.tsx'
 import {AcademyMistakeJournal} from '/src/components/inspector/AcademyMistakeJournal.tsx'
 import {AcademyMeasurement} from '/src/components/inspector/AcademyMeasurement.tsx'
@@ -38,6 +38,8 @@ const stepsCourse={...course,lessons:[stepsLesson]}
 const journalMistakes=[{lesson_id:'m1',lesson_title:'m1',step_id:'s1',prompt:'How many?',response:'9',confidence:'sure',diagnosis:'Unequal parts',blindspot:true,repaired:false,at:100},{lesson_id:'m2',lesson_title:'m2',step_id:'s2',prompt:'Which?',response:'0.3',blindspot:true,repaired:true,at:90}]
 academyApi.steps=async()=>({ok:true,data:{steps:stepsLesson.steps,responses:[{step_id:'s1',correct:false,response:'4',attempts:1,at:1,confidence:'sure'}],completed:false}})
 academyApi.logTime=async(project,body)=>{window.timeLogged.push(body);return {ok:true,data:{request_id:body.request_id,status:'ready',result:{learning_time:{lesson_id:body.lesson_id,seconds:body.seconds}}}}}
+const reviewQueueItem=(id,retrievability)=>({lesson_id:id,title:id,goal:'g',stage:'s',retrievability,overdue_days:1,checks:[{id:'q',prompt:'Q?',options:[{id:'a',label:'A'},{id:'b',label:'B'}]}]})
+academyApi.reviews=async()=>({ok:true,data:{reviews:[reviewQueueItem('rA',0.8),reviewQueueItem('rB',0.3)]}})
 function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);window.setCoachTurns=setCoachTurns;return React.createElement('div',{className:'space-y-6 p-4'},
  React.createElement('div',{id:'order-card'},React.createElement(AcademyStepCard,{step:ordering,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'hint-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:{correct:false,text:'Not yet.',hints:['First hint','Second hint','Third hint']},onSubmit:()=>{},onNext:()=>{}})),
@@ -52,6 +54,7 @@ function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);w
  React.createElement('div',{id:'daily-goal'},React.createElement(AcademyDailyGoal,{activity:goalActivity})),
  React.createElement('div',{id:'goal-report'},React.createElement(AcademyReport,{mastery:goalMastery})),
  React.createElement('div',{id:'measurement'},React.createElement(AcademyMeasurement,{mastery:goalMastery})),
+ React.createElement('div',{id:'review-session'},React.createElement(AcademyReviewSession,{projectId:'p6',active:true,onOpenLesson:()=>{}})),
  React.createElement('div',{id:'studio-halo',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,haloProps)),
  React.createElement('div',{id:'studio-coach',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{...liveProps,project:{...project,id:'p4'},tutorTurns:coachTurns})),
  React.createElement('div',{id:'studio-done',style:{height:600,position:'relative',transform:'translateZ(0)'}},React.createElement(AcademyStudio,{course,project,lesson,active:false,disabled:false,tutorTurns:[],struggleRevealed:false,checkAnswers:new Map(),note:'done',studyReady:true,studyCompleted:true,onClose:()=>{},onOpenLesson:()=>{},onAskCoach:p=>{window.asked.push(p)},onStrugglePhase:()=>{},onCheckAnswer:()=>{},onNote:()=>{},onComplete:()=>{},onRefresh:()=>{}})))}
@@ -240,6 +243,13 @@ await browserScenario(async({server,browser}) => {
     assert.ok((await page.locator('#goal-report').innerText()).includes('Transfer pass rate'),'report shows transfer pass rate')
     assert.ok((await page.locator('#measurement [data-measurement-transfer]').innerText()).includes('50%'),'measurement shows transfer pass rate')
     assert.ok((await page.locator('#measurement').innerText()).includes('Rigorous measurement protocol'),'measurement shows the protocol')
+    // 复习顺序：默认交错保持宿主序；最弱优先按可提取性升序。
+    const session=page.locator('#review-session [data-academy-review-session]')
+    await session.locator('[data-academy-review-lesson="rA"]').waitFor()
+    await session.locator('[data-review-order="weakest"]').click()
+    await session.locator('[data-academy-review-lesson="rB"]').waitFor()
+    await session.locator('[data-review-order="interleaved"]').click()
+    await session.locator('[data-academy-review-lesson="rA"]').waitFor()
     assert.equal(await page.locator('#studio-halo [data-coach-opening]').count(),1,'coach opening remembers learner state')
     assert.ok((await page.locator('#studio-halo [data-coach-opening]').innerText()).includes("repaired a blindspot in 'Lesson'"),'coach celebrates recent repair (growth mindset)')
     await page.waitForFunction(key=>{const el=document.querySelector('#goal-report [data-activity-day="'+key+'"]');return Boolean(el&&el.className.includes('ring-ok'))},todayKey)

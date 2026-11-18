@@ -252,6 +252,11 @@ export function academyMasteryCounts(mastery: Pick<AcademyMastery, 'skills'>): {
     fresh: mastery.skills.filter(skill => skill.state === 'new').length}
 }
 
+/** 复习顺序：默认保持宿主阶段交错（Rohrer）；最弱优先按可提取性升序，先提取记忆最弱者（合意困难）。 */
+export function academyReviewOrder<T extends {retrievability: number}>(queue: ReadonlyArray<T>, weakestFirst: boolean): T[] {
+  return weakestFirst ? [...queue].sort((a, b) => a.retrievability - b.retrievability) : [...queue]
+}
+
 /** 学习效果实测指标：从证据账本聚合延迟保持/迁移/修复/效率，全部可核验；null 表示尚无相应证据，不投影。 */
 export interface AcademyEfficacyMetrics {
   delayedRate: number | null; delayedCorrect: number; delayedAttempts: number
