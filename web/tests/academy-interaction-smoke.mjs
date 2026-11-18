@@ -15,7 +15,7 @@ import {AcademySkillMap} from '/src/components/inspector/AcademySkillMap.tsx'
 import {academyApi} from '/src/lib/academy.ts'
 import {setLocale, useLocale} from '/src/i18n/index.ts'
 import '/src/styles.css'
-window.locale=setLocale;window.shaded=null;window.asked=[];window.reviewed=null;window.mapOpened=[];window.stepsAsked=[];window.journalOpened=[]
+window.locale=setLocale;window.shaded=null;window.asked=[];window.reviewed=null;window.mapOpened=[];window.stepsAsked=[];window.journalOpened=[];window.timeLogged=[]
 const ordering={id:'ord',kind:'ordering',prompt:'Order the steps.',feedback:'Think order.',items:[{id:'a',label:'Alpha'},{id:'b',label:'Beta'},{id:'c',label:'Gamma'}]}
 const numeric={id:'num',kind:'numeric',prompt:'Pick on the line.',feedback:'Think.',tolerance:0,number_line:{min:0,max:12}}
 const matching={id:'mat',kind:'matching',prompt:'Pair them.',feedback:'Match.',left:[{id:'l1',label:'Left one'},{id:'l2',label:'Left two'}],right:[{id:'r1',label:'Right one'},{id:'r2',label:'Right two'}]}
@@ -36,6 +36,7 @@ const stepsLesson={...lesson,id:'l2',steps:[{id:'s1',kind:'numeric',prompt:'Pick
 const stepsCourse={...course,lessons:[stepsLesson]}
 const journalMistakes=[{lesson_id:'m1',lesson_title:'m1',step_id:'s1',prompt:'How many?',response:'9',confidence:'sure',diagnosis:'Unequal parts',blindspot:true,repaired:false,at:100},{lesson_id:'m2',lesson_title:'m2',step_id:'s2',prompt:'Which?',response:'0.3',blindspot:true,repaired:true,at:90}]
 academyApi.steps=async()=>({ok:true,data:{steps:stepsLesson.steps,responses:[{step_id:'s1',correct:false,response:'4',attempts:1,at:1,confidence:'sure'}],completed:false}})
+academyApi.logTime=async(project,body)=>{window.timeLogged.push(body);return {ok:true,data:{request_id:body.request_id,status:'ready',result:{learning_time:{lesson_id:body.lesson_id,seconds:body.seconds}}}}}
 function App(){useLocale();const [coachTurns,setCoachTurns]=React.useState([]);window.setCoachTurns=setCoachTurns;return React.createElement('div',{className:'space-y-6 p-4'},
  React.createElement('div',{id:'order-card'},React.createElement(AcademyStepCard,{step:ordering,busy:false,feedback:null,onSubmit:()=>{},onNext:()=>{}})),
  React.createElement('div',{id:'hint-card'},React.createElement(AcademyStepCard,{step:numeric,busy:false,feedback:{correct:false,text:'Not yet.',hints:['First hint','Second hint','Third hint']},onSubmit:()=>{},onNext:()=>{}})),
@@ -146,6 +147,13 @@ await browserScenario(async({server,browser}) => {
     // 记忆光环：旅程节点以 FSRS 可提取性渲染记忆保持环。
     await page.locator('#studio-halo [data-journey-memory]').waitFor()
     assert.equal(await page.locator('#studio-halo [data-journey-memory]').getAttribute('aria-label'),'Memory retention 62%','halo shows retrievability')
+    // 专注时长证据：暂停（隐藏）触发 flush，按课次记录秒数。
+    await page.waitForTimeout(1200)
+    await page.evaluate(()=>{Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'))})
+    await page.waitForFunction(()=>window.timeLogged.length>0)
+    const logged=await page.evaluate(()=>window.timeLogged.find(e=>e.lesson_id==='l1'))
+    assert.ok(logged&&logged.seconds>=1,'focused time logged for the active lesson')
+    await page.evaluate(()=>{Object.defineProperty(document,'hidden',{value:false,configurable:true});document.dispatchEvent(new Event('visibilitychange'))})
     // 技能地图：先修边＋记忆光环，点击/键盘开课。
     const map=page.locator('#skill-map [data-academy-skill-map]')
     await map.locator('[data-skill-map-node]').first().waitFor()

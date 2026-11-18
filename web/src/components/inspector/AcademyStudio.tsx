@@ -146,7 +146,29 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   }, [active, project.id])
   useEffect(() => {if (dueCount > 0 && !manual.current && !doneRef.current.has('review')) setPhase('review')}, [dueCount])
 
-  /** 专注计时：隐藏标签页暂停计时与轮询，回到前台继续；到预计用时给出休息提示。 */
+  const elapsedRef = useRef(0)
+  const flushedRef = useRef(0)
+  const pendingTimeRef = useRef<{requestId: string; seconds: number} | null>(null)
+  const flushingTimeRef = useRef(false)
+  /** 专注时长增量作为效率证据 flush；同一 chunk 用同一请求号幂等重试，失败/未知保留待下次，不重放为新请求。 */
+  const flushTime = useCallback(() => {
+    if (!active || flushingTimeRef.current) return
+    let chunk = pendingTimeRef.current
+    if (!chunk) {
+      const delta = elapsedRef.current - flushedRef.current
+      if (delta <= 0) return
+      chunk = {requestId: crypto.randomUUID(), seconds: Math.min(delta, 3600)}
+      pendingTimeRef.current = chunk
+    }
+    const pending = chunk
+    flushingTimeRef.current = true
+    void academyApi.logTime(project.id, {request_id: pending.requestId, lesson_id: lesson.id, seconds: pending.seconds}).then(outcome => {
+      flushingTimeRef.current = false
+      if (outcome.ok) {flushedRef.current += pending.seconds; pendingTimeRef.current = null}
+    }).catch(() => {flushingTimeRef.current = false})
+  }, [active, project.id, lesson.id])
+
+  /** 专注计时：隐藏标签页暂停计时与轮询，回到前台继续；到预计用时给出休息提示。计时增量周期性与暂停/卸载时 flush 为学习时长证据。 */
   useEffect(() => {
     const onVisibility = () => setVisible(!document.hidden)
     document.addEventListener('visibilitychange', onVisibility)
@@ -154,9 +176,13 @@ export function AcademyStudio({course, project, lesson, active, disabled, tutorT
   }, [])
   useEffect(() => {
     if (!active || !visible) return
-    const timer = setInterval(() => setElapsed(value => value + 1), 1000)
-    return () => clearInterval(timer)
-  }, [active, visible])
+    const timer = setInterval(() => {
+      elapsedRef.current += 1
+      setElapsed(elapsedRef.current)
+      if (elapsedRef.current - flushedRef.current >= 60) flushTime()
+    }, 1000)
+    return () => {clearInterval(timer); flushTime()}
+  }, [active, visible, flushTime])
 
   /** 对话流自动滚动到最新内容；仅内容签名变化时滚动，尊重减少动效偏好。 */
   useEffect(() => {

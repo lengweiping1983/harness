@@ -4769,6 +4769,7 @@
   "ui.academy.report.immediate": "即时正确率",
   "ui.academy.report.delayedRate": "延迟正确率",
   "ui.academy.mastery.delayedRate": "延迟正确率 {percent}%",
+  "ui.academy.mastery.focusTime": "专注 {minutes} 分钟",
   "ui.academy.report.sureCorrect": "高确信答对",
   "ui.academy.report.sureWrong": "高确信答错（盲点）",
   "ui.academy.report.guessCorrect": "猜测答对",

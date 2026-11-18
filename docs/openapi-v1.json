@@ -21744,6 +21744,70 @@
         ]
       }
     },
+    "/api/v1/academy/projects/{project_id}/learning-time": {
+      "post": {
+        "operationId": "post_api_v1_academy_projects_project_id_learning_time",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademyLogTime"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/academy/receipts/{request_id}": {
       "get": {
         "operationId": "get_api_v1_academy_receipts_request_id",
@@ -32817,6 +32881,10 @@
           },
           "reviews": {
             "$ref": "#/components/schemas/AcademySkillReviews"
+          },
+          "learning_seconds": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [
@@ -32831,6 +32899,46 @@
           "last_evidence_at",
           "evidence_count",
           "reviews"
+        ]
+      },
+      "AcademyLearningTime": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lesson_id": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "lesson_id",
+          "seconds"
+        ]
+      },
+      "AcademyLogTime": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "lesson_id": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600
+          }
+        },
+        "required": [
+          "request_id",
+          "lesson_id",
+          "seconds"
         ]
       },
       "AcademyEngagement": {
@@ -33173,6 +33281,9 @@
           },
           "step": {
             "$ref": "#/components/schemas/AcademyStepResult"
+          },
+          "learning_time": {
+            "$ref": "#/components/schemas/AcademyLearningTime"
           },
           "backup_checkpoint_id": {
             "type": "string"

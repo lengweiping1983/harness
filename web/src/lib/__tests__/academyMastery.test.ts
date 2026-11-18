@@ -248,6 +248,17 @@ it('shows transfer pass rate only when transfer steps were attempted', async () 
   expect(chinese).toContain('100%')
 })
 
+it('shows focused learning time per skill when recorded', async () => {
+  await setLocale('en')
+  const html = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({learning_seconds: 120}), skill({lesson_id: 'decimals', title: 'Decimals', learning_seconds: 0})]}))
+  expect(html).toContain('data-skill-focus="120"')
+  expect(html).toContain('2 min focused')
+  expect(html).not.toContain('data-skill-focus="0"')
+  await setLocale('zh-CN')
+  const chinese = renderToStaticMarkup(createElement(AcademySkillList, {skills: [skill({learning_seconds: 90})]}))
+  expect(chinese).toContain('专注 2 分钟')
+})
+
 it('renders the mastery entry collapsed without fetching when inactive', async () => {
   await setLocale('en')
   const html = renderToStaticMarkup(createElement(AcademyMastery, {projectId: 'project', active: false}))

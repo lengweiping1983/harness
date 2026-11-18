@@ -2,7 +2,7 @@ import {isUnconfirmedWrite, request as httpRequest} from './http'
 import {hasTranslation} from '@/i18n'
 import type { AcademyAssessmentDimension, AcademyCheckpoint, AcademyCourse, AcademyCourseSummary, AcademyDesign, AcademyDimensionId, AcademyFile, AcademyLesson, AcademyModelRun, AcademyProject, AcademyReceipt, AcademyRestorePreview, AcademyRun, AcademySourceFile, AcademySubmission, AcademyTutorTurn, AcademyMastery, AcademyReviewItem, AcademyTeachQuiz, AcademyTeachMisconception, AcademyStruggleView, AcademyWorldView, AcademyStepsView } from '@/types'
 import type {ApiResult, RequestOptions} from './http'
-import type { AcademyCompleteStudy, AcademyCreateDesign, AcademyCreateProject, AcademyExecute, AcademyModelRunRequest, AcademyRestore, AcademySaveCheckpoint, AcademyStartLesson, AcademyWriteFile, AcademySubmit, AcademyTutorRequest, AcademyTutorStop, AcademyModelStop, AcademyReviewRequest, AcademyTeachQuizRequest, AcademyStruggleStart, AcademyStruggleAttempt, AcademyStruggleReveal, AcademyWorldStart, AcademyWorldPredict, AcademyWorldObserve, AcademyWorldComplete, AcademyStepAnswer } from './protocol.generated'
+import type { AcademyCompleteStudy, AcademyCreateDesign, AcademyCreateProject, AcademyExecute, AcademyModelRunRequest, AcademyRestore, AcademySaveCheckpoint, AcademyStartLesson, AcademyWriteFile, AcademySubmit, AcademyTutorRequest, AcademyTutorStop, AcademyModelStop, AcademyLogTime, AcademyReviewRequest, AcademyTeachQuizRequest, AcademyStruggleStart, AcademyStruggleAttempt, AcademyStruggleReveal, AcademyWorldStart, AcademyWorldPredict, AcademyWorldObserve, AcademyWorldComplete, AcademyStepAnswer } from './protocol.generated'
 
 const prefix = '/api/v1/academy'
 const id = encodeURIComponent
@@ -54,6 +54,7 @@ export const academyApi = {
   reviews: (project: string, signal?: AbortSignal) => request<{reviews: AcademyReviewItem[]}>(prefix + '/projects/' + id(project) + '/reviews', {signal}),
   cumulative: (project: string, signal?: AbortSignal) => request<{reviews: AcademyReviewItem[]}>(prefix + '/projects/' + id(project) + '/cumulative', {signal}),
   review: (project: string, body: AcademyReviewRequest) => post('/projects/' + id(project) + '/reviews', body),
+  logTime: (project: string, body: AcademyLogTime) => post('/projects/' + id(project) + '/learning-time', body),
   teachQuiz: (project: string, turn: string, body: AcademyTeachQuizRequest) => post('/projects/' + id(project) + '/tutor-turns/' + id(turn) + '/quiz', body),
   teachQuizzes: (project: string, signal?: AbortSignal) => request<{quizzes: AcademyTeachQuiz[]}>(prefix + '/projects/' + id(project) + '/teach-quizzes', {signal}),
   struggle: (project: string, lesson: string, signal?: AbortSignal) => request<AcademyStruggleView>(prefix + '/projects/' + id(project) + '/struggle?lesson_id=' + id(lesson), {signal}),

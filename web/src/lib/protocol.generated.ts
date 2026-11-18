@@ -2214,6 +2214,16 @@ export interface AcademySkillState {
   last_evidence_at: number | null
   evidence_count: number
   reviews: AcademySkillReviews
+  learning_seconds?: number
+}
+export interface AcademyLearningTime {
+  lesson_id: string
+  seconds: number
+}
+export interface AcademyLogTime {
+  request_id: string
+  lesson_id: string
+  seconds: number
 }
 export interface AcademyEngagement {
   constructive: number
@@ -2296,6 +2306,7 @@ export interface AcademyOperationResult {
   struggle?: AcademyStruggleSession
   world?: AcademyWorldSession
   step?: AcademyStepResult
+  learning_time?: AcademyLearningTime
   backup_checkpoint_id?: string
   error_code?: string
 }

@@ -424,6 +424,43 @@ class TransferRateTests(unittest.TestCase):
         self.assertEqual(view['transfers'], 1)
 
 
+class LearningTimeTests(unittest.TestCase):
+    """专注学习时长：累计、请求号幂等、冲突拒绝、按课次投影与边界校验。"""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.library = self.root / 'library'
+        write_memory_fixture(self.library)
+        self.service = AcademyService(self.root / 'home', catalog_root=self.library)
+        receipt = self.service.create_project('create', 'memory-fixture')
+        self.pid = receipt['result']['project']['id']
+        self.now = time.time()
+        patcher = patch('time.time', side_effect=lambda: self.now)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.temp.cleanup)
+
+    def test_log_time_accumulates_idempotently_and_projects_per_skill(self):
+        first = self.service.mastery.log_time(self.pid, 'lt1', 'fractions', 60)
+        self.assertEqual(first['status'], 'ready')
+        self.assertEqual(first['result']['learning_time'], {'lesson_id': 'fractions', 'seconds': 60})
+        replay = self.service.mastery.log_time(self.pid, 'lt1', 'fractions', 60)
+        self.assertEqual(replay['result']['learning_time']['seconds'], 60)
+        second = self.service.mastery.log_time(self.pid, 'lt2', 'fractions', 30)
+        self.assertEqual(second['result']['learning_time']['seconds'], 90)
+        skill = next(item for item in self.service.mastery.view(self.pid)['skills'] if item['lesson_id'] == 'fractions')
+        self.assertEqual(skill['learning_seconds'], 90)
+        with self.assertRaises(AcademyError) as caught:
+            self.service.mastery.log_time(self.pid, 'lt1', 'fractions', 99)
+        self.assertEqual(caught.exception.code, 'request-conflict')
+
+    def test_log_time_validates_lesson_and_seconds(self):
+        missing = self.service.mastery.log_time(self.pid, 'ltm', 'missing', 60)
+        self.assertEqual(missing['result']['error_code'], 'lesson-not-found')
+        zero = self.service.mastery.log_time(self.pid, 'ltz', 'fractions', 0)
+        self.assertEqual(zero['result']['error_code'], 'invalid-request')
+
+
 class MasteryApiTests(unittest.TestCase):
     def test_routes_authorization_and_validation_precede_writes(self):
         with tempfile.TemporaryDirectory() as directory:

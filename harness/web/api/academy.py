@@ -136,5 +136,6 @@ def build_router(ctx):
     endpoint('GET', prefix + '/projects/{project_id}/reviews', lambda service, body, params, request: {'reviews': service.mastery.queue(**params)})
     endpoint('GET', prefix + '/projects/{project_id}/cumulative', lambda service, body, params, request: {'reviews': service.mastery.queue(cumulative=True)})
     endpoint('POST', prefix + '/projects/{project_id}/reviews', lambda service, body, params, request: service.mastery.review(**params, **body))
+    endpoint('POST', prefix + '/projects/{project_id}/learning-time', lambda service, body, params, request: service.mastery.log_time(**params, **body))
     endpoint('GET', prefix + '/receipts/{request_id}', lambda service, body, params, request: service.receipt(**params))
     return router

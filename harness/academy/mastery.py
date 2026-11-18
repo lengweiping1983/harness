@@ -237,6 +237,13 @@ class AcademyMastery:
         states = fold(self.service.store, project_id)
         now = time.time()
         skills = [_skill_view(lesson, states.get(lesson['id']), now) for lesson in lessons]
+        # 专注学习时长（秒）按课次投影，作为"达到掌握所需分钟数"的效率度量分母。
+        time_map = {}
+        for value in self.service.store.list('learning-time', max_bytes=MAX_EVIDENCE_BYTES):
+            if value.get('project_id') == project_id and isinstance(value.get('lesson_id'), str):
+                time_map[value['lesson_id']] = value.get('seconds', 0)
+        for skill in skills:
+            skill['learning_seconds'] = time_map.get(skill['lesson_id'], 0)
         totals = {key: sum(skill['reviews'][key] for skill in skills) for key in ('attempts', 'correct', 'delayed_correct', 'delayed_attempts')}
         # 学习报告聚合：修复的盲点、未修复盲点与迁移成功，全部来自持久作答记录。
         transfer_ids = {step['id'] for lesson in lessons for step in lesson.get('steps', []) if step.get('transfer')}
@@ -290,6 +297,24 @@ class AcademyMastery:
                 'streak_days': self._streak_days(project_id, now), 'calibration': calibration,
                 'activity': self._activity(project_id, now), 'mistakes': sorted(mistakes, key=lambda item: item['at'], reverse=True)[:50]}
 
+
+    def log_time(self, project_id: str, request_id: str, lesson_id: str, seconds: int) -> dict:
+        """累计专注学习时长（秒）作为效率证据；请求号幂等，重放返回原回执不重复累加。"""
+        def accept():
+            record, lessons = self._lessons(project_id)
+            if not any(lesson['id'] == lesson_id for lesson in lessons):
+                raise AcademyError('lesson-not-found')
+            if not isinstance(seconds, int) or isinstance(seconds, bool) or not 1 <= seconds <= 3600:
+                raise AcademyError('invalid-request')
+            existing = next((value for value in self.service.store.list('learning-time', max_bytes=MAX_EVIDENCE_BYTES)
+                             if value.get('project_id') == project_id and value.get('lesson_id') == lesson_id), None)
+            total = (existing.get('seconds', 0) if existing else 0) + seconds
+            value = {'id': existing['id'] if existing else 'learningtime_' + uuid.uuid4().hex,
+                     'project_id': project_id, 'lesson_id': lesson_id, 'seconds': total, 'updated_at': time.time()}
+            self.service._mark_started()
+            self.service.store.put('learning-time', value)
+            return {'learning_time': {'lesson_id': lesson_id, 'seconds': total}}
+        return self.service._change(request_id, 'learning-time', project_id, {'lesson_id': lesson_id, 'seconds': seconds}, accept)
 
     def profile(self, project_id: str, lesson_id: str) -> dict:
         """带练冻结的掌握度画像：当前技能、先修状态、到期重测与近期独立失败。"""

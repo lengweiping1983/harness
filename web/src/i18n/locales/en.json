@@ -4769,6 +4769,7 @@
   "ui.academy.report.immediate": "Immediate correct rate",
   "ui.academy.report.delayedRate": "Delayed correct rate",
   "ui.academy.mastery.delayedRate": "delayed correct rate {percent}%",
+  "ui.academy.mastery.focusTime": "{minutes} min focused",
   "ui.academy.report.sureCorrect": "Sure & correct",
   "ui.academy.report.sureWrong": "Sure & wrong (blindspots)",
   "ui.academy.report.guessCorrect": "Guess & correct",

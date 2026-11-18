@@ -32,6 +32,7 @@ export function AcademySkillList({skills}: {skills: readonly AcademySkillState[]
     {skill.evidence_count > 0 ? <p className="mt-1 text-xs text-muted">{t('ui.academy.mastery.retrievability', {percent: Math.round(skill.retrievability * 100)})} · {t('ui.academy.mastery.stability', {days: skill.stability_days})}</p> : null}
     {skill.evidence_count > 0 && skill.due_at != null ? <p className="mt-1 text-xs text-warn">{t('ui.academy.mastery.nextDue', {date: new Date(skill.due_at * 1000).toLocaleDateString(locale === 'zh-CN' ? 'zh-CN' : 'en')})}</p> : null}
     {skill.evidence_count > 0 && (skill.reviews.delayed_attempts ?? 0) > 0 ? <p className="mt-1 text-xs text-ok" data-skill-delayed={skill.reviews.delayed_correct}>{t('ui.academy.mastery.delayedEvidence', {count: skill.reviews.delayed_correct})} · {t('ui.academy.mastery.delayedRate', {percent: Math.round(skill.reviews.delayed_correct / skill.reviews.delayed_attempts * 100)})}</p> : null}
+    {skill.evidence_count > 0 && (skill.learning_seconds ?? 0) > 0 ? <p className="mt-1 text-xs text-muted" data-skill-focus={skill.learning_seconds}>{t('ui.academy.mastery.focusTime', {minutes: Math.ceil((skill.learning_seconds ?? 0) / 60)})}</p> : null}
   </li>)}</ul>
 }
 
