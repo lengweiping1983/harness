@@ -500,7 +500,7 @@ class AgentLoop:
                 if self.budget is not None and self.budget.limit is not None:
                     remaining.append(self.budget.limit - self.budget.spent)
                 if remaining:
-                    available = min(remaining) - self._request_input_cost(messages, self._active_tool_schemas())
+                    available = min(remaining) - self._request_input_cost(messages, self._active_tool_schemas(), cfg.model)
                     if available < 1:
                         reason = "budget"
                         break
@@ -568,7 +568,7 @@ class AgentLoop:
                 # 供应商未提供用量时，安全预算仍须生效。
                 # 估算值不能作为供应商账单统计展示。
                 charge = assistant.usage.total_tokens if assistant.usage is not None and assistant.usage.total_tokens > 0 else (
-                    self._request_input_cost(messages, self._active_tool_schemas()) + estimate_tokens([assistant]))
+                    self._request_input_cost(messages, self._active_tool_schemas(), cfg.model) + estimate_tokens([assistant]))
                 charged_tokens += charge
 
                 final_text = output_prefix + assistant.text
@@ -955,7 +955,7 @@ class AgentLoop:
         runtime_messages: Sequence[Any] = (),
     ) -> tuple[AssistantMessage, list[dict[str, Any]]]:
         tools = self._active_tool_schemas()
-        cost = self._request_cost(messages, tools)
+        cost = self._request_cost(messages, tools, config.model)
         input_cost = cost.input_tokens
         reservation = None
         charge = None
@@ -991,7 +991,7 @@ class AgentLoop:
                         reservation = None
                     await self._maybe_compact(session, config, turn, force=True, runtime_messages=runtime_messages)
                     messages = self._build_messages(session, runtime_messages=runtime_messages)
-                    replacement_cost = self._request_cost(messages, tools)
+                    replacement_cost = self._request_cost(messages, tools, config.model)
                     input_cost = replacement_cost.input_tokens
                     if input_cost + context_margin(learned) >= learned:
                         raise LlmContextLengthError(tr('python.agent.04bb15e1682a'), limit=learned,
@@ -1036,7 +1036,7 @@ class AgentLoop:
                 await self._maybe_compact(session, config, turn, force=True, runtime_messages=runtime_messages,
                                           require_summary=True)
                 messages = self._build_messages(session, runtime_messages=runtime_messages)
-                replacement_cost = self._request_cost(messages, tools)
+                replacement_cost = self._request_cost(messages, tools, config.model)
                 reduced_input = replacement_cost.input_tokens
                 if reduced_input >= input_cost:
                     raise
@@ -1165,8 +1165,8 @@ class AgentLoop:
             async def observed_request(data):
                 if data['phase'] == 'started':
                     estimate = data.get('estimated_input_tokens')
-                    if (self.budget is not None and cost.route_models is not None
-                            and type(estimate) is int and estimate > cost.input_tokens):
+                    if (cost.route_models is not None and type(estimate) is int and estimate > cost.input_tokens
+                            and (self.token_budget is not None or self.budget is not None and self.budget.limit is not None)):
                         # 普通续接会合法增加输入；仅拒绝快照以外模型突破原预留。
                         if json.loads(data['body']).get('model') not in cost.route_models:
                             raise _RequestBudgetExhausted(tr('python.agent.e16ced84712b'), code='agent/token-budget',
@@ -1710,24 +1710,25 @@ class AgentLoop:
     # ==================================================================
     # 内部：上下文压缩
     # ==================================================================
-    def _request_cost(self, messages, tools):
+    def _request_cost(self, messages, tools, model):
         """预留上界和模型集合来自同一快照，不租用线路等待预算。"""
         planner = getattr(self.adapter, 'request_budget_plan', None)
         if callable(planner):
-            plan = planner(messages, tools)
+            options = {'model': model} if 'model' in _adapter_parameters(planner) else {}
+            plan = planner(messages, tools, **options)
             if (isinstance(plan, tuple) and len(plan) == 2 and type(plan[0]) is int and plan[0] >= 0
                     and (plan[1] is None or isinstance(plan[1], frozenset) and all(isinstance(name, str) for name in plan[1]))):
                 return ResponseCost(plan[0], route_models=plan[1])
-        return ResponseCost(self._request_input_cost(messages, tools))
-
-    def _request_input_cost(self, messages, tools):
-        """预算使用当前线路的保守上界，自定义适配器保持原投影回退。"""
         estimate = getattr(self.adapter, 'estimate_budget_context', None)
         if callable(estimate):
             value = estimate(messages, tools)
             if type(value) is int and value >= 0:
-                return value
-        return self._estimate_tokens(messages) + self._estimate_tokens(tools)
+                return ResponseCost(value)
+        return ResponseCost(self._estimate_tokens(messages) + self._estimate_tokens(tools))
+
+    def _request_input_cost(self, messages, tools, model=None):
+        """轮次余额、任务预留和用量回退采用同一请求模型。"""
+        return self._request_cost(messages, tools, model or self.config.model).input_tokens
 
     def _estimate_tokens(self, messages):
         """预算与展示共用当前适配器实际思考传输口径。"""

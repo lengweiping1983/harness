@@ -195,8 +195,13 @@ class OpenRouterAdapter:
         """返回请求预留计划的输入上界。"""
         return self.request_budget_plan(messages, tools)[0]
 
-    def request_budget_plan(self, messages, tools=()):
+    def request_budget_plan(self, messages, tools=(), *, model=None):
         """对全部启用线路取工作集上界，不租用线路，不预测最终选中槽位。"""
+        if (model or self.model).startswith('chatgpt/') and getattr(self, 'subscription_pool', None) is not None:
+            # 订阅工作器按 Responses 发送历史推理项，不经过普通 API 线路池。
+            from .context_accounting import estimate_tokens
+            overhead = getattr(self.transport, 'context_tokens', 0) if self._transport_injected else 0
+            return estimate_tokens(messages, reasoning='responses') + self.estimate_context(tools) + overhead, None
         tool_tokens = self.estimate_context(tools)
         tool_tokens += getattr(self.transport, 'context_tokens', 0)
         if self.route_pool is None or self.chatgpt is not None and self.chatgpt.logged_in:

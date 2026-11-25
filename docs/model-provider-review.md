@@ -12,6 +12,12 @@
 
 `ModelConnections.test.tsx` 以页面钩子宿主和受控传输核对单模型完整参数保存、取消、顶部操作栏、焦点恢复、同名对象删除隔离、提供商确认位于标题内且先于模型列表、确认按钮顺序、提供商删除成功／失败及单次提交、非法参数、重复保存、失败草稿、英中英及关闭页面后的迟到回执。`providerModelPreferences.test.tsx` 的行操作用例通过实际呈现链核对完整身份及原位确认的资源消费。该验证不包含浏览器实际布局、明暗主题、不同窗口尺寸、生产构建或桌面实机验收；这些仍待对应专项。
 
+## 订阅工具调用后的预算判断
+
+两轮 ChatGPT 订阅请求在返回工具结果后，下一次输入估算分别为 20,925 和 19,026 Token，预留估算分别为 19,580 和 17,836。两次请求历史均含 Responses 加密推理项。原 `AgentLoop._request_cost` 调用共享适配器时未传入本次模型，适配器按普通 API 线路估算并过滤推理历史。请求观察器随后把订阅模型当作快照外的新线路，即使共享预算没有上限，也会在发送前抛出 `agent/token-budget`。
+
+`test_subscription_tool_continuation_accounts_for_responses_history` 经真实工具循环和隔离 Responses 传输核对无限预算、足够的有限预算、余额不足三个分支及工具调用次数。`test_changed_route_estimate_only_blocks_a_limited_request` 核对普通线路预留后模型改变、输入增加时的预算检查。
+
 ## OpenRouter 目录外模型协议选择
 
 触发条件是选择 `stealth/crouton-alpha` 等固定目录之外的聊天模型，接口保留原生协议，所选模型又没有缓存协议元数据。2026-11-05 核对随包目录确认 OpenRouter 同时包含 `anthropic-messages` 与 `openai-completions`，且没有 Crouton Alpha。原 `bridge.mjs` 仅检查接口声明、所选模型元数据和目录是否只有一种协议；因此在发出 HTTP 请求前抛出 `The model needs an explicit API protocol`，表现为 `status=0`。空缓存、缺少协议的匹配条目及混合缓存也会触发；仅剩其他模型的 Messages 缓存时，还会把其他模型的唯一协议误用于当前新模型。

@@ -24,6 +24,70 @@ class AgentConfigurationTests(unittest.IsolatedAsyncioTestCase):
             model='initial-model', max_steps=2, max_retries=0, **flags), transport=self.transport)
         self.addAsyncCleanup(self.app.close)
 
+    async def test_subscription_tool_continuation_accounts_for_responses_history(self):
+        from unittest.mock import AsyncMock
+        from harness.codex_gateway.quota import parse_quota
+        from harness.llm.routes import ModelRoutes
+        from tests.test_codex_gateway import FakeTransport, authorize, event, usage
+
+        pool = self.app.codex_gateway
+        account = pool.slots[pool.create()].account
+        authorize(account, 'subscription')
+        windows = usage(resets=4102444800)
+        windows['rateLimitsByLimitId']['codex']['secondary']['resetsAt'] = 4102444800
+        pool.reader = AsyncMock(return_value=parse_quota(windows, epoch=account.epoch))
+        self.app.adapter.route_pool = ModelRoutes([{'model': 'api-model', 'enabled': True,
+            'base_url': 'https://fixture.invalid', 'keys': [{'value': 'fixture-key', 'enabled': True}]}])
+        reasoning = {'type': 'reasoning', 'id': 'rs_fixture', 'encrypted_content': 'X' * 100000}
+        call = {'type': 'function_call', 'call_id': 'call_search', 'name': 'search_tools',
+                'arguments': '{"query":"read"}'}
+        first = [event('response.output_item.done', item=reasoning),
+                 event('response.output_item.done', output_index=1, item=call),
+                 event('response.completed', response={'usage': {'input_tokens': 100, 'output_tokens': 20}})]
+        final = [event('response.output_text.delta', delta='Done'), event('response.completed')]
+
+        class ToolTransport(FakeTransport):
+            async def post_stream(self, url, **kwargs):
+                self.chunks = final if self.calls else first
+                async for chunk in super().post_stream(url, **kwargs):
+                    yield chunk
+
+        for limit in (None, 100000, 20000):
+            with self.subTest(limit=limit):
+                transport = ToolTransport([])
+                self.app.adapter.transport = transport
+                self.app.config.token_budget = limit
+                session = self.app.create_session()
+                result = await self.app.run_async(session, 'Find a read tool', model=account.selected)
+                self.assertEqual(len([e for e in session.events if e.type == 'tool/result']), 1)
+                if limit == 20000:
+                    self.assertEqual(result.error_info['code'], 'agent/token-budget')
+                    self.assertEqual(len(transport.calls), 1)
+                else:
+                    self.assertEqual(result.text, 'Done', result.error_info)
+                    self.assertEqual(len(transport.calls), 2)
+                    items = json.loads(transport.calls[1][1]['body'])['input']
+                    self.assertIn(reasoning, items)
+                    self.assertTrue(any(item.get('type') == 'function_call_output'
+                                        and item['call_id'] == 'call_search' for item in items))
+
+    async def test_changed_route_estimate_only_blocks_a_limited_request(self):
+        from unittest.mock import patch
+        # 模拟预留后线路集合已经更新，实际请求的模型及输入均超出快照。
+        with patch.object(self.app.adapter, 'request_budget_plan',
+                          new=lambda messages, tools: (0, frozenset({'previous-model'}))):
+            for limit in (None, 100000):
+                with self.subTest(limit=limit):
+                    self.app.config.token_budget = limit
+                    before = len(self.transport.requests)
+                    result = await self.app.run_async(self.app.create_session(), 'Check the route')
+                    if limit is None:
+                        self.assertEqual(result.reason, 'completed', result.error_info)
+                        self.assertEqual(len(self.transport.requests), before + 1)
+                    else:
+                        self.assertEqual(result.error_info['code'], 'agent/token-budget')
+                        self.assertEqual(len(self.transport.requests), before)
+
     async def test_saved_default_reasoning_reaches_requests_and_preserves_overrides(self):
         from harness.core.language import current_language
         from harness.web.api.settings import build_router
