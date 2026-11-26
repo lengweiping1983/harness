@@ -12,7 +12,7 @@ import {Button} from '@/components/ui/primitives'
 import {SecretInput} from '@/components/ui/SecretInput'
 import {SaveStatus} from '@/components/ui/SaveStatus'
 import {usePageVisible} from '@/hooks/usePageVisible'
-import {CodexGatewayAccounts} from './CodexGatewayAccounts'
+import {CodexGatewayAccounts, type GatewayState} from './CodexGatewayAccounts'
 import {Switch} from './ExtensionCatalogControls'
 import type {ProviderChoice} from './ProviderPickers'
 import {ModelPagination, ModelPicker, ProviderPicker} from './ProviderPickers'
@@ -38,7 +38,9 @@ export function ModelConnections() {
   const [editingModel, setEditingModel] = useState<ModelTarget | null>(null)
   const [removingModel, setRemovingModel] = useState<ModelTarget | null>(null)
   const [adding, setAdding] = useState(false)
-  const [subscription, setSubscription] = useState(false)
+  const [gateway, setGateway] = useState<GatewayState | null>(null)
+  const [editingSubscription, setEditingSubscription] = useState(false)
+  const subscription = editingSubscription || gateway?.accounts.some(account => account.logged_in || account.pending)
   const [busy, setBusy] = useState(false)
   const [probeCount, setProbeCount] = useState(0)
   const activeProbes = useRef(0)
@@ -74,11 +76,11 @@ export function ModelConnections() {
     void Promise.all([
       runtimeRequest<ProviderSnapshot>('/connection', 'GET', undefined, {signal: controller.signal}),
       runtimeRequest<{providers: ProviderTemplate[]}>('/connection/providers', 'GET', undefined, {signal: controller.signal}),
-      runtimeRequest<{accounts: Array<{logged_in: boolean; pending: boolean}>}>('/codex-gateway', 'GET', undefined, {signal: controller.signal}),
+      runtimeRequest<GatewayState>('/codex-gateway', 'GET', undefined, {signal: controller.signal}),
       runtimeRequest<ModelCatalog>('/models', 'GET', undefined, {signal: controller.signal}).then(data => ({data}), failure => ({error: failureText(failure)})),
     ]).then(([next, catalog, accounts, modelCatalog]) => {
       if (owner.current !== generation) return
-      setSnapshot(next); setTemplates(catalog.providers); setSubscription(accounts.accounts.some(account => account.logged_in || account.pending))
+      setSnapshot(next); setTemplates(catalog.providers); setGateway(accounts)
       if ('data' in modelCatalog) useAppStore.setState({models: modelCatalog.data.models, defaultModel: modelCatalog.data.active})
       else setError({template: {key: 'ui.providers.catalogUnavailable', params: {reason: modelCatalog.error}}})
     }).catch(failure => {if (!controller.signal.aborted && owner.current === generation) setError(failureText(failure))})
@@ -135,9 +137,9 @@ export function ModelConnections() {
     {error && !draft ? <div className="space-y-2"><p role="alert" className="text-xs text-danger">{noticeText(error)}</p>{snapshot ? <Button size="sm" onClick={() => {setError(''); setLoadAttempt(value => value + 1)}}>{t('ui.providers.retryLoading')}</Button> : null}</div> : null}
     {saved ? <SaveStatus phase="saved" /> : null}
     {!snapshot ? error ? <Button size="sm" onClick={() => {setError(''); setLoadAttempt(value => value + 1)}}>{t('ui.providers.retryLoading')}</Button> : <p role="status" className="text-xs text-muted">{t('ui.providers.loading')}</p> : null}
-    {adding ? <ProviderPicker choices={choices} onClose={() => setAdding(false)} onPick={id => {setAdding(false); setSaved(false); if (id === 'codex-account-pool') {setSubscription(true); return} const selected = templates.find(row => row.id === id); if (!selected) return; setEditingModel(null); setError(''); setDraft(providerDraftForTemplate(selected, configuredProviders))}} /> : null}
+    {adding ? <ProviderPicker choices={choices} onClose={() => setAdding(false)} onPick={id => {setAdding(false); setSaved(false); if (id === 'codex-account-pool') {setEditingSubscription(true); return} const selected = templates.find(row => row.id === id); if (!selected) return; setEditingModel(null); setError(''); setDraft(providerDraftForTemplate(selected, configuredProviders))}} /> : null}
     <DefaultModelFeedback />
-    {subscription && !draft ? <CodexGatewayAccounts /> : null}
+    {subscription && gateway && !draft ? <CodexGatewayAccounts state={gateway} onStateChange={setGateway} editing={editingSubscription} onEditChange={setEditingSubscription} models={models.filter(model => model.id.startsWith('chatgpt/'))} /> : null}
     {snapshot && !snapshot.providers.length && !subscription && !draft && !adding ? <div className="rounded-xl border border-dashed border-line p-6 text-center text-xs text-muted">{t('ui.providers.empty')}</div> : null}
     {!draft ? sortProviderChoices(configuredProviders).map(provider => <section key={provider.id} data-provider-id={provider.id} aria-label={provider.name} className="overflow-hidden rounded-xl border border-line">
       <div className="flex flex-wrap items-center justify-between gap-3 p-4">
@@ -175,7 +177,7 @@ export function ModelConnections() {
       </> : null}
       </div>
     </form> : null}
-    {!draft ? <ModelPreferences models={models.filter(model => !model.id.startsWith('harness/'))} /> : null}
+    {!draft ? <ModelPreferences models={models.filter(model => !model.id.startsWith('harness/') && !model.id.startsWith('chatgpt/'))} /> : null}
   </section>
 }
 

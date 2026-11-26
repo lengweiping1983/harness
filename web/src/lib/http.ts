@@ -31,6 +31,17 @@ function requestErrorCopy(code: string, details: unknown): ResourceCopy | undefi
   const rules: Record<string, Record<string, Record<string, 'string' | 'number'>>> = {
     'bad-json': {'ui.http.invalidJsonRequest': {}},
     'session/invalid-field': {'ui.session.titleTooLong': {limit: 'number'}, 'ui.session.unknownField': {field: 'string'}},
+    'codex-gateway/model-catalog': {
+      'ui.codexGateway.accountMissing': {}, 'ui.codexGateway.closed': {}, 'ui.codexGateway.noAccount': {},
+      'chatgpt.account_changed': {}, 'chatgpt.login_required': {}, 'chatgpt.expired': {},
+      'chatgpt.access_missing': {}, 'chatgpt.identity_mismatch': {}, 'chatgpt.refresh_mismatch': {},
+      'chatgpt.identity_missing': {}, 'chatgpt.refresh_invalid': {}, 'chatgpt.response_large': {},
+      'chatgpt.response_object': {}, 'chatgpt.network_failed': {}, 'chatgpt.models_missing': {},
+      'chatgpt.models_empty': {}, 'chatgpt.state_save_failed': {},
+      'chatgpt.http_failed': {status: 'number'}, 'chatgpt.http_challenge': {status: 'number'},
+      'chatgpt.http_region': {status: 'number'}, 'chatgpt.http_grant': {status: 'number'},
+      'chatgpt.http_denied': {status: 'number'}, 'chatgpt.http_client': {status: 'number'},
+    },
     'voice/invalid': {'ui.voice.invalidPreparation': {}},
   }
   if (!Object.hasOwn(rules, code) || !details || typeof details !== 'object') return

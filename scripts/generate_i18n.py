@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PREFIXES = ('ui.', 'settings.language.', 'files.open.', 'browser.')
+PREFIXES = ('ui.', 'settings.language.', 'files.open.', 'browser.', 'chatgpt.')
 
 
 def main() -> int:
@@ -20,7 +20,7 @@ def main() -> int:
         source = ROOT / 'harness' / 'i18n' / 'locales' / f'{language}.json'
         values = json.loads(source.read_text(encoding='utf-8'))
         startup[language] = {key: values[key] for key in ('ui.App.f76a8d866552', 'ui.startup.failed', 'ui.deferred.reload')}
-        content = json.dumps({key: value for key, value in values.items() if key.startswith(PREFIXES)}, ensure_ascii=False, indent=2) + '\n'
+        content = json.dumps({key: value for key, value in values.items() if key.startswith(PREFIXES) or key == 'models.model.missing'}, ensure_ascii=False, indent=2) + '\n'
         destination = ROOT / 'web' / 'src' / 'i18n' / 'locales' / f'{language}.json'
         if args.check:
             if not destination.exists() or destination.read_text(encoding='utf-8') != content:

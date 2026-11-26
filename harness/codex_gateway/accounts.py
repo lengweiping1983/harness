@@ -168,6 +168,20 @@ class AccountPool:
             slot.checked = float('-inf')
             return {**self.status(), 'authorization_url': result['authorization_url']}
 
+    def refresh_models(self, identity):
+        """刷新指定账号的订阅目录；网络等待不占用账号池锁。"""
+        with self.lock:
+            if self.closed:
+                raise QuotaError('ui.codexGateway.closed')
+            slot = self.slot(identity)
+            if not any(item is slot and item.enabled and not duplicate for item, duplicate in self._unique()):
+                raise QuotaError('ui.codexGateway.noAccount')
+            with slot.account.lock:
+                if not slot.account.logged_in or slot.account.pending:
+                    raise QuotaError('ui.codexGateway.noAccount')
+                epoch = slot.account.epoch
+        return slot.account.refresh_models(epoch)
+
     def cancel_login(self, identity):
         with self.lock:
             self.slot(identity).account.cancel_login()
@@ -223,6 +237,16 @@ class AccountPool:
             rows.append((slot, duplicate))
         return rows
 
+    def model_info(self, model):
+        """按目录的账号顺序读取指定订阅模型的能力快照，不租用账号。"""
+        with self.lock:
+            for slot, duplicate in self._unique():
+                if slot.enabled and not duplicate and slot.account.logged_in:
+                    info = next((row for row in slot.account.status()['models'] if row['id'] == model), None)
+                    if info is not None:
+                        return info
+        return None
+
     def status(self):
         with self.lock:
             now, wall = self.clock(), self.wall()
@@ -241,7 +265,7 @@ class AccountPool:
                                                and slot.rejected_until <= wall and quota.available(self.threshold))})
             return {'enabled': self.enabled, 'current_account': self.current_account, 'auto_rotate': self.auto_rotate, 'threshold': self.threshold, 'waiting': self.waiting, 'accounts': rows}
 
-    async def refresh(self, *, force=False):
+    async def refresh(self, *, force=False, recheck=frozenset()):
         async with self.refresh_lock:
             with self.lock:
                 if self.closed:
@@ -250,6 +274,8 @@ class AccountPool:
                         if slot.enabled and slot.account.logged_in and not slot.account.pending and not duplicate
                         and slot.auth_failed_epoch != slot.account.epoch
                         and (force or self.clock() - slot.checked >= 30
+                             or slot.id in recheck and (slot.quota is None or slot.quota.epoch != slot.account.epoch
+                                                        or not slot.quota.fresh(self.clock(), self.wall()))
                              or slot.quota is not None and any(
                                  slot.checked_wall < window.resets <= self.wall() for window in slot.quota.windows))]
 
@@ -270,10 +296,27 @@ class AccountPool:
                     group.create_task(read(slot))
         return self.status()
 
+    def _admission_issue(self, slot):
+        """区分认证、上游冷却、额度观察与明确达到阈值的回执。"""
+        if slot.auth_failed_epoch == slot.account.epoch:
+            return 'ui.codexGateway.authUnavailable'
+        if slot.rejected_until > self.wall():
+            return 'ui.codexGateway.rateLimited'
+        quota = slot.quota
+        if quota is None or quota.epoch != slot.account.epoch:
+            return slot.error_key or 'ui.codexGateway.quotaUnavailable'
+        if not quota.fresh(self.clock(), self.wall()):
+            return 'ui.codexGateway.quotaStale'
+        if not quota.available(self.threshold):
+            return 'ui.codexGateway.allowanceBlocked'
+        return None
+
     @asynccontextmanager
     async def acquire(self, model, *, exclude=frozenset(), harness=False):
         """每次请求租用一个身份；等待者取消不释放其他请求的租约。"""
         slot = None
+        recheck = set()
+        rechecked = False
         with self.lock:
             self.waiting += 1
         try:
@@ -281,25 +324,30 @@ class AccountPool:
                 with self.lock:
                     if self.closed or not harness and not self.enabled:
                         raise QuotaError('ui.codexGateway.disabled')
-                await self.refresh()
+                await self.refresh(recheck=recheck)
+                recheck.clear()
                 with self.lock:
                     if self.closed or not harness and not self.enabled:
                         raise QuotaError('ui.codexGateway.disabled')
                     candidates = []
-                    recoverable = False
+                    reasons = set()
+                    wait_for_slot = False
                     for item, duplicate in self._unique():
                         if (harness and not self.auto_rotate and self.current_account and item.id != self.current_account
                                 or not item.enabled or duplicate or item.id in exclude or not item.account.logged_in
-                                or item.account.pending or item.auth_failed_epoch == item.account.epoch
+                                or item.account.pending
                                 or not any(row['id'] == 'chatgpt/' + model for row in item.account.status()['models'])):
                             continue
-                        quota = item.quota
-                        if quota is None or quota.epoch != item.account.epoch:
-                            continue
-                        recoverable = True
-                        if (not item.in_use and item.rejected_until <= self.wall()
-                                and quota.fresh(self.clock(), self.wall()) and quota.available(self.threshold)):
+                        issue = self._admission_issue(item)
+                        if issue is None and not item.in_use:
                             candidates.append(item)
+                            continue
+                        if issue:
+                            reasons.add(issue)
+                            if harness and not rechecked and issue in {'ui.codexGateway.quotaUnavailable', 'ui.codexGateway.quotaStale'}:
+                                recheck.add(item.id)
+                        if item.auth_failed_epoch != item.account.epoch and item.quota and item.quota.epoch == item.account.epoch:
+                            wait_for_slot |= item.in_use or not harness
                     if candidates:
                         slot = min(candidates, key=lambda item: (
                             item.id != self.current_account if harness else False, item.quota.five_hour.resets, item.quota.five_hour.used, item.id))
@@ -307,8 +355,12 @@ class AccountPool:
                             self._save(current_account=slot.id)
                             self.current_account = slot.id
                         slot.in_use = True
-                    elif not recoverable or harness and not any(item.in_use for item, _ in self._unique()):
-                        raise QuotaError('ui.codexGateway.noAccount')
+                    elif recheck:
+                        # 仅复查额度，尚未发送模型请求；每次准入至多补查一次。
+                        rechecked = True
+                        continue
+                    elif not wait_for_slot:
+                        raise QuotaError(next(iter(reasons)) if len(reasons) == 1 else 'ui.codexGateway.noAccount')
                 if slot is None:
                     await asyncio.sleep(.25)
             yield slot, slot.account.epoch

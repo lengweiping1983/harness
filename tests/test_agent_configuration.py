@@ -24,6 +24,46 @@ class AgentConfigurationTests(unittest.IsolatedAsyncioTestCase):
             model='initial-model', max_steps=2, max_retries=0, **flags), transport=self.transport)
         self.addAsyncCleanup(self.app.close)
 
+    async def test_subscription_selection_reaches_responses_with_a_stale_api_route(self):
+        from unittest.mock import AsyncMock
+        from harness.codex_gateway.quota import parse_quota
+        from harness.llm.routes import ModelRoutes
+        from harness.web.api.settings import SettingsStore, build_router
+        from tests.test_codex_gateway import FakeTransport, authorize, event, usage
+
+        pool = self.app.codex_gateway
+        account = pool.slots[pool.create()].account
+        authorize(account, 'secondary')
+        account.models = [{**account.models[0], 'id': 'chatgpt/' + name, 'context_window': 500000}
+                          for name in ('gpt-6.2-astra', 'gpt-6-astra')]
+        account.selected = account.models[0]['id']
+        windows = usage(resets=4102444800)
+        windows['rateLimitsByLimitId']['codex']['secondary']['resetsAt'] = 4102444800
+        pool.reader = AsyncMock(return_value=parse_quota(windows, epoch=account.epoch))
+        transport = FakeTransport([event('response.output_text.delta', delta='OK'), event('response.completed')])
+        self.app.adapter.transport = transport
+        self.app.adapter.route_pool = ModelRoutes([{'model': 'harness/old/endpoint/removed', 'enabled': True,
+            'base_url': 'https://fixture.invalid', 'keys': [{'value': 'fixture-key', 'enabled': True}]}])
+        SettingsStore(self.app.config.home).update({'default_model': 'chatgpt/gpt-6.2-astra', 'reasoning_effort': 'high'})
+        build_router(SimpleNamespace(harness=self.app))
+
+        for override, expected in ((None, 'gpt-6.2-astra'), ('chatgpt/gpt-6-astra', 'gpt-6-astra')):
+            session = self.app.create_session(metadata={'model': override} if override else {})
+            result = await self.app.run_async(session, 'Original prompt')
+            self.assertEqual(result.text, 'OK', result.error_info)
+            self.assertEqual(session.latest('request/header').data['config']['model'], 'chatgpt/' + expected)
+            url, request = transport.calls[-1]
+            self.assertTrue(url.endswith('/codex/responses'))
+            body = json.loads(request['body'])
+            self.assertEqual((body['model'], body['reasoning']['effort']), (expected, 'high'))
+        self.assertEqual(len(transport.calls), 2)
+        self.assertEqual(self.app._effective_context_window(), 500000)
+        missing = self.app.create_session(metadata={'model': 'chatgpt/actually-removed'})
+        with self.assertLogs('harness.core.agent', level='ERROR'):
+            result = await self.app.run_async(missing, 'Original prompt')
+        self.assertEqual(result.error_info['code'], 'llm/model-missing')
+        self.assertEqual(len(transport.calls), 2)
+
     async def test_subscription_tool_continuation_accounts_for_responses_history(self):
         from unittest.mock import AsyncMock
         from harness.codex_gateway.quota import parse_quota
@@ -87,6 +127,32 @@ class AgentConfigurationTests(unittest.IsolatedAsyncioTestCase):
                     else:
                         self.assertEqual(result.error_info['code'], 'agent/token-budget')
                         self.assertEqual(len(self.transport.requests), before)
+
+    async def test_configuring_another_provider_preserves_the_subscription_default(self):
+        import asyncio
+        from harness.llm.providers import ProviderConnections
+        from harness.web.api.provider_connections import build_router
+        from harness.web.router import Request
+        from tests.test_kilo_free import provider_fixture
+
+        home = Path(self.directory.name) / 'mixed-providers'
+        store = ProviderConnections(home)
+        provider = provider_fixture()
+        store.save([provider], store.revision)
+        selected = 'chatgpt/gpt-6.2-astra'
+        app = Harness(HarnessConfig(home=home, cwd=home, model=selected, enable_setup=True,
+                                    enable_mcp=False, enable_automations=False),
+                      codex_gateway_home=home/'gateway', transport=self.transport)
+        self.addAsyncCleanup(app.close)
+        self.assertEqual(app.config.model, selected)
+        ctx = SimpleNamespace(harness=app, call=asyncio.run)
+        path = '/api/v1/connection'
+        handler, params = build_router(ctx).resolve('PATCH', path)
+        provider['name'] = 'Renamed provider'
+        body = json.dumps({'providers': [provider], 'revision': app.provider_connections.revision}).encode()
+        response = await asyncio.to_thread(handler, Request('PATCH', path, {}, {}, body), **params)
+        self.assertEqual(json.loads(response.body)['config']['model'], selected)
+        self.assertEqual(app._session_llm_config(app.create_session()).model, selected)
 
     async def test_saved_default_reasoning_reaches_requests_and_preserves_overrides(self):
         from harness.core.language import current_language

@@ -1,12 +1,15 @@
 """ OAuth 流程 ChatGPT 订阅登录和模型目录。"""
 from __future__ import annotations
 
+import asyncio
 import base64
 from copy import deepcopy
 import hashlib
 import json
 import math
+import re
 import secrets
+import shutil
 import threading
 import time
 import urllib.error
@@ -23,7 +26,7 @@ CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 TOKEN_URL = 'https://auth.openai.com/oauth/token'
 BASE_URL = 'https://chatgpt.com/backend-api/codex'
 REDIRECT_URI = 'http://localhost:1455/auth/callback'
-CLIENT_VERSION = '0.159.0'
+CLIENT_VERSION = '0.166.0'
 
 
 class ChatGPTAccountError(ValueError):
@@ -119,6 +122,7 @@ class ChatGPTAccount:
         self.login_timer = None
         self.error = ''
         self.epoch = 0
+        self.catalog_generation = 0
         if self.path.exists():
             try:
                 raw = json.loads(self.path.read_text(encoding='utf-8'))
@@ -209,9 +213,31 @@ class ChatGPTAccount:
                     'ChatGPT-Account-Id': self.credentials['account_id'], 'originator': 'harness',
                     'User-Agent': f'harness/{CLIENT_VERSION}'}
 
-    def refresh_models(self):
+    def request_models(self, epoch):
+        """按本机 Codex 版本协商目录；未安装 CLI 时使用随包客户端版本。"""
+        from ..tools.runtime_probe import probe_version
+
+        executable = shutil.which('codex')
+        version = CLIENT_VERSION
+        if executable:
+            reported = asyncio.run(probe_version([executable, '--version'], 3))
+            match = re.fullmatch(r'codex-cli (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)', reported)
+            if match:
+                version = match[1]
+        headers = {**self.headers(epoch), 'User-Agent': f'harness/{version}'}
+        return self.request(BASE_URL + '/models?' + urllib.parse.urlencode({'client_version': version}), headers=headers)
+
+    def refresh_models(self, expected_epoch=None):
         with self.lock:
-            data = self.request(BASE_URL + '/models?' + urllib.parse.urlencode({'client_version': CLIENT_VERSION}), headers=self.headers())
+            epoch = self.epoch if expected_epoch is None else expected_epoch
+            if epoch != self.epoch:
+                raise ChatGPTAccountError('chatgpt.account_changed')
+            self.catalog_generation += 1
+            generation = self.catalog_generation
+        data = self.request_models(epoch)
+        with self.lock:
+            if epoch != self.epoch or generation != self.catalog_generation:
+                raise ChatGPTAccountError('chatgpt.account_changed')
             rows = data.get('models')
             if not isinstance(rows, list):
                 raise ChatGPTAccountError('chatgpt.models_missing')
@@ -220,7 +246,7 @@ class ChatGPTAccount:
             for row in rows:
                 if not isinstance(row, dict) or not isinstance(row.get('slug'), str) or not row['slug'] or row['slug'] in seen:
                     continue
-                if row.get('visibility') == 'hide' or row.get('supported_in_api') is False:
+                if row.get('visibility', 'list') != 'list':
                     continue
                 seen.add(row['slug'])
                 levels = row.get('supported_reasoning_levels')
@@ -234,6 +260,9 @@ class ChatGPTAccount:
                 models.append(model)
             if not models:
                 raise ChatGPTAccountError('chatgpt.models_empty')
+            if self.models == models and self.selected in {m['id'] for m in models}:
+                self.error = ''
+                return self.status()
             old = self.models, self.selected
             self.models = models
             if self.selected not in {m['id'] for m in models}:

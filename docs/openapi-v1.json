@@ -1606,6 +1606,60 @@
         ]
       }
     },
+    "/api/v1/codex-gateway/accounts/{account_id}/models": {
+      "post": {
+        "operationId": "post_api_v1_codex_gateway_accounts_account_id_models",
+        "responses": {
+          "200": {
+            "description": "操作成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatGPTAccountStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "稳定错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求失败，请查看响应中的错误码与说明；写入结果不确定时先查询状态。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/codex-gateway/accounts/{account_id}/cancel": {
       "post": {
         "operationId": "post_api_v1_codex_gateway_accounts_account_id_cancel",

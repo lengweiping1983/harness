@@ -8,7 +8,7 @@ import time
 import tomllib
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
@@ -24,7 +24,7 @@ from harness.codex_gateway.protocol import decode_object, openapi
 from harness.codex_gateway.server import create_app
 from harness.core.language import current_language
 from harness.i18n import tr
-from harness.llm.chatgpt_auth import ChatGPTAccount
+from harness.llm.chatgpt_auth import CLIENT_VERSION, ChatGPTAccount, ChatGPTAccountError
 
 
 def usage(used=10, *, resets=20000, weekly=10):
@@ -129,6 +129,70 @@ class PoolFixture(unittest.IsolatedAsyncioTestCase):
 
 
 class PoolTests(PoolFixture):
+    async def test_settings_refreshes_the_target_subscription_catalog_and_retains_it_on_failure(self):
+        from harness.web.api.codex_gateway import build_router
+        from harness.web.errors import BadRequest
+        from harness.web.router import Request
+        slot = self.add_account('second')
+        account = slot.account
+        original = self.pool.slot('primary').account.status()
+        path = f'/api/v1/codex-gateway/accounts/{slot.id}/models'
+        ctx = SimpleNamespace(harness=SimpleNamespace(codex_gateway=self.pool),
+                              call=lambda task, **kwargs: asyncio.run(task))
+        handler, params = build_router(ctx).resolve('POST', path)
+        request = Request('POST', path, {}, {}, b'')
+        account.request = Mock(return_value={'models': [
+            {'slug': 'gpt-6.2-sol', 'display_name': 'GPT-6.2 Sol', 'supported_in_api': False, 'visibility': 'list',
+             'supported_reasoning_levels': [{'effort': 'high'}], 'context_window': 500000},
+            {'slug': 'hidden', 'visibility': 'hide'}, {'slug': 'gpt-6.2-sol'},
+            {'slug': 'fixture-model'}]})
+        with patch('shutil.which', return_value='/fixture/codex'), patch(
+                'harness.tools.runtime_probe.probe_version', new_callable=AsyncMock,
+                return_value='codex-cli 0.200.1') as probe:
+            response = await asyncio.to_thread(handler, request, **params)
+            probe.assert_awaited_once_with(['/fixture/codex', '--version'], 3)
+        self.assertEqual(response.status, 200)
+        result = json.loads(response.body)
+        self.assertEqual([row['id'] for row in result['models']], ['chatgpt/gpt-6.2-sol', 'chatgpt/fixture-model'])
+        self.assertEqual(result['models'][0]['context_window'], 500000)
+        self.assertEqual(result['models'][0]['reasoning_efforts'], ['high'])
+        self.assertEqual(result['selected'], 'chatgpt/fixture-model')
+        self.assertEqual(ChatGPTAccount(account.path.parent).status(), result)
+        url, = account.request.call_args.args
+        self.assertTrue(url.endswith('/models?client_version=0.200.1'))
+        self.assertEqual(account.request.call_args.kwargs['headers']['User-Agent'], 'harness/0.200.1')
+        confirmed = account.path.read_bytes()
+        account.request.return_value = {'models': []}
+        with patch('shutil.which', return_value=None):
+            with self.assertRaises(BadRequest) as caught:
+                await asyncio.to_thread(handler, request, **params)
+            self.assertEqual(caught.exception.details['copy']['key'], 'chatgpt.models_empty')
+            self.assertTrue(account.request.call_args.args[0].endswith('client_version=' + CLIENT_VERSION))
+        self.assertEqual(account.path.read_bytes(), confirmed)
+        self.assertEqual(self.pool.slot('primary').account.status(), original)
+
+    async def test_catalog_refresh_excludes_ineligible_slots_and_discards_old_account_results(self):
+        duplicate = self.add_account('primary')
+        disabled = self.add_account('disabled')
+        self.pool.set_enabled(disabled.id, False)
+        pending = self.add_account('pending')
+        pending.account.pending = 'fixture'
+        logged_out = self.pool.slot(self.pool.create())
+        for slot in (duplicate, disabled, pending, logged_out):
+            with self.subTest(slot=slot.id), self.assertRaises(QuotaError), patch.object(slot.account, 'request_models') as read:
+                await asyncio.to_thread(self.pool.refresh_models, slot.id)
+            read.assert_not_called()
+        pending.account.pending = None
+        account = self.pool.slot('primary').account
+        def delayed(epoch):
+            account.logout()
+            return {'models': [{'slug': 'stale'}]}
+        with patch.object(account, 'request_models', side_effect=delayed):
+            with self.assertRaises(ChatGPTAccountError) as caught:
+                await asyncio.to_thread(self.pool.refresh_models, 'primary')
+        self.assertEqual(caught.exception.key, 'chatgpt.account_changed')
+        self.assertEqual(ChatGPTAccount(self.home).status()['models'], [])
+
     def test_runtime_lease_excludes_another_writer_without_removing_the_lock_file(self):
         with runtime_lease(self.home):
             with self.assertRaises(QuotaError):
@@ -137,6 +201,73 @@ class PoolTests(PoolFixture):
         self.assertTrue((self.home / 'codex-gateway-runtime.lock').exists())
         with runtime_lease(self.home):
             pass
+
+    async def test_harness_rechecks_unconfirmed_quota_once_before_sending(self):
+        account = self.pool.slot('primary').account
+        other = self.add_account('other')
+        other.account.models = []
+        quota = parse_quota(usage(), epoch=account.epoch, monotonic=self.tick)
+        for cached in (True, False):
+            with self.subTest(cached=cached):
+                self.pool.reader = AsyncMock(side_effect=[
+                    QuotaError('ui.codexGateway.quotaUnavailable'), quota])
+                self.pool.set_enabled(other.id, False)
+                if cached:
+                    await self.pool.refresh(force=True)
+                # 第二个账号有自己的新鲜观察，且不支持本次模型。
+                other.quota, other.checked = quota, self.tick
+                self.pool.set_enabled(other.id, True)
+                async with self.pool.acquire('fixture-model', harness=True) as (slot, _):
+                    self.assertIs(slot.account, account)
+                    self.assertTrue(slot.in_use)
+                self.assertEqual(self.pool.reader.await_count, 2)
+                self.assertTrue(all(call.args == (account, account.epoch) for call in self.pool.reader.await_args_list))
+                self.assertFalse(slot.in_use)
+
+    async def test_subscription_reports_quota_reason_and_never_posts_without_admission(self):
+        from harness.core.errors import LlmError
+        from harness.llm.adapter import OpenRouterAdapter
+        from harness.llm.types import LlmCallConfig, UserMessage
+        transport = FakeTransport([])
+        adapter = OpenRouterAdapter('fixture', transport=transport)
+        adapter.subscription_pool = self.pool
+        account = self.pool.slot('primary')
+        confirmed = parse_quota(usage(96), epoch=account.account.epoch, monotonic=self.tick)
+        stale = parse_quota(usage(), epoch=account.account.epoch, monotonic=self.tick - 30)
+        for reading, key, count in [
+                (QuotaError('ui.codexGateway.quotaUnavailable'), 'quotaUnavailable', 2),
+                (QuotaError('ui.codexGateway.windowUnknown'), 'windowUnknown', 1),
+                (ChatGPTAccountError('chatgpt.expired'), 'authUnavailable', 1),
+                (confirmed, 'allowanceBlocked', 1), (stale, 'quotaStale', 2)]:
+            account.checked = float('-inf')
+            self.pool.reader = AsyncMock(side_effect=reading) if isinstance(reading, Exception) else AsyncMock(return_value=reading)
+            with self.subTest(key=key), self.assertRaises(LlmError) as caught:
+                async for _ in adapter.stream([UserMessage('fixture')], config=LlmCallConfig(model='chatgpt/fixture-model')):
+                    self.fail('准入失败时不得产生模型事件')
+            self.assertEqual(caught.exception.code, 'llm/chatgpt-account')
+            self.assertEqual(caught.exception.details['copy'], {'key': 'ui.codexGateway.' + key})
+            self.assertEqual(self.pool.reader.await_count, count)
+            self.assertFalse(account.in_use)
+        self.assertEqual(transport.calls, [])
+
+    async def test_exhausted_subscription_rotation_preserves_the_upstream_rejection(self):
+        from harness.core.errors import LlmError
+        from harness.llm.adapter import OpenRouterAdapter
+        from harness.llm.types import LlmCallConfig, UserMessage
+        calls = []
+        class Rejected:
+            async def post_stream(self, url, **kwargs):
+                calls.append(url)
+                raise LlmError('Original upstream rejection', code='llm/http', status=403)
+                yield
+        adapter = OpenRouterAdapter('fixture', transport=Rejected())
+        adapter.subscription_pool = self.pool
+        with self.assertRaises(LlmError) as caught:
+            async for _ in adapter.stream([UserMessage('fixture')], config=LlmCallConfig(model='chatgpt/fixture-model')):
+                self.fail('拒绝的请求不得生成内容')
+        self.assertEqual(caught.exception.code, 'llm/http')
+        self.assertEqual(caught.exception.details['status'], 403)
+        self.assertEqual(len(calls), 1)
 
     async def test_four_account_rotation_and_earliest_reset_selection(self):
         slots = [self.pool.slot('primary'), *[self.add_account(name, resets=20000 + offset)

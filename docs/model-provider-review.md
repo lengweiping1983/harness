@@ -12,6 +12,16 @@
 
 `ModelConnections.test.tsx` 以页面钩子宿主和受控传输核对单模型完整参数保存、取消、顶部操作栏、焦点恢复、同名对象删除隔离、提供商确认位于标题内且先于模型列表、确认按钮顺序、提供商删除成功／失败及单次提交、非法参数、重复保存、失败草稿、英中英及关闭页面后的迟到回执。`providerModelPreferences.test.tsx` 的行操作用例通过实际呈现链核对完整身份及原位确认的资源消费。该验证不包含浏览器实际布局、明暗主题、不同窗口尺寸、生产构建或桌面实机验收；这些仍待对应专项。
 
+## ChatGPT 订阅目录与设置卡片
+
+账号登录后，原设置页只轮询本地模型投影，账号池没有刷新上游目录的入口；已保存的目录会持续显示旧型号。即使上游返回新型号，原订阅解析仍按 API Key 的 `supported_in_api` 条件过滤，并用固定客户端版本请求目录。当前设置通过 `CodexGatewayAccounts` 刷新每个符合条件的账号，经 `AccountPool.refresh_models` 和 `ChatGPTAccount.request_models` 获取目录，再读 `/models` 更新卡片与选择器。订阅身份按上游列表可见性筛选，账号代次和请求代次保护已确认的目录。订阅筛选与目录可见性的依据见 [Codex 模型协议](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs)。
+
+`test_codex_gateway.py` 通过设置路由和隔离账号检查版本协商、订阅专属型号、原选择保留、失败保留与账号切换。`ModelConnections.test.tsx` 在提供商卡片内核对模型行和默认状态，并验证自动获取、多账号部分失败和手动重试。`http.test.ts` 核对刷新诊断的双语资源身份。在线订阅实际可见的型号仍以该账号的服务端响应为准。
+
+同时存在 API 路由池和 ChatGPT 模型时，原 `Harness._session_llm_config` 在处理订阅模型前先调用 `route_pool.select()`，会将默认或会话选择替换为旧路由模型。旧 ID 移除后，`AgentLoop._maybe_compact` 在发出请求前检查能力并以 `llm/model-missing` 结束。现在订阅模型沿选定身份进入订阅账号池，初始化上下文窗口也按池内具体型号读取。`test_agent_configuration.py` 复现原始错误，通过隔离账号与 Responses 传输核对默认和会话选择的实际请求、推理档位、真实缺失时的拒绝，以及启动和编辑其他提供商时的默认值。`providerModelFailure.test.tsx` 验证缺失模型卡片的双语操作提示和原始诊断。
+
+订阅模型已解析但在租用账号前读取额度失败时，原 `AccountPool.refresh` 会记录失败并在缓存期内跳过查询，`acquire` 又把失败原因统一改成“没有可用账号”。现在对可参与本次请求且额度暂时无法读取或已过期的账号最多补查一次；明确的额度限制、授权失败和不支持的窗口直接报告。上游明确拒绝请求且没有候补账号时，保留原拒绝。`test_codex_gateway.py` 验证临时失败恢复、过期与持续失败、阈值与授权拒绝、模型请求次数；`providerModelFailure.test.tsx` 核对历史卡片和带具体原因的新卡片在英中英切换时的提示。旧错误仅保存通用信息，事后额度正常不能还原失败当时的状态。
+
 ## 订阅工具调用后的预算判断
 
 两轮 ChatGPT 订阅请求在返回工具结果后，下一次输入估算分别为 20,925 和 19,026 Token，预留估算分别为 19,580 和 17,836。两次请求历史均含 Responses 加密推理项。原 `AgentLoop._request_cost` 调用共享适配器时未传入本次模型，适配器按普通 API 线路估算并过滤推理历史。请求观察器随后把订阅模型当作快照外的新线路，即使共享预算没有上限，也会在发送前抛出 `agent/token-budget`。

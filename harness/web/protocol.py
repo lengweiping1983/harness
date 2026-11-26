@@ -1202,7 +1202,7 @@ def openapi(templates: list[str]) -> dict[str, Any]:
             operation['requestBody'] = {'required': True, 'content': {'application/json': {'schema': {'$ref': '#/components/schemas/ChatCompanionSettings'}}}}
         if path == '/api/v1/mcp-service/companion/token':
             operation['responses']['200']['content'] = {'application/json': {'schema': {'type': 'object', 'required': ['token'], 'properties': {'token': {'type': 'string'}}}}}
-        if path == '/api/v1/chatgpt' or path.startswith('/api/v1/chatgpt/'):
+        if path in ('/api/v1/chatgpt', '/api/v1/codex-gateway/accounts/{account_id}/models') or path.startswith('/api/v1/chatgpt/'):
             operation['responses']['200']['content'] = {'application/json': {'schema': {'$ref': '#/components/schemas/ChatGPTAccountStatus'}}}
         if path in {'/api/v1/connection', '/api/v1/connection/status', '/api/v1/connection/reset'}:
             response_schema = {'$ref': '#/components/schemas/ProviderRouting'}

@@ -1,6 +1,6 @@
 import {afterEach, expect, test} from 'vitest'
 import {renderToStaticMarkup} from 'react-dom/server'
-import {setLocale} from '@/i18n'
+import {setLocale, t} from '@/i18n'
 import {ErrorBlock} from '@/components/chat/blocks/MessageBlocks'
 import {modelFailure} from '../modelFailure'
 
@@ -40,4 +40,33 @@ test('the actual error card retains provider diagnostics across language changes
     expect(html).not.toContain('<details open')
   }
   expect(JSON.stringify(block)).toBe(before)
+})
+
+test('a missing model card directs the user to select a model in both languages', async () => {
+  const block = {id: 'missing', at: 0, kind: 'error' as const, turn: 1,
+    code: 'llm/model-missing', message: 'Original diagnostic', details: {}}
+  for (const locale of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(locale)
+    const html = renderToStaticMarkup(<ErrorBlock block={block} sessionId="conversation" />)
+    expect(html).toContain(t('ui.models.unavailableName'))
+    expect(html).toContain(t('models.model.missing'))
+    expect(html).toContain('llm/model-missing')
+    expect(html).toContain('Original diagnostic')
+    expect(html).not.toContain(t('ui.modelFailure.requestHint'))
+  }
+})
+
+test('subscription admission errors show the recorded reason or account settings guidance', async () => {
+  const block = {id: 'quota', at: 0, kind: 'error' as const, turn: 1, code: 'llm/chatgpt-account', message: 'Saved diagnostic'}
+  for (const locale of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(locale)
+    for (const reason of ['quotaUnavailable', 'quotaStale', 'windowUnknown', 'authUnavailable', 'allowanceBlocked', 'rateLimited']) {
+      const key = 'ui.codexGateway.' + reason
+      const html = renderToStaticMarkup(<ErrorBlock block={{...block, details: {copy: {key}}}} sessionId="conversation" />)
+      expect(html).toContain(t('ui.codexGateway.accountUnavailableTitle'))
+      expect(html).toContain(t(key))
+      expect(html).not.toContain(t('ui.modelFailure.requestHint'))
+    }
+    expect(renderToStaticMarkup(<ErrorBlock block={block} sessionId="conversation" />)).toContain(t('ui.codexGateway.checkAccounts'))
+  }
 })

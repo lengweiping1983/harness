@@ -406,6 +406,7 @@ async def subscription_stream(adapter, messages, *, config, tools, on_attempt, o
     from ..codex_gateway.quota import QuotaError
     pool = adapter.subscription_pool
     attempted = set()
+    last_rejection = None
     while True:
         delivered = False
         try:
@@ -432,5 +433,8 @@ async def subscription_stream(adapter, messages, *, config, tools, on_attempt, o
                         pool.rejected(slot, epoch, status)
                     if delivered or not pool.auto_rotate or status not in {401, 403, 429}:
                         raise
+                    last_rejection = error
         except QuotaError as error:
-            raise LlmError(str(error), code='llm/chatgpt-account') from None
+            if last_rejection is not None and error.key == 'ui.codexGateway.noAccount':
+                raise last_rejection from None
+            raise LlmError(str(error), code='llm/chatgpt-account', copy={'key': error.key}) from None

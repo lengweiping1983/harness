@@ -204,7 +204,7 @@ class Harness:
         self.config.chatgpt_account = self.chatgpt
         self.config.subscription_pool = self.codex_gateway
         available_models = self.provider_connections.catalog()
-        if available_models and not any(m['id'] == self.config.model for m in available_models):
+        if available_models and not self.config.model.startswith('chatgpt/') and not any(m['id'] == self.config.model for m in available_models):
             self.config.model = available_models[0]['id']
         from ..codex_gateway.desktop import DesktopIntegration
         self.codex_desktop = DesktopIntegration(gateway_home)
@@ -1318,12 +1318,11 @@ class Harness:
         base = self.agent.config
         metadata = session.header.metadata or {}
         model = str(metadata.get("model") or "").strip()
-        if model.startswith('harness/') or self.config.model.startswith('harness/') and not model:
-            model = model or self.config.model
-        elif self.adapter.route_pool is not None:
+        if not model and self.config.model.startswith('harness/'):
+            model = self.config.model
+        # 已选提供商或订阅模型由自己的接口执行；API 路由池只解析普通线路。
+        if self.adapter.route_pool is not None and not (model or self.config.model).startswith(('harness/', 'chatgpt/')):
             model = self.adapter.route_pool.select()[0]['model']
-        elif model.startswith('chatgpt/'):
-            pass
         effort = metadata.get("reasoning_effort")
         # 挂载的Agent可以声明模型覆盖：优先级低于会话显式选择的模型，
         # 高于全局默认——"以Agent身份工作"自然包含"用Agent擅长的模型"。
@@ -1432,8 +1431,8 @@ class Harness:
         if self.config.model.startswith('harness/'):
             entry = next((m for m in self.provider_connections.catalog() if m['id'] == self.config.model), {})
             return minimum(entry.get('context_window'), self.config.context_window)
-        if self.chatgpt.logged_in and self.config.model.startswith('chatgpt/'):
-            info = self.chatgpt.resolve()
+        if self.config.model.startswith('chatgpt/'):
+            info = self.codex_gateway.model_info(self.config.model) or {}
             return minimum(info.get('context_window'), self.config.context_window)
         model = adapter.route_pool.select()[0] if adapter.route_pool else {
             'model': self.config.model, 'base_url': self.config.base_url,

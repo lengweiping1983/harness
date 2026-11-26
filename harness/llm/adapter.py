@@ -670,11 +670,11 @@ class OpenRouterAdapter:
                 raise LlmError(tr('models.model.missing'), code='llm/model-missing')
             return {'context_window': entry['context_window'] or None, 'max_output_tokens': entry['max_output'] or None, 'supports_thinking': entry['supports_reasoning'], 'supported_efforts': entry['reasoning_efforts'], 'supports_vision': 'image' in self.provider_connections.resolve(model)[2]['input'], 'confirmed': True, 'sources': ['configuration']}
         if model and model.startswith('chatgpt/') and getattr(self, 'subscription_pool', None) is not None:
-            for slot, duplicate in self.subscription_pool._unique():
-                if not duplicate and slot.enabled and slot.account.logged_in:
-                    info = next((item for item in slot.account.status()['models'] if item['id'] == model), None)
-                    if info:
-                        return {'context_window': info.get('context_window'), 'max_output_tokens': info.get('max_output'), 'supports_thinking': info['supports_reasoning'], 'supported_efforts': info['reasoning_efforts'], 'confirmed': True, 'sources': ['chatgpt-account']}
+            info = self.subscription_pool.model_info(model)
+            if info is not None:
+                return {'context_window': info.get('context_window'), 'max_output_tokens': info.get('max_output'),
+                        'supports_thinking': info['supports_reasoning'], 'supported_efforts': info['reasoning_efforts'],
+                        'confirmed': True, 'sources': ['chatgpt-account']}
             raise LlmError(tr('models.model.missing'), code='llm/model-missing')
         account = self.chatgpt or self._chatgpt_endpoint
         if account is not None and account.logged_in:

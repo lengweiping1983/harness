@@ -6,6 +6,7 @@ from typing import Any
 
 from ...codex_gateway.quota import QuotaError
 from ...i18n import tr
+from ...llm.chatgpt_auth import ChatGPTAccountError
 from ..errors import BadRequest
 from ..responses import json_response
 from ..router import Router
@@ -64,6 +65,19 @@ def build_router(ctx: Any) -> Router:
     @router.post('/api/v1/codex-gateway/accounts/{account_id}/login')
     def login(request, account_id):
         return run(lambda: require_pool().login(account_id))
+
+    @router.post('/api/v1/codex-gateway/accounts/{account_id}/models')
+    def refresh_models(request, account_id):
+        def refresh():
+            try:
+                return require_pool().refresh_models(account_id)
+            except (ChatGPTAccountError, QuotaError) as exc:
+                raise BadRequest(str(exc), code='codex-gateway/model-catalog',
+                                 details={'copy': {'key': exc.key, 'params': getattr(exc, 'values', {})}}) from None
+            except OSError:
+                raise BadRequest(tr('chatgpt.state_save_failed'), code='codex-gateway/model-catalog',
+                                 details={'copy': {'key': 'chatgpt.state_save_failed'}}) from None
+        return run(refresh)
 
     @router.post('/api/v1/codex-gateway/accounts/{account_id}/cancel')
     def cancel(request, account_id):

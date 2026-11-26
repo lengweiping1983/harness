@@ -198,7 +198,7 @@ def build_router(ctx):
             snapshot = store.save(body['providers'], body['revision'], authorizations=authorizations.operations)
             configured = store.catalog()
             current = ctx.harness.config.model
-            if (configured or current.startswith('harness/')) and not any(m['id'] == current for m in configured):
+            if not current.startswith('chatgpt/') and (configured or current.startswith('harness/')) and not any(m['id'] == current for m in configured):
                 selected = configured[0]['id'] if configured else ''
                 ctx.harness.config.model = selected
                 ctx.harness.agent.config = ctx.harness.agent.config.merged(model=selected)

@@ -4,7 +4,9 @@ import {renderToStaticMarkup} from 'react-dom/server'
 import {setLocale, t} from '@/i18n'
 import {ModelConnections, ConnectionEditor, ProviderModelPreferences, RemovalConfirmation} from '../ModelConnections'
 import {ProviderModelFields} from '../ProviderModelEditor'
-import {Button} from '@/components/ui/primitives'
+import {CodexGatewayAccounts, type GatewayState} from '../CodexGatewayAccounts'
+import {ModelPreferences} from '../ModelPreferences'
+import {Button, RefreshButton} from '@/components/ui/primitives'
 import type {ModelProvider, ProviderSnapshot, ProviderTemplate} from '@/lib/providerConnections'
 import type {ModelInfo} from '@/types'
 import {ResourceError} from '@/lib/resourceError'
@@ -361,4 +363,99 @@ it('does not publish a late model save into a closed page or a newly opened edit
   expect(fields().props.value.name).toBe('New draft 原文')
   expect(renderToStaticMarkup(render())).not.toContain('Obsolete 原文')
   expect(writes()).toHaveLength(1)
+})
+
+const account = (id: string) => ({id, email: id + '@example.invalid', enabled: true, logged_in: true, pending: false, duplicate: false,
+  available: true, in_use: false, fresh: false, windows: [], error_key: null, auth_error: ''})
+const gatewayState: GatewayState = {enabled: false, current_account: '', auto_rotate: true, threshold: 95, waiting: 0,
+  accounts: [account('primary'), account('second'), {...account('disabled'), enabled: false}, {...account('duplicate'), duplicate: true}]}
+const subscriptionModel = {id: 'chatgpt/gpt-6.2-sol', label: 'GPT-6.2 Sol', provider: 'chatgpt', context_window: 500000}
+
+it('places subscription models in their provider card alongside configured providers', async () => {
+  const transport = fixture.request.getMockImplementation()!
+  fixture.request.mockImplementation(async (path, ...args) => {
+    if (path === '/codex-gateway') return gatewayState
+    if (path === '/models') return {models: [...catalog(routing.providers), subscriptionModel], active: subscriptionModel.id}
+    return transport(path, ...args)
+  })
+  await loaded()
+  const tree = render()
+  const card = nodes(tree).find(node => node.type === CodexGatewayAccounts)!
+  expect(card.props.models).toEqual([subscriptionModel])
+  expect(nodes(tree).find(node => node.type === ModelPreferences)?.props.models).toEqual([])
+  for (const locale of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(locale)
+    const html = renderToStaticMarkup(card)
+    expect(html).toContain(t('ui.chatgpt.title'))
+    expect(html).toContain(t('ui.providers.summary', {state: t('ui.providers.state.configured'), models: 1}))
+    expect(html).toContain('GPT-6.2 Sol')
+    expect(html).toContain('gpt-6.2-sol')
+    expect(html).toContain('role="switch"')
+    expect(html).toContain(t('ui.components.overlays.SettingsDialog.ba336585f0a2'))
+    expect(html).not.toContain('chatgpt/gpt-6.2-sol')
+    expect(html).not.toContain('<h5')
+  }
+})
+
+it('refreshes eligible subscription accounts on opening and on explicit retry, retaining partial results and localized errors', async () => {
+  let poll!: () => void
+  vi.stubGlobal('window', {setInterval: (callback: () => void) => {poll = callback; return 1}, clearInterval: vi.fn()})
+  try {
+    let fail = true
+    const first = deferred<void>()
+    fixture.request.mockImplementation(async (path: string) => {
+      if (path === '/codex-gateway') return gatewayState
+      if (path === '/codex-gateway/desktop') return {enabled: false, config_path: ''}
+      if (path === '/codex-gateway/accounts/primary/models') return first.promise
+      if (path === '/codex-gateway/accounts/second/models') {
+        if (fail) throw new ResourceError({key: 'chatgpt.http_failed', params: {status: 503}})
+        return {}
+      }
+      if (path === '/models') return {models: [subscriptionModel], active: subscriptionModel.id}
+      throw new Error(path)
+    })
+    function card() {
+      hooks.cursor = 0; hooks.active = true
+      let tree: ReactElement
+      try {tree = CodexGatewayAccounts({state: gatewayState, onStateChange: vi.fn(), models: fixture.state.models, editing: false, onEditChange: vi.fn()})}
+      finally {hooks.active = false}
+      while (hooks.effects.length) hooks.effects.shift()!()
+      return tree
+    }
+    const refreshButton = () => nodes(card()).find(node => node.type === RefreshButton)!
+    const posts = () => fixture.request.mock.calls.filter(call => call[1] === 'POST').map(call => call[0])
+    card()
+    expect(refreshButton().props.disabled).toBe(true)
+    refreshButton().props.onClick()
+    poll()
+    const expected = ['/codex-gateway/accounts/primary/models', '/codex-gateway/accounts/second/models']
+    expect(posts()).toEqual(expected)
+    first.resolve()
+    await vi.waitFor(() => expect(refreshButton().props.disabled).toBe(false))
+    expect(fixture.state.models).toEqual([subscriptionModel])
+    for (const locale of ['en', 'zh-CN', 'en'] as const) {
+      await setLocale(locale)
+      expect(renderToStaticMarkup(card())).toContain(t('ui.chatgpt.catalogRefreshFailed', {account: gatewayState.accounts[1].email, reason: t('chatgpt.http_failed', {status: 503})}))
+    }
+    poll()
+    await vi.waitFor(() => expect(fixture.request.mock.calls.some(call => call[0] === '/codex-gateway')).toBe(true))
+    expect(posts()).toEqual(expected)
+    fail = false
+    refreshButton().props.onClick()
+    await vi.waitFor(() => expect(refreshButton().props.disabled).toBe(false))
+    expect(posts()).toEqual([...expected, ...expected])
+    expect(renderToStaticMarkup(card())).not.toContain('role="alert"')
+  } finally {unmount(); vi.unstubAllGlobals()}
+})
+
+it('shows the quota read failure beside its account in subscription settings', async () => {
+  const key = 'ui.codexGateway.quotaUnavailable'
+  const state = {...gatewayState, accounts: [{...account('second'), available: false, error_key: key}]}
+  for (const locale of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(locale)
+    const html = renderToStaticMarkup(<CodexGatewayAccounts state={state} onStateChange={vi.fn()} editing onEditChange={vi.fn()} models={[]} />)
+    expect(html).toContain('second@example.invalid')
+    expect(html).toContain(t(key))
+  }
+  expect(fixture.request).not.toHaveBeenCalled()
 })

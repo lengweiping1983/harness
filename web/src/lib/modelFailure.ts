@@ -6,6 +6,17 @@ export function modelFailure(message: unknown, code?: unknown, details?: unknown
     && Object.hasOwn(details, 'error_code') && (details as Record<string, unknown>).error_code === 'data_inspection_failed') {
     return { title: t('ui.modelFailure.contentFilterRejected'), hint: t('ui.modelFailure.contentFilterHint') }
   }
+  if (code === 'llm/chatgpt-account') {
+    const copy = details && typeof details === 'object' && 'copy' in details ? details.copy : null
+    const key = copy && typeof copy === 'object' && 'key' in copy ? copy.key : null
+    const reasons = ['quotaUnavailable', 'quotaInvalid', 'quotaStale', 'windowUnknown', 'authUnavailable',
+      'allowanceBlocked', 'rateLimited', 'closed', 'stateChanged']
+    const hint = reasons.some(reason => key === 'ui.codexGateway.' + reason) ? t(String(key)) : t('ui.codexGateway.checkAccounts')
+    return { title: t('ui.codexGateway.accountUnavailableTitle'), hint }
+  }
+  if (code === 'llm/model-missing') {
+    return { title: t('ui.models.unavailableName'), hint: t('models.model.missing') }
+  }
   if (code === 'llm/provider-model-call-failed') {
     return { title: t('ui.modelFailure.providerModelCallFailed'), hint: t('ui.modelFailure.providerModelCallHint') }
   }

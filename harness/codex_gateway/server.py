@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 from starlette.middleware import Middleware
 
-from ..llm.chatgpt_auth import BASE_URL, CLIENT_VERSION, ChatGPTAccountError
+from ..llm.chatgpt_auth import ChatGPTAccountError
 from ..core.errors import LlmError
 from ..core.language import current_language
 from .proxy import ResponsesProxy, validate_request
@@ -117,11 +117,8 @@ def create_app(pool, *, proxy=None):
                                            'message': str(QuotaError('ui.codexGateway.noAccount'))}}, status_code=503)
         import asyncio
         try:
-            def read():
-                headers = slot.account.headers(epoch)
-                return slot.account.request(BASE_URL + '/models?client_version=' + CLIENT_VERSION, headers=headers)
             from ..core.cleanup import join_cleanup
-            return JSONResponse(await join_cleanup(asyncio.create_task(asyncio.to_thread(read))))
+            return JSONResponse(await join_cleanup(asyncio.create_task(asyncio.to_thread(slot.account.request_models, epoch))))
         except (OSError, ChatGPTAccountError):
             return JSONResponse({'error': {'code': 'gateway/models',
                                            'message': str(QuotaError('ui.codexGateway.upstreamError'))}}, status_code=502)

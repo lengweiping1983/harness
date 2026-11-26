@@ -26,6 +26,20 @@ it.each([
   expect(fetchMock).toHaveBeenCalledTimes(1)
 })
 
+it('keeps subscription catalog diagnostics translatable after the request finishes', async () => {
+  const copy = {key: 'chatgpt.http_failed', params: {status: 503}}
+  fetchMock.mockResolvedValueOnce(Response.json({error: 'Server snapshot', code: 'codex-gateway/model-catalog', details: {copy}}, {status: 400}))
+  const result = await request('/api/v1/codex-gateway/accounts/primary/models', {method: 'POST'})
+  if (result.ok) throw Error('Expected a catalog failure')
+  expect(result.copy).toEqual(copy)
+  const diagnostic = failureText(new ApiError(result))
+  for (const locale of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(locale)
+    expect(noticeText(diagnostic)).toBe(t(copy.key, copy.params))
+  }
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+})
+
 it('does not trust unrelated or malformed request error resources', async () => {
   for (const copy of [{key: 'ui.session.titleTooLong', params: {limit: '512'}},
       {key: 'ui.session.unknownField', params: {field: 'x', extra: 'y'}},
