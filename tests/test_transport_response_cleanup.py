@@ -1,14 +1,37 @@
 """响应回调与关闭的原始失败保持，重复取消等待同一次收尾。"""
 import asyncio
+import errno
+import ssl
 import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from harness.core.errors import LlmRequestError
 from harness.llm.transport import UrllibTransport
 
 
 class TransportResponseCleanupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_only_body_read_classifies_bad_descriptor_as_recoverable(self):
+        transport = UrllibTransport()
+        failure = OSError(errno.EBADF, 'Bad file descriptor')
+        for error, phase, transient in ((failure, 'read', True), (failure, 'connect', False),
+                                        (ssl.SSLError(9, 'TLS error'), 'read', False)):
+            with self.subTest(phase=phase, error=error):
+                response = SimpleNamespace(status=200, read=Mock(side_effect=error), close=Mock())
+                opener = Mock(return_value=response, side_effect=error if phase == 'connect' else None)
+                with self.assertRaises(LlmRequestError) as caught:
+                    _ = [chunk async for chunk in transport._stream_response(opener, timeout=1)]
+                self.assertEqual(caught.exception.transient, transient)
+                self.assertEqual(caught.exception.details['phase'], phase)
+                self.assertIs(caught.exception.__cause__, error)
+        response = SimpleNamespace(status=200, close=Mock())
+        with self.assertRaises(OSError) as caught:
+            _ = [chunk async for chunk in transport._stream_response(lambda: response, timeout=1,
+                                                                     on_response=Mock(side_effect=failure))]
+        self.assertIs(caught.exception, failure)
+        response.close.assert_called_once()
+
     async def test_callback_failure_waits_for_close_despite_repeated_cancel(self):
         callback_failure = RuntimeError('Original callback 原文')
         closing, release = threading.Event(), threading.Event()

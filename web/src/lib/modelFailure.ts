@@ -2,6 +2,11 @@ import { t } from '@/i18n'
 /** Human-facing projection; keep original diagnostics available for inspection. */
 export function modelFailure(message: unknown, code?: unknown, details?: unknown): { title: string; hint: string } | null {
   const text = String(message ?? '')
+  if (code === 'llm/request' && details !== null && typeof details === 'object'
+    && 'phase' in details && details.phase === 'read' && 'errno' in details && details.errno === 9
+    && 'network_error' in details && details.network_error === 'OSError') {
+    return { title: t('ui.modelFailure.readInterrupted'), hint: t('ui.modelFailure.readInterruptedHint') }
+  }
   if (code === 'llm/content-filter' || code === 'llm/provider' && details !== null && typeof details === 'object'
     && Object.hasOwn(details, 'error_code') && (details as Record<string, unknown>).error_code === 'data_inspection_failed') {
     return { title: t('ui.modelFailure.contentFilterRejected'), hint: t('ui.modelFailure.contentFilterHint') }

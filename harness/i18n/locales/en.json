@@ -4872,6 +4872,8 @@
   "ui.modelFailure.continuationStalled": "Model continuation made no progress",
   "ui.modelFailure.continuationHint": "Partial text was preserved. Check output settings or change the model, then continue after reviewing completed operations.",
   "ui.modelFailure.requestIncomplete": "Model request did not finish",
+  "ui.modelFailure.readInterrupted": "Connection lost while reading the model response",
+  "ui.modelFailure.readInterruptedHint": "Review the completed operations, then continue the task in this conversation.",
   "ui.modelFailure.requestHint": "Execution tasks were preserved. Check the model connection before continuing the current task.",
   "ui.modelFailure.contentFilterRejected": "Model content review rejected",
   "ui.modelFailure.contentFilterHint": "The provider's content review blocked this request or generated output. Review the request and context, and contact the provider with the technical details if needed. Execution records were preserved; check completed operations before continuing.",

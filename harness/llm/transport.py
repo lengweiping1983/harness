@@ -65,6 +65,9 @@ def network_failure(exc: Exception, *, phase: str) -> LlmError:
         })
     if isinstance(reason, socket.gaierror):
         transient = reason.errno == socket.EAI_AGAIN
+    # 正文读取时句柄已失效；新请求会打开独立连接。SSL 错误码另有含义。
+    if phase == 'read' and type(reason) is OSError and reason.errno == errno.EBADF:
+        transient = True
     if isinstance(reason, ssl.SSLCertVerificationError):
         transient = False
     return LlmRequestError(tr('python.transport.ee3219b35c35') + str(reason)[:500], transient=transient,
@@ -232,6 +235,8 @@ class UrllibTransport(Transport):
                     await asyncio.to_thread(_open)
             except asyncio.TimeoutError as exc:
                 raise LlmTimeoutError(tr('python.transport.86e3b977b52d', p0=f'{timeout}')) from exc
+            except (OSError, http.client.HTTPException) as exc:
+                raise network_failure(exc, phase='connect') from exc
 
             status = holder["response"].status
             if on_response is not None:
@@ -267,7 +272,10 @@ class UrllibTransport(Transport):
             # 也不会在内存里留下整个回复。
             total = 0
             while True:
-                chunk = await loop.run_in_executor(None, _read_chunk, 4096)
+                try:
+                    chunk = await loop.run_in_executor(None, _read_chunk, 4096)
+                except (OSError, http.client.HTTPException) as exc:
+                    raise network_failure(exc, phase='read') from exc
                 if not chunk:
                     break
                 total += len(chunk)
@@ -277,9 +285,6 @@ class UrllibTransport(Transport):
                         code='llm/response-byte-limit', status=status, limit=self.max_body_bytes,
                     )
                 yield chunk
-        except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
-            primary = network_failure(exc, phase='read' if 'response' in holder else 'connect')
-            raise primary from exc
         except BaseException as exc:
             primary = exc
             raise

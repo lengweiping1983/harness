@@ -6,6 +6,23 @@ import {modelFailure} from '../modelFailure'
 
 afterEach(() => setLocale('zh-CN'))
 
+test('a saved read interruption explains where the connection failed and retains its diagnostics', async () => {
+  const block = {id: 'read', at: 0, kind: 'error' as const, turn: 1,
+    code: 'llm/request', message: '[Errno 9] Bad file descriptor',
+    details: {phase: 'read', errno: 9, network_error: 'OSError', attempts: 1, recoveries: 0}}
+  for (const locale of ['en', 'zh-CN', 'en'] as const) {
+    await setLocale(locale)
+    const title = locale === 'zh-CN' ? '读取模型响应时连接中断' : 'Connection lost while reading the model response'
+    const html = renderToStaticMarkup(<ErrorBlock block={block} sessionId="conversation" />)
+    expect(html).toContain(title)
+    expect(html).toContain(locale === 'zh-CN' ? '在当前对话中继续任务' : 'continue the task in this conversation')
+    expect(html).toContain(block.message)
+    for (const changes of [{phase: 'connect'}, {errno: '9'}, {network_error: 'SSLError'}]) {
+      expect(modelFailure(block.message, block.code, {...block.details, ...changes})?.title).not.toBe(title)
+    }
+  }
+})
+
 test('model call failures explain the provider boundary in English Chinese and English', () => {
   const original = '409: {"code":"MODEL_CALL_FAILED","traceId":"trace-fixture"}'
   const views = []

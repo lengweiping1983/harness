@@ -62,6 +62,10 @@
 
 ## 流活动、超时与恢复诊断
 
+订阅请求在读响应正文时出现 `OSError(errno.EBADF)`，原 `UrllibTransport` 将其交给 `network_failure` 后标为永久失败。经 `subscription_stream` 传到 `AgentLoop._stream_response`，首个事件前即可出现截图中的一次尝试、零次恢复。修复将分类限定在实际正文读取处；截图和受控故障均无法确定历史连接失效的来源。
+
+`test_subscription_recovers_bad_response_descriptor_within_turn_budget` 用隔离订阅账号和受控响应在原实现复现该诊断，修复后核对再次请求成功、持续失败耗尽三次恢复、原工具只执行一次、每个响应关闭和账号租约释放。`test_only_body_read_classifies_bad_descriptor_as_recoverable` 核对正文读取与连接建立、SSL 错误码及响应观察回调的边界。错误卡片与恢复预览沿 `modelFailure` 消费结构化诊断；对应前端用例核对历史错误展示、英中英切换、原始诊断保留与恢复预览无额外提交。
+
 `provider_runtime.bridge` 原先把读取超时与进程退出、NDJSON 解析错误一起改写为不可恢复的 `llm/provider-runtime`，丢弃原异常；`provider_stream` 又将归档中的错误类型、代码与首事件时间固定为空。已核对的失败记录在请求发出约 180.9 秒后结束，解析事件为零、恢复次数为零；旧记录没有底层错误证据，不能证明当时是本机网络中断还是上游等待。
 
 另一可复现触发条件是上游持续发送 SSE 心跳或工具参数片段：`model-runtime/bridge.mjs` 原先只转发正文、思考和完整调用，后端会把尚无这些事件误判为无活动。现由 `stream-observation.mjs` 观察真实响应字节及原生供应商事件，通过桥接传递节流后的活动；只在完整调用时交付工具。读取超时独立分类为 `llm/timeout`，SDK 传输错误保留结构化身份；明确缺少终止帧与任意协议损坏分别分类。认证与证书拒绝、刷新结果未知及进程故障保持非恢复边界，归档保存实际错误及首事件时间。

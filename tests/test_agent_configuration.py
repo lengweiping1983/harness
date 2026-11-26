@@ -111,6 +111,59 @@ class AgentConfigurationTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(any(item.get('type') == 'function_call_output'
                                         and item['call_id'] == 'call_search' for item in items))
 
+    async def test_subscription_recovers_bad_response_descriptor_within_turn_budget(self):
+        import errno
+        from unittest.mock import AsyncMock, Mock, patch
+        from harness.codex_gateway.quota import parse_quota
+        from harness.llm.transport import UrllibTransport
+        from tests.test_codex_gateway import authorize, event, usage
+
+        pool = self.app.codex_gateway
+        slot = pool.slot('primary')
+        authorize(slot.account, 'subscription')
+        windows = usage(resets=4102444800)
+        windows['rateLimitsByLimitId']['codex']['secondary']['resetsAt'] = 4102444800
+        pool.reader = AsyncMock(return_value=parse_quota(windows, epoch=slot.account.epoch))
+        self.app.adapter.transport = UrllibTransport(prefer_ipv4=False)
+
+        def response(*reads):
+            return SimpleNamespace(status=200, read1=Mock(side_effect=reads), close=Mock())
+
+        for persistent in (False, True):
+            with self.subTest(persistent=persistent):
+                failure = OSError(errno.EBADF, 'Bad file descriptor')
+                call = {'type': 'function_call', 'call_id': 'lookup', 'name': 'search_tools',
+                        'arguments': '{"query":"read"}'}
+                responses = [response(event('response.output_item.done', output_index=0, item=call),
+                                      event('response.completed')), response(failure)]
+                if persistent:
+                    responses.extend(response(failure) for _ in range(3))
+                else:
+                    responses.append(response(event('response.output_text.delta', delta='Done'),
+                                              event('response.completed')))
+                session = self.app.create_session()
+                with patch.object(self.app.adapter.transport, '_open_response', side_effect=responses) as opened:
+                    if persistent:
+                        with self.assertLogs('harness.core.agent', level='ERROR'):
+                            result = await self.app.run_async(session, 'Find a read tool', model=slot.account.selected)
+                        self.assertEqual(result.error_info['code'], 'llm/request')
+                        details = result.error_info['details']
+                        self.assertEqual((details['phase'], details['errno'], details['attempts'],
+                                          details['recoveries']), ('read', errno.EBADF, 4, 3))
+                        self.assertTrue(details['request_recovery_exhausted'])
+                    else:
+                        result = await self.app.run_async(session, 'Find a read tool', model=slot.account.selected)
+                        self.assertEqual(result.text, 'Done', result.error_info)
+                self.assertEqual(opened.call_count, len(responses))
+                bodies = [json.loads(attempt.args[2]) for attempt in opened.call_args_list]
+                self.assertEqual(bodies[2:], [bodies[1]] * (len(responses) - 2))
+                self.assertTrue(any(item.get('type') == 'function_call_output' and item['call_id'] == 'lookup'
+                                    for item in bodies[1]['input']))
+                self.assertEqual(len([e for e in session.events if e.type == 'tool/result']), 1)
+                self.assertFalse(slot.in_use)
+                for reply in responses:
+                    reply.close.assert_called_once()
+
     async def test_changed_route_estimate_only_blocks_a_limited_request(self):
         from unittest.mock import patch
         # 模拟预留后线路集合已经更新，实际请求的模型及输入均超出快照。

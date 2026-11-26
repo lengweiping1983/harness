@@ -38,10 +38,16 @@ afterEach(async () => {
   await setLocale('zh-CN')
 })
 
-test('the same recovery instance translates inspection rejection without refetching or continuing', async () => {
+test.each([
+  {name: 'inspection rejection', code: 'llm/provider', details: {error_code: 'data_inspection_failed'},
+    title: ['Model content review rejected', '模型内容审核未通过'], hint: ['request and context', '请求及上下文']},
+  {name: 'response read interruption', code: 'llm/request', details: {phase: 'read', network_error: 'OSError', errno: 9},
+    title: ['Connection lost while reading the model response', '读取模型响应时连接中断'],
+    hint: ['continue the task in this conversation', '在当前对话中继续任务']},
+])('the same recovery instance translates $name without refetching or continuing', async ({code, details, title, hint}) => {
   const record: RunRecord = {id: 'inspection-run', session_id: 'inspection-conversation', text: 'Sports animation',
-    status: 'failed', created_at: 1, error: {code: 'llm/provider', message: 'Original provider diagnostic',
-      details: {...{error_code: 'data_inspection_failed'}, copy: undefined}}}
+    status: 'failed', created_at: 1, error: {code, message: 'Original provider diagnostic',
+      details: {...details, copy: undefined}}}
   const preview: RecoveryPreview = {run_id: record.id, session_id: record.session_id, status: 'failed', turn: 1,
     task: record.text, task_truncated: false, error: 'Original provider diagnostic', scope_known: true,
     version: 'inspection-version', tools: [], total_tools: 0, uncertain_operations: 0,
@@ -63,8 +69,8 @@ test('the same recovery instance translates inspection rejection without refetch
   for (const language of ['en', 'zh-CN', 'en'] as const) {
     await setLocale(language)
     const html = render()
-    expect(html).toContain(language === 'zh-CN' ? '模型内容审核未通过' : 'Model content review rejected')
-    expect(html).toContain(language === 'zh-CN' ? '请求及上下文' : 'request and context')
+    expect(html).toContain(title[language === 'zh-CN' ? 1 : 0])
+    expect(html).toContain(hint[language === 'zh-CN' ? 1 : 0])
     expect(html).toContain('Original provider diagnostic')
     expect(html).toContain('Inspect 原文')
   }
